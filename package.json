@@ -1,0 +1,39 @@
+{
+  "name": "comprova-endereco",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.7.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "typecheck": "turbo typecheck",
+    "compose:up": "docker compose up -d",
+    "compose:down": "docker compose down",
+    "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
+    "db:seed": "tsx --env-file=.env packages/db/src/bootstrap.ts",
+    "db:fence": "pgfence analyze --ci --max-risk medium packages/db/migrations/*.sql",
+    "seed:golden": "tsx --env-file=.env apps/ingestor/src/cli.ts fixtures",
+    "start": "pnpm compose:up && pnpm db:migrate && pnpm db:seed && pnpm --filter @comprova/api dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "@flvmnt/pgfence": "0.8.1",
+    "@types/node": "^22.15.0",
+    "eslint": "^9.30.0",
+    "fast-check": "^4.10.2",
+    "globals": "^16.3.0",
+    "prettier": "^3.6.0",
+    "tsx": "^4.20.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.35.0",
+    "vitest": "^3.2.0"
+  }
+}

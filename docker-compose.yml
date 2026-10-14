@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: comprova
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d comprova']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: valkey/valkey:8-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/admin-tools:1.27.0
+    entrypoint: ['temporal', 'server', 'start-dev', '--ip', '0.0.0.0', '--port', '7233', '--ui-port', '8233']
+    ports:
+      - '7233:7233'
+      - '8233:8233'
+
+  objectstorage:
+    image: zenko/cloudserver:latest
+    environment:
+      S3DATA: multiple
+      S3_BACKEND: mem
+      REMOTE_MANAGEMENT_DISABLE: 'true'
+    ports:
+      - '9000:8000'
+    volumes:
+      - ./compose/cloudserver-config.json:/usr/src/app/config.json:ro
+      - objectdata:/data
+
+  objectstorage-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      - objectstorage
+    environment:
+      AWS_ACCESS_KEY_ID: accessKey1
+      AWS_SECRET_ACCESS_KEY: verySecretKey1
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: |
+      /bin/sh -c "
+      i=0
+      while [ $$i -lt 30 ]; do
+        aws --endpoint-url http://objectstorage:8000 s3 mb s3://evidence && exit 0
+        sleep 2
+        i=$$((i+1))
+      done
+      exit 1
+      "
+
+volumes:
+  pgdata:
+  objectdata:

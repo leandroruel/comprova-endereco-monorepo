@@ -1,0 +1,15 @@
+{
+  "name": "@comprova/ingestor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file=../../.env src/cli.ts",
+    "start": "tsx --env-file=../../.env src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@comprova/core": "workspace:*",
+    "@comprova/db": "workspace:*",
+    "@comprova/testing": "workspace:*"
+  }
+}

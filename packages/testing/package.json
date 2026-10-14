@@ -1,0 +1,19 @@
+{
+  "name": "@comprova/testing",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@comprova/core": "workspace:*",
+    "@comprova/db": "workspace:*",
+    "@node-rs/argon2": "^2.2.2",
+    "@testcontainers/postgresql": "^12.2.0",
+    "@testcontainers/redis": "^12.2.0",
+    "testcontainers": "^12.2.0"
+  }
+}
