@@ -2,6 +2,15 @@
 
 Estado: **Projeto completo (F0–F6, perfil zero-custo)** (2026-10-14) — 102/102 testes
 
+## Feature flag do step de IA (VLM) ✅ (2026-10-14)
+
+- **`VLM_ENABLED`** (default **false**): controla se o deep path inclui o checker de IA
+  `street_view_vlm` (T2). → pipeline passa pelo check de visão (requer
+  `OPENAI_API_KEY`/`GOOGLE_STREET_VIEW_KEY` para classificar; sem chaves vira `unknown`);
+  → T2 vazio, deep path **100% determinístico** (T0 local + T1 geocode/grafo).
+  Gate no `buildT2Checkers` (`apps/worker/src/activities.ts`), testado em
+  `apps/worker/src/vlm-flag.test.ts` (3/3).
+
 ## Fase 6 — Produção e escala (pacote zero-custo) ✅
 
 - **Job de expiração** de validações (`expires_at`): `validationRetentionTick` no worker

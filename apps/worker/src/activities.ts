@@ -20,6 +20,7 @@ export interface DeepWorkerEnv {
   readonly databaseUrl: string
   readonly policyVersion: string
   readonly repoRoot: string
+  readonly vlmEnabled: boolean
   readonly nominatimUrl?: string
   readonly overpassUrl?: string
   readonly googleStreetViewKey?: string
@@ -46,6 +47,23 @@ const findRepoRoot = (startDir: string): string => {
   return existsSync(path.join(startDir, 'pnpm-workspace.yaml'))
     ? startDir
     : findRepoRoot(path.dirname(startDir))
+}
+
+export const buildT2Checkers = (env: DeepWorkerEnv, evidenceWriter: EvidenceWriter): readonly Checker[] => {
+  if (!env.vlmEnabled) return []
+  const streetView = makeGoogleStreetView({ apiKey: env.googleStreetViewKey })
+  const vision =
+    env.openAiKey !== undefined && env.openAiKey !== ''
+      ? makeOpenAIVisionModel({ apiKey: env.openAiKey, prompt: FACADE_PROMPT })
+      : makeStubVisionModel()
+  return [
+    makeStreetViewVlm({
+      streetView,
+      vision,
+      evidenceWriter,
+      ...(env.storeStreetViewImages === true ? { storeImages: true } : {}),
+    }),
+  ]
 }
 
 export const buildDeepWorkerContext = (env: DeepWorkerEnv): DeepWorkerContext => {
@@ -76,19 +94,7 @@ export const buildDeepWorkerContext = (env: DeepWorkerEnv): DeepWorkerContext =>
       : makeFakeObjectStore()
   const evidenceWriter = makeEvidenceWriter(pool.db, objectStore)
 
-  const streetView = makeGoogleStreetView({ apiKey: env.googleStreetViewKey })
-  const vision =
-    env.openAiKey !== undefined && env.openAiKey !== ''
-      ? makeOpenAIVisionModel({ apiKey: env.openAiKey, prompt: FACADE_PROMPT })
-      : makeStubVisionModel()
-  const t2Checkers = [
-    makeStreetViewVlm({
-      streetView,
-      vision,
-      evidenceWriter,
-      ...(env.storeStreetViewImages === true ? { storeImages: true } : {}),
-    }),
-  ]
+  const t2Checkers = buildT2Checkers(env, evidenceWriter)
 
   return { pool, policy, t1Checkers, t2Checkers, evidenceWriter }
 }
@@ -129,6 +135,7 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Deep
     databaseUrl,
     policyVersion: env.POLICY_VERSION ?? '2026.12.1',
     repoRoot: findRepoRoot(process.cwd()),
+    vlmEnabled: env.VLM_ENABLED === 'true',
     ...(nominatimUrl !== undefined ? { nominatimUrl } : {}),
     ...(overpassUrl !== undefined ? { overpassUrl } : {}),
     ...(googleStreetViewKey !== undefined ? { googleStreetViewKey } : {}),

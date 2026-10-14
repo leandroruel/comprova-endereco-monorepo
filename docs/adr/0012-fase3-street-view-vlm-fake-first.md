@@ -59,6 +59,13 @@ OpenAI/Google agora. O plano aprovado: porta + fake + rubrica prontos, chamada p
   é construível e testável agora; só o dado visual é adiável.
 - **Persistir imagens por padrão**: ToS do Street View restringe armazenamento; flag off.
 
+## Emenda (2026-10-14): feature flag `VLM_ENABLED`
+
+- Default **false**: o worker não monta o checker de IA (T2 vazio) — deep path
+  determinístico, sem chamada de visão. (sem chaves) → stub → `unknown`.
+- Implementado como gate no `buildT2Checkers` (spec seção 13: flags para ligar/desligar
+  checkers sem deploy); OpenFeature fica como evolução quando houver múltiplos ambientes.
+
 ## Consequências
 
 - Com keys: setar `GOOGLE_STREET_VIEW_KEY` + `OPENAI_API_KEY` no worker — nenhum código muda.
