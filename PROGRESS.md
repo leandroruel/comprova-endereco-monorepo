@@ -1,6 +1,31 @@
 # PROGRESS.md
 
-Estado: **Fase 2 concluída** (2026-10-14)
+Estado: **Fase 3 concluída (estrutural), integração aguardando Docker** (2026-10-14)
+
+## ⚠️ Pendência de ambiente
+
+O daemon do Docker (WSL2) caiu durante a validação final da Fase 3. Reexecutar quando voltar:
+`pnpm test` (inclui `apps/worker/src/f3.int.test.ts` + suíte completa). Unit/contrato verdes
+(47/47), typecheck/lint/format/pgfence verdes sem containers.
+
+## Fase 3 — Mundo físico (Street View + VLM, fake-first) ✅ (sem chaves)
+
+- **Providers**: `StreetViewProvider` (Google real escrito, sem chave → PROVIDER_UNAVAILABLE;
+  fake), `VisionModel` (OpenAI gpt-4o real escrito, temperature 0 + JSON estrito Zod; fakes),
+  `ObjectStore` (S3/CloudServer + fake). ADR-0012.
+- **Checker T2 `street_view_vlm`**: prompt versionado `facade-v1` (sem descrever pessoas),
+  rubrica por classes (keywords com fronteira de palavra — bug 'sOBRAdo/OBRA' corrigido),
+  stance por classe de fachada, decay de confiança por idade da imagem (1→0.3 em 60 meses),
+  evidências (`street_view_image` só com `STORE_STREET_VIEW_IMAGES=true`; `vlm_output` sempre)
+  com `evidence_id` no sinal.
+- **Orquestração**: T2 só roda se ambíguo após T1 **e** `max_tier >= 2` (flui do POST via
+  workflow). Falha de provider → `unknown` (sem veredito falso).
+- **Retenção**: job no worker (`retention_until` vencida → objeto + linha apagados).
+- **Avaliação**: harness `runFacadeEval` (por classe, accuracy, erros) no CI com modelo fake
+  (gate ≥85% por classe). **Gate adiada (com keys)**: dataset real ≥200 fachadas + modelo real.
+- **Política 2026.12.1** (peso street_view_vlm 1.2).
+- Testes: checker 11/11 (unit), harness, evidência/retenção; integração T2-gating escrita
+  (`f3.int.test.ts` — gate <25% no dourado) pendente de Docker.
 
 ## Fase 2 — Deep path e evidência externa ✅
 

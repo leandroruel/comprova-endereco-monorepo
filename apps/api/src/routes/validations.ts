@@ -238,6 +238,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
         void startDeepWorkflow(deps.deepTrigger, {
           tenantId: tenant.tenantId,
           validationId: result.validationId,
+          maxTier: body.options.max_tier,
         })
           .then(async (workflowId) => {
             if (workflowId === null) return

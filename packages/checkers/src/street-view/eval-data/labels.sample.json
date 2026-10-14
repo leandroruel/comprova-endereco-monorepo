@@ -1,0 +1,10 @@
+[
+  { "id": "sample-01", "expected": "COMMERCIAL", "hint": "vitrine com placa de mercadinho" },
+  { "id": "sample-02", "expected": "COMMERCIAL", "hint": "letreiro de oficina mecanica" },
+  { "id": "sample-03", "expected": "RESIDENTIAL", "hint": "porta de casa com cortina" },
+  { "id": "sample-04", "expected": "RESIDENTIAL", "hint": "sobrado sem placa" },
+  { "id": "sample-05", "expected": "VACANT_LOT", "hint": "terreno com muro baixo" },
+  { "id": "sample-06", "expected": "CONDOMINIUM", "hint": "portaria com interfone" },
+  { "id": "sample-07", "expected": "CONSTRUCTION", "hint": "tapume e andaime" },
+  { "id": "sample-08", "expected": "UNKNOWN", "hint": "imagem desfocada" }
+]

@@ -40,6 +40,7 @@ const getClient = async (deps: DeepTriggerDeps): Promise<LazyClient | null> => {
 export interface DeepWorkflowInput {
   readonly tenantId: string
   readonly validationId: string
+  readonly maxTier?: number
 }
 
 export const startDeepWorkflow = async (

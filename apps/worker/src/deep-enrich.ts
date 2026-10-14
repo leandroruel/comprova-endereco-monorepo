@@ -18,11 +18,13 @@ import { randomUUID } from 'node:crypto'
 export interface DeepEnrichInput {
   readonly tenantId: string
   readonly validationId: string
+  readonly maxTier?: number
 }
 
 export interface DeepEnrichDeps {
   readonly db: Db
   readonly t1Checkers: readonly Checker[]
+  readonly t2Checkers?: readonly Checker[]
   readonly policy: Policy
   readonly clock: Clock
 }
@@ -34,6 +36,7 @@ export interface DeepEnrichResult {
   readonly score: number
   readonly explanation: string
   readonly newSignals: number
+  readonly t2Signals: number
 }
 
 const hexToBuffer = (hex: unknown): Buffer | null =>
@@ -162,22 +165,45 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
     },
   }
 
-  const newSignals = await deps.t1Checkers.reduce<Promise<readonly Signal[]>>(async (acc, checker) => {
-    const prior = await acc
-    if (!checker.appliesTo.includes(subject.docType)) return prior
-    const produced = await checker.run({ ...ctx, priorSignals: [...signals, ...prior] })
-    return [...prior, ...produced]
-  }, Promise.resolve([]))
+  const runCheckerList = async (
+    checkers: readonly Checker[],
+    prior: readonly Signal[],
+  ): Promise<readonly Signal[]> =>
+    checkers.reduce<Promise<readonly Signal[]>>(async (acc, checker) => {
+      const list = await acc
+      if (!checker.appliesTo.includes(subject.docType)) return list
+      const produced = await checker.run({ ...ctx, priorSignals: [...prior, ...list] })
+      return [...list, ...produced]
+    }, Promise.resolve([]))
 
-  const allSignals: readonly Signal[] = [...signals, ...newSignals]
+  const newSignals = await runCheckerList(deps.t1Checkers, signals)
+
+  const signalsAfterT1: readonly Signal[] = [...signals, ...newSignals]
+  const scoreAfterT1 = weightedScore(signalsAfterT1, deps.policy, now)
+  const decisionAfterT1 = decide({
+    signals: signalsAfterT1,
+    score: scoreAfterT1,
+    policy: deps.policy,
+    now,
+  })
+  const ambiguousAfterT1 =
+    decisionAfterT1.verdict === 'INSUFFICIENT_EVIDENCE' || decisionAfterT1.confidence < 0.55
+  const maxTier = input.maxTier ?? 2
+  const t2Signals =
+    ambiguousAfterT1 && maxTier >= 2 && deps.t2Checkers !== undefined
+      ? await runCheckerList(deps.t2Checkers, signalsAfterT1)
+      : []
+
+  const allSignals: readonly Signal[] = [...signalsAfterT1, ...t2Signals]
   const score = weightedScore(allSignals, deps.policy, now)
   const decision = decide({ signals: allSignals, score, policy: deps.policy, now })
   const stillPartial = decision.verdict === 'INSUFFICIENT_EVIDENCE' || decision.confidence < 0.55
 
   await withTenant(deps.db, input.tenantId, async (tx) => {
-    if (newSignals.length > 0) {
+    const freshSignals = [...newSignals, ...t2Signals]
+    if (freshSignals.length > 0) {
       await tx.insert(t.signal).values(
-        newSignals.map((s) => ({
+        freshSignals.map((s) => ({
           signalId: randomUUID(),
           validationId: input.validationId,
           checkerId: s.checkerId,
@@ -197,7 +223,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
         await tx
           .insert(t.addressSignalCache)
           .values(
-            newSignals.map((s) => ({
+            freshSignals.map((s) => ({
               addressId,
               checkerId: s.checkerId,
               checkerVersion: s.checkerVersion,
@@ -251,6 +277,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
     confidence: decision.confidence,
     score: Math.tanh(score),
     explanation: decision.explanation,
-    newSignals: newSignals.length,
+    newSignals: newSignals.length + t2Signals.length,
+    t2Signals: t2Signals.length,
   }
 }
