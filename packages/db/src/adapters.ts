@@ -3,6 +3,7 @@ import type {
   CnaeCategoria,
   CepReader,
   CepRecord,
+  CnefeCoordReader,
   CnefeReader,
   EstabelecimentoRecord,
   KnownSharedReader,
@@ -36,6 +37,8 @@ const toEstabelecimento = (row: typeof t.refReceitaEstabelecimento.$inferSelect)
   municipioIbge: row.municipioIbge,
   paisCodigo: row.paisCodigo,
   cidadeExterior: row.cidadeExterior,
+  telefone: row.telefone,
+  emailDomain: row.emailDomain,
   buildingKey: row.buildingKey === null ? null : Buffer.from(row.buildingKey),
   unitKey: row.unitKey === null ? null : Buffer.from(row.unitKey),
 })
@@ -182,5 +185,26 @@ export const makeCnaeCategoriaReader = (db: Db) => ({
       .limit(1)
     const row = rows[0]
     return (row?.categoria as CnaeCategoria | undefined) ?? 'MIXED'
+  },
+})
+
+export const makeCnefeCoordReader = (db: Db): CnefeCoordReader => ({
+  coordFor: async ({ municipioIbge, logradouroNorm, numero }) => {
+    const rows = await db
+      .select({
+        lat: sql`ST_Y(geom::geometry)`,
+        lon: sql`ST_X(geom::geometry)`,
+      })
+      .from(t.refCnefeAddress)
+      .where(
+        and(
+          eq(t.refCnefeAddress.municipioIbge, municipioIbge),
+          sql`${t.refCnefeAddress.logradouroNorm} = ${logradouroNorm}`,
+          sql`${t.refCnefeAddress.numero} = ${numero}`,
+        ),
+      )
+      .limit(1)
+    const row = rows[0]
+    return row === undefined ? null : { lat: Number(row.lat), lon: Number(row.lon) }
   },
 })

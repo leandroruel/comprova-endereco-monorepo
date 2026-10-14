@@ -7,7 +7,7 @@ import { confidenceFrom, decide, weightedScore } from './scoring.js'
 import type { Signal, Stance } from './types.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const policy = loadPolicy(readFileSync(path.resolve(here, '../../../policies/2026.10.1.yaml'), 'utf8'))
+const policy = loadPolicy(readFileSync(path.resolve(here, '../../../policies/2026.11.1.yaml'), 'utf8'))
 
 const now = new Date('2026-10-10T12:00:00Z')
 
@@ -31,7 +31,7 @@ const sig = (
 
 describe('policy loading', () => {
   it('carrega a politica versionada do YAML', () => {
-    expect(policy.version).toBe('2026.10.1')
+    expect(policy.version).toBe('2026.11.1')
     expect(policy.hard_rules.length).toBe(3)
     expect(policy.weights['cotenancy']).toBe(1.3)
   })

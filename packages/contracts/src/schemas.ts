@@ -90,6 +90,19 @@ export const ValidationDtoSchema = z.object({
   expires_at: z.iso.datetime(),
 })
 
+export const BatchItemSchema = z.object({
+  type: DocTypeSchema,
+  value: z.string().min(11).max(20),
+})
+
+export const BatchRequestSchema = z.object({
+  items: z.array(BatchItemSchema).min(1).max(1000),
+  mode: ValModeSchema.default('fast'),
+  legal_basis: LegalBasisSchema,
+})
+
+export type BatchRequest = z.infer<typeof BatchRequestSchema>
+
 export const ProblemSchema = z.object({
   type: z.string(),
   title: z.string(),

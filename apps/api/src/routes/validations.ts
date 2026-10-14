@@ -14,6 +14,7 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { runFastPath, type FastPathDeps, type FastPathResult } from '../services/fastpath.js'
+import { startDeepWorkflow, type DeepTriggerDeps } from '../services/deep-trigger.js'
 
 const GetValidationParams = z.object({ id: z.uuid() })
 
@@ -24,6 +25,7 @@ const CreateValidationHeaders = z.object({
 export interface ValidationRoutesDeps {
   readonly db: Db
   readonly fastPath: FastPathDeps
+  readonly deepTrigger: DeepTriggerDeps
 }
 
 const summaryOf = (explanation: { summary?: string } | null): string | null => {
@@ -231,6 +233,22 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
       reply.header('Location', `/v1/validations/${result.validationId}`)
       if (body.mode === 'deep') {
         reply.code(202)
+      }
+      if (body.mode === 'deep' || (body.mode === 'auto' && result.status === 'partial')) {
+        void startDeepWorkflow(deps.deepTrigger, {
+          tenantId: tenant.tenantId,
+          validationId: result.validationId,
+        })
+          .then(async (workflowId) => {
+            if (workflowId === null) return
+            await withTenant(deps.db, tenant.tenantId, (tx) =>
+              tx
+                .update(t.validation)
+                .set({ workflowId })
+                .where(eq(t.validation.validationId, result.validationId)),
+            )
+          })
+          .catch(() => undefined)
       }
       return reply.send(dtoFromResult(result))
     },

@@ -34,7 +34,12 @@ const app = await buildApp({
     PORT: 3000,
     HOST: '127.0.0.1',
     LOG_LEVEL: 'silent',
-    POLICY_VERSION: '2026.10.1',
+    POLICY_VERSION: '2026.11.1',
+    TEMPORAL_ENABLED: false,
+    TEMPORAL_ADDRESS: 'localhost:7233',
+    TEMPORAL_NAMESPACE: 'default',
+    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
+    WORKER_LOOPS: false,
   },
   db: appPool.db,
   redis,
@@ -116,7 +121,7 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
     const res = await postValidation(GOLDEN_CASES[0]?.cnpj as string)
     expect(res.statusCode).toBe(200)
     const body = res.json()
-    expect(body.policy_version).toBe('2026.10.1')
+    expect(body.policy_version).toBe('2026.11.1')
     expect(body.signals.length).toBeGreaterThan(3)
     expect(body.address).not.toBeNull()
     expect(body.address.building_key).toMatch(/^b64:/)

@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@comprova/core": "workspace:*"
+    "@comprova/core": "workspace:*",
+    "@comprova/providers": "workspace:*"
   }
 }

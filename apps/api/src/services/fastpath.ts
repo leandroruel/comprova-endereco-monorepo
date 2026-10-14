@@ -94,6 +94,25 @@ const addressFromRegistry = (record: EstabelecimentoRecord): AddressComponents =
   countryCode: 'BR',
 })
 
+export const deepContextOf = (
+  registryRecord: EstabelecimentoRecord | undefined,
+  docDigitsValid: boolean,
+): Record<string, unknown> | null =>
+  registryRecord === undefined
+    ? null
+    : {
+        docDigitsValid,
+        record: {
+          ...registryRecord,
+          buildingKey:
+            registryRecord.buildingKey === null
+              ? null
+              : Buffer.from(registryRecord.buildingKey).toString('hex'),
+          unitKey:
+            registryRecord.unitKey === null ? null : Buffer.from(registryRecord.unitKey).toString('hex'),
+        },
+      }
+
 const statusFor = (
   mode: 'fast' | 'deep' | 'auto',
   verdict: Verdict,
@@ -316,6 +335,7 @@ export const runFastPath = async (
       legalBasis: req.legalBasis,
       idempotencyKey: req.idempotencyKey,
       explanation: { summary: decision.explanation },
+      deepContext: deepContextOf(registryRecord, docDigitsValid),
       createdAt: now,
       expiresAt,
     })

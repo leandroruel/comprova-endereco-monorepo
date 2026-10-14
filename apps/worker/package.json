@@ -5,5 +5,22 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@comprova/checkers": "workspace:^",
+    "@comprova/contracts": "workspace:^",
+    "@comprova/core": "workspace:^",
+    "@comprova/db": "workspace:^",
+    "@comprova/providers": "workspace:^",
+    "@temporalio/activity": "^1.24.0",
+    "@temporalio/client": "^1.24.0",
+    "@temporalio/worker": "^1.24.0",
+    "@temporalio/workflow": "^1.24.0",
+    "postgres": "^3.4.9",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@comprova/testing": "workspace:^"
   }
 }

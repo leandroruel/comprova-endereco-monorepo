@@ -21,8 +21,10 @@ export interface EstabelecimentoRecord {
   readonly municipioIbge: number | null
   readonly paisCodigo: number | null
   readonly cidadeExterior: string | null
+  readonly telefone: string | null
+  readonly emailDomain: string | null
   readonly buildingKey: Uint8Array | null
-  readonly unitKey: Buffer | null
+  readonly unitKey: Uint8Array | null
 }
 
 export interface CnefeMatch {
@@ -96,4 +98,17 @@ export interface KnownSharedReader {
 
 export interface CnaeCategoriaReader {
   readonly categoriaForDivisao: (divisao: string) => Promise<CnaeCategoria>
+}
+
+export interface GeoCoord {
+  readonly lat: number
+  readonly lon: number
+}
+
+export interface CnefeCoordReader {
+  readonly coordFor: (query: {
+    readonly municipioIbge: number
+    readonly logradouroNorm: string
+    readonly numero: string
+  }) => Promise<GeoCoord | null>
 }

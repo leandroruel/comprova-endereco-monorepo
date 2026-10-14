@@ -27,11 +27,33 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import type { AppConfig } from './config.js'
 import { makeAuthenticate } from './plugins/auth.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
+import { registerBatchRoutes } from './routes/batches.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
 import { registerValidationRoutes } from './routes/validations.js'
-import { docHmacKeyFromPepper } from './services/fastpath.js'
+import { registerWebhookRoutes } from './routes/webhooks.js'
+import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
 import { loadPolicyFile } from './policy-loader.js'
+
+export const buildFastPathDeps = (db: Db, config: AppConfig): FastPathDeps => {
+  const registry = makeRegistryReader(db)
+  const policy = loadPolicyFile(config.POLICY_VERSION)
+  return {
+    db,
+    registry,
+    checkers: makeT0Checkers({
+      registry,
+      cnefe: makeCnefeReader(db),
+      cep: makeCepReader(db),
+      profile: makeProfileReader(db),
+      knownShared: makeKnownSharedReader(db),
+      cnaeCategoria: makeCnaeCategoriaReader(db),
+    }),
+    policy,
+    clock: systemClock,
+    docHmacKey: docHmacKeyFromPepper(config.API_KEY_PEPPER),
+  }
+}
 
 export interface AppDeps {
   readonly config: AppConfig
@@ -114,29 +136,24 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const authenticate = makeAuthenticate(deps.db, deps.config.API_KEY_PEPPER)
   const rateLimit = makeRateLimiter(deps.redis)
 
-  const registry = makeRegistryReader(deps.db)
-  const policy = loadPolicyFile(deps.config.POLICY_VERSION)
-  const fastPath = {
-    db: deps.db,
-    registry,
-    checkers: makeT0Checkers({
-      registry,
-      cnefe: makeCnefeReader(deps.db),
-      cep: makeCepReader(deps.db),
-      profile: makeProfileReader(deps.db),
-      knownShared: makeKnownSharedReader(deps.db),
-      cnaeCategoria: makeCnaeCategoriaReader(deps.db),
-    }),
-    policy,
-    clock: systemClock,
-    docHmacKey: docHmacKeyFromPepper(deps.config.API_KEY_PEPPER),
+  const fastPath = buildFastPathDeps(deps.db, deps.config)
+  const deepTrigger = {
+    config: {
+      enabled: deps.config.TEMPORAL_ENABLED,
+      address: deps.config.TEMPORAL_ADDRESS,
+      namespace: deps.config.TEMPORAL_NAMESPACE,
+      taskQueue: deps.config.TEMPORAL_TASK_QUEUE,
+    },
+    logger: deps.logger,
   }
 
   await app.register(
     async (v1) => {
       v1.addHook('preHandler', authenticate)
       v1.addHook('preHandler', rateLimit)
-      registerValidationRoutes(v1, { db: deps.db, fastPath })
+      registerValidationRoutes(v1, { db: deps.db, fastPath, deepTrigger })
+      registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
+      registerBatchRoutes(v1, { db: deps.db })
     },
     { prefix: '/v1' },
   )

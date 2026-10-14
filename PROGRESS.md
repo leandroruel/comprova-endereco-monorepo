@@ -1,8 +1,40 @@
 # PROGRESS.md
 
-Estado: **Fase 1 em validação final** (2026-10-10)
+Estado: **Fase 2 concluída** (2026-10-14)
 
-## Fase 1 — Dados de referência e fast path (CNPJ) 🔄
+## Fase 2 — Deep path e evidência externa ✅
+
+### Feito
+
+- **Providers** (`packages/providers`, ADR-0010): Nominatim (geocode), Overpass (places) com
+  timeout/abort, fakes p/ testes, `LICENSE_NOTES.md` (ODbL, rate limits, Google futuro).
+- **Checkers T1**: `geocode_consensus` (Nominatim × CNEFE, dispersão em metros),
+  `places_match` (POIs num raio de 60m vs nome fantasia), `digital_footprint` (DDD vs UF).
+  Política `2026.11.1` com pesos T1.
+- **Deep path Temporal**: workflow `deepValidationWorkflow` + activity `deepEnrichActivity`
+  (retry 3×, 45s); trigger da API via `@temporalio/client` (dedupe por workflowId, degradação
+  graciosa se Temporal cai); `deep_context` (migração 0013) — snapshot público do CNPJ para o
+  worker nunca precisar do documento; sinais T1 gravados + `address_signal_cache` populado +
+  re-scoring + `validation.completed`.
+- **Webhooks** (ADR-0011): CRUD `/v1/webhooks`, segredo AES-256-GCM, assinatura
+  HMAC-SHA256 (`X-Signature`/`X-Timestamp`, anti-replay 300s), dispatcher outbox com
+  backoff exponencial (bug de retry corrigido: falha não-final mantinha pending), guarda SSRF.
+- **Batch**: `POST /v1/batches` (≤1000, fast) + `GET /v1/batches/{id}`; claim
+  `FOR UPDATE SKIP LOCKED`, validação de dígitos por item, evento `batch.completed`.
+- **E2E real validado**: API + worker + Temporal dev no ar → POST deep mode → 202 → workflow
+  roda T1 com Nominatim real → validação `completed` com sinais T1 (~12s).
+- Caos: providers fora do ar → sinais `unknown`, sem veredito falso (testado).
+
+### Gates
+
+| Gate                         | Estado                                                             |
+| ---------------------------- | ------------------------------------------------------------------ |
+| Resiliência em teste de caos | ✅ (provider fora → unknown; Temporal fora → fica partial)         |
+| Deep path p95 < 15 s         | ✅ informal E2E (~12s incl. polling); relatório formal no k6 F6    |
+| Custo por validação          | 🟡 `usage_event` registra kind fast/deep; relatório de custo na F6 |
+| Testes                       | ✅ 76/76 (11 arquivos)                                             |
+
+## Fase 1 — Dados de referência e fast path (CNPJ) ✅
 
 ### Feito
 

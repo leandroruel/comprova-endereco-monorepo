@@ -294,6 +294,7 @@ export const validation = pgTable(
     idempotencyKey: text('idempotency_key'),
     workflowId: text('workflow_id'),
     explanation: jsonb('explanation').$type<{ summary?: string } | null>(),
+    deepContext: jsonb('deep_context').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -395,6 +396,8 @@ export const webhookDelivery = pgTable('webhook_delivery', {
   status: text('status').notNull(),
   lastError: text('last_error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  eventType: text('event_type').notNull().default(''),
 })
 
 export const usageEvent = pgTable('usage_event', {
@@ -417,6 +420,43 @@ export const auditLog = pgTable('audit_log', {
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
 })
+
+export const batch = pgTable('batch', {
+  batchId: uuid('batch_id').primaryKey(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenant.tenantId),
+  status: text('status').notNull().default('queued'),
+  totalItems: integer('total_items').notNull(),
+  mode: valModeEnum('mode').notNull(),
+  legalBasis: text('legal_basis')
+    .notNull()
+    .references(() => legalBasis.code),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+})
+
+export const batchItem = pgTable(
+  'batch_item',
+  {
+    itemId: uuid('item_id').primaryKey(),
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => batch.batchId),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.tenantId),
+    position: integer('position').notNull(),
+    docType: docTypeEnum('doc_type').notNull(),
+    docDigits: text('doc_digits').notNull(),
+    status: text('status').notNull().default('pending'),
+    validationId: uuid('validation_id'),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+  },
+  (t) => [unique('batch_item_position_uq').on(t.batchId, t.position)],
+)
 
 export const schema = {
   tenant,
@@ -444,6 +484,8 @@ export const schema = {
   webhookDelivery,
   usageEvent,
   auditLog,
+  batch,
+  batchItem,
 } as const
 
 export type Tenant = typeof tenant.$inferSelect
