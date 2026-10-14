@@ -24,7 +24,7 @@ export interface S3ObjectStoreOptions {
 
 export const makeS3ObjectStore = (options: S3ObjectStoreOptions): ObjectStore => ({
   put: async (key, data, contentType) => {
-    const { S3Client, PutObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3')
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3')
     const client = new S3Client({
       endpoint: options.endpoint,
       region: options.region,
