@@ -1,4 +1,6 @@
 import { createDbPool, runMigrations } from '@comprova/db'
+import { hash } from '@node-rs/argon2'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createTenant, seedGoldenDataset } from '@comprova/testing'
@@ -64,6 +66,31 @@ switch (command) {
         writeFileSync(path.join(dir, `${target}.json`), JSON.stringify(report, null, 2))
         console.log(`relatorio salvo em docs/policy-reports/${target}.json`)
       }
+    } finally {
+      await pool.end()
+    }
+    break
+  }
+  case 'load-tenant': {
+    const pool = createDbPool(adminUrl, { max: 1 })
+    try {
+      const tenantId = randomUUID()
+      await pool.db.insert((await import('@comprova/db')).tenant).values({
+        tenantId,
+        name: 'load-tenant',
+        rateLimitRps: 100_000,
+        burst: 200_000,
+      })
+      const pepper = process.env.API_KEY_PEPPER ?? 'dev-pepper-change-me'
+      const plaintext = `cvk${randomBytes(18).toString('hex')}`
+      const keyHash = await hash(pepper + plaintext)
+      await pool.db.insert((await import('@comprova/db')).apiKey).values({
+        apiKeyId: randomUUID(),
+        tenantId,
+        keyPrefix: plaintext.slice(0, 8),
+        keyHash: Buffer.from(keyHash),
+      })
+      console.log(plaintext)
     } finally {
       await pool.end()
     }

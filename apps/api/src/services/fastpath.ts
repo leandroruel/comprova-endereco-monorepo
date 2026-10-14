@@ -8,8 +8,8 @@ import {
   isValidDocument,
   weightedScore,
   type AddressComponents,
-  type CanonicalAddressRef,
   type CepReader,
+  type CanonicalAddressRef,
   type CheckContext,
   type Checker,
   type Clock,
@@ -69,8 +69,6 @@ export interface FastPathResult {
   readonly idempotentReplay: boolean
 }
 
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
-
 const hmacDoc = (key: string, docType: string, digits: string): Buffer =>
   createHmac('sha256', key).update(`${docType}:${digits}`).digest()
 
@@ -85,30 +83,24 @@ const splitCnpj = (
   dv: digits.slice(12, 14),
 })
 
-const enrichWithCep = async (
-  deps: FastPathDeps,
-  input: AddressComponents | null,
-): Promise<AddressComponents | null> => {
-  if (input === null || deps.cep === undefined) return input
-  if (input.municipioIbge !== undefined && input.municipioIbge !== null) return input
-  const cep = (input.cep ?? '').replace(/\D+/g, '')
-  if (cep.length !== 8) return input
-  const cepRecord = await deps.cep.get(cep)
-  if (cepRecord === null || cepRecord.municipioIbge === null) return input
-  return { ...input, municipioIbge: cepRecord.municipioIbge }
+const flightCaches = {
+  canonical: new Map<string, Promise<unknown>>(),
+  subject: new Map<string, Promise<unknown>>(),
 }
 
-const addressFromRegistry = (record: EstabelecimentoRecord): AddressComponents => ({
-  tipoLogradouro: record.tipoLogradouro,
-  logradouro: record.logradouro,
-  numero: record.numero,
-  complemento: record.complemento,
-  bairro: record.bairro,
-  cep: record.cep,
-  uf: record.uf,
-  municipioIbge: record.municipioIbge,
-  countryCode: 'BR',
-})
+const singleflight = async <T>(
+  cache: Map<string, Promise<unknown>>,
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> => {
+  const existing = cache.get(key)
+  if (existing !== undefined) return existing as Promise<T>
+  const created = fn().finally(() => {
+    cache.delete(key)
+  })
+  cache.set(key, created)
+  return created
+}
 
 export const deepContextOf = (
   registryRecord: EstabelecimentoRecord | undefined,
@@ -141,6 +133,31 @@ const statusFor = (
   return 'completed'
 }
 
+const enrichWithCep = async (
+  deps: FastPathDeps,
+  input: AddressComponents | null,
+): Promise<AddressComponents | null> => {
+  if (input === null || deps.cep === undefined) return input
+  if (input.municipioIbge !== undefined && input.municipioIbge !== null) return input
+  const cep = (input.cep ?? '').replace(/\D+/g, '')
+  if (cep.length !== 8) return input
+  const cepRecord = await deps.cep.get(cep)
+  if (cepRecord === null || cepRecord.municipioIbge === null) return input
+  return { ...input, municipioIbge: cepRecord.municipioIbge }
+}
+
+const addressFromRegistry = (record: EstabelecimentoRecord): AddressComponents => ({
+  tipoLogradouro: record.tipoLogradouro,
+  logradouro: record.logradouro,
+  numero: record.numero,
+  complemento: record.complemento,
+  bairro: record.bairro,
+  cep: record.cep,
+  uf: record.uf,
+  municipioIbge: record.municipioIbge,
+  countryCode: 'BR',
+})
+
 const runCheckers = async (
   deps: FastPathDeps,
   documentType: 'CPF' | 'CNPJ',
@@ -166,40 +183,26 @@ const runCheckers = async (
     return [...priorSignals, ...produced]
   }, Promise.resolve([]))
 
-const findExistingValidationId = async (
-  tx: Tx,
+const loadValidationForReplay = async (
+  db: Db,
   tenantId: string,
-  idempotencyKey: string,
-): Promise<string | null> => {
-  const rows = await tx
-    .select({ validationId: t.validationIdempotency.validationId })
-    .from(t.validationIdempotency)
-    .where(
-      and(
-        eq(t.validationIdempotency.tenantId, tenantId),
-        eq(t.validationIdempotency.idempotencyKey, idempotencyKey),
-      ),
-    )
-    .limit(1)
-  return rows[0]?.validationId ?? null
-}
-
-const replayResult = async (
-  deps: FastPathDeps,
-  tx: Tx,
   validationId: string,
   policyVersion: string,
 ): Promise<FastPathResult> => {
-  const rows = await tx
-    .select()
-    .from(t.validation)
-    .where(eq(t.validation.validationId, validationId))
-    .limit(1)
+  const rows = await withTenant(db, tenantId, (tx) =>
+    tx.select().from(t.validation).where(eq(t.validation.validationId, validationId)).limit(1),
+  )
   const row = rows[0]
   if (row === undefined) {
     throw new Error(`idempotency points to missing validation ${validationId}`)
   }
-  const signalRows = await tx.select().from(t.signal).where(eq(t.signal.validationId, validationId))
+  const subjectRows = await withTenant(db, tenantId, (tx) =>
+    tx.select().from(t.subject).where(eq(t.subject.subjectId, row.subjectId)).limit(1),
+  )
+  void subjectRows
+  const signalRows = await withTenant(db, tenantId, (tx) =>
+    tx.select().from(t.signal).where(eq(t.signal.validationId, validationId)),
+  )
   return {
     validationId: row.validationId,
     subjectId: row.subjectId,
@@ -228,6 +231,26 @@ const replayResult = async (
   }
 }
 
+const findExistingValidationId = async (
+  db: Db,
+  tenantId: string,
+  idempotencyKey: string,
+): Promise<string | null> => {
+  const rows = await withTenant(db, tenantId, (tx) =>
+    tx
+      .select({ validationId: t.validationIdempotency.validationId })
+      .from(t.validationIdempotency)
+      .where(
+        and(
+          eq(t.validationIdempotency.tenantId, tenantId),
+          eq(t.validationIdempotency.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1),
+  )
+  return rows[0]?.validationId ?? null
+}
+
 export const runFastPath = async (
   deps: FastPathDeps,
   tenant: FastPathTenantContext,
@@ -236,29 +259,71 @@ export const runFastPath = async (
   const now = deps.clock.now()
   const digits = digitsOnly(req.documentValue)
   const docHmac = hmacDoc(deps.docHmacKey, req.documentType, digits)
+  const docHmacHex = docHmac.toString('hex')
   const policyVersion = deps.policy.version
 
-  return withTenant(deps.db, tenant.tenantId, async (tx) => {
-    if (req.idempotencyKey !== null) {
-      const existingId = await findExistingValidationId(tx, tenant.tenantId, req.idempotencyKey)
-      if (existingId !== null) {
-        return replayResult(deps, tx, existingId, policyVersion)
-      }
+  if (req.idempotencyKey !== null) {
+    const existingId = await findExistingValidationId(deps.db, tenant.tenantId, req.idempotencyKey)
+    if (existingId !== null) {
+      return loadValidationForReplay(deps.db, tenant.tenantId, existingId, policyVersion)
     }
+  }
 
-    const subjectRows = await tx
-      .insert(t.subject)
-      .values({
-        subjectId: randomUUID(),
-        tenantId: tenant.tenantId,
-        docType: req.documentType,
-        docHmac,
-      })
-      .onConflictDoNothing()
-      .returning({ subjectId: t.subject.subjectId })
-    const existingSubject =
-      subjectRows[0] === undefined
-        ? (
+  const resolved =
+    req.documentType === 'CNPJ' ? await deps.registry.getEstabelecimento(splitCnpj(digits)) : null
+  const registryRecord = resolved === null ? undefined : resolved
+
+  const rawAddressInput =
+    registryRecord !== undefined ? addressFromRegistry(registryRecord) : req.addressInput
+  const addressInput = await enrichWithCep(deps, rawAddressInput)
+
+  const canonical = canonicalizeAddress(addressInput ?? {})
+  const keys = addressKeys(canonical)
+  const addressRef: CanonicalAddressRef | null =
+    addressInput === null
+      ? null
+      : {
+          buildingKey: keys.buildingKey,
+          unitKey: keys.unitKey,
+          country: canonical.countryCode,
+          uf: canonical.uf ?? undefined,
+          cep: canonical.cep ?? undefined,
+          municipioIbge: canonical.municipioIbge ?? undefined,
+          logradouroNorm: canonical.logradouroNorm,
+          numero: canonical.numeroNorm,
+          bairroNorm: canonical.bairroNorm ?? undefined,
+          exterior: canonical.isExterior,
+        }
+
+  const docDigitsValid = isValidDocument(req.documentType, req.documentValue)
+  const signals = await runCheckers(deps, req.documentType, docDigitsValid, registryRecord, addressRef)
+
+  const score = weightedScore(signals, deps.policy, now)
+  const decision = decide({ signals, score, policy: deps.policy, now })
+  const normalizedScore = Math.tanh(score)
+  const status = statusFor(req.mode, decision.verdict, decision.confidence)
+  const validationId = randomUUID()
+  const expiresAt = new Date(now.getTime() + 30 * 86_400_000)
+  const buildingKeyHex = keys.buildingKey.toString('hex')
+
+  const persisted = await withTenant(deps.db, tenant.tenantId, async (tx) => {
+    const subjectId = await singleflight(
+      flightCaches.subject,
+      `${tenant.tenantId}:${docHmacHex}`,
+      async () => {
+        const subjectRows = await tx
+          .insert(t.subject)
+          .values({
+            subjectId: randomUUID(),
+            tenantId: tenant.tenantId,
+            docType: req.documentType,
+            docHmac,
+          })
+          .onConflictDoNothing()
+          .returning({ subjectId: t.subject.subjectId })
+        const found =
+          subjectRows[0]?.subjectId ??
+          (
             await tx
               .select({ subjectId: t.subject.subjectId })
               .from(t.subject)
@@ -270,74 +335,55 @@ export const runFastPath = async (
                 ),
               )
               .limit(1)
-          )[0]
-        : subjectRows[0]
-    const subjectId = existingSubject?.subjectId ?? randomUUID()
-
-    const resolved =
-      req.documentType === 'CNPJ' ? await deps.registry.getEstabelecimento(splitCnpj(digits)) : null
-    const registryRecord = resolved === null ? undefined : resolved
-
-    const rawAddressInput =
-      registryRecord !== undefined ? addressFromRegistry(registryRecord) : req.addressInput
-    const addressInput = await enrichWithCep(deps, rawAddressInput)
-
-    const canonical = canonicalizeAddress(addressInput ?? {})
-    const keys = addressKeys(canonical)
-    const addressRef: CanonicalAddressRef | null =
-      addressInput === null
-        ? null
-        : {
-            buildingKey: keys.buildingKey,
-            unitKey: keys.unitKey,
-            country: canonical.countryCode,
-            uf: canonical.uf ?? undefined,
-            cep: canonical.cep ?? undefined,
-            municipioIbge: canonical.municipioIbge ?? undefined,
-            logradouroNorm: canonical.logradouroNorm,
-            numero: canonical.numeroNorm,
-            bairroNorm: canonical.bairroNorm ?? undefined,
-            exterior: canonical.isExterior,
-          }
+          )[0]?.subjectId
+        if (found === undefined) throw new Error('subject upsert failed')
+        return found
+      },
+    )
 
     let addressId: string | null = null
     if (addressInput !== null) {
+      await singleflight(flightCaches.canonical, buildingKeyHex, async () => {
+        await tx
+          .insert(t.canonicalAddress)
+          .values({
+            addressId: randomUUID(),
+            buildingKey: keys.buildingKey,
+            countryCode: canonical.countryCode,
+            uf: canonical.uf,
+            municipioIbge: canonical.municipioIbge,
+            cep: canonical.cep,
+            logradouroNorm: canonical.logradouroNorm,
+            numero: canonical.numeroNorm,
+            bairroNorm: canonical.bairroNorm,
+          })
+          .onConflictDoNothing()
+      })
       const addressRows = await tx
-        .insert(t.canonicalAddress)
-        .values({
-          addressId: randomUUID(),
-          buildingKey: keys.buildingKey,
-          countryCode: canonical.countryCode,
-          uf: canonical.uf,
-          municipioIbge: canonical.municipioIbge,
-          cep: canonical.cep,
-          logradouroNorm: canonical.logradouroNorm,
-          numero: canonical.numeroNorm,
-          bairroNorm: canonical.bairroNorm,
-        })
-        .onConflictDoNothing()
-        .returning({ addressId: t.canonicalAddress.addressId })
-      addressId =
-        addressRows[0]?.addressId ??
-        (
-          await tx
-            .select({ addressId: t.canonicalAddress.addressId })
-            .from(t.canonicalAddress)
-            .where(eq(t.canonicalAddress.buildingKey, keys.buildingKey))
-            .limit(1)
-        )[0]?.addressId ??
-        null
+        .select({ addressId: t.canonicalAddress.addressId })
+        .from(t.canonicalAddress)
+        .where(eq(t.canonicalAddress.buildingKey, keys.buildingKey))
+        .limit(1)
+      addressId = addressRows[0]?.addressId ?? null
     }
 
-    const docDigitsValid = isValidDocument(req.documentType, req.documentValue)
-    const signals = await runCheckers(deps, req.documentType, docDigitsValid, registryRecord, addressRef)
-
-    const score = weightedScore(signals, deps.policy, now)
-    const decision = decide({ signals, score, policy: deps.policy, now })
-    const normalizedScore = Math.tanh(score)
-    const status = statusFor(req.mode, decision.verdict, decision.confidence)
-    const validationId = randomUUID()
-    const expiresAt = new Date(now.getTime() + 30 * 86_400_000)
+    if (req.idempotencyKey !== null) {
+      const idemRows = await tx
+        .insert(t.validationIdempotency)
+        .values({
+          tenantId: tenant.tenantId,
+          idempotencyKey: req.idempotencyKey,
+          validationId,
+        })
+        .onConflictDoNothing()
+        .returning({ validationId: t.validationIdempotency.validationId })
+      if (idemRows.length === 0) {
+        const winnerId = await findExistingValidationId(tx as never, tenant.tenantId, req.idempotencyKey)
+        if (winnerId !== null) {
+          return { replay: winnerId, subjectId, addressId }
+        }
+      }
+    }
 
     await tx.insert(t.validation).values({
       validationId,
@@ -358,24 +404,6 @@ export const runFastPath = async (
       createdAt: now,
       expiresAt,
     })
-
-    if (req.idempotencyKey !== null) {
-      const idemRows = await tx
-        .insert(t.validationIdempotency)
-        .values({
-          tenantId: tenant.tenantId,
-          idempotencyKey: req.idempotencyKey,
-          validationId,
-        })
-        .onConflictDoNothing()
-        .returning({ validationId: t.validationIdempotency.validationId })
-      if (idemRows.length === 0) {
-        const winnerId = await findExistingValidationId(tx, tenant.tenantId, req.idempotencyKey)
-        if (winnerId !== null) {
-          return replayResult(deps, tx, winnerId, policyVersion)
-        }
-      }
-    }
 
     if (signals.length > 0) {
       await tx.insert(t.signal).values(
@@ -424,29 +452,35 @@ export const runFastPath = async (
       details: { mode: req.mode, verdict: decision.verdict, status },
     })
 
-    return {
-      validationId,
-      subjectId,
-      addressId,
-      status,
-      verdict: decision.verdict,
-      confidence: decision.confidence,
-      score: normalizedScore,
-      explanation: decision.explanation,
-      signals,
-      address:
-        addressInput === null
-          ? null
-          : {
-              buildingKey: `b64:${keys.buildingKey.toString('base64url')}`,
-              country: canonical.countryCode,
-              uf: canonical.uf,
-              municipioIbge: canonical.municipioIbge,
-            },
-      policyVersion,
-      createdAt: now,
-      expiresAt,
-      idempotentReplay: false,
-    }
+    return { replay: null, subjectId, addressId }
   })
+
+  if (persisted.replay !== null) {
+    return loadValidationForReplay(deps.db, tenant.tenantId, persisted.replay, policyVersion)
+  }
+
+  return {
+    validationId,
+    subjectId: persisted.subjectId,
+    addressId: persisted.addressId,
+    status,
+    verdict: decision.verdict,
+    confidence: decision.confidence,
+    score: normalizedScore,
+    explanation: decision.explanation,
+    signals,
+    address:
+      addressInput === null
+        ? null
+        : {
+            buildingKey: `b64:${keys.buildingKey.toString('base64url')}`,
+            country: canonical.countryCode,
+            uf: canonical.uf,
+            municipioIbge: canonical.municipioIbge,
+          },
+    policyVersion,
+    createdAt: now,
+    expiresAt,
+    idempotentReplay: false,
+  }
 }

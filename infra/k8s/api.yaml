@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comprova-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: comprova-api }
+  template:
+    metadata:
+      labels: { app: comprova-api }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/leandroruel/comprova-api:latest # distroless + cosign (spec secao 11)
+          ports: [{ containerPort: 3000 }]
+          envFrom:
+            - secretRef: { name: comprova-api-secrets }
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits: { cpu: '2', memory: 1Gi }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 3000 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: comprova-api
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: comprova-api }
+  minReplicas: 3
+  maxReplicas: 30
+  metrics:
+    - type: Pods
+      pods:
+        metric: { name: http_requests_per_pod } # metrica custom (RPS por pod, spec secao 11)
+        target: { type: AverageValue, averageValue: '150' } # do relatorio de carga: 150 rps/pod
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: comprova-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: comprova-api }

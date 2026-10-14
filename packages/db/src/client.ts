@@ -16,7 +16,7 @@ export const createDbPool = (
   options: postgres.Options<Record<string, postgres.PostgresType>> = {},
 ): DbPool => {
   const client = postgres(url, {
-    max: 10,
+    max: Number(process.env.DB_POOL_MAX ?? 10),
     idle_timeout: 30,
     connect_timeout: 10,
     ...options,
@@ -30,5 +30,6 @@ export const createDbPool = (
 export const withTenant = async <T>(db: Db, tenantId: string, fn: (tx: DbTx) => Promise<T>): Promise<T> =>
   db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`)
+    await tx.execute(sql`SET LOCAL lock_timeout = '3s'`)
     return fn(tx)
   })

@@ -32,12 +32,40 @@ interface ApiKeyRow {
 const unauthorized = (reply: FastifyReply): FastifyReply =>
   reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
 
+const CACHE_TTL_MS = 60_000
+const CACHE_MAX = 5_000
+const verifiedKeys = new Map<string, { readonly expiresAt: number; readonly ctx: TenantContext }>()
+
+const cacheGet = (bearer: string, now: number): TenantContext | null => {
+  const hit = verifiedKeys.get(bearer)
+  if (hit === undefined) return null
+  if (hit.expiresAt < now) {
+    verifiedKeys.delete(bearer)
+    return null
+  }
+  return hit.ctx
+}
+
+const cachePut = (bearer: string, ctx: TenantContext, now: number): void => {
+  if (verifiedKeys.size >= CACHE_MAX) {
+    const oldest = verifiedKeys.keys().next().value
+    if (oldest !== undefined) verifiedKeys.delete(oldest)
+  }
+  verifiedKeys.set(bearer, { expiresAt: now + CACHE_TTL_MS, ctx })
+}
+
 export const makeAuthenticate = (db: Db, pepper: string) => {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
     const header = request.headers.authorization
     const bearer = header?.startsWith('Bearer ') ? header.slice(7).trim() : undefined
     if (bearer === undefined || bearer.length === 0) {
       return unauthorized(reply)
+    }
+    const now = Date.now()
+    const cached = cacheGet(bearer, now)
+    if (cached !== null) {
+      request.tenant = cached
+      return
     }
 
     const rows = (await db
@@ -64,12 +92,14 @@ export const makeAuthenticate = (db: Db, pepper: string) => {
 
     await db.update(t.apiKey).set({ lastUsedAt: new Date() }).where(eq(t.apiKey.apiKeyId, match.apiKeyId))
 
-    request.tenant = {
+    const ctx: TenantContext = {
       tenantId: match.tenantId,
       apiKeyId: match.apiKeyId,
       scopes: match.scopes,
       rateLimitRps: match.rateLimitRps,
       burst: match.burst,
     }
+    cachePut(bearer, ctx, now)
+    request.tenant = ctx
   }
 }

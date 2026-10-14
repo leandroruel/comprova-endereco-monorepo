@@ -62,7 +62,9 @@
   local (Fase 6 com infra real, se houver).
 - Multi-região active-passive com atenção à residência de dados (LGPD) — decisão futura.
 
-## Estimativa de capacidade (rascunho; refinar na Fase 1 com o dump real)
+## Estimativa de capacidade
+
+Ver docs/capacidade.md (medicoes do k6 F6 + estimativas com dump). Antiga secao:
 
 - `ref_receita_estabelecimento`: ~60M linhas × ~250 B ≈ 15 GB + índices (~2–3×) → working set
   por `building_key`/`cep` cabe em RAM de uma máquina dev (32–64 GB) para testes.

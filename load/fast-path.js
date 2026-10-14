@@ -35,7 +35,7 @@ export default function () {
       headers: {
         Authorization: `Bearer ${KEY}`,
         'Content-Type': 'application/json',
-        'Idempotency-Key': `k6-${__VU}-${__ITER}`,
+        'Idempotency-Key': `k6idem-${__VU}-${__ITER}`,
       },
     },
   )

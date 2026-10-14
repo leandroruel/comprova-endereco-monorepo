@@ -5,6 +5,7 @@ import { buildDeepWorkerContext, makeDeepEnrichActivity, workerEnvFromProcess } 
 import { makeFakeObjectStore, makeS3ObjectStore } from '@comprova/providers'
 import { createDbPool } from '@comprova/db'
 import { startRetentionLoop } from './evidence.js'
+import { startValidationRetentionLoop } from './retention.js'
 
 const env = workerEnvFromProcess()
 const ctx = buildDeepWorkerContext(env)
@@ -27,6 +28,9 @@ const retentionStore =
     : makeFakeObjectStore()
 const retentionDb = createDbPool(env.databaseUrl)
 const stopRetention = startRetentionLoop(retentionDb.db, retentionStore)
+const adminUrl = process.env.DATABASE_ADMIN_URL
+const stopValidationRetention =
+  adminUrl !== undefined && adminUrl !== '' ? startValidationRetentionLoop(createDbPool(adminUrl).db) : null
 
 const worker = await Worker.create({
   taskQueue,
@@ -39,4 +43,5 @@ try {
   await worker.run()
 } finally {
   stopRetention()
+  stopValidationRetention?.()
 }
