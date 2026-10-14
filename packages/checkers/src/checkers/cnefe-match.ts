@@ -52,11 +52,13 @@ export const makeCnefeMatch = (cnefe: CnefeReader): Checker => ({
       ]
     }
     const residential = match.especie !== null && RESIDENTIAL_ESPECIES.has(match.especie)
+    const cpfResidentialHint = residential && match.exactNumber && ctx.subject.docType === 'CPF'
     const detail: Record<string, unknown> = {
       match: match.exactNumber ? 'exact_number' : 'street_only',
       cnefe_id: match.cnefeId,
       ...(match.especie !== null ? { especie: match.especie } : {}),
       ...(residential ? { residential_hint: true } : {}),
+      ...(cpfResidentialHint ? { verdict_hint: 'RESIDENTIAL' } : {}),
     }
     if (match.exactNumber) {
       return [makeSignal({ ...base, stance: 'supports', strength: 0.6, confidence: 0.9, detail })]

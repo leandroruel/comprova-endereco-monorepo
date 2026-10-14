@@ -227,6 +227,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
           legalBasis: body.legal_basis,
           mode: body.mode,
           idempotencyKey: request.headers['idempotency-key'] ?? null,
+          consentRef: body.consent_ref,
         },
       )
 
@@ -252,6 +253,54 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
           .catch(() => undefined)
       }
       return reply.send(dtoFromResult(result))
+    },
+  )
+
+  app.post(
+    '/validations/:id/contest',
+    {
+      schema: {
+        params: GetValidationParams,
+        body: z.object({ reason: z.string().min(10).max(2000) }),
+        response: {
+          200: z.object({ contested: z.boolean(), validation_id: z.uuid() }),
+          404: ProblemSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const tenant = request.tenant
+      if (tenant === undefined) throw new Error('tenant context missing')
+      const exists = await withTenant(deps.db, tenant.tenantId, (tx) =>
+        tx
+          .select({ validationId: t.validation.validationId })
+          .from(t.validation)
+          .where(eq(t.validation.validationId, request.params.id))
+          .limit(1),
+      )
+      if (exists.length === 0) {
+        return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('validation'))
+      }
+      await withTenant(deps.db, tenant.tenantId, async (tx) => {
+        await tx.insert(t.auditLog).values({
+          tenantId: tenant.tenantId,
+          actor: `api-key:${tenant.apiKeyId}`,
+          action: 'validation.contested',
+          targetType: 'validation',
+          targetId: request.params.id,
+          details: { reason_length: request.body.reason.length },
+        })
+        await tx.insert(t.outbox).values({
+          aggregate: 'validation',
+          aggregateId: request.params.id,
+          eventType: 'validation.contested',
+          payload: {
+            tenant_id: tenant.tenantId,
+            validation_id: request.params.id,
+          },
+        })
+      })
+      return reply.send({ contested: true, validation_id: request.params.id })
     },
   )
 }

@@ -30,6 +30,7 @@ import { makeRateLimiter } from './plugins/rate-limit.js'
 import { registerBatchRoutes } from './routes/batches.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
+import { registerSubjectRoutes } from './routes/subjects.js'
 import { registerValidationRoutes } from './routes/validations.js'
 import { registerWebhookRoutes } from './routes/webhooks.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
@@ -37,10 +38,12 @@ import { loadPolicyFile } from './policy-loader.js'
 
 export const buildFastPathDeps = (db: Db, config: AppConfig): FastPathDeps => {
   const registry = makeRegistryReader(db)
+  const cep = makeCepReader(db)
   const policy = loadPolicyFile(config.POLICY_VERSION)
   return {
     db,
     registry,
+    cep,
     checkers: makeT0Checkers({
       registry,
       cnefe: makeCnefeReader(db),
@@ -154,6 +157,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerValidationRoutes(v1, { db: deps.db, fastPath, deepTrigger })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
       registerBatchRoutes(v1, { db: deps.db })
+      registerSubjectRoutes(v1, { db: deps.db })
     },
     { prefix: '/v1' },
   )

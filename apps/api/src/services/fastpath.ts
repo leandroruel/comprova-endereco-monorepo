@@ -9,6 +9,7 @@ import {
   weightedScore,
   type AddressComponents,
   type CanonicalAddressRef,
+  type CepReader,
   type CheckContext,
   type Checker,
   type Clock,
@@ -33,6 +34,7 @@ export interface FastPathRequest {
   readonly legalBasis: string
   readonly mode: 'fast' | 'deep' | 'auto'
   readonly idempotencyKey: string | null
+  readonly consentRef?: string | null
 }
 
 export interface FastPathDeps {
@@ -42,6 +44,7 @@ export interface FastPathDeps {
   readonly policy: Policy
   readonly clock: Clock
   readonly docHmacKey: string
+  readonly cep?: CepReader
 }
 
 export interface FastPathResult {
@@ -81,6 +84,19 @@ const splitCnpj = (
   ordem: digits.slice(8, 12),
   dv: digits.slice(12, 14),
 })
+
+const enrichWithCep = async (
+  deps: FastPathDeps,
+  input: AddressComponents | null,
+): Promise<AddressComponents | null> => {
+  if (input === null || deps.cep === undefined) return input
+  if (input.municipioIbge !== undefined && input.municipioIbge !== null) return input
+  const cep = (input.cep ?? '').replace(/\D+/g, '')
+  if (cep.length !== 8) return input
+  const cepRecord = await deps.cep.get(cep)
+  if (cepRecord === null || cepRecord.municipioIbge === null) return input
+  return { ...input, municipioIbge: cepRecord.municipioIbge }
+}
 
 const addressFromRegistry = (record: EstabelecimentoRecord): AddressComponents => ({
   tipoLogradouro: record.tipoLogradouro,
@@ -262,7 +278,9 @@ export const runFastPath = async (
       req.documentType === 'CNPJ' ? await deps.registry.getEstabelecimento(splitCnpj(digits)) : null
     const registryRecord = resolved === null ? undefined : resolved
 
-    const addressInput = registryRecord !== undefined ? addressFromRegistry(registryRecord) : req.addressInput
+    const rawAddressInput =
+      registryRecord !== undefined ? addressFromRegistry(registryRecord) : req.addressInput
+    const addressInput = await enrichWithCep(deps, rawAddressInput)
 
     const canonical = canonicalizeAddress(addressInput ?? {})
     const keys = addressKeys(canonical)
@@ -334,6 +352,7 @@ export const runFastPath = async (
       policyVersion,
       legalBasis: req.legalBasis,
       idempotencyKey: req.idempotencyKey,
+      consentRef: req.consentRef ?? null,
       explanation: { summary: decision.explanation },
       deepContext: deepContextOf(registryRecord, docDigitsValid),
       createdAt: now,

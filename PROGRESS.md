@@ -1,6 +1,28 @@
 # PROGRESS.md
 
-Estado: **Fase 4 concluída** (2026-10-14) — 95/95 testes
+Estado: **Fase 5 concluída** (2026-10-14) — 102/102 testes
+
+## Fase 5 — CPF e conformidade ✅
+
+- **Fluxo CPF consentido** (ADR-0014): endereço por request com `legal_basis` + `consent_ref`
+  (agora **persistido** na validation — corrigido); **enriquecimento por CEP** no fast path
+  preenche `municipio_ibge` via `ref_cep` (validação CEP↔UF↔município da spec); vereditos:
+  CNEFE residencial exato → `RESIDENTIAL` (hint novo condicionado a CPF), CNEFE não-residencial
+  - CEP ok → `CONFIRMED_COMMERCIAL`, sem evidência → `INSUFFICIENT_EVIDENCE`.
+- **Direitos do titular**: `GET /v1/subjects/{id}/validations` (relatório de acesso) e
+  `DELETE /v1/subjects/{id}` (eliminação transacional: validações + sinais + idempotência +
+  subject, com audit `subject.erasure` + evento outbox; RLS cross-tenant).
+- **Contestação (art. 20)**: `POST /v1/validations/{id}/contest` → auditoria (comprimento,
+  não o texto) + evento `validation.contested`; fluxo de revisão humana em
+  `docs/lgpd/contestacao.md`.
+- **Docs LGPD** (`docs/lgpd/`): mapa de dados, RIPD/DPIA, política de retenção (por tabela,
+  com mecanismos reais), LIA prevenção à fraude, fluxo de contestação.
+- **Gate zero-PII em logs**: teste captura o log da API num fluxo CPF completo e falha se
+  CPF/logradouro cru aparecer — no CI.
+- **AttestationVerifier stub** (seção 15 da spec): porta + tipos do formato esperado
+  (BBS+/zk-SNARK/JWT-VC, claims de escopo geográfico, sem receber documento) + ADR.
+- Testes: **102/102** (17 arquivos) — fluxo CPF (2 vereditos), erasure+RLS, contestação,
+  PII-logs, atestado stub; sem regressões nas fases 0–4.
 
 ## Fase 4 — Grafo e fachadas + simulador de políticas ✅
 
