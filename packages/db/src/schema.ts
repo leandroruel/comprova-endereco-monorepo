@@ -312,6 +312,8 @@ export const validationIdempotency = pgTable(
     tenantId: uuid('tenant_id').notNull(),
     idempotencyKey: text('idempotency_key').notNull(),
     validationId: uuid('validation_id').notNull(),
+    requestHash: text('request_hash'),
+    responseAddress: jsonb('response_address').$type<Record<string, unknown> | null>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.idempotencyKey] })],

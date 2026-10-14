@@ -10,6 +10,7 @@ import type {
   OtherActiveCnpj,
   PartnerGraphReader,
   ProfileReader,
+  SignalCacheReader,
   RegistryReader,
 } from '@comprova/core'
 import type { Db } from './client.js'
@@ -250,6 +251,47 @@ export const makePartnerGraphReader = (db: Db): PartnerGraphReader => ({
       cnpjsSharingPartner: Number(row?.['cnpjs_sharing_partner'] ?? 0),
       recentOpeningsAtAddress: Number(row?.['recent_openings'] ?? 0),
       hasData: coLocated > 0,
+    }
+  },
+})
+
+export const makeSignalCacheReader = (db: Db): SignalCacheReader => ({
+  getCached: async (addressId: string, checkerId: string) => {
+    const rows = await db
+      .select({
+        checkerId: t.addressSignalCache.checkerId,
+        checkerVersion: t.addressSignalCache.checkerVersion,
+        stance: t.addressSignalCache.stance,
+        strength: t.addressSignalCache.strength,
+        confidence: t.addressSignalCache.confidence,
+        source: t.addressSignalCache.source,
+        observedAt: t.addressSignalCache.observedAt,
+        expiresAt: t.addressSignalCache.expiresAt,
+        detail: t.addressSignalCache.detail,
+        evidenceId: t.addressSignalCache.evidenceId,
+      })
+      .from(t.addressSignalCache)
+      .where(
+        and(
+          eq(t.addressSignalCache.addressId, addressId),
+          eq(t.addressSignalCache.checkerId, checkerId),
+          sql`${t.addressSignalCache.expiresAt} > now()`,
+        ),
+      )
+      .limit(1)
+    const row = rows[0]
+    if (row === undefined) return null
+    return {
+      checkerId: row.checkerId,
+      checkerVersion: row.checkerVersion,
+      stance: row.stance,
+      strength: row.strength,
+      confidence: row.confidence,
+      source: row.source,
+      observedAt: row.observedAt.toISOString(),
+      ttlSeconds: Math.max(1, Math.floor((row.expiresAt.getTime() - Date.now()) / 1000)),
+      detail: row.detail,
+      ...(row.evidenceId !== null ? { evidenceId: row.evidenceId } : {}),
     }
   },
 })

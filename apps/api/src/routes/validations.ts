@@ -4,6 +4,7 @@ import {
   PROBLEM_CONTENT_TYPE,
   ValidationDtoSchema,
   ProblemSchema,
+  problem,
   problems,
   type ValidationDto,
 } from '@comprova/contracts'
@@ -13,8 +14,14 @@ import * as t from '@comprova/db'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { runFastPath, type FastPathDeps, type FastPathResult } from '../services/fastpath.js'
+import {
+  runFastPath,
+  type FastPathDeps,
+  type FastPathResult,
+  type FastPathRequest,
+} from '../services/fastpath.js'
 import { startDeepWorkflow, type DeepTriggerDeps } from '../services/deep-trigger.js'
+import { encryptSecret } from '../webhooks.js'
 
 const GetValidationParams = z.object({ id: z.uuid() })
 
@@ -214,22 +221,31 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
         return reply.code(422).type(PROBLEM_CONTENT_TYPE).send(problems.addressRequiredForCpf())
       }
 
+      const fastRequest: FastPathRequest = {
+        documentType: body.document.type,
+        documentValue: body.document.value,
+        addressInput:
+          body.document.type === 'CPF' && body.address !== null
+            ? addressComponentsFromDto(body.address)
+            : null,
+        legalBasis: body.legal_basis,
+        mode: body.mode,
+        idempotencyKey: request.headers['idempotency-key'] ?? null,
+        consentRef: body.consent_ref,
+      }
+
       const result = await runFastPath(
         deps.fastPath,
         { tenantId: tenant.tenantId, apiKeyId: tenant.apiKeyId },
-        {
-          documentType: body.document.type,
-          documentValue: body.document.value,
-          addressInput:
-            body.document.type === 'CPF' && body.address !== null
-              ? addressComponentsFromDto(body.address)
-              : null,
-          legalBasis: body.legal_basis,
-          mode: body.mode,
-          idempotencyKey: request.headers['idempotency-key'] ?? null,
-          consentRef: body.consent_ref,
-        },
+        fastRequest,
       )
+
+      if (result.requestMismatch === true) {
+        return reply
+          .code(422)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(problem(422, 'IDEMPOTENCY_MISMATCH', 'Idempotency key used with different request body'))
+      }
 
       reply.header('Location', `/v1/validations/${result.validationId}`)
       if (body.mode === 'deep') {
@@ -288,7 +304,10 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
           action: 'validation.contested',
           targetType: 'validation',
           targetId: request.params.id,
-          details: { reason_length: request.body.reason.length },
+          details: {
+            reason_enc: encryptSecret(deps.fastPath.docHmacKey, request.body.reason).toString('base64'),
+            reason_length: request.body.reason.length,
+          },
         })
         await tx.insert(t.outbox).values({
           aggregate: 'validation',

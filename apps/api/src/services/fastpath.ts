@@ -37,6 +37,19 @@ export interface FastPathRequest {
   readonly consentRef?: string | null
 }
 
+export const requestHashOf = (req: FastPathRequest): string =>
+  createHash('sha256')
+    .update(
+      JSON.stringify({
+        t: req.documentType,
+        d: req.documentValue,
+        a: req.addressInput,
+        l: req.legalBasis,
+        m: req.mode,
+      }),
+    )
+    .digest('hex')
+
 export interface FastPathDeps {
   readonly db: Db
   readonly registry: RegistryReader
@@ -67,6 +80,7 @@ export interface FastPathResult {
   readonly createdAt: Date
   readonly expiresAt: Date
   readonly idempotentReplay: boolean
+  readonly requestMismatch?: boolean
 }
 
 const hmacDoc = (key: string, docType: string, digits: string): Buffer =>
@@ -160,7 +174,29 @@ const runCheckers = async (
         observe: () => undefined,
       },
     }
-    const produced = await checker.run(ctx)
+    const produced = await Promise.race([
+      checker.run(ctx),
+      new Promise<readonly Signal[]>((_, reject) =>
+        setTimeout(() => reject(new Error(`checker ${checker.id} timeout`)), checker.timeoutMs),
+      ),
+    ]).catch((err: unknown) => {
+      if (err instanceof Error && err.message.includes('timeout')) {
+        return [
+          {
+            checkerId: checker.id,
+            checkerVersion: checker.version,
+            stance: 'unknown' as const,
+            strength: 0,
+            confidence: 0,
+            source: `${checker.id}:timeout`,
+            observedAt: deps.clock.now().toISOString(),
+            ttlSeconds: 300,
+            detail: { reason: 'checker_timeout', timeout_ms: checker.timeoutMs },
+          },
+        ]
+      }
+      throw err
+    })
     return [...priorSignals, ...produced]
   }, Promise.resolve([]))
 
@@ -169,6 +205,7 @@ const loadValidationForReplay = async (
   tenantId: string,
   validationId: string,
   policyVersion: string,
+  idempotencyKey?: string,
 ): Promise<FastPathResult> => {
   const rows = await withTenant(db, tenantId, (tx) =>
     tx.select().from(t.validation).where(eq(t.validation.validationId, validationId)).limit(1),
@@ -177,13 +214,40 @@ const loadValidationForReplay = async (
   if (row === undefined) {
     throw new Error(`idempotency points to missing validation ${validationId}`)
   }
-  const subjectRows = await withTenant(db, tenantId, (tx) =>
-    tx.select().from(t.subject).where(eq(t.subject.subjectId, row.subjectId)).limit(1),
-  )
-  void subjectRows
   const signalRows = await withTenant(db, tenantId, (tx) =>
     tx.select().from(t.signal).where(eq(t.signal.validationId, validationId)),
   )
+
+  let cachedAddress: FastPathResult['address'] = null
+  if (idempotencyKey !== undefined) {
+    const idemRows = await withTenant(db, tenantId, (tx) =>
+      tx
+        .select({ responseAddress: t.validationIdempotency.responseAddress })
+        .from(t.validationIdempotency)
+        .where(
+          and(
+            eq(t.validationIdempotency.tenantId, tenantId),
+            eq(t.validationIdempotency.idempotencyKey, idempotencyKey),
+          ),
+        )
+        .limit(1),
+    )
+    const addr = idemRows[0]?.responseAddress as {
+      building_key?: string
+      country?: string
+      uf?: string | null
+      municipioIbge?: number | null
+    } | null
+    if (addr !== null && addr !== undefined && addr.building_key !== undefined) {
+      cachedAddress = {
+        buildingKey: addr.building_key,
+        country: addr.country ?? 'BR',
+        uf: addr.uf ?? null,
+        municipioIbge: addr.municipioIbge ?? null,
+      }
+    }
+  }
+
   return {
     validationId: row.validationId,
     subjectId: row.subjectId,
@@ -204,7 +268,7 @@ const loadValidationForReplay = async (
       ttlSeconds: s.ttlSeconds,
       detail: s.detail,
     })),
-    address: null,
+    address: cachedAddress,
     policyVersion,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
@@ -212,14 +276,17 @@ const loadValidationForReplay = async (
   }
 }
 
-const findExistingValidationId = async (
+const findExistingIdempotency = async (
   db: Db,
   tenantId: string,
   idempotencyKey: string,
-): Promise<string | null> => {
+): Promise<{ readonly validationId: string; readonly requestHash: string | null } | null> => {
   const rows = await withTenant(db, tenantId, (tx) =>
     tx
-      .select({ validationId: t.validationIdempotency.validationId })
+      .select({
+        validationId: t.validationIdempotency.validationId,
+        requestHash: t.validationIdempotency.requestHash,
+      })
       .from(t.validationIdempotency)
       .where(
         and(
@@ -229,7 +296,8 @@ const findExistingValidationId = async (
       )
       .limit(1),
   )
-  return rows[0]?.validationId ?? null
+  const row = rows[0]
+  return row === undefined ? null : { validationId: row.validationId, requestHash: row.requestHash }
 }
 
 export const runFastPath = async (
@@ -240,13 +308,39 @@ export const runFastPath = async (
   const now = deps.clock.now()
   const digits = digitsOnly(req.documentValue)
   const docHmac = hmacDoc(deps.docHmacKey, req.documentType, digits)
+  const reqHash = requestHashOf(req)
 
   const policyVersion = deps.policy.version
 
   if (req.idempotencyKey !== null) {
-    const existingId = await findExistingValidationId(deps.db, tenant.tenantId, req.idempotencyKey)
-    if (existingId !== null) {
-      return loadValidationForReplay(deps.db, tenant.tenantId, existingId, policyVersion)
+    const existing = await findExistingIdempotency(deps.db, tenant.tenantId, req.idempotencyKey)
+    if (existing !== null) {
+      if (existing.requestHash !== null && existing.requestHash !== reqHash) {
+        return {
+          validationId: existing.validationId,
+          subjectId: '',
+          addressId: null,
+          status: 'completed',
+          verdict: 'INSUFFICIENT_EVIDENCE',
+          confidence: 0,
+          score: 0,
+          explanation: 'Idempotency key used with different request body',
+          signals: [],
+          address: null,
+          policyVersion,
+          createdAt: now,
+          expiresAt: now,
+          idempotentReplay: true,
+          requestMismatch: true,
+        }
+      }
+      return loadValidationForReplay(
+        deps.db,
+        tenant.tenantId,
+        existing.validationId,
+        policyVersion,
+        req.idempotencyKey ?? undefined,
+      )
     }
   }
 
@@ -345,13 +439,23 @@ export const runFastPath = async (
           tenantId: tenant.tenantId,
           idempotencyKey: req.idempotencyKey,
           validationId,
+          requestHash: reqHash,
+          responseAddress:
+            addressInput === null
+              ? null
+              : {
+                  building_key: `b64:${keys.buildingKey.toString('base64url')}`,
+                  country: canonical.countryCode,
+                  uf: canonical.uf,
+                  municipioIbge: canonical.municipioIbge,
+                },
         })
         .onConflictDoNothing()
         .returning({ validationId: t.validationIdempotency.validationId })
       if (idemRows.length === 0) {
-        const winnerId = await findExistingValidationId(tx as never, tenant.tenantId, req.idempotencyKey)
-        if (winnerId !== null) {
-          return { replay: winnerId, subjectId, addressId }
+        const winner = await findExistingIdempotency(tx as never, tenant.tenantId, req.idempotencyKey)
+        if (winner !== null) {
+          return { replay: winner.validationId, subjectId, addressId }
         }
       }
     }
@@ -427,7 +531,13 @@ export const runFastPath = async (
   })
 
   if (persisted.replay !== null) {
-    return loadValidationForReplay(deps.db, tenant.tenantId, persisted.replay, policyVersion)
+    return loadValidationForReplay(
+      deps.db,
+      tenant.tenantId,
+      persisted.replay,
+      policyVersion,
+      req.idempotencyKey ?? undefined,
+    )
   }
 
   return {

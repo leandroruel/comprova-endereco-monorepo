@@ -44,6 +44,32 @@ const TIPO_MAP: Readonly<Record<string, string>> = {
   MORRO: 'MORRO',
   LGO: 'LARGO',
   LARGO: 'LARGO',
+  DR: 'DOUTOR',
+  DOUTOR: 'DOUTOR',
+  PROF: 'PROFESSOR',
+  PROFESSOR: 'PROFESSOR',
+  CEL: 'CORONEL',
+  CORONEL: 'CORONEL',
+  STA: 'SANTA',
+  SANTA: 'SANTA',
+  STO: 'SANTO',
+  SANTO: 'SANTO',
+  SEN: 'SENADOR',
+  SENADOR: 'SENADOR',
+  DEP: 'DEPUTADO',
+  DEPUTADO: 'DEPUTADO',
+  GOV: 'GOVERNADOR',
+  GOVERNADOR: 'GOVERNADOR',
+  ENG: 'ENGENHEIRO',
+  ENGENHEIRO: 'ENGENHEIRO',
+  VER: 'VEREADOR',
+  VEREADOR: 'VEREADOR',
+  MAJ: 'MAJOR',
+  MAJOR: 'MAJOR',
+  GEN: 'GENERAL',
+  GENERAL: 'GENERAL',
+  PTE: 'PRESIDENTE',
+  PRESIDENTE: 'PRESIDENTE',
 }
 
 const expandTipo = (token: string): string => {
@@ -56,14 +82,13 @@ export const normalizeLogradouro = (
   logradouro: string | null | undefined,
 ): string => {
   const joined = normalizeText(`${tipoLogradouro ?? ''} ${logradouro ?? ''}`)
-  const tokens = joined.split(' ').filter((t) => t.length > 0)
-  const [head, ...rest] = tokens
-  return head === undefined
-    ? ''
-    : [expandTipo(head), ...rest]
-        .filter((t) => t.length > 0)
-        .join(' ')
-        .trim()
+  return joined
+    .split(' ')
+    .filter((t) => t.length > 0)
+    .map((t) => expandTipo(t))
+    .filter((t) => t.length > 0)
+    .join(' ')
+    .trim()
 }
 
 const SEM_NUMERO_RE = /^(S\s*[/.,-]?\s*N[Oº.]?|SEM\s+NUMERO?|S\/N?O?)$/
@@ -109,7 +134,11 @@ export const normalizeNumero = (raw: string | null | undefined): string => {
   const qd = extractQuadra(km.rest)
   const lt = extractLote(qd.rest)
   const remainder = cleanRemainder(lt.rest)
-  return [km.canonical, qd.canonical, lt.canonical, remainder]
+  const normalizedRemainder = remainder
+    .replace(/(\d+)([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return [km.canonical, qd.canonical, lt.canonical, normalizedRemainder]
     .filter((part) => part.length > 0)
     .join(' ')
     .trim()

@@ -1,3 +1,5 @@
+import type { Stance } from './types.js'
+
 export interface EstabelecimentoRecord {
   readonly cnpjBasico: string
   readonly cnpjOrdem: string
@@ -94,6 +96,23 @@ export interface ProfileReader {
 
 export interface KnownSharedReader {
   readonly get: (buildingKey: Uint8Array) => Promise<{ readonly kind: string } | null>
+}
+
+export interface CachedSignal {
+  readonly checkerId: string
+  readonly checkerVersion: string
+  readonly stance: Stance
+  readonly strength: number
+  readonly confidence: number
+  readonly source: string
+  readonly observedAt: string
+  readonly ttlSeconds: number
+  readonly detail: Record<string, unknown>
+  readonly evidenceId?: string
+}
+
+export interface SignalCacheReader {
+  readonly getCached: (addressId: string, checkerId: string) => Promise<CachedSignal | null>
 }
 
 export interface CnaeCategoriaReader {

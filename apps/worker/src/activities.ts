@@ -1,5 +1,5 @@
 import type { DeepEnrichInput, DeepEnrichResult } from './deep-enrich.js'
-import { loadPolicy, systemClock, type Checker, type Policy } from '@comprova/core'
+import { loadPolicy, systemClock, type Checker, type Policy, type SignalCacheReader } from '@comprova/core'
 import { FACADE_PROMPT, makeStreetViewVlm, makeT1Checkers, type EvidenceWriter } from '@comprova/checkers'
 import { createDbPool, makeCnefeCoordReader, makePartnerGraphReader, type DbPool } from '@comprova/db'
 import {
@@ -12,6 +12,7 @@ import {
   makeStubVisionModel,
 } from '@comprova/providers'
 import { makeEvidenceWriter } from './evidence.js'
+import { makeSignalCacheReader } from '@comprova/db'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { deepEnrich } from './deep-enrich.js'
@@ -39,6 +40,7 @@ export interface DeepWorkerContext {
   readonly t1Checkers: readonly Checker[]
   readonly t2Checkers: readonly Checker[]
   readonly evidenceWriter: EvidenceWriter
+  readonly signalCache: SignalCacheReader
 }
 
 const findRepoRoot = (startDir: string): string => {
@@ -96,7 +98,8 @@ export const buildDeepWorkerContext = (env: DeepWorkerEnv): DeepWorkerContext =>
 
   const t2Checkers = buildT2Checkers(env, evidenceWriter)
 
-  return { pool, policy, t1Checkers, t2Checkers, evidenceWriter }
+  const signalCache = makeSignalCacheReader(pool.db)
+  return { pool, policy, t1Checkers, t2Checkers, evidenceWriter, signalCache }
 }
 
 export const makeDeepEnrichActivity =
@@ -109,6 +112,7 @@ export const makeDeepEnrichActivity =
         t2Checkers: ctx.t2Checkers,
         policy: ctx.policy,
         clock: systemClock,
+        ...(ctx.signalCache !== undefined ? { signalCache: ctx.signalCache } : {}),
       },
       input,
     )

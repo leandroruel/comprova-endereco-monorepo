@@ -10,6 +10,7 @@ import {
   type Signal,
   type Verdict,
 } from '@comprova/core'
+import type { SignalCacheReader } from '@comprova/core'
 import type { Db } from '@comprova/db'
 import { withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -27,6 +28,7 @@ export interface DeepEnrichDeps {
   readonly t2Checkers?: readonly Checker[]
   readonly policy: Policy
   readonly clock: Clock
+  readonly signalCache?: SignalCacheReader
 }
 
 export interface DeepEnrichResult {
@@ -172,6 +174,28 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
     checkers.reduce<Promise<readonly Signal[]>>(async (acc, checker) => {
       const list = await acc
       if (!checker.appliesTo.includes(subject.docType)) return list
+
+      if (validation.addressId !== null && deps.signalCache !== undefined) {
+        const cached = await deps.signalCache.getCached(validation.addressId, checker.id)
+        if (cached !== null) {
+          return [
+            ...list,
+            {
+              checkerId: cached.checkerId,
+              checkerVersion: cached.checkerVersion,
+              stance: cached.stance,
+              strength: cached.strength,
+              confidence: cached.confidence,
+              source: cached.source,
+              observedAt: cached.observedAt,
+              ttlSeconds: cached.ttlSeconds,
+              detail: cached.detail,
+              ...(cached.evidenceId !== undefined ? { evidenceId: cached.evidenceId } : {}),
+            },
+          ]
+        }
+      }
+
       const produced = await checker.run({ ...ctx, priorSignals: [...prior, ...list] })
       return [...list, ...produced]
     }, Promise.resolve([]))
