@@ -1,12 +1,23 @@
 # PROGRESS.md
 
-Estado: **Fase 3 concluída (estrutural), integração aguardando Docker** (2026-10-14)
+Estado: **Fase 4 concluída** (2026-10-14) — 95/95 testes
 
-## ⚠️ Pendência de ambiente
+## Fase 4 — Grafo e fachadas + simulador de políticas ✅
 
-O daemon do Docker (WSL2) caiu durante a validação final da Fase 3. Reexecutar quando voltar:
-`pnpm test` (inclui `apps/worker/src/f3.int.test.ts` + suíte completa). Unit/contrato verdes
-(47/47), typecheck/lint/format/pgfence verdes sem containers.
+- **`partner_graph`** (ADR-0013): porta + adapter com CTE única (co-localizados × sócios
+  compartilhados × aberturas 12m); checker T1 emite `contradicts` com `pattern:
+partner_facade` quando ≥3 CNPjs co-localizados compartilham sócio ou ≥5 aberturas recentes;
+  roda no deep path (fora do hot path). Backend de grafo dedicado rejeitado por agora
+  (consulta é profundidade 1; interface permite trocar).
+- **Simulador de políticas (shadow mode)**: CLI `pnpm --filter @comprova/ingestor start --
+policy:simulate <versao> [--report]` — replay de `decide()` sobre sinais históricos,
+  relatório de divergências/transições (grava em `docs/policy-reports/`). Fluxo de promoção:
+  simular → revisar transições → bump `POLICY_VERSION`.
+- Golden dataset ampliado com cenário de fachada contábil (3 CNPjs co-localizados + sócio
+  comum + aberturas recentes).
+- Testes: 95/95 (15 arquivos) — integração do grafo (stats + sinal contraditório mantendo
+  veredito por hint) e do simulador (divergência detectada onde os sinais não sustentam o
+  veredito armazenado).
 
 ## Fase 3 — Mundo físico (Street View + VLM, fake-first) ✅ (sem chaves)
 

@@ -8,8 +8,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@comprova/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@comprova/checkers": "workspace:^",
     "@comprova/core": "workspace:*",
-    "@comprova/db": "workspace:*",
     "@comprova/testing": "workspace:*"
   }
 }

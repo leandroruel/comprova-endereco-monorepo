@@ -5,9 +5,20 @@ import {
   startTestDb,
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
-import { createDbPool, eq, lte, runMigrations } from '@comprova/db'
+import {
+  createDbPool,
+  eq,
+  lte,
+  makeCepReader,
+  makeCnaeCategoriaReader,
+  makeCnefeReader,
+  makeKnownSharedReader,
+  makeProfileReader,
+  makeRegistryReader,
+  runMigrations,
+} from '@comprova/db'
 import * as t from '@comprova/db'
-import { loadPolicy, systemClock } from '@comprova/core'
+import { addressKeys, canonicalizeAddress, loadPolicy, systemClock } from '@comprova/core'
 import { makeT0Checkers, makeT1Checkers, makeStreetViewVlm } from '@comprova/checkers'
 import {
   makeFakeGeocoder,
@@ -15,7 +26,7 @@ import {
   makeFakeStreetView,
   makeFakeVisionModel,
 } from '@comprova/providers'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,7 +46,7 @@ const tenant = await createTenant(adminPool.db, { name: 'f3-tenant' })
 
 const policy = loadPolicy(readFileSync(path.join(repoRoot, 'policies', '2026.12.1.yaml'), 'utf8'))
 
-const registry = { getEstabelecimento: async () => null }
+const registry = makeRegistryReader(adminPool.db)
 const t1Checkers = makeT1Checkers({
   geocoder: makeFakeGeocoder(() => ({
     point: { lat: -23.56, lon: -46.65 },
@@ -69,16 +80,14 @@ const t2Checkers = [
 
 const fastPathDeps = {
   db: adminPool.db,
-  registry: {
-    getEstabelecimento: async () => null,
-  },
+  registry,
   checkers: makeT0Checkers({
     registry,
-    cnefe: { findAddress: async () => null },
-    cep: { get: async () => null },
-    profile: { getProfile: async () => null, getOtherActiveCnpjs: async () => [] },
-    knownShared: { get: async () => null },
-    cnaeCategoria: { categoriaForDivisao: async () => 'MIXED' as const },
+    cnefe: makeCnefeReader(adminPool.db),
+    cep: makeCepReader(adminPool.db),
+    profile: makeProfileReader(adminPool.db),
+    knownShared: makeKnownSharedReader(adminPool.db),
+    cnaeCategoria: makeCnaeCategoriaReader(adminPool.db),
   }),
   policy,
   clock: systemClock,
@@ -115,21 +124,72 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
     expect(result.t2Signals).toBe(0)
   })
 
-  it('caso ambiguo roda T2 e grava sinal + evidencia', async () => {
-    const created = await mkValidation('90123456000131', 'f3-gate-2')
+  it('caso ambiguo com endereco roda T2, grava sinal contraditório e evidencia', async () => {
+    const subjectId = randomUUID()
+    await adminPool.db.insert(t.subject).values({
+      subjectId,
+      tenantId: tenant,
+      docType: 'CNPJ',
+      docHmac: randomBytes(32),
+    })
+    const canonical = canonicalizeAddress({
+      tipoLogradouro: 'R.',
+      logradouro: 'das Flores',
+      numero: '100',
+      bairro: 'Centro',
+      cep: '01310100',
+      uf: 'SP',
+      municipioIbge: 3550308,
+    })
+    const keys = addressKeys(canonical)
+    const addressRows = await adminPool.db
+      .insert(t.canonicalAddress)
+      .values({
+        addressId: randomUUID(),
+        buildingKey: keys.buildingKey,
+        countryCode: 'BR',
+        uf: 'SP',
+        municipioIbge: 3550308,
+        cep: '01310100',
+        logradouroNorm: canonical.logradouroNorm,
+        numero: canonical.numeroNorm,
+        bairroNorm: canonical.bairroNorm,
+      })
+      .onConflictDoNothing()
+      .returning({ addressId: t.canonicalAddress.addressId })
+    const addressId =
+      addressRows[0]?.addressId ??
+      (
+        await adminPool.db
+          .select({ addressId: t.canonicalAddress.addressId })
+          .from(t.canonicalAddress)
+          .where(eq(t.canonicalAddress.buildingKey, keys.buildingKey))
+          .limit(1)
+      )[0]?.addressId
+    const validationId = randomUUID()
+    await adminPool.db.insert(t.validation).values({
+      validationId,
+      tenantId: tenant,
+      subjectId,
+      addressId,
+      mode: 'auto',
+      status: 'partial',
+      policyVersion: '2026.12.1',
+      legalBasis: 'FRAUD_PREVENTION',
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+    })
+
     const result = await deepEnrich(
       { db: adminPool.db, t1Checkers, t2Checkers, policy, clock: systemClock },
-      { tenantId: tenant, validationId: created.validationId, maxTier: 2 },
+      { tenantId: tenant, validationId, maxTier: 2 },
     )
     expect(result.t2Signals).toBe(1)
 
-    const signals = await adminPool.db
-      .select()
-      .from(t.signal)
-      .where(eq(t.signal.validationId, created.validationId))
+    const signals = await adminPool.db.select().from(t.signal).where(eq(t.signal.validationId, validationId))
     const t2 = signals.find((s) => s.checkerId === 'street_view_vlm')
     expect(t2).toBeDefined()
-    expect(t2?.stance).toBe('unknown')
+    expect(t2?.stance).toBe('contradicts')
+    expect(t2?.detail['facade']).toBe('residential')
     expect(t2?.evidenceId).not.toBeNull()
 
     const evidence = await adminPool.db

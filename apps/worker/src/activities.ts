@@ -1,7 +1,7 @@
 import type { DeepEnrichInput, DeepEnrichResult } from './deep-enrich.js'
 import { loadPolicy, systemClock, type Checker, type Policy } from '@comprova/core'
 import { FACADE_PROMPT, makeStreetViewVlm, makeT1Checkers, type EvidenceWriter } from '@comprova/checkers'
-import { createDbPool, makeCnefeCoordReader, type DbPool } from '@comprova/db'
+import { createDbPool, makeCnefeCoordReader, makePartnerGraphReader, type DbPool } from '@comprova/db'
 import {
   makeFakeObjectStore,
   makeGoogleStreetView,
@@ -57,6 +57,7 @@ export const buildDeepWorkerContext = (env: DeepWorkerEnv): DeepWorkerContext =>
   const t1Checkers = makeT1Checkers({
     geocoder: makeNominatimGeocoder(env.nominatimUrl !== undefined ? { baseUrl: env.nominatimUrl } : {}),
     cnefeCoords,
+    partnerGraph: makePartnerGraphReader(pool.db),
     places: makeOverpassPlaces(env.overpassUrl !== undefined ? { baseUrl: env.overpassUrl } : {}),
   })
 

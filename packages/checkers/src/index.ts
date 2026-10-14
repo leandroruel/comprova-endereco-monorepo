@@ -1,5 +1,6 @@
 import type {
   CnaeCategoriaReader,
+  PartnerGraphReader,
   CepReader,
   CnefeCoordReader,
   CnefeReader,
@@ -17,6 +18,7 @@ import { countryCheck } from './checkers/country-check.js'
 import { digitalFootprint } from './checkers/digital-footprint.js'
 import { documentIntegrity } from './checkers/document-integrity.js'
 import { makeGeocodeConsensus } from './checkers/geocode-consensus.js'
+import { makePartnerGraph } from './checkers/partner-graph.js'
 import { makePlacesMatch } from './checkers/places-match.js'
 import { registryStatus } from './checkers/registry-status.js'
 
@@ -33,6 +35,7 @@ export interface T1Deps {
   readonly geocoder: GeocodeProvider
   readonly cnefeCoords: CnefeCoordReader
   readonly places: PlacesProvider
+  readonly partnerGraph?: PartnerGraphReader
 }
 
 export const makeT0Checkers = (deps: T0Deps): readonly Checker[] => [
@@ -49,6 +52,7 @@ export const makeT1Checkers = (deps: T1Deps): readonly Checker[] => [
   makeGeocodeConsensus(deps.geocoder, deps.cnefeCoords),
   makePlacesMatch(deps.places, deps.cnefeCoords),
   digitalFootprint,
+  ...(deps.partnerGraph !== undefined ? [makePartnerGraph(deps.partnerGraph)] : []),
 ]
 
 export * from './checkers/cep-consistency.js'
@@ -59,6 +63,7 @@ export * from './checkers/country-check.js'
 export * from './checkers/digital-footprint.js'
 export * from './checkers/document-integrity.js'
 export * from './checkers/geocode-consensus.js'
+export * from './checkers/partner-graph.js'
 export * from './checkers/places-match.js'
 export * from './checkers/registry-status.js'
 export * from './street-view/index.js'

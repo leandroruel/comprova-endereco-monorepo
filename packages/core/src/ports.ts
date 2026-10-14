@@ -105,6 +105,20 @@ export interface GeoCoord {
   readonly lon: number
 }
 
+export interface PartnerGraphStats {
+  readonly coLocatedCnpjs: number
+  readonly cnpjsSharingPartner: number
+  readonly recentOpeningsAtAddress: number
+  readonly hasData: boolean
+}
+
+export interface PartnerGraphReader {
+  readonly statsFor: (query: {
+    readonly buildingKey: Uint8Array
+    readonly cnpjBasico: string
+  }) => Promise<PartnerGraphStats>
+}
+
 export interface CnefeCoordReader {
   readonly coordFor: (query: {
     readonly municipioIbge: number

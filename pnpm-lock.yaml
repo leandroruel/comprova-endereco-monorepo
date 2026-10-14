@@ -99,12 +99,16 @@ importers:
 
   apps/ingestor:
     dependencies:
-      '@comprova/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@comprova/db':
         specifier: workspace:*
         version: link:../../packages/db
+    devDependencies:
+      '@comprova/checkers':
+        specifier: workspace:^
+        version: link:../../packages/checkers
+      '@comprova/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@comprova/testing':
         specifier: workspace:*
         version: link:../../packages/testing

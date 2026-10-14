@@ -500,6 +500,147 @@ export const seedGoldenDataset = async (db: Db): Promise<void> => {
       .insert(t.refKnownSharedAddress)
       .values({ buildingKey: contabilidadeKey, kind: 'accounting_office', source: 'golden' })
       .onConflictDoNothing()
+
+    const partnerKey = Buffer.from('golden-contabilidade-partner')
+    const coLocated: readonly EstabSeed[] = [
+      {
+        basico: '11111111',
+        ordem: '0001',
+        dv: '91',
+        matrizFilial: 1,
+        nomeFantasia: 'Empresa Fachada Um',
+        situacao: 2,
+        cnaePrincipal: '4711301',
+        tipoLogradouro: 'AV.',
+        logradouro: 'Central',
+        numero: 'S/N',
+        complemento: 'Sala 1',
+        bairro: 'Centro',
+        cep: '01310200',
+        uf: 'SP',
+        municipioIbge: 3550308,
+        paisCodigo: null,
+        cidadeExterior: null,
+      },
+      {
+        basico: '22222222',
+        ordem: '0001',
+        dv: '91',
+        matrizFilial: 1,
+        nomeFantasia: 'Empresa Fachada Dois',
+        situacao: 2,
+        cnaePrincipal: '4781400',
+        tipoLogradouro: 'AV.',
+        logradouro: 'Central',
+        numero: 'S/N',
+        complemento: 'Sala 2',
+        bairro: 'Centro',
+        cep: '01310200',
+        uf: 'SP',
+        municipioIbge: 3550308,
+        paisCodigo: null,
+        cidadeExterior: null,
+      },
+      {
+        basico: '33333333',
+        ordem: '0001',
+        dv: '91',
+        matrizFilial: 1,
+        nomeFantasia: 'Empresa Fachada Tres',
+        situacao: 2,
+        cnaePrincipal: '6202301',
+        tipoLogradouro: 'AV.',
+        logradouro: 'Central',
+        numero: 'S/N',
+        complemento: 'Sala 3',
+        bairro: 'Centro',
+        cep: '01310200',
+        uf: 'SP',
+        municipioIbge: 3550308,
+        paisCodigo: null,
+        cidadeExterior: null,
+      },
+    ]
+    await db
+      .insert(t.refReceitaEstabelecimento)
+      .values(
+        coLocated.map((seed) => ({
+          cnpjBasico: seed.basico,
+          cnpjOrdem: seed.ordem,
+          cnpjDv: seed.dv,
+          matrizFilial: seed.matrizFilial,
+          nomeFantasia: seed.nomeFantasia,
+          situacaoCadastral: seed.situacao,
+          dataSituacao: null,
+          motivoSituacao: null,
+          dataAbertura: '2026-05-02',
+          cnaePrincipal: seed.cnaePrincipal,
+          cnaesSecundarios: null,
+          tipoLogradouro: seed.tipoLogradouro,
+          logradouro: seed.logradouro,
+          numero: seed.numero,
+          complemento: seed.complemento,
+          bairro: seed.bairro,
+          cep: seed.cep,
+          uf: seed.uf,
+          municipioReceita: 7107,
+          municipioIbge: seed.municipioIbge,
+          paisCodigo: seed.paisCodigo,
+          cidadeExterior: seed.cidadeExterior,
+          telefone: null,
+          emailDomain: null,
+          buildingKey: contabilidadeKey,
+          unitKey: contabilidadeKey,
+          snapshotMonth: '2026-09-01',
+        })),
+      )
+      .onConflictDoNothing()
+
+    await db
+      .insert(t.refReceitaSocio)
+      .values([
+        {
+          cnpjBasico: '23456789',
+          tipoSocio: 2,
+          nomeSocio: null,
+          docMascarado: null,
+          qualificacao: 49,
+          dataEntrada: '2020-01-01',
+          partnerKey,
+          snapshotMonth: '2026-09-01',
+        },
+        {
+          cnpjBasico: '11111111',
+          tipoSocio: 2,
+          nomeSocio: null,
+          docMascarado: null,
+          qualificacao: 49,
+          dataEntrada: '2026-05-02',
+          partnerKey,
+          snapshotMonth: '2026-09-01',
+        },
+        {
+          cnpjBasico: '22222222',
+          tipoSocio: 2,
+          nomeSocio: null,
+          docMascarado: null,
+          qualificacao: 49,
+          dataEntrada: '2026-05-02',
+          partnerKey,
+          snapshotMonth: '2026-09-01',
+        },
+        {
+          cnpjBasico: '33333333',
+          tipoSocio: 2,
+          nomeSocio: null,
+          docMascarado: null,
+          qualificacao: 49,
+          dataEntrada: '2026-05-02',
+          partnerKey,
+          snapshotMonth: '2026-09-01',
+        },
+      ])
+      .onConflictDoNothing()
   }
 
   if (comercioAddress !== undefined) {
