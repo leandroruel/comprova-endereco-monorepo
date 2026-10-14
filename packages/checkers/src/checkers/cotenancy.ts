@@ -3,13 +3,20 @@ import type { CheckContext, Checker, Signal } from '@comprova/core'
 import { makeSignal } from '../utils.js'
 
 const ID = 'cotenancy'
-const VERSION = '1.0.0'
+const VERSION = '2.0.0'
 const SOURCE = 'receita:address_profile'
 const TTL = 7 * 86_400
 
 const SHARED_MIN_ACTIVE = 8
 const SHARED_MIN_CNAE_DIV = 5
 const OCCUPIED_MAX_OTHERS = 3
+
+const sameUnitOf = (ctx: CheckContext): boolean => {
+  const unitKey = ctx.address?.unitKey
+  const recordKey = ctx.registryRecord?.unitKey
+  if (unitKey === undefined || recordKey === undefined || recordKey === null) return false
+  return Buffer.from(unitKey).equals(recordKey)
+}
 
 export const makeCotenancy = (
   profile: ProfileReader,
@@ -44,6 +51,8 @@ export const makeCotenancy = (
         }),
       ]
     }
+    const sameUnit = sameUnitOf(ctx)
+
     const [profileRecord, sharedRecord] = await Promise.all([
       profile.getProfile(buildingKey),
       knownShared.get(buildingKey),
@@ -70,20 +79,22 @@ export const makeCotenancy = (
         makeSignal({
           ...base,
           stance: 'neutral',
-          strength: 0.7,
+          strength: sameUnit ? 0.5 : 0.7,
           confidence: 0.85,
           detail: {
             verdict_hint: 'SHARED_VIRTUAL',
             active_cnpj_count: activeCount,
             distinct_cnae_div: cnaeDiv,
             shared_kind: sharedRecord?.kind ?? profileRecord?.sharedKind ?? null,
+            same_unit: sameUnit,
           },
         }),
       ]
     }
 
     const others = await profile.getOtherActiveCnpjs(buildingKey, ctx.registryRecord.cnpjBasico)
-    if (others.length >= 1 && others.length <= OCCUPIED_MAX_OTHERS) {
+
+    if (!sameUnit && others.length >= 1 && others.length <= OCCUPIED_MAX_OTHERS) {
       return [
         makeSignal({
           ...base,
@@ -96,10 +107,28 @@ export const makeCotenancy = (
             other_names: others
               .map((o) => o.nomeFantasia ?? `${o.cnpjBasico}/${o.cnpjOrdem}`)
               .slice(0, OCCUPIED_MAX_OTHERS),
+            same_unit: false,
           },
         }),
       ]
     }
+
+    if (sameUnit && others.length >= 1 && others.length <= OCCUPIED_MAX_OTHERS) {
+      return [
+        makeSignal({
+          ...base,
+          stance: 'neutral',
+          strength: 0.3,
+          confidence: 0.6,
+          detail: {
+            reason: 'same_unit_other_cnpjs',
+            other_active_cnpjs: others.length,
+            same_unit: true,
+          },
+        }),
+      ]
+    }
+
     if (others.length > OCCUPIED_MAX_OTHERS) {
       return [
         makeSignal({
@@ -115,6 +144,7 @@ export const makeCotenancy = (
         }),
       ]
     }
+
     return [
       makeSignal({
         ...base,

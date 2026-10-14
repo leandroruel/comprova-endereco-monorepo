@@ -37,7 +37,13 @@ export const PolicySchema = z.object({
 export type HardRule = z.infer<typeof HardRuleSchema>
 export type Policy = z.infer<typeof PolicySchema>
 
-export const loadPolicy = (yamlContent: string): Policy => {
+export const loadPolicy = (yamlContent: string, expectedVersion?: string): Policy => {
   const raw: unknown = parseYaml(yamlContent)
-  return PolicySchema.parse(raw)
+  const policy = PolicySchema.parse(raw)
+  if (expectedVersion !== undefined && policy.version !== expectedVersion) {
+    throw new Error(
+      `policy version mismatch: file declares '${policy.version}' but expected '${expectedVersion}'`,
+    )
+  }
+  return policy
 }

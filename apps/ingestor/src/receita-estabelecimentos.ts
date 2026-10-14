@@ -1,18 +1,18 @@
-import { addressKeys, canonicalizeAddress } from '@comprova/core'
+import { addressKeys, canonicalizeAddress, normalizeText } from '@comprova/core'
 import type { Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 
-export const COLUMN_MAP = [
+export const ESTABELECIMENTO_COLUMNS = [
   'cnpj_basico',
   'cnpj_ordem',
   'cnpj_dv',
   'matriz_filial',
   'nome_fantasia',
   'situacao_cadastral',
-  'data_situacao_cadastral',
-  'motivo_situacao_cadastral',
+  'data_situacao',
+  'motivo_situacao',
   'nome_cidade_exterior',
   'pais',
   'data_inicio_atividade',
@@ -26,145 +26,277 @@ export const COLUMN_MAP = [
   'cep',
   'uf',
   'municipio',
+  'ddd1',
+  'telefone1',
+  'ddd2',
+  'telefone2',
   'situacao_especial',
   'data_situacao_especial',
+  'email',
 ] as const
 
-const parseCsvLine = (line: string, separator: string): readonly string[] => {
-  const out: string[] = []
-  let field = ''
-  let quoted = false
+const unquote = (field: string): string => field.replace(/^"|"$/g, '')
+
+const parseLine = (line: string): readonly string[] => {
+  const fields: string[] = []
+  let current = ''
+  let inQuotes = false
   for (let i = 0; i < line.length; i++) {
     const char = line[i] ?? ''
-    const next = line[i + 1] ?? ''
-    if (quoted) {
-      if (char === '"' && next === '"') {
-        field += '"'
-        i++
-      } else if (char === '"') {
-        quoted = false
-      } else {
-        field += char
-      }
-    } else if (char === '"') {
-      quoted = true
-    } else if (char === separator) {
-      out.push(field)
-      field = ''
+    if (char === '"') {
+      inQuotes = !inQuotes
+    } else if (char === ';' && !inQuotes) {
+      fields.push(unquote(current))
+      current = ''
     } else {
-      field += char
+      current += char
     }
   }
-  out.push(field)
-  return out
+  fields.push(unquote(current))
+  return fields
 }
 
-const detectSeparator = (header: string): string =>
-  (header.match(/;/g)?.length ?? 0) >= (header.match(/,/g)?.length ?? 0) ? ';' : ','
+const toIsoDate = (raw: string): string | null => {
+  const digits = raw.replace(/\D+/g, '')
+  if (digits.length !== 8) return null
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
+}
 
-const toRow = (fields: readonly string[]): Record<string, string> =>
-  Object.fromEntries(COLUMN_MAP.map((col, i) => [col, (fields[i] ?? '').trim()]))
+const digitsOnly = (value: string): string | null => {
+  const digits = value.replace(/\D+/g, '')
+  return digits.length > 0 ? digits : null
+}
 
-const nullIfEmpty = (value: string): string | null => (value === '' ? null : value)
+const cnaesToArray = (raw: string): readonly string[] | null => {
+  const list = raw
+    .split(',')
+    .map((code) => code.replace(/\D+/g, ''))
+    .filter((code) => code.length === 7)
+  return list.length > 0 ? list : null
+}
 
-const digitsOnly = (value: string | null): string | null =>
-  value === null ? null : value.replace(/\D+/g, '') || null
+const telefoneOf = (ddd: string, tel: string): string | null => {
+  const d = digitsOnly(ddd)
+  const n = digitsOnly(tel)
+  return d !== null && n !== null && n !== '00000000' ? `${d}${n}` : null
+}
 
-const toInsertValue = (row: Record<string, string>, snapshotMonth: string) => {
-  const components = {
-    tipoLogradouro: nullIfEmpty(row['tipo_logradouro'] ?? ''),
-    logradouro: nullIfEmpty(row['logradouro'] ?? ''),
-    numero: nullIfEmpty(row['numero'] ?? ''),
-    complemento: nullIfEmpty(row['complemento'] ?? ''),
-    bairro: nullIfEmpty(row['bairro'] ?? ''),
-    cep: digitsOnly(nullIfEmpty(row['cep'] ?? '')),
-    uf: nullIfEmpty(row['uf'] ?? ''),
-    municipioIbge: null,
-    countryCode: nullIfEmpty(row['pais'] ?? '') === '105' ? 'BR' : 'BR',
-  }
+const emailDomainOf = (raw: string): string | null => {
+  const at = raw.indexOf('@')
+  return at > 0 && at < raw.length - 1 ? raw.slice(at + 1).toLowerCase() : null
+}
+
+const nullIfEmpty = (value: string): string | null => (value.trim().length > 0 ? value : null)
+
+export interface EstabelecimentoRowValues {
+  readonly cnpjBasico: string
+  readonly cnpjOrdem: string
+  readonly cnpjDv: string
+  readonly matrizFilial: number
+  readonly nomeFantasia: string | null
+  readonly situacaoCadastral: number
+  readonly dataSituacao: string | null
+  readonly motivoSituacao: number | null
+  readonly dataAbertura: string | null
+  readonly cnaePrincipal: string | null
+  readonly cnaesSecundarios: readonly string[] | null
+  readonly tipoLogradouro: string | null
+  readonly logradouro: string | null
+  readonly numero: string | null
+  readonly complemento: string | null
+  readonly bairro: string | null
+  readonly cep: string | null
+  readonly uf: string | null
+  readonly municipioReceita: number | null
+  readonly municipioIbge: number | null
+  readonly paisCodigo: number | null
+  readonly cidadeExterior: string | null
+  readonly telefone: string | null
+  readonly emailDomain: string | null
+  readonly buildingKey: Buffer | null
+  readonly unitKey: Buffer | null
+  readonly snapshotMonth: string
+}
+
+export const toEstabelecimentoValues = (
+  fields: readonly string[],
+  snapshotMonth: string,
+): EstabelecimentoRowValues | null => {
+  const cnpjBasico = (fields[0] ?? '').replace(/\D+/g, '')
+  if (cnpjBasico.length !== 8) return null
+
+  const tipoLogradouro = nullIfEmpty(fields[13] ?? '')
+  const logradouro = nullIfEmpty(fields[14] ?? '')
+  const numero = nullIfEmpty(fields[15] ?? '')
+  const complemento = nullIfEmpty(fields[16] ?? '')
+  const bairro = nullIfEmpty(fields[17] ?? '')
+  const cepRaw = digitsOnly(fields[18] ?? '')
+  const cep = cepRaw !== null && cepRaw.length === 8 ? cepRaw : null
+  const ufRaw = nullIfEmpty(fields[19] ?? '')
+  const uf = ufRaw !== null && ufRaw.length === 2 ? ufRaw.toUpperCase() : null
+  const municipioCode = digitsOnly(fields[20] ?? '')
+  const municipioReceita = municipioCode !== null && municipioCode.length > 0 ? Number(municipioCode) : null
+  const paisRaw = digitsOnly(fields[9] ?? '')
   const isExterior =
-    nullIfEmpty(row['nome_cidade_exterior'] ?? '') !== null ||
-    (nullIfEmpty(row['pais'] ?? '') !== null && row['pais'] !== '105')
+    nullIfEmpty(fields[8] ?? '') !== null || (paisRaw !== null && paisRaw !== '105' && paisRaw.length > 0)
+
   const keys =
-    nullIfEmpty(row['cep'] ?? '') === null && nullIfEmpty(row['uf'] ?? '') === null
-      ? null
-      : addressKeys(canonicalizeAddress(components))
+    !isExterior && (cep !== null || uf !== null) && (logradouro !== null || numero !== null)
+      ? addressKeys(
+          canonicalizeAddress({
+            tipoLogradouro,
+            logradouro,
+            numero,
+            complemento,
+            bairro,
+            cep,
+            uf,
+            municipioIbge: null,
+            countryCode: 'BR',
+          }),
+        )
+      : null
+
+  const situacao = digitsOnly(fields[5] ?? '')
+  const motivo = digitsOnly(fields[7] ?? '')
+
   return {
-    cnpjBasico: row['cnpj_basico'] ?? '',
-    cnpjOrdem: row['cnpj_ordem'] ?? '',
-    cnpjDv: row['cnpj_dv'] ?? '',
-    matrizFilial: Number(row['matriz_filial'] ?? '1'),
-    nomeFantasia: nullIfEmpty(row['nome_fantasia'] ?? ''),
-    situacaoCadastral: Number(row['situacao_cadastral'] ?? '0'),
-    dataSituacao: nullIfEmpty(row['data_situacao_cadastral'] ?? ''),
-    motivoSituacao:
-      nullIfEmpty(row['motivo_situacao_cadastral'] ?? '') === null
-        ? null
-        : Number(row['motivo_situacao_cadastral']),
-    dataAbertura: nullIfEmpty(row['data_inicio_atividade'] ?? ''),
-    cnaePrincipal: nullIfEmpty(row['cnae_fiscal_principal'] ?? ''),
-    cnaesSecundarios: null,
-    tipoLogradouro: nullIfEmpty(row['tipo_logradouro'] ?? ''),
-    logradouro: nullIfEmpty(row['logradouro'] ?? ''),
-    numero: nullIfEmpty(row['numero'] ?? ''),
-    complemento: nullIfEmpty(row['complemento'] ?? ''),
-    bairro: nullIfEmpty(row['bairro'] ?? ''),
-    cep: digitsOnly(nullIfEmpty(row['cep'] ?? '')),
-    uf: nullIfEmpty(row['uf'] ?? ''),
-    municipioReceita: nullIfEmpty(row['municipio'] ?? '') === null ? null : Number(row['municipio']),
+    cnpjBasico,
+    cnpjOrdem: (fields[1] ?? '').replace(/\D+/g, ''),
+    cnpjDv: (fields[2] ?? '').replace(/\D+/g, ''),
+    matrizFilial: Number(digitsOnly(fields[3] ?? '') ?? '1'),
+    nomeFantasia: nullIfEmpty((fields[4] ?? '').trim()),
+    situacaoCadastral: situacao !== null ? Number(situacao) : 0,
+    dataSituacao: toIsoDate(fields[6] ?? ''),
+    motivoSituacao: motivo !== null && motivo.length > 0 ? Number(motivo) : null,
+    dataAbertura: toIsoDate(fields[10] ?? ''),
+    cnaePrincipal: digitsOnly(fields[11] ?? ''),
+    cnaesSecundarios: cnaesToArray(fields[12] ?? ''),
+    tipoLogradouro,
+    logradouro,
+    numero,
+    complemento,
+    bairro,
+    cep,
+    uf,
+    municipioReceita,
     municipioIbge: null,
-    paisCodigo: nullIfEmpty(row['pais'] ?? '') === null ? null : Number(row['pais']),
-    cidadeExterior: nullIfEmpty(row['nome_cidade_exterior'] ?? ''),
-    telefone: null,
-    emailDomain: null,
+    paisCodigo: paisRaw !== null && paisRaw.length > 0 ? Number(paisRaw) : null,
+    cidadeExterior: nullIfEmpty(fields[8] ?? ''),
+    telefone: telefoneOf(fields[21] ?? '', fields[22] ?? ''),
+    emailDomain: emailDomainOf(fields[27] ?? ''),
     buildingKey: keys === null ? null : keys.buildingKey,
     unitKey: keys === null ? null : keys.unitKey,
     snapshotMonth,
-    ...(isExterior ? {} : {}),
   }
 }
+
+export const toInsertRow = (values: EstabelecimentoRowValues) => ({
+  cnpjBasico: values.cnpjBasico,
+  cnpjOrdem: values.cnpjOrdem,
+  cnpjDv: values.cnpjDv,
+  matrizFilial: values.matrizFilial,
+  nomeFantasia: values.nomeFantasia,
+  situacaoCadastral: values.situacaoCadastral,
+  dataSituacao: values.dataSituacao,
+  motivoSituacao: values.motivoSituacao,
+  dataAbertura: values.dataAbertura,
+  cnaePrincipal: values.cnaePrincipal,
+  cnaesSecundarios: values.cnaesSecundarios === null ? null : [...values.cnaesSecundarios],
+  tipoLogradouro: values.tipoLogradouro,
+  logradouro: values.logradouro,
+  numero: values.numero,
+  complemento: values.complemento,
+  bairro: values.bairro,
+  cep: values.cep,
+  uf: values.uf,
+  municipioReceita: values.municipioReceita,
+  municipioIbge: values.municipioIbge,
+  paisCodigo: values.paisCodigo,
+  cidadeExterior: values.cidadeExterior,
+  telefone: values.telefone,
+  emailDomain: values.emailDomain,
+  buildingKey: values.buildingKey,
+  unitKey: values.unitKey,
+  snapshotMonth: values.snapshotMonth,
+})
 
 export interface IngestStats {
   readonly rows: number
   readonly snapshotMonth: string
+  readonly elapsedMs: number
 }
 
 export const ingestReceitaEstabelecimentos = async (
   db: Db,
   csvPath: string,
-  limit?: number,
-  batchSize = 5_000,
+  snapshotMonth: string,
+  options: { readonly limit?: number; readonly batchSize?: number } = {},
 ): Promise<IngestStats> => {
-  const stream = createReadStream(csvPath, 'utf8')
+  const batchSize = options.batchSize ?? 2_000
+  const started = Date.now()
+
+  const stream = createReadStream(csvPath, { encoding: 'latin1' })
   const rl = createInterface({ input: stream, crlfDelay: Infinity })
   const lines = rl[Symbol.asyncIterator]()
-  const header = (await lines.next()).value
-  if (typeof header !== 'string') {
-    throw new Error('arquivo vazio')
-  }
-  const separator = detectSeparator(header)
-  const snapshotMonth = new Date().toISOString().slice(0, 7) + '-01'
 
   let count = 0
-  let batch: ReturnType<typeof toInsertValue>[] = []
+  let batch: ReturnType<typeof toInsertRow>[] = []
   const flush = async (): Promise<void> => {
     if (batch.length === 0) return
     await db.insert(t.refReceitaEstabelecimento).values(batch).onConflictDoNothing()
     batch = []
   }
-  for (let i = 0; ; i++) {
+
+  for (;;) {
     const next = await lines.next()
     if (next.done === true) break
-    if (next.value.trim() === '') continue
-    const row = toRow(parseCsvLine(next.value, separator))
-    batch.push(toInsertValue(row, snapshotMonth))
-    if (batch.length >= batchSize) {
-      await flush()
+    const line = next.value
+    if (line.trim().length === 0) continue
+    const values = toEstabelecimentoValues(parseLine(line), snapshotMonth)
+    if (values !== null) {
+      batch.push(toInsertRow(values))
+      if (batch.length >= batchSize) {
+        await flush()
+      }
+      count++
+      if (options.limit !== undefined && count >= options.limit) break
     }
-    count++
-    if (limit !== undefined && count >= limit) break
   }
   await flush()
   await lines.return?.()
-  return { rows: count, snapshotMonth }
+  return { rows: count, snapshotMonth, elapsedMs: Date.now() - started }
+}
+
+export const ingestReceitaMunicipios = async (
+  db: Db,
+  csvPath: string,
+  snapshotMonth: string,
+): Promise<number> => {
+  const stream = createReadStream(csvPath, { encoding: 'latin1' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  const rows: { codigoReceita: number; nomeNorm: string; snapshotMonth: string }[] = []
+  for await (const line of rl) {
+    if (line.trim().length === 0) continue
+    const [codeRaw, nameRaw] = line.split(';').map(unquote)
+    const code = digitsOnly(codeRaw ?? '')
+    if (code === null || nameRaw === undefined) continue
+    rows.push({
+      codigoReceita: Number(code),
+      nomeNorm: normalizeText(nameRaw),
+      snapshotMonth,
+    })
+  }
+  if (rows.length > 0) {
+    await db
+      .insert(t.refReceitaMunicipio)
+      .values(
+        rows.map((r) => ({
+          codigoReceita: r.codigoReceita,
+          nomeNorm: r.nomeNorm,
+        })),
+      )
+      .onConflictDoNothing()
+  }
+  return rows.length
 }

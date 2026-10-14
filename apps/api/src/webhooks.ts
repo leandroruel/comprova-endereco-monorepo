@@ -1,4 +1,11 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto'
 
 const deriveKey = (pepper: string): Buffer => createHash('sha256').update(`webhook-secret:${pepper}`).digest()
 
@@ -43,16 +50,16 @@ export const verifyWebhookSignature = (
   toleranceSeconds = 300,
 ): boolean => {
   if (Math.abs(Date.now() - timestamp) > toleranceSeconds * 1000) return false
-  const expected = createHmac('sha256', secret).update(`${timestamp}.${payload}`).digest('hex')
-  return expected.length === signature.length && expected === signature
+  const expected = createHmac('sha256', secret).update(`${timestamp}.${payload}`).digest()
+  const received = Buffer.from(signature, 'hex')
+  return received.length === expected.length && timingSafeEqual(expected, received)
 }
-
 const PRIVATE_HOST_RE = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|169\.254\.|\[?::1)/i
 
 export const isSafeWebhookUrl = (url: string): boolean => {
   try {
     const parsed = new URL(url)
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false
+    if (parsed.protocol !== 'https:') return false
     return !PRIVATE_HOST_RE.test(parsed.hostname)
   } catch {
     return false

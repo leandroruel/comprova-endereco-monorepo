@@ -83,25 +83,6 @@ const splitCnpj = (
   dv: digits.slice(12, 14),
 })
 
-const flightCaches = {
-  canonical: new Map<string, Promise<unknown>>(),
-  subject: new Map<string, Promise<unknown>>(),
-}
-
-const singleflight = async <T>(
-  cache: Map<string, Promise<unknown>>,
-  key: string,
-  fn: () => Promise<T>,
-): Promise<T> => {
-  const existing = cache.get(key)
-  if (existing !== undefined) return existing as Promise<T>
-  const created = fn().finally(() => {
-    cache.delete(key)
-  })
-  cache.set(key, created)
-  return created
-}
-
 export const deepContextOf = (
   registryRecord: EstabelecimentoRecord | undefined,
   docDigitsValid: boolean,
@@ -259,7 +240,7 @@ export const runFastPath = async (
   const now = deps.clock.now()
   const digits = digitsOnly(req.documentValue)
   const docHmac = hmacDoc(deps.docHmacKey, req.documentType, digits)
-  const docHmacHex = docHmac.toString('hex')
+
   const policyVersion = deps.policy.version
 
   if (req.idempotencyKey !== null) {
@@ -304,61 +285,51 @@ export const runFastPath = async (
   const status = statusFor(req.mode, decision.verdict, decision.confidence)
   const validationId = randomUUID()
   const expiresAt = new Date(now.getTime() + 30 * 86_400_000)
-  const buildingKeyHex = keys.buildingKey.toString('hex')
 
   const persisted = await withTenant(deps.db, tenant.tenantId, async (tx) => {
-    const subjectId = await singleflight(
-      flightCaches.subject,
-      `${tenant.tenantId}:${docHmacHex}`,
-      async () => {
-        const subjectRows = await tx
-          .insert(t.subject)
-          .values({
-            subjectId: randomUUID(),
-            tenantId: tenant.tenantId,
-            docType: req.documentType,
-            docHmac,
-          })
-          .onConflictDoNothing()
-          .returning({ subjectId: t.subject.subjectId })
-        const found =
-          subjectRows[0]?.subjectId ??
-          (
-            await tx
-              .select({ subjectId: t.subject.subjectId })
-              .from(t.subject)
-              .where(
-                and(
-                  eq(t.subject.tenantId, tenant.tenantId),
-                  eq(t.subject.docType, req.documentType),
-                  eq(t.subject.docHmac, docHmac),
-                ),
-              )
-              .limit(1)
-          )[0]?.subjectId
-        if (found === undefined) throw new Error('subject upsert failed')
-        return found
-      },
-    )
+    const subjectRows = await tx
+      .insert(t.subject)
+      .values({
+        subjectId: randomUUID(),
+        tenantId: tenant.tenantId,
+        docType: req.documentType,
+        docHmac,
+      })
+      .onConflictDoNothing()
+      .returning({ subjectId: t.subject.subjectId })
+    const subjectId =
+      subjectRows[0]?.subjectId ??
+      (
+        await tx
+          .select({ subjectId: t.subject.subjectId })
+          .from(t.subject)
+          .where(
+            and(
+              eq(t.subject.tenantId, tenant.tenantId),
+              eq(t.subject.docType, req.documentType),
+              eq(t.subject.docHmac, docHmac),
+            ),
+          )
+          .limit(1)
+      )[0]?.subjectId
+    if (subjectId === undefined) throw new Error('subject upsert failed')
 
     let addressId: string | null = null
     if (addressInput !== null) {
-      await singleflight(flightCaches.canonical, buildingKeyHex, async () => {
-        await tx
-          .insert(t.canonicalAddress)
-          .values({
-            addressId: randomUUID(),
-            buildingKey: keys.buildingKey,
-            countryCode: canonical.countryCode,
-            uf: canonical.uf,
-            municipioIbge: canonical.municipioIbge,
-            cep: canonical.cep,
-            logradouroNorm: canonical.logradouroNorm,
-            numero: canonical.numeroNorm,
-            bairroNorm: canonical.bairroNorm,
-          })
-          .onConflictDoNothing()
-      })
+      await tx
+        .insert(t.canonicalAddress)
+        .values({
+          addressId: randomUUID(),
+          buildingKey: keys.buildingKey,
+          countryCode: canonical.countryCode,
+          uf: canonical.uf,
+          municipioIbge: canonical.municipioIbge,
+          cep: canonical.cep,
+          logradouroNorm: canonical.logradouroNorm,
+          numero: canonical.numeroNorm,
+          bairroNorm: canonical.bairroNorm,
+        })
+        .onConflictDoNothing()
       const addressRows = await tx
         .select({ addressId: t.canonicalAddress.addressId })
         .from(t.canonicalAddress)

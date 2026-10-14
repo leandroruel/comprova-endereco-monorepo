@@ -23,22 +23,29 @@ const stopBatch =
     ? startBatchLoop({ adminDb: adminPool.db, fastPath: buildFastPathDeps(pool.db, config) }, 1_000)
     : null
 
-const shutdown = async (): Promise<void> => {
-  logger.info('graceful shutdown started')
+const shutdown = async (signal: string): Promise<void> => {
+  logger.info({ signal }, 'graceful shutdown started')
   stopPublisher?.()
   stopBatch?.()
+  let hadError = false
   try {
     await app.close()
     await pool.end()
     if (adminPool !== null) await adminPool.end()
     redis.disconnect()
-  } finally {
-    process.exit(0)
+  } catch (err) {
+    hadError = true
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, 'error during shutdown')
   }
+  process.exit(hadError ? 1 : 0)
 }
 
-process.once('SIGTERM', () => void shutdown())
-process.once('SIGINT', () => void shutdown())
+process.once('SIGTERM', () => void shutdown('SIGTERM'))
+process.once('SIGINT', () => void shutdown('SIGINT'))
+process.on('uncaughtException', (err) => {
+  logger.error({ err: err.message }, 'uncaught exception')
+  void shutdown('uncaughtException')
+})
 
 await redis.connect()
 await app.listen({ port: config.PORT, host: config.HOST })

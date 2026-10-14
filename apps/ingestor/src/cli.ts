@@ -1,5 +1,5 @@
 import { createDbPool, runMigrations } from '@comprova/db'
-import { hash } from '@node-rs/argon2'
+import { createHmac } from 'node:crypto'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -24,14 +24,31 @@ const fixtures = async (): Promise<void> => {
   }
 }
 
-const ingestEstabelecimentos = async (file: string, limit?: number): Promise<void> => {
+const ingestEstabelecimentos = async (file: string, limit?: number, snapshot?: string): Promise<void> => {
   const { ingestReceitaEstabelecimentos } = await import('./receita-estabelecimentos.js')
   await runMigrations({ adminUrl, rolePassword: process.env.APP_DB_PASSWORD })
   const pool = createDbPool(adminUrl, { max: 4 })
   try {
-    const stats = await ingestReceitaEstabelecimentos(pool.db, file, limit)
-    console.log(`ingested ${stats.rows} rows into staging (snapshot ${stats.snapshotMonth})`)
-    console.log('gate adiada: validar layout com o dump real e medir tempo de ingestao completa')
+    const snapshotMonth = (snapshot ?? '2026-09') + '-01'
+    const stats = await ingestReceitaEstabelecimentos(pool.db, file, snapshotMonth, {
+      ...(limit !== undefined ? { limit } : {}),
+    })
+    const rate = stats.elapsedMs > 0 ? Math.round((stats.rows / stats.elapsedMs) * 1000) : 0
+    console.log(
+      `ingested ${stats.rows} rows in ${Math.round(stats.elapsedMs / 1000)}s (${rate} rows/s), snapshot ${stats.snapshotMonth}`,
+    )
+  } finally {
+    await pool.end()
+  }
+}
+
+const ingestMunicipios = async (file: string): Promise<void> => {
+  const { ingestReceitaMunicipios } = await import('./receita-estabelecimentos.js')
+  await runMigrations({ adminUrl, rolePassword: process.env.APP_DB_PASSWORD })
+  const pool = createDbPool(adminUrl, { max: 1 })
+  try {
+    const count = await ingestReceitaMunicipios(pool.db, file, '2026-09')
+    console.log(`ingested ${count} municipios`)
   } finally {
     await pool.end()
   }
@@ -82,12 +99,12 @@ switch (command) {
         burst: 200_000,
       })
       const pepper = process.env.API_KEY_PEPPER ?? 'dev-pepper-change-me'
-      const plaintext = `cvk${randomBytes(18).toString('hex')}`
-      const keyHash = await hash(pepper + plaintext)
+      const plaintext = `cvk_${randomBytes(24).toString('base64url')}`
+      const keyHash = createHmac('sha256', pepper).update(plaintext).digest()
       await pool.db.insert((await import('@comprova/db')).apiKey).values({
         apiKeyId: randomUUID(),
         tenantId,
-        keyPrefix: plaintext.slice(0, 8),
+        keyPrefix: plaintext.slice(0, 12),
         keyHash: Buffer.from(keyHash),
       })
       console.log(plaintext)
@@ -100,10 +117,63 @@ switch (command) {
     const file = process.argv[3]
     const limitFlag = process.argv.indexOf('--limit')
     const limit = limitFlag > 0 ? Number(process.argv[limitFlag + 1]) : undefined
+    const snapFlag = process.argv.indexOf('--snapshot')
+    const snapshot = snapFlag > 0 ? process.argv[snapFlag + 1] : undefined
     if (!file) {
-      throw new Error('usage: ingestor receita:estabelecimentos <arquivo.csv> [--limit N]')
+      throw new Error('usage: ingestor receita:estabelecimentos <csv> [--limit N] [--snapshot 2026-09]')
     }
-    await ingestEstabelecimentos(file, limit)
+    await ingestEstabelecimentos(file, limit, snapshot)
+    break
+  }
+  case 'profiles:recompute': {
+    const { recomputeAddressProfiles, seedCanonicalAddresses } = await import('./address-profile.js')
+    const pool = createDbPool(adminUrl, { max: 1 })
+    try {
+      const seeded = await seedCanonicalAddresses(pool.db)
+      console.log(`canonical addresses seeded: ${seeded}`)
+      const count = await recomputeAddressProfiles(pool.db)
+      console.log(`address profiles recomputed for ${count} addresses`)
+    } finally {
+      await pool.end()
+    }
+    break
+  }
+  case 'ceps:backfill': {
+    const { backfillCepsFromEstabelecimentos } = await import('./cep-backfill.js')
+    const limitFlag = process.argv.indexOf('--limit')
+    const limit = limitFlag > 0 ? Number(process.argv[limitFlag + 1]) : 500
+    const pool = createDbPool(adminUrl, { max: 2 })
+    try {
+      const stats = await backfillCepsFromEstabelecimentos(pool.db, {
+        ...(limit !== undefined ? { limit } : {}),
+      })
+      console.log(
+        `ceps: ${stats.cepsProcessed} processed, ${stats.cepsFound} found, ${stats.cepsNotFound} not found (${Math.round(stats.elapsedMs / 1000)}s)`,
+      )
+    } finally {
+      await pool.end()
+    }
+    break
+  }
+  case 'receita:ibge-derive': {
+    const { deriveMunicipioIbge, deriveMunicipioUf } = await import('./cep-backfill.js')
+    const pool = createDbPool(adminUrl, { max: 1 })
+    try {
+      const ibgeCount = await deriveMunicipioIbge(pool.db)
+      console.log(`municipio_ibge derived for ${ibgeCount} estabelecimentos`)
+      const ufCount = await deriveMunicipioUf(pool.db)
+      console.log(`uf derived for ${ufCount} municipios`)
+    } finally {
+      await pool.end()
+    }
+    break
+  }
+  case 'receita:municipios': {
+    const file = process.argv[3]
+    if (!file) {
+      throw new Error('usage: ingestor receita:municipios <csv>')
+    }
+    await ingestMunicipios(file)
     break
   }
   default:

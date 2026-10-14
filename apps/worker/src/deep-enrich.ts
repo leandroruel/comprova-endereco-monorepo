@@ -200,7 +200,11 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
   const stillPartial = decision.verdict === 'INSUFFICIENT_EVIDENCE' || decision.confidence < 0.55
 
   await withTenant(deps.db, input.tenantId, async (tx) => {
-    const freshSignals = [...newSignals, ...t2Signals]
+    const existingCheckerIds = new Set(signals.map((s) => `${s.checkerId}@${s.checkerVersion}`))
+    const freshSignals = [...newSignals, ...t2Signals].filter(
+      (s) => !existingCheckerIds.has(`${s.checkerId}@${s.checkerVersion}`),
+    )
+
     if (freshSignals.length > 0) {
       await tx.insert(t.signal).values(
         freshSignals.map((s) => ({

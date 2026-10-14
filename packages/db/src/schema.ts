@@ -210,9 +210,9 @@ export const refReceitaMunicipio = pgTable(
   'ref_receita_municipio',
   {
     codigoReceita: integer('codigo_receita').primaryKey(),
-    codigoIbge: integer('codigo_ibge').notNull(),
+    codigoIbge: integer('codigo_ibge'),
     nomeNorm: text('nome_norm').notNull(),
-    uf: char('uf', { length: 2 }).notNull(),
+    uf: char('uf', { length: 2 }),
   },
   (t) => [unique('ref_receita_municipio_nome_uf_uq').on(t.nomeNorm, t.uf)],
 )

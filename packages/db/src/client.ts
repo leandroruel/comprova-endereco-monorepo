@@ -31,5 +31,6 @@ export const withTenant = async <T>(db: Db, tenantId: string, fn: (tx: DbTx) => 
   db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`)
     await tx.execute(sql`SET LOCAL lock_timeout = '3s'`)
+    await tx.execute(sql`SET LOCAL statement_timeout = '10s'`)
     return fn(tx)
   })

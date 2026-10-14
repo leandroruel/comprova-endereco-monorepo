@@ -1,7 +1,9 @@
-import { hash } from '@node-rs/argon2'
 import { type Db } from '@comprova/db'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import * as t from '@comprova/db'
+
+export const hashApiKey = (pepper: string, plaintext: string): Buffer =>
+  createHmac('sha256', pepper).update(plaintext).digest()
 
 export const ensureLegalBasis = async (db: Db): Promise<void> => {
   await db
@@ -44,11 +46,11 @@ export const createApiKey = async (
 ): Promise<{ readonly apiKeyId: string; readonly plaintext: string }> => {
   const apiKeyId = randomUUID()
   const plaintext = `cvk${randomBytes(18).toString('hex')}`
-  const keyHash = await hash(pepper + plaintext)
+  const keyHash = hashApiKey(pepper, plaintext)
   await db.insert(t.apiKey).values({
     apiKeyId,
     tenantId,
-    keyPrefix: plaintext.slice(0, 8),
+    keyPrefix: plaintext.slice(0, 12),
     keyHash: Buffer.from(keyHash),
     scopes: [...(opts.scopes ?? ['validate:read', 'validate:write'])],
   })

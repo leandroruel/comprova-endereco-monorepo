@@ -139,6 +139,16 @@ export const decide = (input: DecisionInput): Decision => {
     }
   }
 
+  const [bandLow, bandHigh] = policy.decision.insufficient_band
+  if (score >= bandLow && score <= bandHigh) {
+    return {
+      verdict: 'INSUFFICIENT_EVIDENCE',
+      confidence: confidenceFrom(signals, policy, now),
+      hardRuleId: null,
+      explanation: 'Score dentro da banda de insuficiencia; sinais nao sustentam conclusao.',
+    }
+  }
+
   return {
     verdict: 'INSUFFICIENT_EVIDENCE',
     confidence: confidenceFrom(signals, policy, now),

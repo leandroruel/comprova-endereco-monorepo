@@ -13,17 +13,8 @@ export interface PublisherDeps {
   readonly fetchImpl?: typeof fetch
   readonly now?: () => Date
   readonly maxAttempts?: number
+  readonly batchSize?: number
 }
-
-interface OutboxEventRow {
-  readonly outboxId: number
-  readonly aggregate: string
-  readonly aggregateId: string
-  readonly eventType: string
-  readonly payload: Record<string, unknown>
-}
-
-const TENANT_ID_ERROR = 'outbox event without tenant_id in payload'
 
 const createDeliveriesForNewEvents = async (deps: PublisherDeps): Promise<number> => {
   const now = (deps.now ?? (() => new Date()))()
@@ -38,53 +29,58 @@ const createDeliveriesForNewEvents = async (deps: PublisherDeps): Promise<number
     .from(t.outbox)
     .where(isNull(t.outbox.publishedAt))
     .orderBy(t.outbox.outboxId)
-    .limit(20)) as readonly OutboxEventRow[]
+    .limit(deps.batchSize ?? 20)) as readonly {
+    outboxId: number
+    aggregate: string
+    aggregateId: string
+    eventType: string
+    payload: Record<string, unknown>
+  }[]
 
-  const created = await events.reduce<Promise<number>>(
-    async (acc, event) =>
-      event.payload['tenant_id'] === undefined || typeof event.payload['tenant_id'] !== 'string'
-        ? Promise.reject(new Error(TENANT_ID_ERROR))
-        : (await acc) +
-          (await withTenant(deps.db, event.payload['tenant_id'] as string, async (tx) => {
-            const endpoints = await tx
-              .select({
-                endpointId: t.webhookEndpoint.endpointId,
-              })
-              .from(t.webhookEndpoint)
-              .where(
-                and(
-                  eq(t.webhookEndpoint.active, true),
-                  sql`${t.webhookEndpoint.events} @> ARRAY[${event.eventType}]::text[]`,
-                ),
-              )
-            if (endpoints.length === 0) return 0
-            await tx.insert(t.webhookDelivery).values(
-              endpoints.map((endpoint) => ({
-                deliveryId: randomUUID(),
-                endpointId: endpoint.endpointId,
-                validationId: event.aggregateId,
-                status: 'pending',
-                attempt: 0,
-                nextAttemptAt: now,
-                payload: event.payload,
-                eventType: event.eventType,
-              })),
-            )
-            return endpoints.length
+  let created = 0
+  for (const event of events) {
+    try {
+      const tenantId = event.payload['tenant_id']
+      if (typeof tenantId !== 'string') {
+        deps.logger.warn(
+          { outbox_id: event.outboxId, event_type: event.eventType },
+          'outbox event without tenant_id, skipping',
+        )
+        await deps.db.update(t.outbox).set({ publishedAt: now }).where(eq(t.outbox.outboxId, event.outboxId))
+        continue
+      }
+      created += await withTenant(deps.db, tenantId, async (tx) => {
+        const endpoints = await tx
+          .select({ endpointId: t.webhookEndpoint.endpointId })
+          .from(t.webhookEndpoint)
+          .where(
+            and(
+              eq(t.webhookEndpoint.active, true),
+              sql`${t.webhookEndpoint.events} @> ARRAY[${event.eventType}]::text[]`,
+            ),
+          )
+        if (endpoints.length === 0) return 0
+        await tx.insert(t.webhookDelivery).values(
+          endpoints.map((endpoint) => ({
+            deliveryId: randomUUID(),
+            endpointId: endpoint.endpointId,
+            validationId: event.aggregateId,
+            status: 'pending',
+            attempt: 0,
+            nextAttemptAt: now,
+            payload: event.payload,
+            eventType: event.eventType,
           })),
-    Promise.resolve(0),
-  )
-
-  if (events.length > 0) {
-    await deps.db
-      .update(t.outbox)
-      .set({ publishedAt: now })
-      .where(
-        sql`${t.outbox.outboxId} IN (${sql.join(
-          events.map((e) => sql`${e.outboxId}`),
-          sql`, `,
-        )})`,
+        )
+        return endpoints.length
+      })
+      await deps.db.update(t.outbox).set({ publishedAt: now }).where(eq(t.outbox.outboxId, event.outboxId))
+    } catch (err) {
+      deps.logger.warn(
+        { err: err instanceof Error ? err.message : String(err), outbox_id: event.outboxId },
+        'outbox event processing failed, will retry next tick',
       )
+    }
   }
   return created
 }
@@ -109,7 +105,7 @@ const processDueDeliveries = async (deps: PublisherDeps): Promise<number> => {
     .from(t.webhookDelivery)
     .innerJoin(t.webhookEndpoint, eq(t.webhookDelivery.endpointId, t.webhookEndpoint.endpointId))
     .where(and(eq(t.webhookDelivery.status, 'pending'), lte(t.webhookDelivery.nextAttemptAt, now)))
-    .limit(10)) as readonly {
+    .limit(deps.batchSize ?? 10)) as readonly {
     deliveryId: string
     endpointId: string
     validationId: string
@@ -121,8 +117,7 @@ const processDueDeliveries = async (deps: PublisherDeps): Promise<number> => {
     tenantId: string
   }[]
 
-  await due.reduce<Promise<number>>(async (acc, delivery) => {
-    const delivered = await acc
+  for (const delivery of due) {
     const body = JSON.stringify({
       type: delivery.eventType,
       delivery_id: delivery.deliveryId,
@@ -140,6 +135,7 @@ const processDueDeliveries = async (deps: PublisherDeps): Promise<number> => {
       const timer = setTimeout(() => controller.abort(), 8_000)
       const res = await doFetch(delivery.url, {
         method: 'POST',
+        redirect: 'manual',
         headers: {
           'Content-Type': 'application/json',
           'X-Signature': signature,
@@ -158,24 +154,30 @@ const processDueDeliveries = async (deps: PublisherDeps): Promise<number> => {
     const nextAttempt = delivery.attempt + 1
     const giveUp = status === 'failed' && nextAttempt >= maxAttempts
     const finalStatus = status === 'delivered' ? 'delivered' : giveUp ? 'failed' : 'pending'
-    await withTenant(deps.db, delivery.tenantId, (tx) =>
-      tx
-        .update(t.webhookDelivery)
-        .set({
-          status: finalStatus,
-          attempt: nextAttempt,
-          nextAttemptAt:
-            status === 'delivered' || giveUp ? null : new Date(now.getTime() + 2 ** nextAttempt * 15_000),
-          ...(lastError !== null ? { lastError } : {}),
-        })
-        .where(eq(t.webhookDelivery.deliveryId, delivery.deliveryId)),
-    )
-    return delivered + (status === 'delivered' ? 1 : 0)
-  }, Promise.resolve(0))
+    try {
+      await withTenant(deps.db, delivery.tenantId, (tx) =>
+        tx
+          .update(t.webhookDelivery)
+          .set({
+            status: finalStatus,
+            attempt: nextAttempt,
+            nextAttemptAt:
+              status === 'delivered' || giveUp ? null : new Date(now.getTime() + 2 ** nextAttempt * 15_000),
+            ...(lastError !== null ? { lastError } : {}),
+          })
+          .where(eq(t.webhookDelivery.deliveryId, delivery.deliveryId)),
+      )
+    } catch (err) {
+      deps.logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'delivery update failed')
+    }
+  }
   return due.length
 }
 
+let ticking = false
 export const publishTick = async (deps: PublisherDeps): Promise<void> => {
+  if (ticking) return
+  ticking = true
   try {
     await createDeliveriesForNewEvents(deps)
     await processDueDeliveries(deps)
@@ -184,6 +186,8 @@ export const publishTick = async (deps: PublisherDeps): Promise<void> => {
       { err: err instanceof Error ? err.message : String(err) },
       'outbox publisher tick failed',
     )
+  } finally {
+    ticking = false
   }
 }
 

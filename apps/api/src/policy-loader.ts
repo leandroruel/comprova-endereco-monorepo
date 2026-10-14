@@ -14,5 +14,5 @@ export const findRepoRoot = (startDir: string): string => {
 
 export const loadPolicyFile = (policyVersion: string, startDir = process.cwd()): Policy => {
   const policyPath = path.join(findRepoRoot(startDir), 'policies', `${policyVersion}.yaml`)
-  return loadPolicy(readFileSync(policyPath, 'utf8'))
+  return loadPolicy(readFileSync(policyPath, 'utf8'), policyVersion)
 }

@@ -1,4 +1,4 @@
-version: '2026.11.1'
+version: '2026.12.1'
 weights:
   document_integrity: 1.0
   registry_status: 1.2

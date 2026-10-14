@@ -26,6 +26,7 @@ import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import type { AppConfig } from './config.js'
 import { makeAuthenticate } from './plugins/auth.js'
+import { makeApiKeyHasher } from './api-keys.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
 import { registerBatchRoutes } from './routes/batches.js'
 import { registerHealthRoutes } from './routes/health.js'
@@ -136,7 +137,8 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       .send(problem(500, 'INTERNAL_ERROR', 'Internal server error'))
   })
 
-  const authenticate = makeAuthenticate(deps.db, deps.config.API_KEY_PEPPER)
+  const hasher = makeApiKeyHasher(deps.config.API_KEY_PEPPER)
+  const authenticate = makeAuthenticate(deps.db, hasher)
   const rateLimit = makeRateLimiter(deps.redis)
 
   const fastPath = buildFastPathDeps(deps.db, deps.config)
