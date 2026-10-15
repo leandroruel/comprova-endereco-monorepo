@@ -28,6 +28,25 @@ export interface ValidationDto {
   expires_at: string
 }
 
+export interface StatsDto {
+  total: number
+  by_doc_type: Record<string, number>
+  by_verdict: Record<string, number>
+  completed: number
+  partial: number
+  failed: number
+  avg_confidence: number
+  avg_score: number
+}
+
+export async function getStats(): Promise<StatsDto> {
+  const res = await fetch(`${API_BASE}/v1/stats`, {
+    headers: { Authorization: `Bearer ${API_KEY}` },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return (await res.json()) as StatsDto
+}
+
 export async function createValidation(document: string, mode: string = 'fast'): Promise<ValidationDto> {
   const isCpf = document.replace(/\D+/g, '').length === 11
   const res = await fetch(`${API_BASE}/v1/validations`, {

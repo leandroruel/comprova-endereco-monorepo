@@ -29,6 +29,7 @@ import { makeAuthenticate } from './plugins/auth.js'
 import { makeApiKeyHasher } from './api-keys.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
 import { registerBatchRoutes } from './routes/batches.js'
+import { registerStatsRoutes } from './routes/stats.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
 import { registerSubjectRoutes } from './routes/subjects.js'
@@ -164,6 +165,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
       registerBatchRoutes(v1, { db: deps.db })
+      registerStatsRoutes(v1, { db: deps.db })
       registerSubjectRoutes(v1, { db: deps.db })
     },
     { prefix: '/v1' },

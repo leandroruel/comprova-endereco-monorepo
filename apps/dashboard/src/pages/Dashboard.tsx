@@ -1,49 +1,66 @@
 import { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { createValidation, getReady, type ValidationDto } from '@/api/client'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { createValidation, getReady, getStats, type ValidationDto } from '@/api/client'
 import { DashboardLayout } from '@/components/layout'
 import { ValidationCard } from '@/components/validation-card'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
-import { CheckCircle2, FileSearch, Globe, Search, Timer, Zap } from 'lucide-react'
+import {
+  Activity,
+  CheckCircle2,
+  Search,
+  Timer,
+  Users,
+  XCircle,
+} from 'lucide-react'
+
+const VLM_ENABLED = false
+
+const MODES: readonly ('fast' | 'auto' | 'deep')[] = VLM_ENABLED ? ['fast', 'auto', 'deep'] : ['fast']
 
 function StatCard({
   icon,
   label,
   value,
   sub,
+  accent,
 }: {
   icon: React.ReactNode
   label: string
   value: string
   sub?: string
+  accent?: string
 }) {
   return (
     <Card>
-      <CardContent className="flex items-center gap-4 p-5">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">{icon}</div>
-        <div className="flex-1">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-          <p className="mt-0.5 font-mono text-xl font-bold tabular-nums text-foreground">{value}</p>
-          {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+      <CardContent className="p-4">
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${accent ?? 'bg-muted'}`}
+          >
+            {icon}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+            <p className="font-mono text-2xl font-bold tabular-nums leading-tight text-foreground">{value}</p>
+            {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
+          </div>
         </div>
       </CardContent>
     </Card>
   )
 }
 
-const VLM_ENABLED = false
-
-const MODES: readonly ('fast' | 'auto' | 'deep')[] = VLM_ENABLED ? ['fast', 'auto', 'deep'] : ['fast']
-
 export default function Dashboard() {
   const [document, setDocument] = useState('')
   const [mode, setMode] = useState<'fast' | 'auto' | 'deep'>('fast')
   const [history, setHistory] = useState<ValidationDto[]>([])
+  const queryClient = useQueryClient()
 
-  const health = useQuery({
-    queryKey: ['health'],
-    queryFn: getReady,
-    refetchInterval: 15_000,
+
+  const stats = useQuery({
+    queryKey: ['stats'],
+    queryFn: getStats,
+    refetchInterval: 5_000,
   })
 
   const mutation = useMutation({
@@ -51,13 +68,17 @@ export default function Dashboard() {
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
       setDocument('')
+      void queryClient.invalidateQueries({ queryKey: ['stats'] })
     },
   })
 
-  const totalValidations = history.length
-  const confirmed = history.filter((v) => v.verdict === 'CONFIRMED_COMMERCIAL').length
-  const avgConfidence =
-    history.length > 0 ? (history.reduce((acc, v) => acc + (v.confidence ?? 0), 0) / history.length) * 100 : 0
+  const s = stats.data
+  const cnpjCount = s?.by_doc_type?.['CNPJ'] ?? 0
+  const cpfCount = s?.by_doc_type?.['CPF'] ?? 0
+  const confirmedCount = s?.by_verdict?.['CONFIRMED_COMMERCIAL'] ?? 0
+  const insuffCount = s?.by_verdict?.['INSUFFICIENT_EVIDENCE'] ?? 0
+  const notFoundCount = s?.by_verdict?.['NOT_FOUND'] ?? 0
+  const unsuccessful = insuffCount + notFoundCount + (s?.by_verdict?.['INCONSISTENT'] ?? 0)
 
   return (
     <DashboardLayout>
@@ -71,32 +92,33 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
-            icon={<FileSearch className="h-5 w-5 text-foreground/70" />}
-            label="Validações (sessão)"
-            value={String(totalValidations)}
+            icon={<Activity className="h-4 w-4 text-foreground/60" />}
+            label="Total de consultas"
+            value={stats.isPending ? '—' : String(s?.total ?? 0)}
+            sub={s ? `${s.completed} completas · ${s.partial} parciais` : undefined}
           />
           <StatCard
-            icon={<CheckCircle2 className="h-5 w-5 text-emerald-600" />}
-            label="Confirmadas"
-            value={String(confirmed)}
-            sub={
-              totalValidations > 0
-                ? `${((confirmed / totalValidations) * 100).toFixed(0)}% do total`
-                : undefined
-            }
+            icon={<Users className="h-4 w-4 text-blue-600" />}
+            label="CNPJ / CPF"
+            value={stats.isPending ? '—' : `${cnpjCount}/${cpfCount}`}
+            sub={`${cnpjCount + cpfCount} documentos consultados`}
+            accent="bg-blue-50"
           />
           <StatCard
-            icon={<Zap className="h-5 w-5 text-amber-600" />}
-            label="Confiança média"
-            value={`${avgConfidence.toFixed(0)}%`}
+            icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+            label="Bem sucedidas"
+            value={stats.isPending ? '—' : String(confirmedCount)}
+            sub={s && s.total > 0 ? `${((confirmedCount / s.total) * 100).toFixed(0)}% do total` : undefined}
+            accent="bg-emerald-50"
           />
           <StatCard
-            icon={<Globe className="h-5 w-5 text-blue-600" />}
-            label="API"
-            value={health.data?.status === 'ok' ? 'online' : 'offline'}
-            sub={health.isFetching ? 'verificando...' : 'sa-east-1 (dev)'}
+            icon={<XCircle className="h-4 w-4 text-red-600" />}
+            label="Não sucedidas"
+            value={stats.isPending ? '—' : String(unsuccessful)}
+            sub={s && s.total > 0 ? `${((unsuccessful / s.total) * 100).toFixed(0)}% do total` : undefined}
+            accent="bg-red-50"
           />
         </div>
 
