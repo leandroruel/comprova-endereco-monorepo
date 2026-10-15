@@ -1,72 +1,131 @@
-# Arquitetura — comprova-endereco
+# Architecture — comprova-endereco
 
-> Address Intelligence API: validação investigativa de endereço a partir de CNPJ/CPF, com
+> Address Intelligence API: validação investigativa de endereço a partir de CNPJ/CPF com
 > veredito explicável, score de confiança e trilha de auditoria.
 
 ## Visão geral
 
 ```
                          ┌────────────────────────────┐
- Cliente ──HTTPS──► apps/api (Fastify, stateless)
+ Cliente ──HTTPS──► Dashboard (React+Vite :5173)      │
+                         │ Better Auth (login/sessão) │
                          └────────────┬───────────────┘
-                                      │ fast path: Postgres(+réplica) + Valkey/Redis (cache L2) + LRU L1
-                                      │ deep path: start workflow
+                                      │ fetch (credentials: include)
                                       ▼
-                              Temporal (self-hosted dev / Cloud ou HA em prod)
+                         ┌────────────────────────────┐
+                         │ apps/api (Fastify :3000)   │
+                         │ stateless, N pods          │
+                         └────────────┬───────────────┘
+                                      │ fast path: Postgres + Redis
+                                      │ batch: background processor
+                                      │ deep path: Temporal → Worker
+                                      ▼
+                              Postgres 16 + PostGIS
+                              (32 partições hash, RLS multi-tenant)
                                       │
-                         ┌────────────┴─────────────┐
-                         ▼                          ▼
-                   apps/worker (Activities)    apps/ingestor (jobs/CLI)
-                   - checkers T1/T2            - dump Receita (mensal)
-                   - provedores externos       - CNEFE, CEP
-                   - VLM / imagens             - recomputo address_profile
-                         │
-        ┌────────────────┼──────────────────────┐
-        ▼                ▼                      ▼
-   Postgres+PostGIS    Valkey (cache)     Object Storage S3-compatible
-   (primário + réplicas, RLS por tenant)   (evidências; CloudServer em dev, R2/S3 em prod)
-        │
-   Outbox ► EventBus (porta) ► webhooks / analytics / billing
+                              Outbox → EventBus → Webhooks
 ```
 
 ## Fast path vs deep path
 
-- **Fast path** (T0) nunca chama rede externa: responde com Postgres (Receita, CNEFE, CEP,
-  `address_profile`, `address_signal_cache`) + caches. Se faltar evidência, devolve
-  `status: "partial"` e dispara o deep path (se `mode: "auto"`).
-- **Deep path** (T1/T2) roda em workflows Temporal por tiers, com curto-circuito entre
-  avaliações, e só executa T2 (VLM/imagens) se o score seguir ambíguo.
+| Modo   | Checkers                                                                                                          | Latência   | Disponível       |
+| ------ | ----------------------------------------------------------------------------------------------------------------- | ---------- | ---------------- |
+| `fast` | T0: document_integrity, registry_status, country_check, cep_consistency, cnefe_match, cotenancy, cnae_vs_location | ~15ms      | sempre           |
+| `auto` | T0 → se ambíguo → T1 (geocode, Places, footprint)                                                                 | assíncrono | VLM_ENABLED=true |
+| `deep` | T0 → T1 → T2 (Street View + VLM)                                                                                  | 5-15s      | VLM_ENABLED=true |
 
-## Camadas (Fase 0 implementada; Fases 1+ indicadas)
+Com `VLM_ENABLED=false` (default), apenas `fast` funciona — deep/auto retornam `422 DEEP_PATH_DISABLED`.
 
-| Camada                                                                                        | Onde                                                  | Fase |
-| --------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ---- |
-| API HTTP (Fastify, auth API key argon2id, rate limit token-bucket, problem+json, OpenAPI 3.1) | `apps/api`                                            | 0    |
-| Contratos Zod + problems RFC 9457                                                             | `packages/contracts`                                  | 0    |
-| Domínio puro (tipos `Signal`, `Checker`, `Stance`, validação CPF/CNPJ)                        | `packages/core`                                       | 0    |
-| DB: migrações SQL versionadas, runner, RLS + `withTenant`                                     | `packages/db`                                         | 0    |
-| Observabilidade: logger com redação PII, métricas Prometheus                                  | `packages/observability`                              | 0    |
-| Testes: Testcontainers (Postgres+PostGIS, Valkey), fixtures                                   | `packages/testing`                                    | 0    |
-| Canonicalização BR, `building_key`, ingestores, checkers T0, scoring                          | `packages/core`, `packages/checkers`, `apps/ingestor` | 1    |
-| Workflows Temporal, providers geocode/places, webhooks, batch                                 | `apps/worker`, `packages/providers`                   | 2    |
-| Street View + VLM (OpenAI), evidências com retenção                                           | `packages/providers`, `packages/checkers`             | 3    |
-| `partner_graph`, simulador de políticas, shadow mode                                          | `packages/core`                                       | 4    |
-| Fluxo CPF consentido, direitos do titular, LGPD docs                                          | `apps/api`, `docs/lgpd`                               | 5    |
+## Building key (identidade de endereço)
 
-## Alvo de produção (documentado, não provisionado — ver ADR-0001)
+```
+sha256("1" | country | uf | cep | logradouro_norm | numero_norm)
+```
 
-- EKS multi-AZ + Karpenter (spot para T2) + KEDA (profundidade de task queue), HPA por RPS na API.
-- Aurora/RDS Postgres 16 multi-AZ + réplicas (fast path lê réplica), PgBouncer/RDS Proxy.
-- ElastiCache/Valkey cluster; S3/R2 com SSE e lifecycle; ALB + WAF; GitOps (Argo CD).
-- SLOs declarados: fast p95 < 120 ms; deep p95 < 15 s; 3k rps fast path. Validação real por k6
-  local (Fase 6 com infra real, se houver).
-- Multi-região active-passive com atenção à residência de dados (LGPD) — decisão futura.
+A fórmula usa **CEP** (não `municipioIbge`) porque:
 
-## Estimativa de capacidade
+- O ingestor não tem `municipioIbge` (vem da Receita como código próprio)
+- O fast path preenche `municipioIbge` via CEP backfill
+- Com `municipioIbge` na chave, ingestor e fast path gerariam hashes diferentes
 
-Ver docs/capacidade.md (medicoes do k6 F6 + estimativas com dump). Antiga secao:
+## Histórico de endereços (SCD Type 2)
 
-- `ref_receita_estabelecimento`: ~60M linhas × ~250 B ≈ 15 GB + índices (~2–3×) → working set
-  por `building_key`/`cep` cabe em RAM de uma máquina dev (32–64 GB) para testes.
-- `ref_cnefe_address`: ~50M linhas com Point → ~20 GB.
-- `validation`/`signal`: ~1–5 KB por validação → partições mensais de centenas de MB a poucos GB.
+| Tabela                        | Papel                                                    |
+| ----------------------------- | -------------------------------------------------------- |
+| `ref_receita_estabelecimento` | Estado atual (1 linha por CNPJ, otimizada para hot path) |
+| `ref_estabelecimento_history` | Histórico de mudanças (PK: cnpj + valid_from)            |
+
+O ingestor com UPSERT detecta mudanças (logradouro, número, CEP, situação, CNAE) e:
+
+1. Copia a linha antiga para history com `valid_from` / `valid_to`
+2. Atualiza a tabela principal
+
+## Multi-tenancy e Auth
+
+| Camada    | Mecanismo                                                                    |
+| --------- | ---------------------------------------------------------------------------- |
+| Dashboard | Better Auth (cookie de sessão, email/password)                               |
+| API /v1   | Bearer token (API key HMAC-SHA256) + sessionMiddleware lê cookie Better Auth |
+| Banco     | RLS FORCE: `SET app.tenant_id` em toda transação via `withTenant()`          |
+
+## Stats por usuário
+
+O middleware de sessão Better Auth extrai `user.id` do cookie e anexa a `request.sessionUser`.
+Cada validação grava `user_id`. O endpoint `/v1/stats` filtra por user_id:
+
+- `total` = COUNT(*) (todas as queries)
+- `unique_documents` = COUNT(DISTINCT subject.doc_hmac) (documentos únicos)
+- `by_doc_type` = COUNT DISTINCT por CNPJ/CPF
+
+## Bulk search
+
+1. Dashboard lê CSV client-side → parse documentos → POST /v1/batches (JSON)
+2. API cria batch + items, responde 202
+3. Batch processor processa itens em background (5/tick, lease 60s)
+4. Dashboard poll GET /v1/batches/:id a cada 3s
+5. Export: GET /v1/batches/:id/export?format=csv|json
+
+## Políticas de scoring
+
+| Versão    | Mudanças                                                             |
+| --------- | -------------------------------------------------------------------- |
+| 2026.10.1 | Base: 7 checkers T0, 3 hard rules                                    |
+| 2026.11.1 | + Pesos T1 (geocode, places, footprint)                              |
+| 2026.12.1 | + Peso T2 (street_view_vlm)                                          |
+| 2026.13.1 | - Hard rule cep-inexistente (era falso positivo); fix versão interna |
+
+Simulador: `pnpm --filter @comprova/ingestor start -- policy:simulate <versao> [--report]`
+
+## Componentes
+
+| Camada                                                       | Onde                 | Fase |
+| ------------------------------------------------------------ | -------------------- | ---- |
+| Dashboard (React+Vite, Better Auth, TanStack Query)          | `apps/dashboard`     | 6+   |
+| API HTTP (Fastify, auth, rate limit, batch, export)          | `apps/api`           | 0-6  |
+| Worker Temporal (deep path T1/T2)                            | `apps/worker`        | 2-3  |
+| Ingestor (Receita, CNEFE, CEP, profiles, simulador)          | `apps/ingestor`      | 1+   |
+| Domínio puro (FP: Signal, Checker, scoring, address keys)    | `packages/core`      | 0+   |
+| DB (migrações SQL, Drizzle, adapters, RLS)                   | `packages/db`        | 0+   |
+| Checkers T0/T1/T2                                            | `packages/checkers`  | 1-3  |
+| Providers (Nominatim, Overpass, Street View, VLM, BrasilAPI) | `packages/providers` | 2-3  |
+| SDK TypeScript                                               | `packages/sdk`       | 6    |
+
+## Capacidade (medido em dev)
+
+| Métrica                    | Valor        |
+| -------------------------- | ------------ |
+| Fast path p95 @ 100 rps    | 21ms         |
+| Fast path p95 @ 150 rps    | 29ms         |
+| Saturação (1 processo)     | ~280 rps     |
+| Argon2 teto (sem cache)    | ~30 rps      |
+| Argon2 teto (com cache L1) | ~280 rps     |
+| Pool DB ótima              | 50 conexões  |
+| 3k rps (alvo prod)         | ~20 réplicas |
+
+## Alvo de produção (documentado, não provisionado — ADR-0001)
+
+- EKS multi-AZ + Karpenter + KEDA
+- Aurora PostgreSQL 16 multi-AZ + réplica leitura
+- ElastiCache/Valkey cluster
+- S3/R2 com SSE-KMS + lifecycle
+- Deploy canário/blue-green via GitOps (Argo CD)

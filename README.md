@@ -1,81 +1,123 @@
 # comprova-endereco
 
-Address Intelligence API: valida o endereço de um CNPJ (e, na Fase 5, de um CPF consentido)
-cruzando múltiplos sinais independentes e devolve um veredito explicável com score de confiança
-e trilha de auditoria.
+Address Intelligence API: valida o endereço de um CNPJ/CPF cruzando múltiplos sinais (Receita Federal, CNEFE/IBGE, CEP, co-tenância, geocoding, fachada) e devolve um veredito explicável com score de confiança e trilha de auditoria.
 
-## Quickstart (custo zero — tudo local)
-
-Pré-requisitos: Node 22, pnpm 10, Docker com Compose.
+## Quickstart
 
 ```bash
 pnpm install
-cp .env.example .env
-pnpm start          # docker compose up -d + migrações + seed + API em :3000
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
 ```
 
-Serviços:
+| Serviço                         | Porta            |
+| ------------------------------- | ---------------- |
+| Dashboard (React + Better Auth) | 5173             |
+| API (Fastify)                   | 3000             |
+| Postgres 16 + PostGIS           | 5432             |
+| Redis/Valkey                    | 6379             |
+| Temporal                        | 7233 / 8233 (UI) |
+| Object storage (S3-compatible)  | 9000             |
 
-| Serviço                                                             | Porta       |
-| ------------------------------------------------------------------- | ----------- |
-| API (`/healthz`, `/readyz`, `/metrics`, `/openapi.json`, `/v1/...`) | 3000        |
-| Postgres 16 + PostGIS (com RLS multi-tenant)                        | 5432        |
-| Valkey (Redis-compatible)                                           | 6379        |
-| Temporal dev server (UI / API)                                      | 8233 / 7233 |
-| Object storage S3-compatible (CloudServer)                          | 9000        |
+## Dashboard
 
-O `pnpm db:seed` imprime a API key do tenant dev **uma única vez** — guarde-a.
+Abre `http://localhost:5173`:
 
-```bash
-curl -H "Authorization: Bearer cvk..." http://localhost:3000/v1/validations/<id>
-```
+1. Cria conta (email/senha)
+2. Valida CNPJ individual ou cria lote (CSV drag & drop / textarea)
+3. Vê stats por usuário, vereditos com sinais, export CSV/JSON
+
+## Endpoints da API
+
+| Método          | Path                                      | Descrição                                       |
+| --------------- | ----------------------------------------- | ----------------------------------------------- |
+| POST            | `/v1/validations`                         | Valida um CNPJ/CPF (fast/auto/deep)             |
+| GET             | `/v1/validations/:id`                     | Consulta resultado com ETag                     |
+| POST            | `/v1/validations/:id/contest`             | Contestação (art. 20 LGPD)                      |
+| GET             | `/v1/stats`                               | Stats por usuário (total, únicos, por veredito) |
+| POST            | `/v1/batches`                             | Cria lote (background)                          |
+| GET             | `/v1/batches`                             | Lista lotes do usuário                          |
+| GET             | `/v1/batches/:id`                         | Detalhes do lote                                |
+| GET             | `/v1/batches/:id/export?format=csv\|json` | Download                                        |
+| POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                       |
+| GET/DELETE      | `/v1/subjects/:id`                        | Relatório de acesso / eliminação LGPD           |
+| GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                             |
+| GET             | `/openapi.json`                           | OpenAPI 3.1                                     |
 
 ## Comandos
 
 ```bash
-pnpm test          # unitários + integração (Testcontainers) + dataset dourado (gate 85%)
-pnpm typecheck     # tsc --noEmit em todos os workspaces
-pnpm lint          # eslint
-pnpm format        # prettier --check
-pnpm db:migrate    # aplica migrações SQL versionadas
-pnpm db:seed       # legal_basis + tenant dev + API key
-pnpm db:fence      # pgfence: gate de segurança de migrações (mesmo gate do CI)
-pnpm seed:golden   # semeia o dataset dourado no banco dev (CNPJs, CEPs, CNEFE, perfis)
-pnpm compose:down  # para os containers
+pnpm dev          # tudo (API, dashboard, worker, ingestor)
+pnpm test         # 109/109 testes
+pnpm typecheck    # tsc --noEmit
+pnpm lint         # eslint
+pnpm format       # prettier
+pnpm db:migrate   # aplica migrações SQL
+pnpm db:seed      # tenant dev + API key
+pnpm db:fence     # pgfence: gate de segurança de migrações
+pnpm seed:golden  # dataset dourado (8 classes de veredito)
+
+# Ingestores
+pnpm --filter @comprova/ingestor start -- receita:estabelecimentos <csv> [--limit N]
+pnpm --filter @comprova/ingestor start -- receita:municipios <csv>
+pnpm --filter @comprova/ingestor start -- cnefe:uf <csv>
+pnpm --filter @comprova/ingestor start -- ceps:backfill --limit N
+pnpm --filter @comprova/ingestor start -- profiles:recompute
+pnpm --filter @comprova/ingestor start -- load-tenant
+pnpm --filter @comprova/ingestor start -- policy:simulate <versao> [--report]
 ```
 
-Exemplo de validação (dataset dourado semeado):
+## Modos de validação
 
-```bash
-curl -s -X POST http://localhost:3000/v1/validations \
-  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"document":{"type":"CNPJ","value":"12345678000195"},"mode":"fast","legal_basis":"FRAUD_PREVENTION"}'
+| Modo   | Descrição                                                    | Requer           |
+| ------ | ------------------------------------------------------------ | ---------------- |
+| `fast` | T0 checkers locais (Receita, CEP, CNEFE, co-tenancy) — ~15ms | nada             |
+| `auto` | Fast + dispara deep se ambíguo                               | VLM_ENABLED=true |
+| `deep` | T0 + T1 (geocoding, POIs) + T2 (VLM) — assíncrono            | VLM_ENABLED=true |
+
+Com `VLM_ENABLED=false` (default), apenas `fast` está disponível — deep/auto retornam `422`.
+
+## Arquitetura
+
 ```
-
-Carga (k6): `API_KEY=... k6 run load/fast-path.js` (threshold p95 < 120 ms).
+Dashboard (React+Vite:5173) ─► API (Fastify:3000)
+                                   │ fast path: Postgres + Redis
+                                   │ deep path: Temporal → Worker → Providers (OSM, VLM)
+                                   │ batch: batch processor em background
+                                   └► Postgres 16+PostGIS (particionado, RLS multi-tenant)
+```
 
 ## Estrutura
 
 ```
-apps/api            Fastify: auth, rate limit, rotas /v1, health, metrics
-apps/worker         Temporal workers (placeholder até a Fase 2)
-apps/ingestor       Ingestão Receita/CNEFE/CEP (placeholder até a Fase 1)
-packages/core       Domínio puro (FP): Signal/Checker/Stance, validação CPF/CNPJ, helpers async
-packages/contracts   Schemas Zod (API) + problem+json (RFC 9457)
-packages/db         Migrações SQL (DDL), schema Drizzle tipado, query-builder, withTenant (RLS)
-packages/observability  Logger com redação de PII + métricas Prometheus
-packages/testing    Testcontainers + fixtures (via Drizzle)
-docs/adr            Decisões de arquitetura (query-builder + FP: ADR-0006)
-docs/architecture.md Visão geral e alvo de produção
-PROGRESS.md         Estado do projeto por fase
+apps/api            Fastify: auth, rate limit, rotas /v1, stats, batch, export
+apps/dashboard      React+Vite: Better Auth, TanStack Query, bulk search, stats
+apps/worker         Temporal workers (deep path T1/T2)
+apps/ingestor       CLI: Receita, CNEFE, CEP, profiles, policy:simulate
+packages/core       Domínio puro (FP): Signal, Checker, scoring, policy, address keys
+packages/contracts   Zod schemas + problem+json
+packages/db         Migrações SQL, Drizzle schema, adapters, RLS
+packages/checkers   T0/T1/T2 checkers
+packages/providers  Nominatim, Overpass, Street View, VLM, BrasilAPI, CloudServer
+packages/observability  Logger com redação PII + métricas
+packages/testing    Testcontainers + fixtures + dataset dourado
+packages/sdk        Cliente TypeScript gerado do OpenAPI
+policies/          Políticas de scoring versionadas (YAML)
+docs/adr/           14 ADRs
+docs/lgpd/          Mapa de dados, RIPD, retenção, LIA
+docs/runbooks/      5 runbooks operacionais
+infra/              Terraform + k8s como código-alvo documentado
+load/               k6 scenarios
 ```
 
-## Fases
+## Segurança
 
-0. Fundação (atual) — monorepo, CI, Compose, schema + RLS, auth, rate limit
-1. Dados de referência + fast path CNPJ (dump Receita/CNEFE/CEP, checkers T0, scoring v1)
-2. Deep path (Temporal, geocode/Places, webhooks, batch)
-3. Mundo físico (Street View + VLM OpenAI)
-4. Grafo de sócios e fachadas; simulador de políticas
-5. CPF consentido e conformidade LGPD
-6. Produção e escala (se houver infra)
+- **Documentos**: nunca em claro — HMAC-SHA256 com chave por tenant
+- **RLS**: FORCE em todas as tabelas com tenant_id
+- **Logs**: redator central com testes anti-vazamento no CI
+- **API keys**: HMAC-SHA256 (sem argon2), prefix 12 chars
+- **Webhooks**: HTTPS only, HMAC-SHA256, timingSafeEqual, redirect: manual
+- **SSRF**: hostname allowlist + private range block
+- **LGPD**: DELETE /v1/subjects/:id (eliminação transacional), contestação com reason cifrada
+- **pgfence**: gate de migrações no CI (lock analysis, risk scoring)

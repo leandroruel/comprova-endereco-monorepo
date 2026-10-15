@@ -1,56 +1,113 @@
 # PROGRESS.md
 
-Estado: **Projeto completo (F0–F6, perfil zero-custo)** (2026-10-14) — 102/102 testes
+Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
-## Feature flag do step de IA (VLM) ✅ (2026-10-14)
+## Dashboard (apps/dashboard)
 
-- **`VLM_ENABLED`** (default **false**): controla se o deep path inclui o checker de IA
-  `street_view_vlm` (T2). → pipeline passa pelo check de visão (requer
-  `OPENAI_API_KEY`/`GOOGLE_STREET_VIEW_KEY` para classificar; sem chaves vira `unknown`);
-  → T2 vazio, deep path **100% determinístico** (T0 local + T1 geocode/grafo).
-  Gate no `buildT2Checkers` (`apps/worker/src/activities.ts`), testado em
-  `apps/worker/src/vlm-flag.test.ts` (3/3).
+- **Better Auth** — login/signup com email/senha, sessão de 7 dias, cookie httpOnly, trustedOrigins, strength meter, confirmar senha
+- **Stats por usuário** — total de consultas, documentos únicos (DISTINCT doc_hmac), CNPJ/CPF, confirmadas/não sucedidas
+- **Busca em lote** — drag & drop CSV, textarea, processamento em background, progresso em tempo real, export CSV/JSON
+- **Sidebar** — navegação entre Valações e Busca em lote, nome do usuário, botão Sair
+- **Hooks order fix** — todos os hooks antes dos early returns (crash após login)
+- **VLM_ENABLED=false** — botões deep/auto escondidos da UI, API retorna 422 DEEP_PATH_DISABLED
 
-## Fase 6 — Produção e escala (pacote zero-custo) ✅
+## API (apps/api)
 
-- **Job de expiração** de validações (`expires_at`): `validationRetentionTick` no worker
-  (DB admin), remove validações+sinais+idempotência vencidas com auditoria
-  `validation.expired` — pendência da política de retenção resolvida.
-- **Runbooks** (`docs/runbooks/`): provedor externo fora, ingestão falhou, fila acumulando
-  (deep/batch), restore de backup, incidente de vazamento de PII.
-- **k6 real** (`docs/load-report.md`): SLO do fast path **garantido até ~150 rps por
-  processo** (p95 = 21–29ms @ 100–150 rps; 100% checks). **3 bugs reais encontrados e
-  corrigidos pelo teste de carga**: (1) Idempotency-Key <8 chars → 400 em massa; (2)
-  **deadlock de pool** — leituras dos checkers dentro da transação esgotavam a pool com txs
-  abertas (fast path reestruturado: leituras fora da tx → tx curta de escrita; `lock_timeout`
-  em todo `withTenant`; singleflight por building_key/doc_hmac — coalescing da spec 10.1);
-  (3) teto de ~30 rps por argon2 → cache L1 de chaves verificadas (TTL 60s). Pool
-  configurável (`DB_POOL_MAX`). Extrapolação honesta: 3k rps ≈ 20 réplicas em infra dedicada.
-- **SDK TypeScript** (`packages/sdk`): tipos gerados do OpenAPI 3.1 (`schema.d.ts` via
-  openapi-typescript, script `pnpm --filter @comprova/sdk generate`) + cliente `createClient`
-  com `SdkError` (código de domínio), idempotency header, timeouts; testes com fetch fake.
-- **Terraform + k8s como código-alvo documentado** (`infra/`): módulos network/eks/aurora/
-  redis/s3-kms + manifests api (HPA por RPS — `averageValue: 150` derivado do k6, PDB) e
-  worker (spot tolerante). Nunca aplicados (ADR-0001); checklist de promoção no
-  `infra/README.md`.
-- **Capacidade** (`docs/capacidade.md`): medições + estimativas por tabela com o dump real.
+- **Better Auth** — Drizzle adapter, handler em /api/auth/*, sessionMiddleware extrai user do cookie
+- **Rotas** — POST /v1/validations, GET /v1/validations/:id, GET /v1/stats, POST+GET+GET/:id+GET/:id/export /v1/batches, webhooks, subjects, contest
+- **CORS** — origin: true, credentials: true (cookie cross-origin)
+- **Auth API keys** — HMAC-SHA256 (sem argon2), prefix 12 chars, cache L1
+- **Batch** — grava user_id, verdict, confidence, explanation em batch_item
+- **Export** — CSV (posicao,tipo,documento,status,veredito,confianca,explicacao,erro) e JSON
+- **Idempotência** — hash SHA-256 do request, 422 se divergir, replay com address
+- **Session middleware** — lê cookie Better Auth, extrai user.id para request.sessionUser
+- **Stats** — filtrado por user_id quando há sessão, COUNT DISTINCT doc_hmac para documentos únicos
 
-## Resumo geral do projeto
+## Revisão de código — 23 correções aplicadas
 
-| Fase                    | Estado | Gate-chave                                                               |
-| ----------------------- | ------ | ------------------------------------------------------------------------ |
-| 0 Fundação              | ✅     | RLS multi-tenant testada; 1 comando sobe tudo                            |
-| 1 Fast path CNPJ        | ✅     | Dourado T0 8/8 (100% ≥ 85%)                                              |
-| 2 Deep path             | ✅     | Caos: provider fora → unknown, sem veredito falso; E2E Temporal real     |
-| 3 VLM fake-first        | ✅     | T2 < 25% no dourado; rubrica+eval no CI (gate real ≥200 imgs = com keys) |
-| 4 Grafo + shadow        | ✅     | CTE partner_graph < 500ms; simulador de políticas                        |
-| 5 CPF + LGPD            | ✅     | Direitos do titular + zero-PII em logs (gate) + docs lgpd                |
-| 6 Produção (zero-custo) | ✅     | k6 real com SLO até 150 rps/pod; runbooks; SDK; infra-alvo               |
+### Críticas (commit afd8d94)
 
-## Adiadas por design (precisam de $ ou dumps)
+1. Singleflight removido (ON CONFLICT resolve concorrência)
+2. Policy 2026.12.1 corrigida (declarava 2026.11.1) + loader valida nome↔versão
+3. deepEnrich idempotente (dedup sinais por checker_id@version)
+4. Rate limiter — redis TIME, por tenant, HSET
+5. API keys — HMAC-SHA256, prefix 12 chars, hash como cache key
+6. Cotenancy v2.0.0 com unit_key (prédio vs sala)
+7. SSRF — HTTPS only, redirect: manual, timingSafeEqual
+8. Outbox — reentrance guard, poison pill → DLQ
+9. Retenção — evidence S3+linha, outbox 7d, delivery 30d, batch_item hash
+10. statement_timeout 10s em withTenant
+11. exit(1) em shutdown com erro
+12. insufficient_band lido do YAML
+13. Advisory lock em migrações
 
-- Dump real da Receita/CNEFE (download do mantenedor em andamento): ingestão completa +
-  `ref_receita_municipio` real + batch `address_profile` + k6 em escala + EXPLAIN anexado.
-- Chaves OpenAI/Street View: checker T2 real + dataset rotulado ≥200 fachadas.
-- Conta AWS: aplicar Terraform, canário, DR cross-region, soak 3k rps em staging.
-- Temporal com persistência Postgres (dev usa `start-dev` ephemeral — ok em dev).
+### Altas (commit 467d18d)
+
+14. Idempotência compara body (hash) + replay address
+15. Batch — legal_basis, lease/timeout, error genérico
+16. Canonicalização — DR/PROF/CEL/STA + 100A ≡ 100 A
+17. Partições — DEFAULT + job mensal
+18. timeoutMs real — Promise.race
+19. address_signal_cache lido (SignalCacheReader)
+20. Contest reason cifrada (AES-GCM)
+21. CI — gitleaks + trivy, timeout 30min
+
+### Fixes de produção (commits fab8e6a..30ae357)
+
+22. Building key usa CEP (não municipioIbge) — chaves batem entre ingestor e fastpath
+23. cep_not_found → unknown (não contradicts) — hard rule removida
+24. Hooks order crash fix (tela branca após login)
+
+## Dados (perfil zero-custo)
+
+### Ingerido
+
+- **Receita file 0**: 30M estabelecimentos, 20M building_keys distintos
+- **CNEFE**: DF (1.3M) + SP (22.9M) + MG + outras UFs (28M total)
+- **Municípios**: 5.572 códigos Receita
+- **CEP via BrasilAPI**: ~200 CEPs (lento — 2.5/min, bulk source = CNEFE)
+
+### Histórico de endereços (SCD Type 2 em tabela separada)
+
+- `ref_estabelecimento_history` (migração 0018) — 32 partições hash
+- Ingestão com UPSERT: detecta mudança de endereço → copia antigo para history → atualiza atual
+- Detecta: logradouro, numero, complemento, bairro, cep, uf, situacao, nome_fantasia, cnae
+
+### Known issues
+
+- File 0 cobre CNPJs 00-98M; arquivos 1-9 ainda não ingeridos (mais ~30M CNPJs)
+- CNEFE: SP completo, MG em progresso, outras UFs pendentes
+- CEP backfill lento via BrasilAPI (2.5/min) — usar CNEFE como fonte bulk
+- profiles:recompute precisa rodar após ingestão completa
+
+## Infra-alvo (não provisionado — ADR-0001)
+
+- `infra/terraform/` — network, EKS, Aurora, Redis, S3+KMS
+- `infra/k8s/` — API deployment + HPA (150 rps/pod do k6) + PDB, worker spot
+- `docs/capacidade.md` — estimativas de storage/queries
+
+## Como rodar
+
+```bash
+pnpm install
+pnpm db:migrate
+pnpm db:seed         # cria API key dev
+pnpm dev             # levanta tudo (API :3000, dashboard :5173, worker, ingestor)
+pnpm test            # 109/109 testes
+pnpm db:fence        # pgfence gate de migrações
+```
+
+## Fluxo de uso
+
+1. Abre `http://localhost:5173`
+2. Cria conta (email/senha) ou faz login
+3. Valida um CNPJ individual ou cria um lote
+4. Consulta stats no dashboard (filtrado por usuário)
+5. Exporta resultados CSV/JSON
+
+## Adiadas (precisam de $ ou dados)
+
+- Chaves OpenAI + Google Street View → T2 VLM real
+- Dump completo (10 arquivos da Receita + CNEFE de todas as UFs)
+- Conta AWS (apply Terraform, DR, soak test)
+- Multi-região (LGPD data residency)
