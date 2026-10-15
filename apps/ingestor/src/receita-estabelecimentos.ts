@@ -86,7 +86,16 @@ const emailDomainOf = (raw: string): string | null => {
   return at > 0 && at < raw.length - 1 ? raw.slice(at + 1).toLowerCase() : null
 }
 
-const nullIfEmpty = (value: string): string | null => (value.trim().length > 0 ? value : null)
+const nullIfEmpty = (value: string): string | null => {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = value
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x00/g, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    .trim()
+  return cleaned.length > 0 ? cleaned : null
+}
 
 export interface EstabelecimentoRowValues {
   readonly cnpjBasico: string

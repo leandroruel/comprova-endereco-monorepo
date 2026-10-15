@@ -12,7 +12,7 @@ export const makeCepConsistency = (cep: CepReader): Checker => ({
   version: VERSION,
   tier: 0,
   appliesTo: ['CNPJ', 'CPF'],
-  timeoutMs: 20,
+  timeoutMs: 200,
   run: async (ctx: CheckContext): Promise<readonly Signal[]> => {
     const base = {
       checkerId: ID,
@@ -39,10 +39,10 @@ export const makeCepConsistency = (cep: CepReader): Checker => ({
       return [
         makeSignal({
           ...base,
-          stance: 'contradicts',
-          strength: 0.7,
-          confidence: 0.6,
-          detail: { reason: 'cep_not_found', verdict_hint: 'NOT_FOUND' },
+          stance: 'unknown',
+          strength: 0,
+          confidence: 0.4,
+          detail: { reason: 'cep_not_in_local_db' },
         }),
       ]
     }

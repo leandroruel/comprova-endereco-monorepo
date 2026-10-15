@@ -111,7 +111,7 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
   { label: 'ocupado-por-outro', cnpj: '34567890000130', expectedVerdict: 'OCCUPIED_BY_OTHER_ENTITY' },
   { label: 'mei-residencial', cnpj: '56789012000100', expectedVerdict: 'RESIDENTIAL' },
   { label: 'endereco-exterior', cnpj: '67890123000116', expectedVerdict: 'FOREIGN' },
-  { label: 'cep-inexistente', cnpj: '78901234000105', expectedVerdict: 'NOT_FOUND' },
+  { label: 'cep-fora-da-base-local', cnpj: '78901234000105', expectedVerdict: 'INSUFFICIENT_EVIDENCE' },
   { label: 'cnpj-baixado', cnpj: '89012345000179', expectedVerdict: 'INCONSISTENT' },
   { label: 'sem-base-local', cnpj: '90123456000131', expectedVerdict: 'INSUFFICIENT_EVIDENCE' },
 ]

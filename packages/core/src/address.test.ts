@@ -120,6 +120,7 @@ describe('addressKeys', () => {
         numero: '123',
         uf: 'SP',
         municipioIbge: 3550308,
+        cep: '01310-100',
       }),
     )
     expect(b.buildingKey.equals(a.buildingKey)).toBe(true)
@@ -133,10 +134,10 @@ describe('addressKeys', () => {
     expect(withCompl.unitKey.equals(without.unitKey)).toBe(false)
   })
 
-  it('numero ou municipio diferente gera building key diferente', () => {
+  it('numero ou cep diferente gera building key diferente', () => {
     const a = addressKeys(canonicalizeAddress({ ...base }))
     const b = addressKeys(canonicalizeAddress({ ...base, numero: '124' }))
-    const c = addressKeys(canonicalizeAddress({ ...base, municipioIbge: 3106200 }))
+    const c = addressKeys(canonicalizeAddress({ ...base, cep: '01310200' }))
     expect(b.buildingKey.equals(a.buildingKey)).toBe(false)
     expect(c.buildingKey.equals(a.buildingKey)).toBe(false)
   })

@@ -16,7 +16,7 @@ export const makeCnaeVsLocation = (categorias: CnaeCategoriaReader): Checker => 
   version: VERSION,
   tier: 0,
   appliesTo: ['CNPJ'],
-  timeoutMs: 20,
+  timeoutMs: 200,
   run: async (ctx: CheckContext): Promise<readonly Signal[]> => {
     const base = {
       checkerId: ID,

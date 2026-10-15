@@ -168,6 +168,28 @@ switch (command) {
     }
     break
   }
+  case 'cnefe:uf': {
+    const file = process.argv[3]
+    const limitFlag = process.argv.indexOf('--limit')
+    const limit = limitFlag > 0 ? Number(process.argv[limitFlag + 1]) : undefined
+    if (!file) {
+      throw new Error('usage: ingestor cnefe:uf <csv> [--limit N]')
+    }
+    const { ingestCnefeCsv } = await import('./cnefe.js')
+    const pool = createDbPool(adminUrl, { max: 4 })
+    try {
+      const stats = await ingestCnefeCsv(pool.db, file, {
+        ...(limit !== undefined ? { limit } : {}),
+      })
+      const rate = stats.elapsedMs > 0 ? Math.round((stats.rows / stats.elapsedMs) * 1000) : 0
+      console.log(
+        `cnefe: ${stats.rows} rows, ${stats.skipped} skipped in ${Math.round(stats.elapsedMs / 1000)}s (${rate} rows/s)`,
+      )
+    } finally {
+      await pool.end()
+    }
+    break
+  }
   case 'receita:municipios': {
     const file = process.argv[3]
     if (!file) {

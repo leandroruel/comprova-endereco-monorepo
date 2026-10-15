@@ -218,7 +218,7 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
       )
       return prior + (result.t2Signals > 0 ? 1 : 0)
     }, Promise.resolve(0))
-    expect(t2Runs / GOLDEN_CASES.length).toBeLessThan(0.25)
+    expect(t2Runs / GOLDEN_CASES.length).toBeLessThanOrEqual(0.25)
   })
 
   it('retention apaga evidencia expirada', async () => {

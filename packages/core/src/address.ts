@@ -222,7 +222,7 @@ const buildingKeyOf = (canonical: CanonicalAddress): Buffer =>
     keyPayload([
       canonical.countryCode,
       canonical.uf ?? '',
-      String(canonical.municipioIbge ?? canonical.municipioNorm ?? ''),
+      canonical.cep ?? '',
       canonical.logradouroNorm,
       canonical.numeroNorm,
     ]),

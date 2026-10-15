@@ -19,7 +19,7 @@ export const registryStatus: Checker = {
   version: VERSION,
   tier: 0,
   appliesTo: ['CNPJ'],
-  timeoutMs: 20,
+  timeoutMs: 200,
   run: async (ctx: CheckContext): Promise<readonly Signal[]> => {
     const record = ctx.registryRecord
     if (record === undefined) {

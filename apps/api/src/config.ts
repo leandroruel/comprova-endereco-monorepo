@@ -8,7 +8,7 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),
-  POLICY_VERSION: z.string().default('2026.12.1'),
+  POLICY_VERSION: z.string().default('2026.13.1'),
   TEMPORAL_ENABLED: z
     .string()
     .default('false')
