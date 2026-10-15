@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createValidation, getReady, getStats, type ValidationDto } from '@/api/client'
+import { createValidation, getStats, type ValidationDto } from '@/api/client'
 import { DashboardLayout } from '@/components/layout'
 import { ValidationCard } from '@/components/validation-card'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
