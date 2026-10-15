@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createValidation, getStats, type ValidationDto } from '@/api/client'
 import { authClient } from '@/api/auth'
@@ -53,26 +53,6 @@ export default function Dashboard() {
   const [history, setHistory] = useState<ValidationDto[]>([])
   const queryClient = useQueryClient()
 
-  if (!authChecked) {
-    void authClient.getSession().then((result) => {
-      if (result.data) {
-        setSession(result.data)
-      }
-      setAuthChecked(true)
-    })
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Spinner />
-      </div>
-    )
-  }
-
-  if (!session) {
-    return (
-      <LoginPage onSuccess={() => void authClient.getSession().then((r) => r.data && setSession(r.data))} />
-    )
-  }
-
   const stats = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
@@ -88,6 +68,28 @@ export default function Dashboard() {
       void queryClient.invalidateQueries({ queryKey: ['stats'] })
     },
   })
+
+  useEffect(() => {
+    if (authChecked) return
+    void authClient.getSession().then((result) => {
+      if (result.data) setSession(result.data)
+      setAuthChecked(true)
+    })
+  }, [authChecked])
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Spinner />
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <LoginPage onSuccess={() => void authClient.getSession().then((r) => r.data && setSession(r.data))} />
+    )
+  }
 
   const s = stats.data
   const cnpjCount = s?.by_doc_type?.['CNPJ'] ?? 0
