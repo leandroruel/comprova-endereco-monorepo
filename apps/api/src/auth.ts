@@ -15,8 +15,10 @@ export const createAuth = (db: Db, secret: string) =>
       },
     }),
     secret,
+    trustedOrigins: ['http://localhost:5173', 'http://localhost:3000'],
     emailAndPassword: {
       enabled: true,
+      minPasswordLength: 8,
     },
     session: {
       expiresIn: 60 * 60 * 24 * 7,
