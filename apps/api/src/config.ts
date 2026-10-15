@@ -13,6 +13,10 @@ const EnvSchema = z.object({
     .string()
     .default('false')
     .transform((v) => v === 'true'),
+  VLM_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
   TEMPORAL_ADDRESS: z.string().default('localhost:7233'),
   TEMPORAL_NAMESPACE: z.string().default('default'),
   TEMPORAL_TASK_QUEUE: z.string().default('comprova-deep-t1'),

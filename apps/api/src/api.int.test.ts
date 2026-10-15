@@ -42,6 +42,7 @@ const app = await buildApp({
     LOG_LEVEL: 'silent',
     POLICY_VERSION: '2026.11.1',
     TEMPORAL_ENABLED: false,
+    VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',
     TEMPORAL_NAMESPACE: 'default',
     TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',

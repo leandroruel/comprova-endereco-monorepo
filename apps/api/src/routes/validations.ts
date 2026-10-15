@@ -33,6 +33,7 @@ export interface ValidationRoutesDeps {
   readonly db: Db
   readonly fastPath: FastPathDeps
   readonly deepTrigger: DeepTriggerDeps
+  readonly vlmEnabled: boolean
 }
 
 const summaryOf = (explanation: { summary?: string } | null): string | null => {
@@ -214,6 +215,14 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
         throw new Error('tenant context missing')
       }
       const body = request.body
+      if ((body.mode === 'deep' || body.mode === 'auto') && deps.vlmEnabled !== true) {
+        return reply
+          .code(422)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(
+            problem(422, 'DEEP_PATH_DISABLED', 'Deep path is disabled (VLM_ENABLED=false); use mode: "fast"'),
+          )
+      }
       if (!isValidDocument(body.document.type, body.document.value)) {
         return reply.code(422).type(PROBLEM_CONTENT_TYPE).send(problems.invalidDocument())
       }

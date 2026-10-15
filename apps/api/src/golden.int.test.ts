@@ -36,6 +36,7 @@ const app = await buildApp({
     LOG_LEVEL: 'silent',
     POLICY_VERSION: '2026.11.1',
     TEMPORAL_ENABLED: false,
+    VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',
     TEMPORAL_NAMESPACE: 'default',
     TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
@@ -159,7 +160,7 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
     expect(res.json().code).toBe('ADDRESS_REQUIRED_FOR_CPF')
   })
 
-  it('mode deep responde 202 com Location', async () => {
+  it('mode deep responde 422 quando VLM desabilitado', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/validations',
@@ -171,8 +172,7 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
-    expect(res.statusCode).toBe(202)
-    expect(res.headers['location']).toMatch(/^\/v1\/validations\//)
-    expect(res.json().status).toBe('queued')
+    expect(res.statusCode).toBe(422)
+    expect(res.json().code).toBe('DEEP_PATH_DISABLED')
   })
 })

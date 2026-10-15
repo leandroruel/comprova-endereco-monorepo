@@ -31,6 +31,10 @@ function StatCard({
   )
 }
 
+const VLM_ENABLED = false
+
+const MODES: readonly ('fast' | 'auto' | 'deep')[] = VLM_ENABLED ? ['fast', 'auto', 'deep'] : ['fast']
+
 export default function Dashboard() {
   const [document, setDocument] = useState('')
   const [mode, setMode] = useState<'fast' | 'auto' | 'deep'>('fast')
@@ -115,7 +119,7 @@ export default function Dashboard() {
                 />
               </div>
               <div className="flex items-center gap-1 rounded-lg border border-input p-0.5">
-                {(['fast', 'auto', 'deep'] as const).map((m) => (
+                {MODES.map((m) => (
                   <button
                     key={m}
                     type="button"

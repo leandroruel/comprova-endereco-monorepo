@@ -156,7 +156,12 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     async (v1) => {
       v1.addHook('preHandler', authenticate)
       v1.addHook('preHandler', rateLimit)
-      registerValidationRoutes(v1, { db: deps.db, fastPath, deepTrigger })
+      registerValidationRoutes(v1, {
+        db: deps.db,
+        fastPath,
+        deepTrigger,
+        vlmEnabled: deps.config.VLM_ENABLED,
+      })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
       registerBatchRoutes(v1, { db: deps.db })
       registerSubjectRoutes(v1, { db: deps.db })
