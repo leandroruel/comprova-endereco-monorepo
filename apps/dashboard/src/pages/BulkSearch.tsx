@@ -72,7 +72,7 @@ function exportBatch(id: string, format: 'csv' | 'json') {
   window.open(`${API_BASE}/v1/batches/${id}/export?format=${format}`, '_blank')
 }
 
-export function BulkSearchPage() {
+export function BulkSearchPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const [rawText, setRawText] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -121,7 +121,7 @@ export function BulkSearchPage() {
   }
 
   return (
-    <DashboardLayout>
+    <DashboardLayout activePage="bulk" onNavigate={onNavigate}>
       <div className="space-y-6">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Busca em lote</h1>

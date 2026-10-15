@@ -10,11 +10,15 @@ const queryClient = new QueryClient({
 })
 
 export default function App() {
-  const [page, setPage] = useState<'dashboard' | 'bulk' | string>('dashboard')
+  const [page, setPage] = useState('validations')
 
   return (
     <QueryClientProvider client={queryClient}>
-      {page === 'bulk' ? <BulkSearchPage /> : <Dashboard onNavigate={setPage} />}
+      {page === 'bulk' ? (
+        <BulkSearchPage onNavigate={setPage} />
+      ) : (
+        <Dashboard onNavigate={setPage} />
+      )}
     </QueryClientProvider>
   )
 }
