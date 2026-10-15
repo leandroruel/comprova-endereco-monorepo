@@ -99,7 +99,7 @@ export const registerStatsRoutes = (instance: FastifyInstance, deps: StatsRoutes
 
       return {
         total: rows.total,
-        unique_documents: (uniqueDocs[0] as { n: number })?.n ?? 0,
+        unique_documents: (rows.uniqueDocs as readonly { n: number }[] | undefined)?.[0]?.n ?? 0,
         by_doc_type: docTypeMap,
         by_verdict: verdictMap,
         completed: statusMap['completed'] ?? 0,
