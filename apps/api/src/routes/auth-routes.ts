@@ -1,16 +1,41 @@
-import { toNodeHandler } from 'better-auth/node'
 import type { FastifyInstance } from 'fastify'
 import type { Auth } from '../auth.js'
 
 export const registerAuthRoutes = (app: FastifyInstance, auth: Auth): void => {
-  const handler = toNodeHandler(auth)
-
   app.route({
     method: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     url: '/auth/*',
-    handler: (request, reply) => {
-      reply.hijack()
-      handler(request.raw, reply.raw)
+    handler: async (request, reply) => {
+      try {
+        const authPath = request.raw.url?.replace('/auth/', '/api/auth/') ?? '/api/auth'
+        const url = `http://localhost${authPath}`
+        const headers = new Headers()
+        for (const [key, value] of Object.entries(request.headers)) {
+          if (key !== 'host' && key !== 'content-length') {
+            const v = Array.isArray(value) ? value.join(',') : value
+            if (v !== undefined) headers.set(key, v)
+          }
+        }
+        const body = request.body ? JSON.stringify(request.body) : undefined
+        const incoming = new Request(url, { method: request.method, headers, body })
+        const response = await auth.handler(incoming)
+        reply.status(response.status)
+        response.headers.forEach((value, key) => {
+          if (key.toLowerCase() !== 'x-powered-by') {
+            reply.header(key, value)
+          }
+        })
+        const text = await response.text()
+        if (text.length > 0) {
+          reply.header('content-type', 'application/json')
+          reply.send(text)
+        } else {
+          reply.send()
+        }
+      } catch (err) {
+        console.error('[auth] handler error:', err instanceof Error ? err.message : String(err))
+        reply.status(500).send({ error: 'auth handler failed' })
+      }
     },
   })
 }

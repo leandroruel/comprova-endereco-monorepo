@@ -174,7 +174,7 @@ export const refReceitaSimples = pgTable('ref_receita_simples', {
   dataExclusaoMei: date('data_exclusao_mei', { mode: 'string' }),
 })
 
-export const authUser = pgTable('auth_user', {
+export const authUser = pgTable('user', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
@@ -184,7 +184,7 @@ export const authUser = pgTable('auth_user', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
-export const authSession = pgTable('auth_session', {
+export const authSession = pgTable('session', {
   id: text('id').primaryKey(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   token: text('token').notNull().unique(),
@@ -197,7 +197,7 @@ export const authSession = pgTable('auth_session', {
     .references(() => authUser.id),
 })
 
-export const authAccount = pgTable('auth_account', {
+export const authAccount = pgTable('account', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
   providerId: text('provider_id').notNull(),
@@ -211,6 +211,15 @@ export const authAccount = pgTable('auth_account', {
   refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
   scope: text('scope'),
   password: text('password'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const authVerification = pgTable('verification', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
