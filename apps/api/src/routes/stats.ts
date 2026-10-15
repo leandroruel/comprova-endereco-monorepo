@@ -82,6 +82,7 @@ export const registerStatsRoutes = (instance: FastifyInstance, deps: StatsRoutes
         }
       })) as unknown as {
         total: number
+        uniqueDocs: readonly { n: number }[]
         docTypes: readonly { t: string; n: number }[]
         verdicts: readonly { v: string; n: number }[]
         statuses: readonly { s: string; n: number }[]
@@ -99,7 +100,7 @@ export const registerStatsRoutes = (instance: FastifyInstance, deps: StatsRoutes
 
       return {
         total: rows.total,
-        unique_documents: (rows.uniqueDocs as readonly { n: number }[] | undefined)?.[0]?.n ?? 0,
+        unique_documents: rows.uniqueDocs[0]?.n ?? 0,
         by_doc_type: docTypeMap,
         by_verdict: verdictMap,
         completed: statusMap['completed'] ?? 0,
