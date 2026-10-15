@@ -4,14 +4,7 @@ import { createValidation, getStats, type ValidationDto } from '@/api/client'
 import { DashboardLayout } from '@/components/layout'
 import { ValidationCard } from '@/components/validation-card'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
-import {
-  Activity,
-  CheckCircle2,
-  Search,
-  Timer,
-  Users,
-  XCircle,
-} from 'lucide-react'
+import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
 
 const VLM_ENABLED = false
 
@@ -56,11 +49,11 @@ export default function Dashboard() {
   const [history, setHistory] = useState<ValidationDto[]>([])
   const queryClient = useQueryClient()
 
-
   const stats = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
-    refetchInterval: 5_000,
+    staleTime: Infinity,
+    refetchOnWindowFocus: true,
   })
 
   const mutation = useMutation({
@@ -96,27 +89,27 @@ export default function Dashboard() {
           <StatCard
             icon={<Activity className="h-4 w-4 text-foreground/60" />}
             label="Total de consultas"
-            value={stats.isPending ? '—' : String(s?.total ?? 0)}
+            value={stats.isLoading ? '—' : String(s?.total ?? 0)}
             sub={s ? `${s.completed} completas · ${s.partial} parciais` : undefined}
           />
           <StatCard
             icon={<Users className="h-4 w-4 text-blue-600" />}
             label="CNPJ / CPF"
-            value={stats.isPending ? '—' : `${cnpjCount}/${cpfCount}`}
+            value={stats.isLoading ? '—' : `${cnpjCount}/${cpfCount}`}
             sub={`${cnpjCount + cpfCount} documentos consultados`}
             accent="bg-blue-50"
           />
           <StatCard
             icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
             label="Bem sucedidas"
-            value={stats.isPending ? '—' : String(confirmedCount)}
+            value={stats.isLoading ? '—' : String(confirmedCount)}
             sub={s && s.total > 0 ? `${((confirmedCount / s.total) * 100).toFixed(0)}% do total` : undefined}
             accent="bg-emerald-50"
           />
           <StatCard
             icon={<XCircle className="h-4 w-4 text-red-600" />}
             label="Não sucedidas"
-            value={stats.isPending ? '—' : String(unsuccessful)}
+            value={stats.isLoading ? '—' : String(unsuccessful)}
             sub={s && s.total > 0 ? `${((unsuccessful / s.total) * 100).toFixed(0)}% do total` : undefined}
             accent="bg-red-50"
           />

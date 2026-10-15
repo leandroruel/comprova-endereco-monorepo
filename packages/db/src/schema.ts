@@ -174,6 +174,42 @@ export const refReceitaSimples = pgTable('ref_receita_simples', {
   dataExclusaoMei: date('data_exclusao_mei', { mode: 'string' }),
 })
 
+export const refEstabelecimentoHistory = pgTable(
+  'ref_estabelecimento_history',
+  {
+    cnpjBasico: char('cnpj_basico', { length: 8 }).notNull(),
+    cnpjOrdem: char('cnpj_ordem', { length: 4 }).notNull(),
+    cnpjDv: char('cnpj_dv', { length: 2 }).notNull(),
+    matrizFilial: smallint('matriz_filial').notNull(),
+    nomeFantasia: text('nome_fantasia'),
+    situacaoCadastral: smallint('situacao_cadastral').notNull(),
+    dataSituacao: date('data_situacao', { mode: 'string' }),
+    motivoSituacao: smallint('motivo_situacao'),
+    dataAbertura: date('data_abertura', { mode: 'string' }),
+    cnaePrincipal: char('cnae_principal', { length: 7 }),
+    cnaesSecundarios: char('cnaes_secundarios', { length: 7 }).array(),
+    tipoLogradouro: text('tipo_logradouro'),
+    logradouro: text('logradouro'),
+    numero: text('numero'),
+    complemento: text('complemento'),
+    bairro: text('bairro'),
+    cep: char('cep', { length: 8 }),
+    uf: char('uf', { length: 2 }),
+    municipioReceita: integer('municipio_receita'),
+    municipioIbge: integer('municipio_ibge'),
+    paisCodigo: integer('pais_codigo'),
+    cidadeExterior: text('cidade_exterior'),
+    telefone: text('telefone'),
+    emailDomain: text('email_domain'),
+    buildingKey: bytea('building_key'),
+    unitKey: bytea('unit_key'),
+    snapshotMonth: date('snapshot_month', { mode: 'string' }).notNull(),
+    validFrom: date('valid_from', { mode: 'string' }).notNull(),
+    validTo: date('valid_to', { mode: 'string' }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.cnpjBasico, t.cnpjOrdem, t.cnpjDv, t.validFrom] })],
+)
+
 export const refCnefeAddress = pgTable('ref_cnefe_address', {
   cnefeId: bigint('cnefe_id', { mode: 'number' }).primaryKey(),
   uf: char('uf', { length: 2 }).notNull(),

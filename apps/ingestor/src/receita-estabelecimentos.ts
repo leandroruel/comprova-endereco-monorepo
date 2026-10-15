@@ -252,7 +252,12 @@ export const ingestReceitaEstabelecimentos = async (
   let batch: ReturnType<typeof toInsertRow>[] = []
   const flush = async (): Promise<void> => {
     if (batch.length === 0) return
-    await db.insert(t.refReceitaEstabelecimento).values(batch).onConflictDoNothing()
+    const { upsertEstabelecimentosWithHistory } = await import('./estabelecimento-upsert.js')
+    await upsertEstabelecimentosWithHistory(
+      db,
+      batch as unknown as readonly Record<string, unknown>[],
+      snapshotMonth,
+    )
     batch = []
   }
 
