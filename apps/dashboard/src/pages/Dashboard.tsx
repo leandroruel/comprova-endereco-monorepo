@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createValidation, getStats, type ValidationDto } from '@/api/client'
+import { authClient } from '@/api/auth'
 import { DashboardLayout } from '@/components/layout'
 import { ValidationCard } from '@/components/validation-card'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
+import { LoginPage } from '@/pages/Login'
 import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
 
 const VLM_ENABLED = false
@@ -44,10 +46,32 @@ function StatCard({
 }
 
 export default function Dashboard() {
+  const [session, setSession] = useState<{ user: { email: string; name: string } } | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const [document, setDocument] = useState('')
   const [mode, setMode] = useState<'fast' | 'auto' | 'deep'>('fast')
   const [history, setHistory] = useState<ValidationDto[]>([])
   const queryClient = useQueryClient()
+
+  if (!authChecked) {
+    void authClient.getSession().then((result) => {
+      if (result.data) {
+        setSession(result.data)
+      }
+      setAuthChecked(true)
+    })
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Spinner />
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <LoginPage onSuccess={() => void authClient.getSession().then((r) => r.data && setSession(r.data))} />
+    )
+  }
 
   const stats = useQuery({
     queryKey: ['stats'],
@@ -74,7 +98,15 @@ export default function Dashboard() {
   const unsuccessful = insuffCount + notFoundCount + (s?.by_verdict?.['INCONSISTENT'] ?? 0)
 
   return (
-    <DashboardLayout>
+    <DashboardLayout
+      userEmail={session.user.email}
+      onLogout={() => {
+        void authClient.signOut().then(() => {
+          setSession(null)
+          setHistory([])
+        })
+      }}
+    >
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>

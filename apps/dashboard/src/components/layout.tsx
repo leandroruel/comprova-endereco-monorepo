@@ -1,15 +1,7 @@
 import { type ReactNode, useState } from 'react'
 import { cn } from '@/lib/utils'
-import {
-  Activity,
-  Building2,
-  ChevronRight,
-  CircleAlert,
-  FileSearch,
-  Globe,
-  Home,
-  Settings,
-} from 'lucide-react'
+import { Activity, Building2, ChevronRight, FileSearch, Globe, Home, Settings } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 
 interface NavItem {
   readonly id: string
@@ -25,7 +17,15 @@ const navItems: readonly NavItem[] = [
   { id: 'settings', label: 'Configurações', icon: <Settings className="h-4 w-4" /> },
 ]
 
-export function DashboardLayout({ children }: { children: ReactNode }) {
+export function DashboardLayout({
+  children,
+  onLogout,
+  userEmail,
+}: {
+  children: ReactNode
+  onLogout?: () => void
+  userEmail?: string
+}) {
   const [active, setActive] = useState('validations')
 
   return (
@@ -68,10 +68,20 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="border-t border-sidebar-border p-4">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <CircleAlert className="h-3 w-3" />
-            <span>Dev only — sem auth</span>
-          </div>
+          {userEmail && (
+            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="truncate font-medium text-foreground">{userEmail.split('@')[0]}</span>
+            </div>
+          )}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <LogOut className="h-3 w-3" />
+              Sair
+            </button>
+          )}
         </div>
       </aside>
 
