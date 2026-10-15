@@ -30,6 +30,7 @@ import { makeApiKeyHasher } from './api-keys.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
 import { createAuth } from './auth.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
+import { makeSessionMiddleware } from './plugins/session.js'
 import { registerBatchRoutes } from './routes/batches.js'
 import { registerStatsRoutes } from './routes/stats.js'
 import { registerHealthRoutes } from './routes/health.js'
@@ -145,8 +146,9 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const rateLimit = makeRateLimiter(deps.redis)
 
   const fastPath = buildFastPathDeps(deps.db, deps.config)
-  const auth = createAuth(deps.db, deps.config.API_KEY_PEPPER)
+  const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
   registerAuthRoutes(app, auth)
+  app.addHook('preHandler', makeSessionMiddleware(auth))
   const deepTrigger = {
     config: {
       enabled: deps.config.TEMPORAL_ENABLED,

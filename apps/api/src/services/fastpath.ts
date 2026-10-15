@@ -35,6 +35,7 @@ export interface FastPathRequest {
   readonly mode: 'fast' | 'deep' | 'auto'
   readonly idempotencyKey: string | null
   readonly consentRef?: string | null
+  readonly userId?: string | null
 }
 
 export const requestHashOf = (req: FastPathRequest): string =>
@@ -474,6 +475,7 @@ export const runFastPath = async (
       legalBasis: req.legalBasis,
       idempotencyKey: req.idempotencyKey,
       consentRef: req.consentRef ?? null,
+      userId: req.userId ?? null,
       explanation: { summary: decision.explanation },
       deepContext: deepContextOf(registryRecord, docDigitsValid),
       createdAt: now,

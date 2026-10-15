@@ -101,7 +101,7 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout
-      userEmail={session.user.email}
+      userEmail={session.user.name}
       onLogout={() => {
         void authClient.signOut().then(() => {
           setSession(null)

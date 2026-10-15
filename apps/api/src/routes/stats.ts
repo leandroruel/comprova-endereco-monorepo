@@ -33,31 +33,36 @@ export const registerStatsRoutes = (instance: FastifyInstance, deps: StatsRoutes
     async (request) => {
       const tenant = request.tenant
       if (tenant === undefined) throw new Error('tenant context missing')
+      const userId = request.sessionUser?.id ?? null
 
       const rows = (await withTenant(deps.db, tenant.tenantId, async (tx) => {
+        const whereUser = userId !== null ? sql` AND user_id = ${userId}` : sql``
         const total = await tx.execute(sql`
-          SELECT COUNT(*)::int as n FROM validation
+          SELECT COUNT(*)::int as n FROM validation WHERE true${whereUser}
         `)
         const byDoc = await tx.execute(sql`
           SELECT s.doc_type::text as t, COUNT(*)::int as n
           FROM validation v
           JOIN subject s ON s.subject_id = v.subject_id
+          WHERE true${whereUser}
           GROUP BY s.doc_type
         `)
         const byVerdict = await tx.execute(sql`
           SELECT COALESCE(v.verdict::text, 'PENDING') as v, COUNT(*)::int as n
           FROM validation v
+          WHERE true${whereUser}
           GROUP BY v.verdict
         `)
         const byStatus = await tx.execute(sql`
           SELECT v.status::text as s, COUNT(*)::int as n
           FROM validation v
+          WHERE true${whereUser}
           GROUP BY v.status
         `)
         const avg = await tx.execute(sql`
           SELECT COALESCE(AVG(v.confidence), 0)::float as conf, COALESCE(AVG(v.score), 0)::float as sc
           FROM validation v
-          WHERE v.confidence IS NOT NULL
+          WHERE v.confidence IS NOT NULL AND true${whereUser}
         `)
 
         return {

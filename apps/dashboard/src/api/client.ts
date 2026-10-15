@@ -41,6 +41,7 @@ export interface StatsDto {
 
 export async function getStats(): Promise<StatsDto> {
   const res = await fetch(`${API_BASE}/v1/stats`, {
+    credentials: 'include',
     headers: { Authorization: `Bearer ${API_KEY}` },
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -51,6 +52,7 @@ export async function createValidation(document: string, mode: string = 'fast'):
   const isCpf = document.replace(/\D+/g, '').length === 11
   const res = await fetch(`${API_BASE}/v1/validations`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       Authorization: `Bearer ${API_KEY}`,
       'Content-Type': 'application/json',
@@ -70,6 +72,7 @@ export async function createValidation(document: string, mode: string = 'fast'):
 
 export async function getValidation(id: string): Promise<ValidationDto> {
   const res = await fetch(`${API_BASE}/v1/validations/${id}`, {
+    credentials: 'include',
     headers: { Authorization: `Bearer ${API_KEY}` },
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)

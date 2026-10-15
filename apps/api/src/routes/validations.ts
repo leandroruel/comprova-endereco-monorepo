@@ -241,6 +241,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
         mode: body.mode,
         idempotencyKey: request.headers['idempotency-key'] ?? null,
         consentRef: body.consent_ref,
+        userId: request.sessionUser?.id ?? null,
       }
 
       const result = await runFastPath(

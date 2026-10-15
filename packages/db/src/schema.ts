@@ -377,6 +377,7 @@ export const validation = pgTable(
       .notNull()
       .references(() => legalBasis.code),
     consentRef: text('consent_ref'),
+    userId: text('user_id'),
     idempotencyKey: text('idempotency_key'),
     workflowId: text('workflow_id'),
     explanation: jsonb('explanation').$type<{ summary?: string } | null>(),
