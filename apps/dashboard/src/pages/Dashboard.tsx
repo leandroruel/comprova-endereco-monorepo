@@ -45,7 +45,7 @@ function StatCard({
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const [session, setSession] = useState<{ user: { email: string; name: string } } | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [document, setDocument] = useState('')
@@ -102,6 +102,8 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout
+      activePage="validations"
+      onNavigate={onNavigate}
       userEmail={session.user.name}
       onLogout={() => {
         void authClient.signOut().then(() => {

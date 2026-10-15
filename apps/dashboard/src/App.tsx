@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from '@/pages/Dashboard'
+import { BulkSearchPage } from '@/pages/BulkSearch'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -8,9 +10,11 @@ const queryClient = new QueryClient({
 })
 
 export default function App() {
+  const [page, setPage] = useState<'dashboard' | 'bulk' | string>('dashboard')
+
   return (
     <QueryClientProvider client={queryClient}>
-      <Dashboard />
+      {page === 'bulk' ? <BulkSearchPage /> : <Dashboard onNavigate={setPage} />}
     </QueryClientProvider>
   )
 }

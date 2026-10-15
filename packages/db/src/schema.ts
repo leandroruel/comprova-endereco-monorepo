@@ -515,6 +515,7 @@ export const batch = pgTable('batch', {
   tenantId: uuid('tenant_id')
     .notNull()
     .references(() => tenant.tenantId),
+  userId: text('user_id'),
   status: text('status').notNull().default('queued'),
   totalItems: integer('total_items').notNull(),
   mode: valModeEnum('mode').notNull(),
@@ -541,6 +542,9 @@ export const batchItem = pgTable(
     status: text('status').notNull().default('pending'),
     validationId: uuid('validation_id'),
     errorCode: text('error_code'),
+    verdict: text('verdict'),
+    confidence: real('confidence'),
+    explanation: text('explanation'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     processedAt: timestamp('processed_at', { withTimezone: true }),
   },

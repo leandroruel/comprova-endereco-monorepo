@@ -10,23 +10,24 @@ interface NavItem {
 }
 
 const navItems: readonly NavItem[] = [
-  { id: 'overview', label: 'Visão geral', icon: <Home className="h-4 w-4" /> },
   { id: 'validations', label: 'Validações', icon: <FileSearch className="h-4 w-4" /> },
-  { id: 'checkers', label: 'Checkers', icon: <Activity className="h-4 w-4" /> },
-  { id: 'entities', label: 'Entidades', icon: <Building2 className="h-4 w-4" /> },
-  { id: 'settings', label: 'Configurações', icon: <Settings className="h-4 w-4" /> },
+  { id: 'bulk', label: 'Busca em lote', icon: <Activity className="h-4 w-4" /> },
 ]
 
 export function DashboardLayout({
   children,
   onLogout,
   userEmail,
+  onNavigate,
+  activePage,
 }: {
   children: ReactNode
   onLogout?: () => void
   userEmail?: string
+  onNavigate?: (page: string) => void
+  activePage?: string
 }) {
-  const [active, setActive] = useState('validations')
+  const [active, setActive] = useState(activePage ?? 'validations')
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -43,7 +44,10 @@ export function DashboardLayout({
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setActive(item.id)}
+              onClick={() => {
+                setActive(item.id)
+                onNavigate?.(item.id)
+              }}
               className={cn(
                 'group flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
                 active === item.id

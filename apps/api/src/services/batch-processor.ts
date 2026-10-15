@@ -86,7 +86,14 @@ const processItem = async (deps: BatchProcessorDeps, item: PendingItem): Promise
     )
     await deps.adminDb
       .update(t.batchItem)
-      .set({ status: 'completed', validationId: result.validationId, processedAt: new Date() })
+      .set({
+        status: 'completed',
+        validationId: result.validationId,
+        verdict: result.verdict,
+        confidence: result.confidence,
+        explanation: result.explanation,
+        processedAt: new Date(),
+      })
       .where(eq(t.batchItem.itemId, item.itemId))
   } catch {
     await deps.adminDb
