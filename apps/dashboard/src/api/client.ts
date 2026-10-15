@@ -30,6 +30,7 @@ export interface ValidationDto {
 
 export interface StatsDto {
   total: number
+  unique_documents: number
   by_doc_type: Record<string, number>
   by_verdict: Record<string, number>
   completed: number

@@ -94,6 +94,7 @@ export default function Dashboard() {
   const s = stats.data
   const cnpjCount = s?.by_doc_type?.['CNPJ'] ?? 0
   const cpfCount = s?.by_doc_type?.['CPF'] ?? 0
+  const uniqueDocs = s?.unique_documents ?? 0
   const confirmedCount = s?.by_verdict?.['CONFIRMED_COMMERCIAL'] ?? 0
   const insuffCount = s?.by_verdict?.['INSUFFICIENT_EVIDENCE'] ?? 0
   const notFoundCount = s?.by_verdict?.['NOT_FOUND'] ?? 0
@@ -122,15 +123,15 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
             icon={<Activity className="h-4 w-4 text-foreground/60" />}
-            label="Total de consultas"
+            label="Consultas"
             value={stats.isLoading ? '—' : String(s?.total ?? 0)}
-            sub={s ? `${s.completed} completas · ${s.partial} parciais` : undefined}
+            sub={s ? `${uniqueDocs} doc${uniqueDocs === 1 ? '' : 's'} · ${s.completed} completas` : undefined}
           />
           <StatCard
             icon={<Users className="h-4 w-4 text-blue-600" />}
             label="CNPJ / CPF"
             value={stats.isLoading ? '—' : `${cnpjCount}/${cpfCount}`}
-            sub={`${cnpjCount + cpfCount} documentos consultados`}
+            sub={`${uniqueDocs} documento${uniqueDocs === 1 ? '' : 's'} único${uniqueDocs === 1 ? '' : 's'}`}
             accent="bg-blue-50"
           />
           <StatCard

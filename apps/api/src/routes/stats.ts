@@ -11,6 +11,7 @@ export interface StatsRoutesDeps {
 
 const StatsDto = z.object({
   total: z.number().int(),
+  unique_documents: z.number().int(),
   by_doc_type: z.record(z.string(), z.number().int()),
   by_verdict: z.record(z.string(), z.number().int()),
   completed: z.number().int(),
@@ -40,8 +41,14 @@ export const registerStatsRoutes = (instance: FastifyInstance, deps: StatsRoutes
         const total = await tx.execute(sql`
           SELECT COUNT(*)::int as n FROM validation WHERE true${whereUser}
         `)
+        const uniqueDocs = await tx.execute(sql`
+          SELECT COUNT(DISTINCT s.doc_hmac)::int as n
+          FROM validation v
+          JOIN subject s ON s.subject_id = v.subject_id
+          WHERE true${whereUser}
+        `)
         const byDoc = await tx.execute(sql`
-          SELECT s.doc_type::text as t, COUNT(*)::int as n
+          SELECT s.doc_type::text as t, COUNT(DISTINCT s.doc_hmac)::int as n
           FROM validation v
           JOIN subject s ON s.subject_id = v.subject_id
           WHERE true${whereUser}
@@ -67,6 +74,7 @@ export const registerStatsRoutes = (instance: FastifyInstance, deps: StatsRoutes
 
         return {
           total: (total[0] as { n: number })?.n ?? 0,
+          uniqueDocs: (uniqueDocs[0] as { n: number })?.n ?? 0,
           docTypes: byDoc as unknown as readonly { t: string; n: number }[],
           verdicts: byVerdict as unknown as readonly { v: string; n: number }[],
           statuses: byStatus as unknown as readonly { s: string; n: number }[],
@@ -91,6 +99,7 @@ export const registerStatsRoutes = (instance: FastifyInstance, deps: StatsRoutes
 
       return {
         total: rows.total,
+        unique_documents: (uniqueDocs[0] as { n: number })?.n ?? 0,
         by_doc_type: docTypeMap,
         by_verdict: verdictMap,
         completed: statusMap['completed'] ?? 0,
