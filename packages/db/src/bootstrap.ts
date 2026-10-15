@@ -1,8 +1,11 @@
 import { hash } from '@node-rs/argon2'
 import { and, eq, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
+import { createCLILogger } from '@comprova/observability'
 import { createDbPool } from './client.js'
 import * as t from './schema.js'
+
+const logger = createCLILogger('bootstrap')
 
 const adminUrl = process.env.DATABASE_ADMIN_URL
 if (!adminUrl) {
@@ -31,7 +34,7 @@ const run = async (): Promise<void> => {
       .where(and(eq(t.apiKey.tenantId, devTenantId), isNull(t.apiKey.revokedAt)))
 
     if (activeKeys.length > 0) {
-      console.log('dev tenant already has an active API key')
+      logger.info('dev tenant already has an active API key')
       return
     }
 
@@ -43,12 +46,12 @@ const run = async (): Promise<void> => {
       keyPrefix: plaintext.slice(0, 8),
       keyHash: Buffer.from(keyHash),
     })
-    console.log('API key created (will not be shown again):')
-    console.log(plaintext)
+    logger.info('API key created (will not be shown again):')
+    process.stdout.write(`${plaintext}\n`)
   } finally {
     await pool.end()
   }
 }
 
 await run()
-console.log('bootstrap done')
+logger.info('bootstrap done')

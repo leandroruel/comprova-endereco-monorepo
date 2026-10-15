@@ -1,4 +1,7 @@
+import { createCLILogger } from '@comprova/observability'
 import { runMigrations } from './runner.js'
+
+const logger = createCLILogger('migrate')
 
 const adminUrl = process.env.DATABASE_ADMIN_URL
 if (!adminUrl) {
@@ -6,4 +9,4 @@ if (!adminUrl) {
 }
 
 await runMigrations({ adminUrl, rolePassword: process.env.APP_DB_PASSWORD })
-console.log('migrations applied')
+logger.info('migrations applied')

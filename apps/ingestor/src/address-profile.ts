@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql } from '@comprova/db'
 import type { Db } from '@comprova/db'
 
 export const recomputeAddressProfiles = async (db: Db): Promise<number> => {

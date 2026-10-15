@@ -31,6 +31,7 @@ import { makeRateLimiter } from './plugins/rate-limit.js'
 import { createAuth } from './auth.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
 import { makeSessionMiddleware } from './plugins/session.js'
+import { makeRedisCache, makeCachedReaders } from '@comprova/db'
 import { registerBatchRoutes } from './routes/batches.js'
 import { registerStatsRoutes } from './routes/stats.js'
 import { registerHealthRoutes } from './routes/health.js'
@@ -41,9 +42,14 @@ import { registerWebhookRoutes } from './routes/webhooks.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
 import { loadPolicyFile } from './policy-loader.js'
 
-export const buildFastPathDeps = (db: Db, config: AppConfig): FastPathDeps => {
-  const registry = makeRegistryReader(db)
-  const cep = makeCepReader(db)
+export const buildFastPathDeps = (
+  db: Db,
+  config: AppConfig,
+  cache?: ReturnType<typeof makeRedisCache>,
+): FastPathDeps => {
+  const cached = cache !== undefined ? makeCachedReaders(db, cache) : null
+  const registry = cached?.registry ?? makeRegistryReader(db)
+  const cep = cached?.cep ?? makeCepReader(db)
   const policy = loadPolicyFile(config.POLICY_VERSION)
   return {
     db,
@@ -51,11 +57,11 @@ export const buildFastPathDeps = (db: Db, config: AppConfig): FastPathDeps => {
     cep,
     checkers: makeT0Checkers({
       registry,
-      cnefe: makeCnefeReader(db),
-      cep: makeCepReader(db),
-      profile: makeProfileReader(db),
-      knownShared: makeKnownSharedReader(db),
-      cnaeCategoria: makeCnaeCategoriaReader(db),
+      cnefe: cached?.cnefe ?? makeCnefeReader(db),
+      cep,
+      profile: cached?.profile ?? makeProfileReader(db),
+      knownShared: cached?.knownShared ?? makeKnownSharedReader(db),
+      cnaeCategoria: cached?.cnaeCategoria ?? makeCnaeCategoriaReader(db),
     }),
     policy,
     clock: systemClock,
@@ -145,7 +151,8 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const authenticate = makeAuthenticate(deps.db, hasher)
   const rateLimit = makeRateLimiter(deps.redis)
 
-  const fastPath = buildFastPathDeps(deps.db, deps.config)
+  const cache = makeRedisCache(deps.redis, deps.logger)
+  const fastPath = buildFastPathDeps(deps.db, deps.config, cache)
   const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
   registerAuthRoutes(app, auth)
   app.addHook('preHandler', makeSessionMiddleware(auth))

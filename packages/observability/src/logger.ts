@@ -13,33 +13,62 @@ export interface CreateLoggerOptions {
   level?: string
   base?: Record<string, unknown>
   stream?: { write(line: string): void }
+  pretty?: boolean
 }
 
-export function createLogger(opts: CreateLoggerOptions = {}): Logger {
+interface PinoLike {
+  debug: (obj: unknown, msg?: unknown) => void
+  info: (obj: unknown, msg?: unknown) => void
+  warn: (obj: unknown, msg?: unknown) => void
+  error: (obj: unknown, msg?: unknown) => void
+  child: (bindings: Record<string, unknown>) => PinoLike
+}
+
+function buildPino(opts: CreateLoggerOptions = {}): PinoLike {
   const inner = pino(
     {
       level: opts.level ?? 'info',
       base: opts.base,
+      ...(opts.pretty
+        ? {
+            transport: {
+              target: 'pino-pretty',
+              options: { colorize: true, translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
+            },
+          }
+        : {}),
     },
     opts.stream,
   )
+  return inner as unknown as PinoLike
+}
 
-  const makeLevel =
+function wrap(inner: PinoLike): Logger {
+  const emit =
     (level: 'debug' | 'info' | 'warn' | 'error') => (arg: string | Record<string, unknown>, msg?: string) => {
-      if (typeof arg === 'string') {
-        inner[level](redactString(arg))
-        return
+      const obj = typeof arg === 'string' ? redactString(arg) : redactDeep(arg)
+      if (msg !== undefined) {
+        inner[level](obj, msg)
+      } else {
+        inner[level](obj)
       }
-      inner[level](redactDeep(arg) as Record<string, unknown>, msg)
     }
 
   return {
-    debug: makeLevel('debug'),
-    info: makeLevel('info'),
-    warn: makeLevel('warn'),
-    error: makeLevel('error'),
-    child(bindings: Record<string, unknown>) {
-      return createLogger({ level: opts.level, base: { ...opts.base, ...bindings } })
+    debug: emit('debug'),
+    info: emit('info'),
+    warn: emit('warn'),
+    error: emit('error'),
+    child(bindings: Record<string, unknown>): Logger {
+      return wrap(inner.child(bindings))
     },
   }
+}
+
+export function createLogger(opts: CreateLoggerOptions = {}): Logger {
+  return wrap(buildPino(opts))
+}
+
+export function createCLILogger(service: string, level = 'info'): Logger {
+  return createLogger({ level, base: { service }, pretty: true })
 }

@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { buildDeepWorkerContext, makeDeepEnrichActivity, workerEnvFromProcess } from './activities.js'
 import { makeFakeObjectStore, makeS3ObjectStore } from '@comprova/providers'
 import { createDbPool } from '@comprova/db'
+import { createCLILogger } from '@comprova/observability'
 import { startRetentionLoop } from './evidence.js'
 import { startValidationRetentionLoop } from './retention.js'
 
+const logger = createCLILogger('worker')
 const env = workerEnvFromProcess()
 const ctx = buildDeepWorkerContext(env)
 const taskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'comprova-deep-t1'
@@ -20,7 +22,7 @@ const retentionStore =
   env.s3Bucket !== undefined
     ? makeS3ObjectStore({
         endpoint: env.s3Endpoint,
-        region: env.s3Region ?? 'us-east-1',
+        region: env.s3Region ?? env.s3Region ?? 'us-east-1',
         bucket: env.s3Bucket,
         accessKeyId: env.s3AccessKeyId,
         secretAccessKey: env.s3SecretAccessKey,
@@ -38,7 +40,7 @@ const worker = await Worker.create({
   activities: { deepEnrichActivity: makeDeepEnrichActivity(ctx) },
 })
 
-console.log(`worker listening on task queue ${taskQueue} (retention loop active)`)
+logger.info({ taskQueue, retention: true }, 'worker listening')
 try {
   await worker.run()
 } finally {

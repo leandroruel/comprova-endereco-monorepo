@@ -1,5 +1,8 @@
 import { addressKeys, canonicalizeAddress } from '@comprova/core'
+import { createCLILogger } from '@comprova/observability'
 import postgres from 'postgres'
+
+const cli = createCLILogger('rebuild-keys')
 
 const rawClient = postgres(process.env.DATABASE_ADMIN_URL!, { max: 2 })
 const BATCH = 20_000
@@ -82,9 +85,9 @@ for (;;) {
   lastBasico = rows[rows.length - 1]?.cnpj_basico ?? ''
   const elapsed = Date.now() - started
   const rate = elapsed > 0 ? Math.round((total / elapsed) * 1000) : 0
-  console.log(`${total}/${30585232} (${rate}/s, ${Math.round((total / 30585232) * 100)}%)`)
+  cli.info(`${total}/${30585232} (${rate}/s, ${Math.round((total / 30585232) * 100)}%)`)
 }
 
-console.log(`done: ${total} keys in ${Math.round((Date.now() - started) / 1000)}s`)
+cli.info(`done: ${total} keys in ${Math.round((Date.now() - started) / 1000)}s`)
 await rawClient.end()
 process.exit(0)

@@ -3,6 +3,9 @@ import { createHmac } from 'node:crypto'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { createCLILogger } from '@comprova/observability'
+
+const cli = createCLILogger('ingestor', process.env.LOG_LEVEL ?? 'info')
 import { createTenant, seedGoldenDataset } from '@comprova/testing'
 
 const adminUrl = process.env.DATABASE_ADMIN_URL
@@ -18,7 +21,7 @@ const fixtures = async (): Promise<void> => {
   try {
     await seedGoldenDataset(pool.db)
     await createTenant(pool.db, { name: 'dev-tenant' })
-    console.log('golden dataset seeded (CNAE categorias, CEPs, CNEFE, estabelecimentos, perfis)')
+    cli.info('golden dataset seeded (CNAE categorias, CEPs, CNEFE, estabelecimentos, perfis)')
   } finally {
     await pool.end()
   }
@@ -34,7 +37,7 @@ const ingestEstabelecimentos = async (file: string, limit?: number, snapshot?: s
       ...(limit !== undefined ? { limit } : {}),
     })
     const rate = stats.elapsedMs > 0 ? Math.round((stats.rows / stats.elapsedMs) * 1000) : 0
-    console.log(
+    cli.info(
       `ingested ${stats.rows} rows in ${Math.round(stats.elapsedMs / 1000)}s (${rate} rows/s), snapshot ${stats.snapshotMonth}`,
     )
   } finally {
@@ -48,7 +51,7 @@ const ingestMunicipios = async (file: string): Promise<void> => {
   const pool = createDbPool(adminUrl, { max: 1 })
   try {
     const count = await ingestReceitaMunicipios(pool.db, file, '2026-09')
-    console.log(`ingested ${count} municipios`)
+    cli.info(`ingested ${count} municipios`)
   } finally {
     await pool.end()
   }
@@ -67,13 +70,13 @@ switch (command) {
     const pool = createDbPool(adminUrl, { max: 2 })
     try {
       const report = await simulatePolicy(pool.db, target)
-      console.log(`politica alvo: ${report.targetPolicyVersion}`)
-      console.log(`validacoes: ${report.total} | divergentes: ${report.divergent}`)
+      cli.info(`politica alvo: ${report.targetPolicyVersion}`)
+      cli.info(`validacoes: ${report.total} | divergentes: ${report.divergent}`)
       for (const tr of report.transitions) {
-        console.log(`  ${tr.from} -> ${tr.to}: ${tr.count}`)
+        cli.info(`  ${tr.from} -> ${tr.to}: ${tr.count}`)
       }
       for (const s of report.samples) {
-        console.log(
+        cli.info(
           `  amostra ${s.validationId}: ${s.storedVerdict} (politica ${s.storedPolicyVersion}) -> ${s.simulatedVerdict}`,
         )
       }
@@ -81,10 +84,41 @@ switch (command) {
         const dir = 'docs/policy-reports'
         mkdirSync(dir, { recursive: true })
         writeFileSync(path.join(dir, `${target}.json`), JSON.stringify(report, null, 2))
-        console.log(`relatorio salvo em docs/policy-reports/${target}.json`)
+        cli.info(`relatorio salvo em docs/policy-reports/${target}.json`)
       }
     } finally {
       await pool.end()
+    }
+    break
+  }
+  case 'cache:flush': {
+    const target = process.argv[3] ?? 'all'
+    const Redis = (await import('ioredis')).default
+    const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379')
+    const { makeRedisCache, cacheKeys } = await import('@comprova/db')
+    const cache = makeRedisCache(redis)
+    try {
+      if (target === 'all') {
+        await cacheKeys.invalidateAll(cache)
+        cli.info('cache: all keys invalidated')
+      } else if (target === 'registry') {
+        await cacheKeys.invalidateRegistry(cache)
+        cli.info('cache: registry invalidated')
+      } else if (target === 'cep') {
+        await cacheKeys.invalidateCep(cache)
+        cli.info('cache: cep invalidated')
+      } else if (target === 'cnefe') {
+        await cacheKeys.invalidateCnefe(cache)
+        cli.info('cache: cnefe invalidated')
+      } else if (target === 'profiles') {
+        await cacheKeys.invalidateProfiles(cache)
+        cli.info('cache: profiles invalidated')
+      } else {
+        cli.info('usage: ingestor cache:flush [all|registry|cep|cnefe|profiles]')
+      }
+      cli.info('cache stats:', JSON.stringify(cache.stats()))
+    } finally {
+      redis.disconnect()
     }
     break
   }
@@ -107,7 +141,7 @@ switch (command) {
         keyPrefix: plaintext.slice(0, 12),
         keyHash: Buffer.from(keyHash),
       })
-      console.log(plaintext)
+      cli.info(plaintext)
     } finally {
       await pool.end()
     }
@@ -130,9 +164,9 @@ switch (command) {
     const pool = createDbPool(adminUrl, { max: 1 })
     try {
       const seeded = await seedCanonicalAddresses(pool.db)
-      console.log(`canonical addresses seeded: ${seeded}`)
+      cli.info(`canonical addresses seeded: ${seeded}`)
       const count = await recomputeAddressProfiles(pool.db)
-      console.log(`address profiles recomputed for ${count} addresses`)
+      cli.info(`address profiles recomputed for ${count} addresses`)
     } finally {
       await pool.end()
     }
@@ -147,7 +181,7 @@ switch (command) {
       const stats = await backfillCepsFromEstabelecimentos(pool.db, {
         ...(limit !== undefined ? { limit } : {}),
       })
-      console.log(
+      cli.info(
         `ceps: ${stats.cepsProcessed} processed, ${stats.cepsFound} found, ${stats.cepsNotFound} not found (${Math.round(stats.elapsedMs / 1000)}s)`,
       )
     } finally {
@@ -160,9 +194,9 @@ switch (command) {
     const pool = createDbPool(adminUrl, { max: 1 })
     try {
       const ibgeCount = await deriveMunicipioIbge(pool.db)
-      console.log(`municipio_ibge derived for ${ibgeCount} estabelecimentos`)
+      cli.info(`municipio_ibge derived for ${ibgeCount} estabelecimentos`)
       const ufCount = await deriveMunicipioUf(pool.db)
-      console.log(`uf derived for ${ufCount} municipios`)
+      cli.info(`uf derived for ${ufCount} municipios`)
     } finally {
       await pool.end()
     }
@@ -182,7 +216,7 @@ switch (command) {
         ...(limit !== undefined ? { limit } : {}),
       })
       const rate = stats.elapsedMs > 0 ? Math.round((stats.rows / stats.elapsedMs) * 1000) : 0
-      console.log(
+      cli.info(
         `cnefe: ${stats.rows} rows, ${stats.skipped} skipped in ${Math.round(stats.elapsedMs / 1000)}s (${rate} rows/s)`,
       )
     } finally {
@@ -199,8 +233,8 @@ switch (command) {
     break
   }
   default:
-    console.log(
+    cli.info(
       'comandos: fixtures | receita:estabelecimentos <csv> [--limit N] | policy:simulate <versao> [--report]',
     )
-    console.log('gate adiada (Fase 1): ingestao completa do dump real + medicao de tempo')
+    cli.info('gate adiada (Fase 1): ingestao completa do dump real + medicao de tempo')
 }

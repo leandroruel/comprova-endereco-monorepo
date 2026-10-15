@@ -33,7 +33,7 @@ export const registerAuthRoutes = (app: FastifyInstance, auth: Auth): void => {
           reply.send()
         }
       } catch (err) {
-        console.error('[auth] handler error:', err instanceof Error ? err.message : String(err))
+        app.log.error({ err: err instanceof Error ? err.message : String(err) }, 'auth handler error')
         reply.status(500).send({ error: 'auth handler failed' })
       }
     },

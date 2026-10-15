@@ -14,11 +14,7 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {page === 'bulk' ? (
-        <BulkSearchPage onNavigate={setPage} />
-      ) : (
-        <Dashboard onNavigate={setPage} />
-      )}
+      {page === 'bulk' ? <BulkSearchPage onNavigate={setPage} /> : <Dashboard onNavigate={setPage} />}
     </QueryClientProvider>
   )
 }
