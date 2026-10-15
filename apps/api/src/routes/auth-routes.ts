@@ -4,10 +4,10 @@ import type { Auth } from '../auth.js'
 export const registerAuthRoutes = (app: FastifyInstance, auth: Auth): void => {
   app.route({
     method: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    url: '/auth/*',
+    url: '/api/auth/*',
     handler: async (request, reply) => {
       try {
-        const authPath = request.raw.url?.replace('/auth/', '/api/auth/') ?? '/api/auth'
+        const authPath = request.raw.url ?? '/api/auth/get-session'
         const url = `http://localhost${authPath}`
         const headers = new Headers()
         for (const [key, value] of Object.entries(request.headers)) {

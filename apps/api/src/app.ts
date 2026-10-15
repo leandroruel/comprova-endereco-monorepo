@@ -80,7 +80,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   app.setSerializerCompiler(serializerCompiler)
 
   await app.register(helmet)
-  await app.register(cors, { origin: true })
+  await app.register(cors, { origin: true, credentials: true })
   await app.register(swagger, {
     openapi: {
       openapi: '3.1.0',
