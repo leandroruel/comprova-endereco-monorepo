@@ -134,7 +134,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     if (result === null) {
       return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('validation'))
     }
-    const { validation, signals } = result
+    const { validation, signals, claim, evidenceSummary } = result
 
     const body: ValidationDto = {
       validation_id: validation.validationId,
@@ -156,6 +156,16 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
         detail: signal.detail,
         evidence_id: signal.evidenceId,
       })),
+      claim:
+        claim === null
+          ? null
+          : {
+              id: claim.claimId,
+              type: claim.type,
+              subject: { type: claim.subjectType, id: claim.subjectId },
+              target: { type: 'address', id: claim.addressId },
+            },
+      evidence_summary: evidenceSummary,
       explanation: summaryOf(validation.explanation),
       explanation_detail: explanationDetailFromStored(validation.explanation),
       created_at: validation.createdAt.toISOString(),

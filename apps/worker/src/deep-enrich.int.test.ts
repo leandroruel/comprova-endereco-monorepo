@@ -14,6 +14,7 @@ import * as t from '@comprova/db'
 import { loadPolicy, systemClock } from '@comprova/core'
 import { makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -170,7 +171,8 @@ describe('deepEnrich (activity core)', () => {
 
     const snapshot = async (): Promise<
       readonly {
-        evidenceId: string
+        claimEvidenceId: string
+        evidenceId: string | null
         signalId: string | null
         checker: string
         checkerVersion: string
@@ -185,6 +187,7 @@ describe('deepEnrich (activity core)', () => {
     > =>
       adminPool.db
         .select({
+          claimEvidenceId: t.claimEvidence.claimEvidenceId,
           evidenceId: t.claimEvidence.evidenceId,
           signalId: t.claimEvidence.signalId,
           checker: t.claimEvidence.checker,
@@ -199,7 +202,7 @@ describe('deepEnrich (activity core)', () => {
         })
         .from(t.claimEvidence)
         .where(eq(t.claimEvidence.claimId, claimId))
-        .orderBy(t.claimEvidence.evidenceId)
+        .orderBy(t.claimEvidence.claimEvidenceId)
 
     const afterFast = await snapshot()
     expect(afterFast.length).toBeGreaterThan(0)
@@ -214,11 +217,11 @@ describe('deepEnrich (activity core)', () => {
     expect(afterFirstDeep.length).toBeGreaterThan(afterFast.length)
     // ...sem tocar nas evidências do fast path.
     for (const before of afterFast) {
-      const after = afterFirstDeep.find((r) => r.evidenceId === before.evidenceId)
-      expect(after, `evidence ${before.evidenceId} deve permanecer intacta`).toEqual(before)
+      const after = afterFirstDeep.find((r) => r.claimEvidenceId === before.claimEvidenceId)
+      expect(after, `evidence ${before.claimEvidenceId} deve permanecer intacta`).toEqual(before)
     }
     // Nunca há evidência duplicada (ids únicos).
-    expect(new Set(afterFirstDeep.map((r) => r.evidenceId)).size).toBe(afterFirstDeep.length)
+    expect(new Set(afterFirstDeep.map((r) => r.claimEvidenceId)).size).toBe(afterFirstDeep.length)
 
     // Replay: nova execução não muta nem duplica as evidências já persistidas.
     await deepEnrich(
@@ -227,5 +230,158 @@ describe('deepEnrich (activity core)', () => {
     )
     const afterReplay = await snapshot()
     expect(afterReplay).toEqual(afterFirstDeep)
+  })
+
+  // FASE 7 — validação legada (signals já persistidos, sem claim) recebe claim e
+  // claim_evidence para TODOS os seus signals, de forma idempotente.
+  it('Fase 7 — cria claim e claim_evidence para validação sem claim (legado)', async () => {
+    const created = await runFastPath(
+      fastPathDeps,
+      { tenantId: tenant, apiKeyId: 'test' },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'auto',
+        idempotencyKey: 'fase7-legacy',
+      },
+    )
+    const claimRows = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    const oldClaimId = claimRows[0]?.claimId
+    if (oldClaimId === undefined) throw new Error('claim nao criado pelo fast path')
+
+    // Simula uma validação criada ANTES do modelo claim.
+    await adminPool.db.delete(t.claimEvidence).where(eq(t.claimEvidence.claimId, oldClaimId))
+    await adminPool.db.delete(t.claim).where(eq(t.claim.claimId, oldClaimId))
+
+    const prior = await adminPool.db
+      .select({ signalId: t.signal.signalId })
+      .from(t.signal)
+      .where(eq(t.signal.validationId, created.validationId))
+    expect(prior.length).toBeGreaterThan(0)
+
+    await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { tenantId: tenant, validationId: created.validationId },
+    )
+
+    const recreated = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    expect(recreated.length).toBe(1)
+    const newClaimId = recreated[0]?.claimId
+    if (newClaimId === undefined) throw new Error('claim nao recriado')
+
+    const allSignals = await adminPool.db
+      .select({ signalId: t.signal.signalId })
+      .from(t.signal)
+      .where(eq(t.signal.validationId, created.validationId))
+    const evidences = await adminPool.db
+      .select({ signalId: t.claimEvidence.signalId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, newClaimId))
+    const covered = new Set(evidences.map((row) => row.signalId))
+    for (const s of allSignals) expect(covered.has(s.signalId)).toBe(true)
+
+    // Replay não duplica observações.
+    await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { tenantId: tenant, validationId: created.validationId },
+    )
+    const after = await adminPool.db
+      .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, newClaimId))
+    expect(after.length).toBe(evidences.length)
+  })
+
+  // FASE 19 — claim_evidence pode referenciar um artefato material (`evidence`)
+  // de forma OPCIONAL, mas nunca um id inexistente (integridade referencial).
+  it('Fase 19 — claim_evidence vincula artefato material opcional (evidence)', async () => {
+    const created = await runFastPath(
+      fastPathDeps,
+      { tenantId: tenant, apiKeyId: 'test' },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'fast',
+        idempotencyKey: 'fase19-material',
+      },
+    )
+    const claimRows = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    const claimId = claimRows[0]?.claimId
+    if (claimId === undefined) throw new Error('claim row missing')
+
+    // Fast path (T0) não produz artefato material → evidence_id nulo.
+    const fastEvidence = await adminPool.db
+      .select({ evidenceId: t.claimEvidence.evidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimId))
+    expect(fastEvidence.length).toBeGreaterThan(0)
+    expect(fastEvidence.every((e) => e.evidenceId === null)).toBe(true)
+
+    const materialId = randomUUID()
+    await adminPool.db.insert(t.evidence).values({
+      evidenceId: materialId,
+      kind: 'image',
+      provider: 'street_view',
+      s3Uri: 's3://comprova-evidence/probe.jpg',
+      sha256: Buffer.alloc(32),
+      capturedAt: new Date(),
+      retentionUntil: new Date(Date.now() + 86_400_000),
+    })
+    const linkedId = randomUUID()
+    await adminPool.db.insert(t.claimEvidence).values({
+      claimEvidenceId: linkedId,
+      tenantId: tenant,
+      claimId,
+      signalId: null,
+      evidenceId: materialId,
+      checker: 'street_view_vlm',
+      checkerVersion: '1.0.0',
+      stance: 'supports',
+      strength: 0.8,
+      confidence: 0.9,
+      source: 'street_view',
+      observedAt: new Date(),
+      ttlSeconds: 3600,
+      expiresAt: new Date(Date.now() + 3_600_000),
+      detail: {},
+    })
+    const readBack = await adminPool.db
+      .select({ evidenceId: t.claimEvidence.evidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimEvidenceId, linkedId))
+    expect(readBack[0]?.evidenceId).toBe(materialId)
+
+    // FK garante que não há referência órfã a artefato inexistente.
+    await expect(
+      adminPool.db.insert(t.claimEvidence).values({
+        claimEvidenceId: randomUUID(),
+        tenantId: tenant,
+        claimId,
+        evidenceId: randomUUID(),
+        checker: 'probe',
+        checkerVersion: '1.0.0',
+        stance: 'unknown',
+        strength: 0,
+        confidence: 1,
+        source: 'test',
+        observedAt: new Date(),
+        ttlSeconds: 60,
+        expiresAt: new Date(Date.now() + 60_000),
+        detail: {},
+      }),
+    ).rejects.toThrow()
   })
 })

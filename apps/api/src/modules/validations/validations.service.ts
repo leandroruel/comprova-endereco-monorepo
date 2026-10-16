@@ -1,7 +1,24 @@
-import { eq, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { eq, sql, withTenant } from '@comprova/db'
+import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { encryptSecret } from '../../shared/secretbox.js'
+
+const evidenceSummaryForClaim = async (
+  tx: DbTx,
+  claimId: string,
+): Promise<{ supporting: number; contradicting: number; unknown: number }> => {
+  const rows = await tx
+    .select({ stance: t.claimEvidence.stance, count: sql<number>`count(*)::int` })
+    .from(t.claimEvidence)
+    .where(eq(t.claimEvidence.claimId, claimId))
+    .groupBy(t.claimEvidence.stance)
+  const byStance = new Map(rows.map((row) => [row.stance, row.count]))
+  return {
+    supporting: byStance.get('supports') ?? 0,
+    contradicting: byStance.get('contradicts') ?? 0,
+    unknown: byStance.get('unknown') ?? 0,
+  }
+}
 
 export const getValidationDetails = async (db: Db, tenantId: string, validationId: string) =>
   withTenant(db, tenantId, async (tx) => {
@@ -39,7 +56,25 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
       .from(t.signal)
       .where(eq(t.signal.validationId, validationId))
       .orderBy(t.signal.createdAt)
-    return { validation, signals }
+
+    // O claim e o resumo de observações tornam explícita a nova semântica
+    // (validation → claim → claim_evidence) também na leitura (GET).
+    const claimRows = await tx
+      .select({
+        claimId: t.claim.claimId,
+        type: t.claim.type,
+        subjectType: t.claim.subjectType,
+        subjectId: t.claim.subjectId,
+        targetType: t.claim.targetType,
+        addressId: t.claim.addressId,
+      })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, validationId))
+      .limit(1)
+    const claim = claimRows[0] ?? null
+    const evidenceSummary = claim === null ? null : await evidenceSummaryForClaim(tx, claim.claimId)
+
+    return { validation, signals, claim, evidenceSummary }
   })
 
 export const setWorkflowId = async (

@@ -1,4 +1,4 @@
-import { and, eq } from '@comprova/db'
+import { and, eq, sql } from '@comprova/db'
 import { createHash, createHmac, randomUUID } from 'node:crypto'
 import {
   addressKeys,
@@ -236,6 +236,49 @@ const runCheckers = async (
     return [...priorSignals, ...produced]
   }, Promise.resolve([]))
 
+const loadClaimSummary = async (
+  db: Db,
+  tenantId: string,
+  validationId: string,
+): Promise<{
+  readonly claim: FastPathResult['claim']
+  readonly evidenceSummary: FastPathResult['evidenceSummary']
+}> =>
+  withTenant(db, tenantId, async (tx) => {
+    const claimRows = await tx
+      .select({
+        claimId: t.claim.claimId,
+        type: t.claim.type,
+        subjectType: t.claim.subjectType,
+        subjectId: t.claim.subjectId,
+        addressId: t.claim.addressId,
+      })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, validationId))
+      .limit(1)
+    const claimRow = claimRows[0]
+    if (claimRow === undefined) return { claim: undefined, evidenceSummary: undefined }
+    const countRows = await tx
+      .select({ stance: t.claimEvidence.stance, count: sql<number>`count(*)::int` })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimRow.claimId))
+      .groupBy(t.claimEvidence.stance)
+    const byStance = new Map(countRows.map((row) => [row.stance, row.count]))
+    return {
+      claim: {
+        id: claimRow.claimId,
+        type: claimRow.type,
+        subject: { type: claimRow.subjectType, refId: claimRow.subjectId },
+        target: { type: 'address', refId: claimRow.addressId },
+      },
+      evidenceSummary: {
+        supporting: byStance.get('supports') ?? 0,
+        contradicting: byStance.get('contradicts') ?? 0,
+        unknown: byStance.get('unknown') ?? 0,
+      },
+    }
+  })
+
 const loadValidationForReplay = async (
   db: Db,
   tenantId: string,
@@ -309,6 +352,7 @@ const loadValidationForReplay = async (
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
     explanationDetail: explanationDetailFromStored(row.explanation),
+    ...(await loadClaimSummary(db, tenantId, validationId)),
     idempotentReplay: true,
   }
 }
@@ -572,24 +616,28 @@ export const runFastPath = async (
       expiresAt,
     })
 
-    if (signals.length > 0) {
-      await tx.insert(t.claim).values({
-        claimId,
-        tenantId: tenant.tenantId,
-        validationId,
-        subjectId,
-        addressId,
-        type: claim.type,
-        subjectType: claim.subject.type,
-        targetType: 'address',
-      })
+    // O claim é sempre criado junto da validation: nunca deve existir uma
+    // validation persistida sem o seu claim (ver ADR-0016).
+    await tx.insert(t.claim).values({
+      claimId,
+      tenantId: tenant.tenantId,
+      validationId,
+      subjectId,
+      addressId,
+      type: claim.type,
+      subjectType: claim.subject.type,
+      targetType: 'address',
+    })
 
+    if (signals.length > 0) {
       await tx.insert(t.claimEvidence).values(
         evidenceList.map((e) => ({
-          evidenceId: e.id,
+          claimEvidenceId: e.id,
           tenantId: tenant.tenantId,
           claimId: e.claimId,
           signalId: e.signalId,
+          // Fast path (T0) não produz artefato material; `evidence_id` fica nulo.
+          evidenceId: null,
           checker: e.checker,
           checkerVersion: e.checkerVersion,
           stance: evidenceStanceOf(e.stance),
@@ -602,9 +650,7 @@ export const runFastPath = async (
           detail: e.detail,
         })),
       )
-    }
 
-    if (signals.length > 0) {
       await tx.insert(t.signal).values(
         signals.map((s, index) => ({
           signalId: signalIds[index] ?? randomUUID(),
@@ -618,7 +664,9 @@ export const runFastPath = async (
           observedAt: new Date(s.observedAt),
           ttlSeconds: s.ttlSeconds,
           detail: s.detail,
-          evidenceId: evidenceList[index]?.id ?? null,
+          // `signal.evidence_id` referencia SOMENTE artefato material (`evidence`).
+          // O vínculo signal↔observação é `claim_evidence.signal_id`.
+          evidenceId: null,
         })),
       )
     }
@@ -630,6 +678,8 @@ export const runFastPath = async (
       payload: {
         validation_id: validationId,
         tenant_id: tenant.tenantId,
+        claim_id: claimId,
+        claim_type: claim.type,
         status,
         verdict: decision.verdict,
       },

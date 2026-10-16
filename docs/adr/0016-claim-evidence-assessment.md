@@ -32,16 +32,25 @@ Evoluir o domínio para:
 validation → claim → evidence → assessment → verdict
 ```
 
-conceitos:
+conceitos e nomes canônicos (evitando a confusão `evidence` × `claim_evidence`):
 
+- **signal** — observação **bruta** produzida por um checker durante uma execução.
+  Persistida em `signal`; por si só não está vinculada a um claim.
 - **claim** — a afirmação que se tenta estabelecer (ex.: "a organização X possui o
-  endereço registrado Y"). Possui identidade própria (`claim_id` opaco), sujeito e
-  alvo referenciados por UUID internos (nunca CPF/CNPJ em claro).
-- **evidence** — representação persistente e rastreável de uma observação de
-  checker a favor/contra um claim: checker + versão + fonte + stance + força +
-  confiança + observação + TTL + detalhe.
-- **assessment** — a conclusão de avaliar o conjunto de evidências contra uma
-  policy (veredito, score, confiança, explicação).
+  endereço registrado Y"). Identidade opaca (`claim_id`), sujeito (`subject_id`) e
+  alvo (`address_id`) referenciados por UUID internos (nunca CPF/CNPJ em claro).
+- **claim_evidence** — **observação persistida de um checker, vinculada a um claim**
+  (checker + versão + fonte + stance + força + confiança + observação + TTL +
+  detalhe). É o elo `claim → claim_evidence → signal`. O identificador próprio é
+  `claim_evidence_id` (o nome `evidence_id` é reservado ao artefato material).
+- **evidence** — **artefato material** capturado de uma fonte (documento, imagem,
+  snapshot, payload externo): `kind`, `provider`, `s3_uri`, `sha256`, retenção. É
+  **diferente** de `claim_evidence`: um `country_check` produz `claim_evidence`
+  **sem** artefato; um `street_view_vlm` pode produzir `claim_evidence` **com**
+  `evidence_id`. O vínculo `claim_evidence.evidence_id → evidence` é **opcional**.
+- **assessment** — a conclusão de avaliar o conjunto de `claim_evidence` de um
+  claim contra uma policy (veredito, score, confiança, explicação). Não possui
+  tabela própria: `validation` persiste o resultado do assessment.
 
 ### Tipos de claim (fase 1)
 
@@ -53,18 +62,29 @@ conceitos:
 Combinações inválidas são bloqueadas por `isValidClaimCombination` (matriz
 `VALID_CLAIM_SUBJECT_MATRIX`), não aceitas silenciosamente.
 
-### Banco (migração 0022)
+### Banco (migrações 0022 e 0023)
 
 - `claim` (RLS FORCE, UNIQUE `(validation_id, type)`, FK `subject_id → subject`,
   `address_id → canonical_address`; sem FK para `validation` — PK composta por
   partição; a exclusão é feita explicitamente na rota de erasure).
-- `claim_evidence` (RLS FORCE, FK `claim_id → claim ON DELETE CASCADE`, índices por
-  `claim_id` e `(tenant_id, claim_id)`). RLS endurecida: `WITH CHECK` exige que o
-  claim pai pertença ao mesmo tenant — tenant A não insere evidência em claim do
-  tenant B.
-- `signal` **não foi removido**. A relação hoje é `evidence.signal_id` (nullable)
-  — cada signal pode ser rastreado a partir da evidência; evidência sem signal é
-  permitida explicitamente para o futuro (evidências não derivadas de checker).
+- `claim_evidence` (RLS FORCE, PK `claim_evidence_id`, FK `claim_id → claim
+ON DELETE CASCADE`, FK `evidence_id → evidence` **opcional**, índices por
+  `claim_id`, `(tenant_id, claim_id)` e `evidence_id` parcial). RLS endurecida:
+  `WITH CHECK` exige que o claim pai pertença ao mesmo tenant — tenant A não insere
+  evidência em claim do tenant B.
+- **Migração 0023 — desambiguação `evidence` × `claim_evidence`.** O PK de
+  `claim_evidence` chamava-se `evidence_id`, colidindo com `evidence.evidence_id`
+  (artefato material) e tornando ambíguo `signal.evidence_id`. A 0023 renomeia o PK
+  para `claim_evidence_id`, adiciona `claim_evidence.evidence_id` (FK opcional →
+  `evidence`) e adiciona a FK `claim.address_id → canonical_address` (garantindo o
+  alvo do claim). O `signal.evidence_id` passa a ter **uma única semântica**:
+  referencia apenas artefato material (`evidence`); no fast path (T0) é **nulo**.
+- `signal` **não foi removido**. A relação canônica `signal → claim_evidence` é
+  feita por `claim_evidence.signal_id` (nullable) — o `signal` é a observação bruta
+  que origina a `claim_evidence`; `claim_evidence` sem `signal` é permitida
+  explicitamente para o futuro (observações não derivadas de checker). Essa coluna
+  **não** tem FK: o PK de `signal` é composto `(signal_id, created_at)` e não há
+  UNIQUE apenas em `signal_id`; a ligação é lógica, garantida pela pipeline.
 - Stance de evidência **persistida**: `supports | contradicts | unknown`. O `neutral`
   dos signals mapeia para `unknown` no momento da gravação (observação sem posição).
   Em memória, porém, a evidência preserva o stance fiel do signal (inclui `neutral`)
@@ -118,7 +138,8 @@ teste falhar.
 
 ### DTO
 
-`POST /v1/validations` mantém todos os campos e adiciona:
+Tanto `POST /v1/validations` quanto `GET /v1/validations/:id` (e o replay
+idempotente) mantêm todos os campos e adicionam, de forma aditiva e opcional:
 
 ```json
 {
@@ -182,18 +203,21 @@ Decisões:
 - **reusa** o claim criado pelo fast path (ou cria um, se a validação é legada
   ou veio de fora do fast path); a unicidade `(validation_id, type)` evita
   duplicatas concorrentes;
-- grava `claim_evidence` para cada sinal T1/T2 novo, ligando
+- garante, de forma idempotente, uma `claim_evidence` por **signal** da validação:
+  anexa as novas (T1/T2) e **faz backfill** das pré-existentes ainda sem observação
+  (validações legadas, criadas antes do modelo), ligando
   `claim_evidence.signal_id → signal.signal_id` (rastreabilidade
-  claim → evidence → signal → checker);
+  claim → claim_evidence → signal → checker);
 - deduplica por `checker@version` (mesma regra dos signals), então replay não
   duplica evidências;
 - reconstrói `explanation_detail` a partir de **todas** as `claim_evidence` do
   claim (T0 + T1/T2).
 
-Nota: `signal.evidence_id` continua com semântica própria do deep path (aponta
-para a tabela S3 `evidence` no caso VLM); a ligação de evidência de claim usa a
-direção inversa (`claim_evidence.signal_id`). Unificar essa semântica fica para
-uma etapa futura (exigiria migração).
+Nota: `signal.evidence_id` referencia **apenas** artefato material (`evidence`) —
+no caso VLM, aponta para a imagem/snapshot em S3; no fast path (T0) é nulo. A
+ligação observação↔claim é sempre `claim_evidence.signal_id`; a FK
+`claim_evidence.evidence_id` propaga o artefato material do checker (quando
+existe). Ambas as semânticas foram desambiguadas na migração 0023.
 
 ### LGPD
 
@@ -212,7 +236,7 @@ snapshot das linhas de `claim_evidence`:
    (cada linha pré-existente permanece byte-a-byte idêntica);
 2. **replay** (nova execução) não muta nem duplica as evidências já persistidas
    (dedup por `checker@version` → nenhuma inserção);
-3. nunca há `evidence_id` duplicado.
+3. nunca há `claim_evidence_id` duplicado.
 
 A imutabilidade é pré-requisito para a camada de credenciais (uma credencial não
 pode referenciar evidência mutável).
@@ -260,15 +284,13 @@ embrulho sem conteúdo.
 Validation
     │
     ▼
-Subject
-    │
-    ▼
-Claim ──────────────────────────┐
-    │                           │
-    ▼                           ▼
-Evidence (Receita)      Evidence (CNEFE/CEP/cotenancy...)
-    │                           │
-    └───────────┬───────────────┘
+Claim ────────────────────────────┐
+    │                             │
+    ▼                             ▼
+Claim Evidence (Receita)   Claim Evidence (CNEFE/CEP/cotenancy...)
+    │                             │
+    │                             ├──(opcional)─▶ Evidence (artefato material/S3)
+    └───────────┬─────────────────┘
                 ▼
             Assessment (validation: policy + score + confidence + verdict)
                 │

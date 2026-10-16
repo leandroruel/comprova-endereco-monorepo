@@ -148,10 +148,12 @@ describe('claim (CNPJ): business_registered_address', () => {
       .where(eq(t.signal.validationId, body.validation_id))
     expect(signalRows.length).toBe(evidences.length)
     for (const s of signalRows) {
-      const match = evidences.find((e) => e.evidenceId === s.evidenceId)
+      // Fast path (T0) não produz artefato material (`evidence`); o vínculo
+      // canônico signal↔observação é `claim_evidence.signal_id`.
+      expect(s.evidenceId).toBeNull()
+      const match = evidences.find((e) => e.signalId === s.signalId)
       expect(match).toBeDefined()
       expect(match?.checker).toBe(s.checkerId)
-      expect(match?.signalId).toBe(s.signalId)
     }
   })
 
@@ -198,6 +200,9 @@ describe('idempotencia de claims e evidencias', () => {
     expect(first.statusCode).toBe(200)
     expect(second.statusCode).toBe(200)
     expect(second.json().validation_id).toBe(first.json().validation_id)
+    // O replay idempotente devolve a MESMA semântica (claim + resumo) sem recriar nada.
+    expect(second.json().claim).toEqual(first.json().claim)
+    expect(second.json().evidence_summary).toEqual(first.json().evidence_summary)
 
     const claims = await claimRowsFor(first.json().validation_id)
     expect(claims.length).toBe(1)
@@ -227,6 +232,50 @@ describe('idempotencia de claims e evidencias', () => {
   })
 })
 
+describe('GET validation expoe claim e resumo de evidencias', () => {
+  it('retorna claim e evidence_summary consistentes com o POST', async () => {
+    const created = await postCnpj()
+    expect(created.statusCode).toBe(200)
+    const post = created.json()
+
+    const got = await app.inject({
+      method: 'GET',
+      url: `/v1/validations/${post.validation_id}`,
+      headers: authJson,
+    })
+    expect(got.statusCode).toBe(200)
+    const read = got.json()
+
+    expect(read.claim).toEqual(post.claim)
+    expect(read.evidence_summary).toEqual(post.evidence_summary)
+    expect(
+      read.evidence_summary.supporting + read.evidence_summary.contradicting + read.evidence_summary.unknown,
+    ).toBe(read.signals.length)
+  })
+})
+
+describe('webhook/outbox expoe o claim de forma compatível', () => {
+  it('evento de validation inclui claim_id e claim_type junto dos campos existentes', async () => {
+    const res = await postCnpj()
+    const body = res.json()
+
+    const rows = await adminPool.db
+      .select({ payload: t.outbox.payload })
+      .from(t.outbox)
+      .where(eq(t.outbox.aggregateId, body.validation_id))
+
+    const payload = rows
+      .map((row) => row.payload as Record<string, unknown>)
+      .find((p) => p.claim_id !== undefined)
+    expect(payload).toBeDefined()
+    expect(payload?.claim_id).toBe(body.claim.id)
+    expect(payload?.claim_type).toBe(body.claim.type)
+    // Campos pré-existentes permanecem (compatibilidade).
+    expect(payload?.validation_id).toBe(body.validation_id)
+    expect(payload?.verdict).toBe(body.verdict)
+  })
+})
+
 describe('explicacao estruturada (assessment explanation)', () => {
   it('expoe explanation_detail com code, message e contagens consistentes', async () => {
     const res = await postCnpj()
@@ -249,9 +298,9 @@ describe('explicacao estruturada (assessment explanation)', () => {
     if (claimRow === undefined) throw new Error('claim row missing')
     const evidences = await evidenceRowsFor(claimRow.claimId)
 
-    const supporting = new Set(evidences.filter((e) => e.stance === 'supports').map((e) => e.evidenceId))
+    const supporting = new Set(evidences.filter((e) => e.stance === 'supports').map((e) => e.claimEvidenceId))
     const contradicting = new Set(
-      evidences.filter((e) => e.stance === 'contradicts').map((e) => e.evidenceId),
+      evidences.filter((e) => e.stance === 'contradicts').map((e) => e.claimEvidenceId),
     )
     for (const id of body.explanation_detail.supporting_evidence) {
       expect(supporting.has(id)).toBe(true)
@@ -375,7 +424,7 @@ describe('RLS: isolamento de tenant em claim e evidencia', () => {
     await expect(
       withTenant(appRolePool.db, rlsTenantA, (tx) =>
         tx.insert(t.claimEvidence).values({
-          evidenceId: randomUUID(),
+          claimEvidenceId: randomUUID(),
           tenantId: rlsTenantA,
           claimId,
           checker: 'probe',

@@ -21,6 +21,19 @@ export interface AssessmentExplanationDto {
   contradicting_evidence: string[]
 }
 
+export interface ClaimDto {
+  id: string
+  type: 'business_registered_address' | 'address_exists'
+  subject: { type: 'organization' | 'person'; id: string }
+  target: { type: 'address'; id: string | null }
+}
+
+export interface EvidenceSummaryDto {
+  supporting: number
+  contradicting: number
+  unknown: number
+}
+
 export interface ValidationDto {
   validation_id: string
   status: string
@@ -30,6 +43,8 @@ export interface ValidationDto {
   policy_version: string | null
   address: { building_key: string; country: string; uf: string | null; geo_precision: string } | null
   signals: ValidationSignal[]
+  claim?: ClaimDto | null
+  evidence_summary?: EvidenceSummaryDto | null
   explanation: string | null
   explanation_detail?: AssessmentExplanationDto | null
   created_at: string

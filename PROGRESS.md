@@ -2,6 +2,18 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Revisão Claim → Claim Evidence — correções e desambiguação (2026-10-16)
+
+- **Desambiguação `evidence` × `claim_evidence`** (migração `0023_claim_evidence_material.sql`): o PK de `claim_evidence` chamava-se `evidence_id`, colidindo com o artefato material `evidence`. Renomeado para `claim_evidence_id`; adicionado `claim_evidence.evidence_id` (FK **opcional** → `evidence`) e a FK `claim.address_id → canonical_address`. pgfence: `[SAFE]`.
+- **`signal.evidence_id`** — semântica única: referencia **só** artefato material (`evidence`); o fast path (T0) grava **nulo** (antes gravava, por engano, o id de `claim_evidence`). O vínculo canônico `signal → claim_evidence` é `claim_evidence.signal_id`.
+- **Fase 7 — paridade signal↔claim_evidence**: o deep path garante 1 `claim_evidence` por signal da validação, incluindo **backfill** das pré-existentes (validações legadas) e novos T1/T2 — idempotente (replay não duplica).
+- **Fase 10 — claim sempre criado**: o fast path não deixa mais `validation` sem claim; a idempotência reusa o existente.
+- **Fase 15 — GET expõe a nova semântica**: `GET /v1/validations/:id` e o replay idempotente passam a retornar `claim` e `evidence_summary` (antes só o POST).
+- **Fase 16 — webhook/outbox**: o payload do evento de validação ganha `claim_id` e `claim_type` de forma aditiva (campos existentes preservados).
+- **Fase 26 — building key**: documentação alinhada à fórmula canônica (`sha256(key_version | country_code | uf | cep | logradouro_norm | numero_norm)`, implementação única em `packages/core`).
+- **Benchmark (FASE 23)** — fast path mantém o SLO (p95 < 120ms) no ponto de operação: **150 rps → p50 16ms / p95 ~23ms / p99 ~31ms, 100% checks**. Detalhes e ressalvas em `docs/load-report.md`.
+- **Testes** — +4 (GET claim/summary, backfill legado, vínculo material opcional, payload de webhook) + asserções de replay. Suíte: **138/138**.
+
 ## Fase 11 + 14 — Diferencial OLD vs NEW e imutabilidade histórica (2026-10-16)
 
 - **Fase 11 — teste diferencial ponta-a-ponta** (`apps/api/src/golden.int.test.ts`): para cada classe do dataset dourado, lê a validação persistida (caminho NEW, `evaluateClaim`) e **recomputa** o caminho OLD (`weightedScore` + `decide`) a partir dos `signal` brutos relidos do banco; compara veredito, score (`tanh`), confidence e explicação. Como o `signal` preserva `neutral`, qualquer colapso indevido de stance quebra o teste.
@@ -29,7 +41,7 @@ Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 - **`deepEnrich`** agora reusa o claim do fast path (ou cria, se ausente) e grava `claim_evidence` por sinal T1/T2, ligando `signal_id`.
 - **Idempotência** — dedup por `checker@version`; replay não duplica evidências.
 - **`explanation_detail`** — deep path preenche igual ao fast path (reconstruído de todas as evidências do claim).
-- **Nota** — `signal.evidence_id` mantém semântica S3 no VLM (ligação de claim usa `claim_evidence.signal_id`); unificação fica para depois.
+- **Nota** — `signal.evidence_id` referencia apenas artefato material (S3/VLM); a ligação observação↔claim é `claim_evidence.signal_id` (desambiguado na migração 0023).
 - **Testes** — `f3.int.test.ts` +1 (reuso de claim + ligação de evidências T1) e asserções no caso ambíguo. Suíte: 127/127.
 
 ## Dashboard (apps/dashboard)
@@ -123,7 +135,7 @@ pnpm install
 pnpm db:migrate
 pnpm db:seed         # cria API key dev
 pnpm dev             # levanta tudo (API :3000, dashboard :5173, worker, ingestor)
-pnpm test            # 134/134 testes
+pnpm test            # 138/138 testes
 pnpm db:fence        # pgfence gate de migrações
 ```
 

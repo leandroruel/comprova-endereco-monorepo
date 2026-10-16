@@ -271,11 +271,12 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
     })
     const stillPartial = decision.verdict === 'INSUFFICIENT_EVIDENCE' || decision.confidence < 0.55
 
+    let freshSignalIds: string[] = []
     if (freshSignals.length > 0) {
-      const signalIds = freshSignals.map(() => randomUUID())
+      freshSignalIds = freshSignals.map(() => randomUUID())
       await tx.insert(t.signal).values(
         freshSignals.map((s, index) => ({
-          signalId: signalIds[index] ?? randomUUID(),
+          signalId: freshSignalIds[index] ?? randomUUID(),
           validationId: input.validationId,
           checkerId: s.checkerId,
           checkerVersion: s.checkerVersion,
@@ -289,27 +290,6 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
           evidenceId: s.evidenceId ?? null,
         })),
       )
-
-      if (claimId !== null) {
-        await tx.insert(t.claimEvidence).values(
-          freshSignals.map((s, index) => ({
-            evidenceId: randomUUID(),
-            tenantId: input.tenantId,
-            claimId,
-            signalId: signalIds[index] ?? null,
-            checker: s.checkerId,
-            checkerVersion: s.checkerVersion,
-            stance: s.stance === 'neutral' ? ('unknown' as const) : s.stance,
-            strength: s.strength,
-            confidence: s.confidence,
-            source: s.source,
-            observedAt: new Date(s.observedAt),
-            ttlSeconds: s.ttlSeconds,
-            expiresAt: new Date(Date.parse(s.observedAt) + s.ttlSeconds * 1000),
-            detail: s.detail,
-          })),
-        )
-      }
 
       const addressId = validation.addressId
       if (addressId !== null) {
@@ -333,16 +313,77 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       }
     }
 
+    // FASE 7: toda observação (signal) de uma validation com claim deve ter um
+    // `claim_evidence` correspondente. O fast path já cobre os T0; aqui garantimos
+    // idempotentemente o vínculo dos T0 pré-existentes (validações legadas, criadas
+    // antes do claim existir) e dos novos T1/T2, sem duplicar linhas já persistidas.
+    if (claimId !== null) {
+      const existingEvidenceSignalIds = new Set(
+        (
+          await tx
+            .select({ signalId: t.claimEvidence.signalId })
+            .from(t.claimEvidence)
+            .where(eq(t.claimEvidence.claimId, claimId))
+        )
+          .map((row) => row.signalId)
+          .filter((id): id is string => id !== null),
+      )
+
+      const priorToBackfill = priorSignals.filter((row) => !existingEvidenceSignalIds.has(row.signalId))
+
+      const evidenceValues = [
+        ...priorToBackfill.map((row) => ({
+          claimEvidenceId: randomUUID(),
+          tenantId: input.tenantId,
+          claimId,
+          signalId: row.signalId,
+          // Vínculo opcional com artefato material; nulo para T0 sem arquivo.
+          evidenceId: row.evidenceId,
+          checker: row.checkerId,
+          checkerVersion: row.checkerVersion,
+          stance: row.stance === 'neutral' ? ('unknown' as const) : row.stance,
+          strength: row.strength,
+          confidence: row.confidence,
+          source: row.source,
+          observedAt: row.observedAt,
+          ttlSeconds: row.ttlSeconds,
+          expiresAt: new Date(row.observedAt.getTime() + row.ttlSeconds * 1000),
+          detail: row.detail,
+        })),
+        ...freshSignals.map((s, index) => ({
+          claimEvidenceId: randomUUID(),
+          tenantId: input.tenantId,
+          claimId,
+          signalId: freshSignalIds[index] ?? null,
+          evidenceId: s.evidenceId ?? null,
+          checker: s.checkerId,
+          checkerVersion: s.checkerVersion,
+          stance: s.stance === 'neutral' ? ('unknown' as const) : s.stance,
+          strength: s.strength,
+          confidence: s.confidence,
+          source: s.source,
+          observedAt: new Date(s.observedAt),
+          ttlSeconds: s.ttlSeconds,
+          expiresAt: new Date(Date.parse(s.observedAt) + s.ttlSeconds * 1000),
+          detail: s.detail,
+        })),
+      ]
+
+      if (evidenceValues.length > 0) {
+        await tx.insert(t.claimEvidence).values(evidenceValues)
+      }
+    }
+
     const evidenceRows =
       claimId === null
         ? []
         : await tx
-            .select({ evidenceId: t.claimEvidence.evidenceId, stance: t.claimEvidence.stance })
+            .select({ id: t.claimEvidence.claimEvidenceId, stance: t.claimEvidence.stance })
             .from(t.claimEvidence)
             .where(eq(t.claimEvidence.claimId, claimId))
     const explanationDetail = buildAssessmentExplanation(
       decision,
-      evidenceRows.map((row) => ({ id: row.evidenceId, stance: row.stance })),
+      evidenceRows.map((row) => ({ id: row.id, stance: row.stance })),
     )
 
     await tx
@@ -369,6 +410,8 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       payload: {
         tenant_id: input.tenantId,
         validation_id: input.validationId,
+        claim_id: claimId,
+        claim_type: claimType,
         verdict: decision.verdict,
       },
     })

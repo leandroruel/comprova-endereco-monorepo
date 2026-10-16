@@ -425,7 +425,7 @@ export const claim = pgTable('claim', {
   subjectId: uuid('subject_id')
     .notNull()
     .references(() => subject.subjectId),
-  addressId: uuid('address_id'),
+  addressId: uuid('address_id').references(() => canonicalAddress.addressId),
   type: claimTypeEnum('type').notNull(),
   subjectType: claimSubjectTypeEnum('subject_type').notNull(),
   targetType: claimTargetTypeEnum('target_type').notNull(),
@@ -433,7 +433,7 @@ export const claim = pgTable('claim', {
 })
 
 export const claimEvidence = pgTable('claim_evidence', {
-  evidenceId: uuid('evidence_id').primaryKey(),
+  claimEvidenceId: uuid('claim_evidence_id').primaryKey(),
   tenantId: uuid('tenant_id')
     .notNull()
     .references(() => tenant.tenantId),
@@ -441,6 +441,8 @@ export const claimEvidence = pgTable('claim_evidence', {
     .notNull()
     .references(() => claim.claimId),
   signalId: uuid('signal_id'),
+  /** Artefato material associado (nullable: observações sem arquivo/documento). */
+  evidenceId: uuid('evidence_id').references(() => evidence.evidenceId),
   checker: text('checker').notNull(),
   checkerVersion: text('checker_version').notNull(),
   stance: evidenceStanceEnum('stance').notNull(),

@@ -5,6 +5,19 @@ export interface AssessmentExplanationDto {
   readonly contradicting_evidence: readonly string[]
 }
 
+export interface ClaimDto {
+  readonly id: string
+  readonly type: 'business_registered_address' | 'address_exists'
+  readonly subject: { readonly type: 'organization' | 'person'; readonly id: string }
+  readonly target: { readonly type: 'address'; readonly id: string | null }
+}
+
+export interface EvidenceSummaryDto {
+  readonly supporting: number
+  readonly contradicting: number
+  readonly unknown: number
+}
+
 export interface ValidationDto {
   readonly validation_id: string
   readonly status: string
@@ -19,6 +32,8 @@ export interface ValidationDto {
     readonly geo_precision: string
   } | null
   readonly signals: ReadonlyArray<Record<string, unknown>>
+  readonly claim?: ClaimDto | null
+  readonly evidence_summary?: EvidenceSummaryDto | null
   readonly explanation: string | null
   readonly explanation_detail?: AssessmentExplanationDto | null
   readonly created_at: string

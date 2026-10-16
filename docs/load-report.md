@@ -50,7 +50,39 @@ re-execuções futuras.
 ## Como re-executar
 
 ```bash
-pnpm --filter @comprova/ingestor start -- load-tenant   # imprime API key sem rate limit
+pnpm --filter @comprova/ingestor start load-tenant      # imprime API key sem rate limit
 docker run --rm -i -e BASE_URL=http://172.17.0.1:3000 -e API_KEY=<key> -e RPS=150 \
   -e CNPJ=12345678000195 grafana/k6:latest run - < load/fast-path.js
 ```
+
+> Nota: o argumento do subcomando vai **sem** `--` (`pnpm --filter … start load-tenant`).
+> Com `--` o CLI recebe `--` como `argv[2]` e cai no comando `default` (help).
+
+## Re-execução 2026-10-16 — modelo claim/claim_evidence ativo
+
+**Ambiente**: mesmo dev local (WSL2), agora com o pipeline `claim → claim_evidence`
+em produção (a9c0dcf) e esta revisão aplicada. `turbo dev` ativo (API + dashboard +
+worker). Migração 0023 aplicada. k6 `--summary-trend-stats` com p99 explícito.
+
+|  RPS alvo | RPS real |    avg |    p50 |             p95 |    p99 | checks |
+| --------: | -------: | -----: | -----: | --------------: | -----: | -----: |
+|        40 |     40.0 | 18.8ms | 17.1ms |          32.8ms | 50.7ms |   100% |
+|       150 |    149.9 |   17ms | 16.3ms | **22.2–23.9ms** | 30.9ms |   100% |
+| 300 (sat) |    261.0 |  1.02s |  893ms |           1.87s |  1.93s |   100% |
+
+**SLO fast path (p95 < 120ms): mantido com folga no ponto de operação (150 rps)** —
+p95 ≈ 23ms, comparável ao baseline de 2026-10-14 (p95 28.7ms). p99 medido em ~31ms.
+
+Ressalvas de medição:
+
+- Ambiente compartilhado tem **alta variância e cold start**. A primeira execução de cada
+  ponto é inflada (JIT/caches frios): ex. a 1ª rodada a 150 rps deu p95 39.7ms; em regime,
+  22–24ms. Repetições 150 rps: p50 16.3/16.3ms, p95 22.2/23.9ms (estável).
+- A 300 rps o sistema satura (~261 rps reais, `dropped_iterations`); os percentis são
+  dominados por fila — comparação com o baseline (280 rps, p50 749ms) é dentro do ruído
+  e não isola efeito de código.
+- O ganho/custo do modelo `claim/claim_evidence` **não é isolável** deste baseline (o
+  relatório de 2026-10-14 é anterior ao modelo). No caminho POST, esta revisão não
+  adiciona consultas nem round-trips; o único custo novo de escrita é uma checagem de FK
+  em `claim.address_id → canonical_address` (o link material em `claim_evidence.evidence_id`
+  é nulo no fast path). Alterações de GET/replay não afetam o POST.

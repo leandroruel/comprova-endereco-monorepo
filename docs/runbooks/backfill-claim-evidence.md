@@ -21,7 +21,8 @@ precisar emitir claims sobre validações antigas.
 
 ## Se o backfill for necessário (procedure)
 
-1. Migration `0023_claim_backfill.sql` — apenas índices/constraints, sem dados.
+1. Migration `0024_claim_backfill.sql` — apenas índices/constraints, sem dados.
+   (A `0023` já foi usada para desambiguar `claim_evidence` × `evidence`.)
 2. Backfill idempotente em batches via ingestor CLI (`claims:backfill`):
    - `INSERT INTO claim ... SELECT FROM validation v WHERE NOT EXISTS (claim para v)`
      em blocos de 5.000 por `created_at`, `ON CONFLICT DO NOTHING`;
@@ -29,8 +30,12 @@ precisar emitir claims sobre validações antigas.
 SELECT FROM signal s JOIN claim c ON c.validation_id = s.validation_id
 WHERE NOT EXISTS (...)`, com checkpoint (última `created_at` processada em
      tabela `_backfill_progress`);
-   - stance `neutral → unknown`;
-   - `expires_at = observed_at + ttl_seconds`.
+   - `stance` `neutral → unknown`;
+   - `expires_at = observed_at + ttl_seconds`;
+   - `claim_evidence_id` é gerado no backfill; `evidence_id` (artefato material)
+     só é preenchido quando `signal.evidence_id` referenciar uma linha **real** de
+     `evidence` (a FK rejeita ids órfãos). Observações históricas do fast path têm
+     `signal.evidence_id` nulo.
 3. Sem locks longos: `lock_timeout=5s`, `statement_timeout` por batch, batches
    pequenos; fast path não é bloqueado (claims novos convivem com o backfill via
    `ON CONFLICT DO NOTHING`).

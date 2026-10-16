@@ -38,9 +38,18 @@ Com `VLM_ENABLED=false` (default), apenas `fast` funciona — deep/auto retornam
 
 ## Building key (identidade de endereço)
 
+Fórmula **canônica** — implementação única em `packages/core/src/address.ts`
+(`addressKeys`):
+
+```text
+building_key = sha256(key_version | country_code | uf | cep | logradouro_norm | numero_norm)
 ```
-sha256("1" | country | uf | cep | logradouro_norm | numero_norm)
-```
+
+onde `key_version = "1"` e os campos são unidos por `|` (`numero_norm` é o número
+normalizado). A **mesma** função é usada pelo **ingestor** e pelo **fast path** —
+não existe uma segunda implementação (SQL ou outra) do algoritmo. Análises de
+cardinalidade devem reproduzir exatamente este payload (não uma versão SQL
+simplificada).
 
 A fórmula usa **CEP** (não `municipioIbge`) porque:
 
