@@ -14,6 +14,13 @@ export interface ValidationSignal {
   evidence_id: string | null
 }
 
+export interface AssessmentExplanationDto {
+  code: string
+  message: string
+  supporting_evidence: string[]
+  contradicting_evidence: string[]
+}
+
 export interface ValidationDto {
   validation_id: string
   status: string
@@ -24,6 +31,7 @@ export interface ValidationDto {
   address: { building_key: string; country: string; uf: string | null; geo_precision: string } | null
   signals: ValidationSignal[]
   explanation: string | null
+  explanation_detail?: AssessmentExplanationDto | null
   created_at: string
   expires_at: string
 }

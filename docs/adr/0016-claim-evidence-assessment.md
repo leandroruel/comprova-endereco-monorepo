@@ -65,8 +65,10 @@ Combinações inválidas são bloqueadas por `isValidClaimCombination` (matriz
 - `signal` **não foi removido**. A relação hoje é `evidence.signal_id` (nullable)
   — cada signal pode ser rastreado a partir da evidência; evidência sem signal é
   permitida explicitamente para o futuro (evidências não derivadas de checker).
-- Stance de evidência: `supports | contradicts | unknown`. O `neutral` dos signals
-  mapeia para `unknown` na camada de evidência (observação sem posição).
+- Stance de evidência **persistida**: `supports | contradicts | unknown`. O `neutral`
+  dos signals mapeia para `unknown` no momento da gravação (observação sem posição).
+  Em memória, porém, a evidência preserva o stance fiel do signal (inclui `neutral`)
+  para manter o scoring idêntico — ver "Scoring semanticamente equivalente".
 
 ### Assessment sem tabela nova
 
@@ -75,12 +77,44 @@ relação é 1:1 com o assessment. **Não criamos tabela `assessment`** — `val
 claim + evidence` já representam o assessment. Duplicar seria estética arquitetural,
 não valor.
 
-### Scoring semanticamente equivalente
+### Scoring semanticamente equivalente (Fase 10)
 
-`weightedScore` agora recebe as evidências (convertidas de volta para o formato de
-signal, com `unknown → neutral`) em vez dos signals. A matemática, a policy e os
-vereditos são **idênticos** — a primeira versão da refatoração deve ser um no-op
-semântico. A invariante é garantida pelos 109 testes existentes + dataset dourado.
+O scoring passa a ser exposto por uma função explícita de domínio:
+
+```ts
+evaluateClaim({ claim, evidence, policy, now }): { score, decision }
+```
+
+`evaluateClaim` (em `packages/core/src/assessment.ts`) reconstrói os signals a
+partir das evidências e delega para `weightedScore` + `decide`. É a fronteira
+única de scoring: fast path e deep path a usam em vez de chamarem o scorer
+diretamente.
+
+Invariante de compatibilidade — **fidelidade de stance**. O `decide` distingue
+`neutral` de `unknown` (em `confidenceFrom`, um checker `neutral` conta como
+"respondeu"; `unknown` não). Para que a reconstrução seja idêntica ao pipeline de
+signals, o `stance` da evidência **em memória** espelha fielmente o do signal
+(inclui `neutral`); o colapso `neutral → unknown` acontece **apenas na
+persistência** (enum de 3 valores). Sem isso, a confidence mudaria em casos como
+`SHARED_VIRTUAL` (cotenancy `neutral`).
+
+A matemática, a policy e os vereditos são **idênticos** — a primeira versão da
+refatoração é um no-op semântico. A invariante é garantida por
+`packages/core/src/evaluate.test.ts` (OLD `weightedScore`+`decide` vs NEW
+`evaluateClaim`, inclui `neutral != unknown`), pelos testes de scoring/assessment
+existentes e pelo dataset dourado.
+
+### Teste diferencial OLD vs NEW (Fase 11)
+
+Além do teste unitário de equivalência, um teste de integração ponta-a-ponta
+(`apps/api/src/golden.int.test.ts`) prova a equivalência **classe a classe** do
+dataset dourado: para cada caso, ele lê a validação persistida (caminho NEW, via
+`evaluateClaim`) e **recomputa** o caminho OLD (`weightedScore` + `decide`) a
+partir dos `signal` brutos relidos do banco, comparando veredito, score
+(`tanh`), confidence e explicação. Como o `signal` preserva o stance de 4
+valores (`neutral` inclusive), o recompute usa exatamente a mesma entrada que o
+pipeline usou. Qualquer divergência (ex.: colapso indevido de `neutral`) faz o
+teste falhar.
 
 ### DTO
 
@@ -100,12 +134,88 @@ semântico. A invariante é garantida pelos 109 testes existentes + dataset dour
 
 Evidências completas não são expostas no DTO público (minimização de dados).
 
+### Explicação estruturada (Fase 13)
+
+`validation.explanation` (string) permanece no DTO para compatibilidade. Além
+dele, o pipeline agora constrói um `AssessmentExplanation`
+(`buildAssessmentExplanation` em `packages/core`) e persiste a forma estruturada
+no mesmo jsonb:
+
+```json
+{
+  "summary": "…",
+  "code": "CONFIRMED_COMMERCIAL",
+  "supporting_evidence": ["<evidence_id>", "…"],
+  "contradicting_evidence": ["<evidence_id>"]
+}
+```
+
+O DTO público expõe um campo adicional opcional `explanation_detail`:
+
+```json
+{
+  "explanation": "…",
+  "explanation_detail": {
+    "code": "CONFIRMED_COMMERCIAL",
+    "message": "…",
+    "supporting_evidence": ["…"],
+    "contradicting_evidence": []
+  }
+}
+```
+
+Decisões:
+
+- `code` é o veredito, para consumo programático sem parsear linguagem natural;
+- os ids referenciam `claim_evidence` (não `signal`), preservando a
+  rastreabilidade evidence → claim;
+- `explanation` (string) nunca é removido — a mudança é aditiva;
+- o **deep path** agora também cria/reusa o claim e grava `claim_evidence` por
+  sinal T1/T2, então preenche `explanation_detail` igual ao fast path
+  (ver "Deep path" abaixo).
+
+### Deep path
+
+`deepEnrich` passou a completar a trilha claim/evidence das validações
+`deep`/`auto`:
+
+- **reusa** o claim criado pelo fast path (ou cria um, se a validação é legada
+  ou veio de fora do fast path); a unicidade `(validation_id, type)` evita
+  duplicatas concorrentes;
+- grava `claim_evidence` para cada sinal T1/T2 novo, ligando
+  `claim_evidence.signal_id → signal.signal_id` (rastreabilidade
+  claim → evidence → signal → checker);
+- deduplica por `checker@version` (mesma regra dos signals), então replay não
+  duplica evidências;
+- reconstrói `explanation_detail` a partir de **todas** as `claim_evidence` do
+  claim (T0 + T1/T2).
+
+Nota: `signal.evidence_id` continua com semântica própria do deep path (aponta
+para a tabela S3 `evidence` no caso VLM); a ligação de evidência de claim usa a
+direção inversa (`claim_evidence.signal_id`). Unificar essa semântica fica para
+uma etapa futura (exigiria migração).
+
 ### LGPD
 
 O erasure (`DELETE /v1/subjects/:id`) remove claims e evidências junto com
 signals/validations — evidência sobre o titular é dado pessoal e deve morrer com
-ele. Evidências históricas jamais são sobrescritas: nova observação → nova
-evidência (imutabilidade histórica, pré-requisito para a camada de credenciais).
+ele.
+
+### Imutabilidade histórica (Fase 14)
+
+Evidências são **append-only**: uma nova observação gera uma nova evidência, jamais
+sobrescreve uma existente. O teste `apps/worker/src/deep-enrich.int.test.ts`
+(“Fase 14 — claim_evidence é append-only e imutável entre execuções”) comprova, com
+snapshot das linhas de `claim_evidence`:
+
+1. o enriquecimento T1 **anexa** novas evidências sem alterar as do fast path
+   (cada linha pré-existente permanece byte-a-byte idêntica);
+2. **replay** (nova execução) não muta nem duplica as evidências já persistidas
+   (dedup por `checker@version` → nenhuma inserção);
+3. nunca há `evidence_id` duplicado.
+
+A imutabilidade é pré-requisito para a camada de credenciais (uma credencial não
+pode referenciar evidência mutável).
 
 ## Por que signal não foi removido
 

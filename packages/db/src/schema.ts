@@ -380,7 +380,12 @@ export const validation = pgTable(
     userId: text('user_id'),
     idempotencyKey: text('idempotency_key'),
     workflowId: text('workflow_id'),
-    explanation: jsonb('explanation').$type<{ summary?: string } | null>(),
+    explanation: jsonb('explanation').$type<{
+      summary?: string
+      code?: string
+      supporting_evidence?: string[]
+      contradicting_evidence?: string[]
+    } | null>(),
     deepContext: jsonb('deep_context').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),

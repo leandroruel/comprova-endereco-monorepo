@@ -1,3 +1,10 @@
+export interface AssessmentExplanationDto {
+  readonly code: string
+  readonly message: string
+  readonly supporting_evidence: readonly string[]
+  readonly contradicting_evidence: readonly string[]
+}
+
 export interface ValidationDto {
   readonly validation_id: string
   readonly status: string
@@ -13,6 +20,7 @@ export interface ValidationDto {
   } | null
   readonly signals: ReadonlyArray<Record<string, unknown>>
   readonly explanation: string | null
+  readonly explanation_detail?: AssessmentExplanationDto | null
   readonly created_at: string
   readonly expires_at: string
 }

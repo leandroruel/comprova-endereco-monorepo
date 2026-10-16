@@ -25,6 +25,23 @@ const summaryOf = (explanation: { summary?: string } | null): string | null => {
   return typeof summary === 'string' ? summary : null
 }
 
+const explanationDetailFromStored = (
+  explanation: {
+    summary?: string
+    code?: string
+    supporting_evidence?: string[]
+    contradicting_evidence?: string[]
+  } | null,
+): ValidationDto['explanation_detail'] => {
+  if (explanation === null || typeof explanation.code !== 'string') return null
+  return {
+    code: explanation.code,
+    message: explanation.summary ?? '',
+    supporting_evidence: explanation.supporting_evidence ?? [],
+    contradicting_evidence: explanation.contradicting_evidence ?? [],
+  }
+}
+
 const dtoFromResult = (result: FastPathResult): ValidationDto => ({
   validation_id: result.validationId,
   status: result.status,
@@ -69,6 +86,14 @@ const dtoFromResult = (result: FastPathResult): ValidationDto => ({
     : null,
   evidence_summary: result.evidenceSummary ?? null,
   explanation: result.explanation,
+  explanation_detail: result.explanationDetail
+    ? {
+        code: result.explanationDetail.code,
+        message: result.explanationDetail.message,
+        supporting_evidence: [...result.explanationDetail.supportingEvidenceIds],
+        contradicting_evidence: [...result.explanationDetail.contradictingEvidenceIds],
+      }
+    : null,
   created_at: result.createdAt.toISOString(),
   expires_at: result.expiresAt.toISOString(),
 })
@@ -132,6 +157,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
         evidence_id: signal.evidenceId,
       })),
       explanation: summaryOf(validation.explanation),
+      explanation_detail: explanationDetailFromStored(validation.explanation),
       created_at: validation.createdAt.toISOString(),
       expires_at: validation.expiresAt.toISOString(),
     }

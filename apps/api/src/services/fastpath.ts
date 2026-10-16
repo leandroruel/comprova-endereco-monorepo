@@ -3,11 +3,12 @@ import { createHash, createHmac, randomUUID } from 'node:crypto'
 import {
   addressKeys,
   canonicalizeAddress,
-  decide,
   digitsOnly,
   isValidDocument,
-  weightedScore,
   isValidClaimCombination,
+  buildAssessmentExplanation,
+  evaluateClaim,
+  type AssessmentExplanation,
   type Claim,
   type ClaimType,
   type Evidence,
@@ -98,6 +99,7 @@ export interface FastPathResult {
     readonly contradicting: number
     readonly unknown: number
   }
+  readonly explanationDetail?: AssessmentExplanation
 }
 
 const hmacDoc = (key: string, docType: string, digits: string): Buffer =>
@@ -143,6 +145,23 @@ const statusFor = (
     return verdict === 'INSUFFICIENT_EVIDENCE' || confidence < 0.55 ? 'partial' : 'completed'
   }
   return 'completed'
+}
+
+const explanationDetailFromStored = (
+  explanation: {
+    summary?: string
+    code?: string
+    supporting_evidence?: string[]
+    contradicting_evidence?: string[]
+  } | null,
+): AssessmentExplanation | undefined => {
+  if (explanation === null || typeof explanation.code !== 'string') return undefined
+  return {
+    code: explanation.code,
+    message: explanation.summary ?? '',
+    supportingEvidenceIds: explanation.supporting_evidence ?? [],
+    contradictingEvidenceIds: explanation.contradicting_evidence ?? [],
+  }
 }
 
 const enrichWithCep = async (
@@ -289,6 +308,7 @@ const loadValidationForReplay = async (
     policyVersion,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
+    explanationDetail: explanationDetailFromStored(row.explanation),
     idempotentReplay: true,
   }
 }
@@ -415,7 +435,7 @@ export const runFastPath = async (
     claimId,
     checker: signal.checkerId,
     checkerVersion: signal.checkerVersion,
-    stance: signal.stance === 'neutral' ? 'unknown' : signal.stance,
+    stance: signal.stance,
     strength: signal.strength,
     confidence: signal.confidence,
     source: signal.source,
@@ -425,28 +445,22 @@ export const runFastPath = async (
     signalId: signalIds[index] ?? null,
   }))
 
+  const evidenceStanceOf = (stance: Evidence['stance']): 'supports' | 'contradicts' | 'unknown' =>
+    stance === 'neutral' ? 'unknown' : stance
+
   const evidenceSummary = {
     supporting: evidenceList.filter((e) => e.stance === 'supports').length,
     contradicting: evidenceList.filter((e) => e.stance === 'contradicts').length,
-    unknown: evidenceList.filter((e) => e.stance === 'unknown').length,
+    unknown: evidenceList.filter((e) => e.stance === 'unknown' || e.stance === 'neutral').length,
   }
 
-  const score = weightedScore(
-    evidenceList.map((e) => ({
-      checkerId: e.checker,
-      checkerVersion: e.checkerVersion,
-      stance: e.stance === 'unknown' ? ('neutral' as const) : e.stance,
-      strength: e.strength,
-      confidence: e.confidence,
-      source: e.source,
-      observedAt: e.observedAt,
-      ttlSeconds: e.ttlSeconds,
-      detail: e.detail,
-    })),
-    deps.policy,
+  const { score, decision } = evaluateClaim({
+    claim,
+    evidence: evidenceList,
+    policy: deps.policy,
     now,
-  )
-  const decision = decide({ signals, score, policy: deps.policy, now })
+  })
+  const explanationDetail = buildAssessmentExplanation(decision, evidenceList)
   const normalizedScore = Math.tanh(score)
   const status = statusFor(req.mode, decision.verdict, decision.confidence)
   const validationId = randomUUID()
@@ -547,7 +561,12 @@ export const runFastPath = async (
       idempotencyKey: req.idempotencyKey,
       consentRef: req.consentRef ?? null,
       userId: req.userId ?? null,
-      explanation: { summary: decision.explanation },
+      explanation: {
+        summary: decision.explanation,
+        code: explanationDetail.code,
+        supporting_evidence: [...explanationDetail.supportingEvidenceIds],
+        contradicting_evidence: [...explanationDetail.contradictingEvidenceIds],
+      },
       deepContext: deepContextOf(registryRecord, docDigitsValid),
       createdAt: now,
       expiresAt,
@@ -573,7 +592,7 @@ export const runFastPath = async (
           signalId: e.signalId,
           checker: e.checker,
           checkerVersion: e.checkerVersion,
-          stance: e.stance,
+          stance: evidenceStanceOf(e.stance),
           strength: e.strength,
           confidence: e.confidence,
           source: e.source,
@@ -668,6 +687,7 @@ export const runFastPath = async (
       },
     },
     evidenceSummary,
+    explanationDetail,
     address:
       addressInput === null
         ? null

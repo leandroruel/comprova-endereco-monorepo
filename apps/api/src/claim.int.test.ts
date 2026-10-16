@@ -227,6 +227,68 @@ describe('idempotencia de claims e evidencias', () => {
   })
 })
 
+describe('explicacao estruturada (assessment explanation)', () => {
+  it('expoe explanation_detail com code, message e contagens consistentes', async () => {
+    const res = await postCnpj()
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    const detail = body.explanation_detail
+    expect(detail).toBeDefined()
+    expect(detail.code).toBe(body.verdict)
+    expect(typeof detail.message).toBe('string')
+    expect(detail.message.length).toBeGreaterThan(0)
+    expect(detail.supporting_evidence.length).toBe(body.evidence_summary.supporting)
+    expect(detail.contradicting_evidence.length).toBe(body.evidence_summary.contradicting)
+  })
+
+  it('ids de evidencia sao rastreaveis ate claim_evidence por stance', async () => {
+    const res = await postCnpj()
+    const body = res.json()
+    const rows = await claimRowsFor(body.validation_id)
+    const claimRow = rows[0]
+    if (claimRow === undefined) throw new Error('claim row missing')
+    const evidences = await evidenceRowsFor(claimRow.claimId)
+
+    const supporting = new Set(evidences.filter((e) => e.stance === 'supports').map((e) => e.evidenceId))
+    const contradicting = new Set(
+      evidences.filter((e) => e.stance === 'contradicts').map((e) => e.evidenceId),
+    )
+    for (const id of body.explanation_detail.supporting_evidence) {
+      expect(supporting.has(id)).toBe(true)
+    }
+    for (const id of body.explanation_detail.contradicting_evidence) {
+      expect(contradicting.has(id)).toBe(true)
+    }
+  })
+
+  it('persiste explicacao estruturada no validation.explanation (jsonb)', async () => {
+    const res = await postCnpj()
+    const body = res.json()
+    const rows = await adminPool.db
+      .select({ explanation: t.validation.explanation })
+      .from(t.validation)
+      .where(eq(t.validation.validationId, body.validation_id))
+      .limit(1)
+    const stored = rows[0]?.explanation
+    expect(stored?.summary).toBeTruthy()
+    expect(stored?.code).toBe(body.verdict)
+    expect(stored?.supporting_evidence?.length).toBe(body.evidence_summary.supporting)
+    expect(stored?.contradicting_evidence?.length).toBe(body.evidence_summary.contradicting)
+  })
+
+  it('GET /v1/validations/:id devolve explanation_detail consistente com o POST', async () => {
+    const created = await postCnpj()
+    const body = created.json()
+    const got = await app.inject({
+      method: 'GET',
+      url: `/v1/validations/${body.validation_id}`,
+      headers: { authorization: `Bearer ${key}` },
+    })
+    expect(got.statusCode).toBe(200)
+    expect(got.json().explanation_detail).toEqual(body.explanation_detail)
+  })
+})
+
 describe('LGPD: erasure remove claim e evidencias', () => {
   it('DELETE /subjects/:id apaga claims, evidencias e validacoes', async () => {
     const res = await postCnpj()

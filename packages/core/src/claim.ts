@@ -1,3 +1,5 @@
+import type { Stance } from './types.js'
+
 export type ClaimType = 'business_registered_address' | 'address_exists'
 
 export type SubjectType = 'organization' | 'person'
@@ -46,7 +48,12 @@ export interface Evidence {
   readonly claimId: string
   readonly checker: string
   readonly checkerVersion: string
-  readonly stance: EvidenceStance
+  /**
+   * Posição da evidência. Em memória espelha fielmente o stance do signal
+   * (pode ser `neutral`), o que mantém o scoring idêntico ao pipeline de signals.
+   * Na persistência o enum de 3 valores é usado (`neutral` → `unknown`).
+   */
+  readonly stance: Stance
   readonly strength: number
   readonly confidence: number
   readonly source: string

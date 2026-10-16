@@ -8,12 +8,16 @@ import {
   GOLDEN_CASES,
 } from '@comprova/testing'
 import { createLogger, createMetrics } from '@comprova/observability'
-import { createDbPool, runMigrations } from '@comprova/db'
+import { decide, weightedScore, type Signal } from '@comprova/core'
+import { createDbPool, eq, runMigrations } from '@comprova/db'
+import * as t from '@comprova/db'
 import Redis from 'ioredis'
 import { afterAll, describe, expect, it } from 'vitest'
 import { buildApp } from './app.js'
+import { loadPolicyFile } from './policy-loader.js'
 
 const PEPPER = 'test-pepper-123'
+const differentialPolicy = loadPolicyFile('2026.11.1')
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })
@@ -174,5 +178,88 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
     })
     expect(res.statusCode).toBe(422)
     expect(res.json().code).toBe('DEEP_PATH_DISABLED')
+  })
+})
+
+// Fase 10 introduziu `evaluateClaim({ claim, evidence, policy })` como fronteira única
+// de scoring. Este teste diferencial prova, ponta-a-ponta, que a saída persistida pelo
+// caminho novo é idêntica ao caminho antigo (`weightedScore` + `decide` sobre os
+// signals brutos), classe a classe do dataset dourado.
+describe('Fase 11 — diferencial OLD (signals) vs NEW (evaluateClaim)', () => {
+  it('NEW persistido == OLD recomputado dos signals brutos em todas as classes', async () => {
+    const mismatches: Array<Record<string, unknown>> = []
+
+    for (const testCase of GOLDEN_CASES) {
+      const res = await postValidation(testCase.cnpj)
+      if (res.statusCode !== 200) {
+        mismatches.push({ case: testCase.label, field: 'http', old: 200, novo: res.statusCode })
+        continue
+      }
+      const validationId = res.json().validation_id as string
+
+      const rows = await adminPool.db
+        .select({
+          verdict: t.validation.verdict,
+          score: t.validation.score,
+          confidence: t.validation.confidence,
+          explanation: t.validation.explanation,
+          createdAt: t.validation.createdAt,
+        })
+        .from(t.validation)
+        .where(eq(t.validation.validationId, validationId))
+      const row = rows[0]
+      if (row === undefined) {
+        mismatches.push({ case: testCase.label, field: 'row', old: 'present', novo: 'missing' })
+        continue
+      }
+
+      // Reconstrói os signals brutos exatamente como o checker os produziu
+      // (o `signal` preserva o stance de 4 valores, incl. `neutral`).
+      const signalRows = await adminPool.db
+        .select({
+          checkerId: t.signal.checkerId,
+          checkerVersion: t.signal.checkerVersion,
+          stance: t.signal.stance,
+          strength: t.signal.strength,
+          confidence: t.signal.confidence,
+          source: t.signal.source,
+          observedAt: t.signal.observedAt,
+          ttlSeconds: t.signal.ttlSeconds,
+          detail: t.signal.detail,
+        })
+        .from(t.signal)
+        .where(eq(t.signal.validationId, validationId))
+      const signals: Signal[] = signalRows.map((s) => ({
+        checkerId: s.checkerId,
+        checkerVersion: s.checkerVersion,
+        stance: s.stance,
+        strength: s.strength,
+        confidence: s.confidence,
+        source: s.source,
+        observedAt: s.observedAt.toISOString(),
+        ttlSeconds: s.ttlSeconds,
+        detail: s.detail,
+      }))
+
+      const now = row.createdAt
+      const oldScore = weightedScore(signals, differentialPolicy, now)
+      const oldDecision = decide({ signals, score: oldScore, policy: differentialPolicy, now })
+
+      const record = (field: string, old: unknown, novo: unknown): void => {
+        mismatches.push({ case: testCase.label, field, old, novo })
+      }
+      if (oldDecision.verdict !== row.verdict) record('verdict', oldDecision.verdict, row.verdict)
+      if (Math.abs(oldDecision.confidence - (row.confidence ?? 0)) > 1e-4) {
+        record('confidence', oldDecision.confidence, row.confidence)
+      }
+      if (Math.abs(Math.tanh(oldScore) - (row.score ?? 0)) > 1e-4) {
+        record('score', Math.tanh(oldScore), row.score)
+      }
+      if (oldDecision.explanation !== (row.explanation?.summary ?? '')) {
+        record('explanation', oldDecision.explanation, row.explanation?.summary)
+      }
+    }
+
+    expect(mismatches, `divergências OLD≠NEW: ${JSON.stringify(mismatches, null, 2)}`).toEqual([])
   })
 })

@@ -142,4 +142,90 @@ describe('deepEnrich (activity core)', () => {
       .where(eq(t.signal.validationId, created.validationId))
     expect(t1Signals.filter((s) => s.stance === 'contradicts').length).toBe(0)
   })
+
+  // Fase 14 — evidências históricas jamais são sobrescritas: nova observação → nova
+  // evidência. Reexecutar o enriquecimento anexa (append-only) e o replay não muta
+  // nem duplica linhas existentes.
+  it('Fase 14 — claim_evidence é append-only e imutável entre execuções', async () => {
+    const created = await runFastPath(
+      fastPathDeps,
+      { tenantId: tenant, apiKeyId: 'test' },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'auto',
+        idempotencyKey: 'fase14-immutability',
+      },
+    )
+
+    const claimRows = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    const claimId = claimRows[0]?.claimId
+    expect(claimId).toBeDefined()
+    if (claimId === undefined) throw new Error('claim nao criado pelo fast path')
+
+    const snapshot = async (): Promise<
+      readonly {
+        evidenceId: string
+        signalId: string | null
+        checker: string
+        checkerVersion: string
+        stance: string
+        strength: number
+        confidence: number
+        source: string
+        observedAt: Date
+        ttlSeconds: number
+        detail: Record<string, unknown>
+      }[]
+    > =>
+      adminPool.db
+        .select({
+          evidenceId: t.claimEvidence.evidenceId,
+          signalId: t.claimEvidence.signalId,
+          checker: t.claimEvidence.checker,
+          checkerVersion: t.claimEvidence.checkerVersion,
+          stance: t.claimEvidence.stance,
+          strength: t.claimEvidence.strength,
+          confidence: t.claimEvidence.confidence,
+          source: t.claimEvidence.source,
+          observedAt: t.claimEvidence.observedAt,
+          ttlSeconds: t.claimEvidence.ttlSeconds,
+          detail: t.claimEvidence.detail,
+        })
+        .from(t.claimEvidence)
+        .where(eq(t.claimEvidence.claimId, claimId))
+        .orderBy(t.claimEvidence.evidenceId)
+
+    const afterFast = await snapshot()
+    expect(afterFast.length).toBeGreaterThan(0)
+
+    await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { tenantId: tenant, validationId: created.validationId },
+    )
+    const afterFirstDeep = await snapshot()
+
+    // T1 anexou novas evidências (append-only)...
+    expect(afterFirstDeep.length).toBeGreaterThan(afterFast.length)
+    // ...sem tocar nas evidências do fast path.
+    for (const before of afterFast) {
+      const after = afterFirstDeep.find((r) => r.evidenceId === before.evidenceId)
+      expect(after, `evidence ${before.evidenceId} deve permanecer intacta`).toEqual(before)
+    }
+    // Nunca há evidência duplicada (ids únicos).
+    expect(new Set(afterFirstDeep.map((r) => r.evidenceId)).size).toBe(afterFirstDeep.length)
+
+    // Replay: nova execução não muta nem duplica as evidências já persistidas.
+    await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { tenantId: tenant, validationId: created.validationId },
+    )
+    const afterReplay = await snapshot()
+    expect(afterReplay).toEqual(afterFirstDeep)
+  })
 })

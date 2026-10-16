@@ -95,6 +95,13 @@ export const EvidenceSummaryDtoSchema = z.object({
   unknown: z.number().int(),
 })
 
+export const AssessmentExplanationDtoSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  supporting_evidence: z.array(z.uuid()),
+  contradicting_evidence: z.array(z.uuid()),
+})
+
 export const ValidationDtoSchema = z.object({
   validation_id: z.uuid(),
   status: ValStatusSchema,
@@ -107,6 +114,7 @@ export const ValidationDtoSchema = z.object({
   claim: ClaimDtoSchema.nullable().optional(),
   evidence_summary: EvidenceSummaryDtoSchema.nullable().optional(),
   explanation: z.string().nullable(),
+  explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
   created_at: z.string(),
   expires_at: z.string(),
 })

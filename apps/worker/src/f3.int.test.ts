@@ -124,6 +124,43 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
     expect(result.t2Signals).toBe(0)
   })
 
+  it('reusa o claim do fast path e liga as evidencias T1 ao claim', async () => {
+    const created = await mkValidation('12345678000195', 'deep-claim-reuse')
+    const claims = await adminPool.db
+      .select()
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    expect(claims.length).toBe(1)
+    const claimRow = claims[0]
+    if (claimRow === undefined) throw new Error('claim missing')
+    const beforeRows = await adminPool.db
+      .select()
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimRow.claimId))
+
+    await deepEnrich(
+      { db: adminPool.db, t1Checkers, policy, clock: systemClock },
+      { tenantId: tenant, validationId: created.validationId, maxTier: 0 },
+    )
+
+    const claimsAfter = await adminPool.db
+      .select()
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    expect(claimsAfter.length).toBe(1)
+
+    const afterRows = await adminPool.db
+      .select()
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimRow.claimId))
+    expect(afterRows.length).toBeGreaterThanOrEqual(beforeRows.length)
+    expect(afterRows.some((e) => e.checker === 'document_integrity')).toBe(true)
+    // toda evidência precisa ser rastreável até um signal
+    expect(afterRows.every((e) => e.signalId !== null)).toBe(true)
+    // o T1 adicionou evidências novas além das T0
+    expect(afterRows.some((e) => e.checker !== 'document_integrity')).toBe(true)
+  })
+
   it('caso ambiguo com endereco roda T2, grava sinal contraditório e evidencia', async () => {
     const subjectId = randomUUID()
     await adminPool.db.insert(t.subject).values({
@@ -197,6 +234,34 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
       .from(t.evidence)
       .where(eq(t.evidence.evidenceId, t2?.evidenceId as string))
     expect(evidence[0]?.kind).toBe('vlm_output')
+
+    // deep path cria claim (ausente) e liga claim_evidence aos signals
+    const claims = await adminPool.db.select().from(t.claim).where(eq(t.claim.validationId, validationId))
+    expect(claims.length).toBe(1)
+    const claimRow = claims[0]
+    if (claimRow === undefined) throw new Error('claim missing')
+    expect(claimRow.type).toBe('business_registered_address')
+    expect(claimRow.subjectType).toBe('organization')
+
+    const evidences = await adminPool.db
+      .select()
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimRow.claimId))
+    expect(evidences.length).toBe(signals.length)
+    const t2Evidence = evidences.find((e) => e.checker === 'street_view_vlm')
+    expect(t2Evidence).toBeDefined()
+    expect(t2Evidence?.signalId).toBe(t2?.signalId)
+    expect(t2Evidence?.stance).toBe('contradicts')
+
+    // explicação estruturada persistida (code = veredito)
+    const stored = await adminPool.db
+      .select({ explanation: t.validation.explanation })
+      .from(t.validation)
+      .where(eq(t.validation.validationId, validationId))
+      .limit(1)
+    expect(stored[0]?.explanation?.code).toBe(result.verdict)
+    expect(Array.isArray(stored[0]?.explanation?.supporting_evidence)).toBe(true)
+    expect(Array.isArray(stored[0]?.explanation?.contradicting_evidence)).toBe(true)
   })
 
   it('max_tier 0 desliga T2 mesmo ambiguo', async () => {

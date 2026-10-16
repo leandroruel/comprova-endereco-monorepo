@@ -1,13 +1,18 @@
 import { eq } from '@comprova/db'
 import {
+  buildAssessmentExplanation,
   decide,
+  evaluateClaim,
+  observationFromSignal,
   weightedScore,
   type CheckContext,
   type Checker,
+  type ClaimType,
   type Clock,
   type EstabelecimentoRecord,
   type Policy,
   type Signal,
+  type SubjectType,
   type Verdict,
 } from '@comprova/core'
 import type { SignalCacheReader } from '@comprova/core'
@@ -219,20 +224,58 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       : []
 
   const allSignals: readonly Signal[] = [...signalsAfterT1, ...t2Signals]
-  const score = weightedScore(allSignals, deps.policy, now)
-  const decision = decide({ signals: allSignals, score, policy: deps.policy, now })
-  const stillPartial = decision.verdict === 'INSUFFICIENT_EVIDENCE' || decision.confidence < 0.55
+  const claimType: ClaimType = subject.docType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
+  const subjectType: SubjectType = subject.docType === 'CNPJ' ? 'organization' : 'person'
 
-  await withTenant(deps.db, input.tenantId, async (tx) => {
+  const outcome = await withTenant(deps.db, input.tenantId, async (tx) => {
     const existingCheckerIds = new Set(signals.map((s) => `${s.checkerId}@${s.checkerVersion}`))
     const freshSignals = [...newSignals, ...t2Signals].filter(
       (s) => !existingCheckerIds.has(`${s.checkerId}@${s.checkerVersion}`),
     )
 
+    // Reusa o claim criado pelo fast path; cria um se ausente (validação legada
+    // ou criada fora do fast path). A unicidade (validation_id, type) evita duplicata.
+    const existingClaim = await tx
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, input.validationId))
+      .limit(1)
+    let claimId: string | null = existingClaim[0]?.claimId ?? null
+    if (claimId === null) {
+      await tx
+        .insert(t.claim)
+        .values({
+          claimId: randomUUID(),
+          tenantId: input.tenantId,
+          validationId: input.validationId,
+          subjectId: validation.subjectId,
+          addressId: validation.addressId,
+          type: claimType,
+          subjectType,
+          targetType: 'address',
+        })
+        .onConflictDoNothing()
+      const recreated = await tx
+        .select({ claimId: t.claim.claimId })
+        .from(t.claim)
+        .where(eq(t.claim.validationId, input.validationId))
+        .limit(1)
+      claimId = recreated[0]?.claimId ?? null
+    }
+
+    const { score, decision } = evaluateClaim({
+      claim: { id: claimId ?? '', type: claimType },
+      evidence: allSignals.map(observationFromSignal),
+      policy: deps.policy,
+      now,
+    })
+    const stillPartial = decision.verdict === 'INSUFFICIENT_EVIDENCE' || decision.confidence < 0.55
+
     if (freshSignals.length > 0) {
+      const signalIds = freshSignals.map(() => randomUUID())
       await tx.insert(t.signal).values(
-        freshSignals.map((s) => ({
-          signalId: randomUUID(),
+        freshSignals.map((s, index) => ({
+          signalId: signalIds[index] ?? randomUUID(),
           validationId: input.validationId,
           checkerId: s.checkerId,
           checkerVersion: s.checkerVersion,
@@ -246,6 +289,28 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
           evidenceId: s.evidenceId ?? null,
         })),
       )
+
+      if (claimId !== null) {
+        await tx.insert(t.claimEvidence).values(
+          freshSignals.map((s, index) => ({
+            evidenceId: randomUUID(),
+            tenantId: input.tenantId,
+            claimId,
+            signalId: signalIds[index] ?? null,
+            checker: s.checkerId,
+            checkerVersion: s.checkerVersion,
+            stance: s.stance === 'neutral' ? ('unknown' as const) : s.stance,
+            strength: s.strength,
+            confidence: s.confidence,
+            source: s.source,
+            observedAt: new Date(s.observedAt),
+            ttlSeconds: s.ttlSeconds,
+            expiresAt: new Date(Date.parse(s.observedAt) + s.ttlSeconds * 1000),
+            detail: s.detail,
+          })),
+        )
+      }
+
       const addressId = validation.addressId
       if (addressId !== null) {
         await tx
@@ -268,6 +333,18 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       }
     }
 
+    const evidenceRows =
+      claimId === null
+        ? []
+        : await tx
+            .select({ evidenceId: t.claimEvidence.evidenceId, stance: t.claimEvidence.stance })
+            .from(t.claimEvidence)
+            .where(eq(t.claimEvidence.claimId, claimId))
+    const explanationDetail = buildAssessmentExplanation(
+      decision,
+      evidenceRows.map((row) => ({ id: row.evidenceId, stance: row.stance })),
+    )
+
     await tx
       .update(t.validation)
       .set({
@@ -275,7 +352,12 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
         verdict: decision.verdict,
         score: Math.tanh(score),
         confidence: decision.confidence,
-        explanation: { summary: decision.explanation },
+        explanation: {
+          summary: decision.explanation,
+          code: explanationDetail.code,
+          supporting_evidence: [...explanationDetail.supportingEvidenceIds],
+          contradicting_evidence: [...explanationDetail.contradictingEvidenceIds],
+        },
         completedAt: stillPartial ? null : now,
       })
       .where(eq(t.validation.validationId, input.validationId))
@@ -297,14 +379,16 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       units: 1,
       validationId: input.validationId,
     })
+
+    return { score, decision, stillPartial }
   })
 
   return {
-    status: stillPartial ? 'partial' : 'completed',
-    verdict: decision.verdict,
-    confidence: decision.confidence,
-    score: Math.tanh(score),
-    explanation: decision.explanation,
+    status: outcome.stillPartial ? 'partial' : 'completed',
+    verdict: outcome.decision.verdict,
+    confidence: outcome.decision.confidence,
+    score: Math.tanh(outcome.score),
+    explanation: outcome.decision.explanation,
     newSignals: newSignals.length + t2Signals.length,
     t2Signals: t2Signals.length,
   }
