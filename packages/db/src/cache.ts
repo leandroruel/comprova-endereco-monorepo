@@ -1,4 +1,5 @@
 import type Redis from 'ioredis'
+import { Buffer } from 'node:buffer'
 
 export interface CacheLogger {
   readonly warn: (obj: Record<string, unknown>, msg: string) => void
@@ -13,6 +14,14 @@ export interface CacheStore {
   readonly stats: () => { hits: number; misses: number; sets: number; errors: number }
 }
 
+const reviveBuffer = (_key: string, value: unknown): unknown =>
+  value !== null &&
+  typeof value === 'object' &&
+  (value as { type?: unknown }).type === 'Buffer' &&
+  Array.isArray((value as { data?: unknown }).data)
+    ? Buffer.from((value as { data: number[] }).data)
+    : value
+
 export const makeRedisCache = (redis: Redis, logger?: CacheLogger): CacheStore => {
   const stats = { hits: 0, misses: 0, sets: 0, errors: 0 }
 
@@ -25,7 +34,7 @@ export const makeRedisCache = (redis: Redis, logger?: CacheLogger): CacheStore =
           return null
         }
         stats.hits++
-        return JSON.parse(raw) as T
+        return JSON.parse(raw, reviveBuffer) as T
       } catch (err) {
         stats.errors++
         logger?.warn({ err: err instanceof Error ? err.message : String(err), key }, 'cache get failed')

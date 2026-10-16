@@ -76,6 +76,25 @@ export const AddressSummaryDtoSchema = z.object({
   geo_precision: GeoPrecisionSchema,
 })
 
+export const ClaimDtoSchema = z.object({
+  id: z.uuid(),
+  type: z.enum(['business_registered_address', 'address_exists']),
+  subject: z.object({
+    type: z.enum(['organization', 'person']),
+    id: z.string(),
+  }),
+  target: z.object({
+    type: z.literal('address'),
+    id: z.string().nullable(),
+  }),
+})
+
+export const EvidenceSummaryDtoSchema = z.object({
+  supporting: z.number().int(),
+  contradicting: z.number().int(),
+  unknown: z.number().int(),
+})
+
 export const ValidationDtoSchema = z.object({
   validation_id: z.uuid(),
   status: ValStatusSchema,
@@ -85,9 +104,11 @@ export const ValidationDtoSchema = z.object({
   policy_version: z.string().nullable(),
   address: AddressSummaryDtoSchema.nullable(),
   signals: z.array(SignalDtoSchema),
+  claim: ClaimDtoSchema.nullable().optional(),
+  evidence_summary: EvidenceSummaryDtoSchema.nullable().optional(),
   explanation: z.string().nullable(),
-  created_at: z.iso.datetime(),
-  expires_at: z.iso.datetime(),
+  created_at: z.string(),
+  expires_at: z.string(),
 })
 
 export const BatchItemSchema = z.object({

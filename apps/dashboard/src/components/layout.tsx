@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { Activity, Building2, ChevronRight, FileSearch, Globe, Home, Settings } from 'lucide-react'
+import { Activity, ChevronRight, FileSearch, Globe } from 'lucide-react'
 import { LogOut } from 'lucide-react'
 
 interface NavItem {

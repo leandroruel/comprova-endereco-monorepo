@@ -3,7 +3,7 @@ import type { Db } from '@comprova/db'
 import { withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { PROBLEM_CONTENT_TYPE, ProblemSchema, problems } from '@comprova/contracts'
-import { isValidDocument, digitsOnly } from '@comprova/core'
+import { digitsOnly } from '@comprova/core'
 import { randomUUID } from 'node:crypto'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
@@ -67,13 +67,9 @@ export const registerBatchRoutes = (instance: FastifyInstance, deps: BatchRoutes
         return reply.code(422).type(PROBLEM_CONTENT_TYPE).send(problems.unprocessableAddress())
       }
 
-      const validItems = body.documents.filter((d) => isValidDocument(d.type, d.value))
-      if (validItems.length === 0) {
-        return reply.code(422).type(PROBLEM_CONTENT_TYPE).send(problems.invalidDocument())
-      }
-
+      const documents = body.documents
       const batchId = randomUUID()
-      const items = validItems.map((item, position) => ({
+      const items = documents.map((item, position) => ({
         itemId: randomUUID(),
         batchId,
         tenantId: tenant.tenantId,

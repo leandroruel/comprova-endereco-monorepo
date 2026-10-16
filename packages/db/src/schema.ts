@@ -406,6 +406,49 @@ export const validationIdempotency = pgTable(
   (t) => [primaryKey({ columns: [t.tenantId, t.idempotencyKey] })],
 )
 
+export const claimTypeEnum = pgEnum('claim_type', ['business_registered_address', 'address_exists'])
+export const claimSubjectTypeEnum = pgEnum('claim_subject_type', ['organization', 'person'])
+export const claimTargetTypeEnum = pgEnum('claim_target_type', ['address'])
+export const evidenceStanceEnum = pgEnum('evidence_stance', ['supports', 'contradicts', 'unknown'])
+
+export const claim = pgTable('claim', {
+  claimId: uuid('claim_id').primaryKey(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenant.tenantId),
+  validationId: uuid('validation_id').notNull(),
+  subjectId: uuid('subject_id')
+    .notNull()
+    .references(() => subject.subjectId),
+  addressId: uuid('address_id'),
+  type: claimTypeEnum('type').notNull(),
+  subjectType: claimSubjectTypeEnum('subject_type').notNull(),
+  targetType: claimTargetTypeEnum('target_type').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const claimEvidence = pgTable('claim_evidence', {
+  evidenceId: uuid('evidence_id').primaryKey(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenant.tenantId),
+  claimId: uuid('claim_id')
+    .notNull()
+    .references(() => claim.claimId),
+  signalId: uuid('signal_id'),
+  checker: text('checker').notNull(),
+  checkerVersion: text('checker_version').notNull(),
+  stance: evidenceStanceEnum('stance').notNull(),
+  strength: real('strength').notNull(),
+  confidence: real('confidence').notNull(),
+  source: text('source').notNull(),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+  ttlSeconds: integer('ttl_seconds').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  detail: jsonb('detail').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const signal = pgTable(
   'signal',
   {
@@ -569,6 +612,8 @@ export const schema = {
   subject,
   validation,
   validationIdempotency,
+  claim,
+  claimEvidence,
   signal,
   addressSignalCache,
   evidence,

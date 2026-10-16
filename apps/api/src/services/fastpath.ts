@@ -7,6 +7,11 @@ import {
   digitsOnly,
   isValidDocument,
   weightedScore,
+  isValidClaimCombination,
+  type Claim,
+  type ClaimType,
+  type Evidence,
+  type SubjectType,
   type AddressComponents,
   type CepReader,
   type CanonicalAddressRef,
@@ -82,6 +87,17 @@ export interface FastPathResult {
   readonly expiresAt: Date
   readonly idempotentReplay: boolean
   readonly requestMismatch?: boolean
+  readonly claim?: {
+    readonly id: string
+    readonly type: string
+    readonly subject: { readonly type: string; readonly refId: string }
+    readonly target: { readonly type: string; readonly refId: string | null }
+  }
+  readonly evidenceSummary?: {
+    readonly supporting: number
+    readonly contradicting: number
+    readonly unknown: number
+  }
 }
 
 const hmacDoc = (key: string, docType: string, digits: string): Buffer =>
@@ -374,7 +390,62 @@ export const runFastPath = async (
   const docDigitsValid = isValidDocument(req.documentType, req.documentValue)
   const signals = await runCheckers(deps, req.documentType, docDigitsValid, registryRecord, addressRef)
 
-  const score = weightedScore(signals, deps.policy, now)
+  const claimType: ClaimType = req.documentType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
+  const claimSubjectType: SubjectType = req.documentType === 'CNPJ' ? 'organization' : 'person'
+  if (!isValidClaimCombination(claimType, claimSubjectType)) {
+    throw new Error(`invalid claim combination: ${claimType} for ${claimSubjectType}`)
+  }
+  const claimId = randomUUID()
+  const claim: Claim = {
+    id: claimId,
+    type: claimType,
+    subject: {
+      type: claimSubjectType,
+      refId: 'pending',
+    },
+    target: {
+      type: 'address',
+      refId: null,
+    },
+  }
+
+  const signalIds = signals.map(() => randomUUID())
+  const evidenceList: Evidence[] = signals.map((signal, index) => ({
+    id: randomUUID(),
+    claimId,
+    checker: signal.checkerId,
+    checkerVersion: signal.checkerVersion,
+    stance: signal.stance === 'neutral' ? 'unknown' : signal.stance,
+    strength: signal.strength,
+    confidence: signal.confidence,
+    source: signal.source,
+    observedAt: signal.observedAt,
+    ttlSeconds: signal.ttlSeconds,
+    detail: signal.detail,
+    signalId: signalIds[index] ?? null,
+  }))
+
+  const evidenceSummary = {
+    supporting: evidenceList.filter((e) => e.stance === 'supports').length,
+    contradicting: evidenceList.filter((e) => e.stance === 'contradicts').length,
+    unknown: evidenceList.filter((e) => e.stance === 'unknown').length,
+  }
+
+  const score = weightedScore(
+    evidenceList.map((e) => ({
+      checkerId: e.checker,
+      checkerVersion: e.checkerVersion,
+      stance: e.stance === 'unknown' ? ('neutral' as const) : e.stance,
+      strength: e.strength,
+      confidence: e.confidence,
+      source: e.source,
+      observedAt: e.observedAt,
+      ttlSeconds: e.ttlSeconds,
+      detail: e.detail,
+    })),
+    deps.policy,
+    now,
+  )
   const decision = decide({ signals, score, policy: deps.policy, now })
   const normalizedScore = Math.tanh(score)
   const status = statusFor(req.mode, decision.verdict, decision.confidence)
@@ -483,9 +554,41 @@ export const runFastPath = async (
     })
 
     if (signals.length > 0) {
+      await tx.insert(t.claim).values({
+        claimId,
+        tenantId: tenant.tenantId,
+        validationId,
+        subjectId,
+        addressId,
+        type: claim.type,
+        subjectType: claim.subject.type,
+        targetType: 'address',
+      })
+
+      await tx.insert(t.claimEvidence).values(
+        evidenceList.map((e) => ({
+          evidenceId: e.id,
+          tenantId: tenant.tenantId,
+          claimId: e.claimId,
+          signalId: e.signalId,
+          checker: e.checker,
+          checkerVersion: e.checkerVersion,
+          stance: e.stance,
+          strength: e.strength,
+          confidence: e.confidence,
+          source: e.source,
+          observedAt: new Date(e.observedAt),
+          ttlSeconds: e.ttlSeconds,
+          expiresAt: new Date(Date.parse(e.observedAt) + e.ttlSeconds * 1000),
+          detail: e.detail,
+        })),
+      )
+    }
+
+    if (signals.length > 0) {
       await tx.insert(t.signal).values(
-        signals.map((s) => ({
-          signalId: randomUUID(),
+        signals.map((s, index) => ({
+          signalId: signalIds[index] ?? randomUUID(),
           validationId,
           checkerId: s.checkerId,
           checkerVersion: s.checkerVersion,
@@ -496,7 +599,7 @@ export const runFastPath = async (
           observedAt: new Date(s.observedAt),
           ttlSeconds: s.ttlSeconds,
           detail: s.detail,
-          evidenceId: s.evidenceId ?? null,
+          evidenceId: evidenceList[index]?.id ?? null,
         })),
       )
     }
@@ -552,6 +655,19 @@ export const runFastPath = async (
     score: normalizedScore,
     explanation: decision.explanation,
     signals,
+    claim: {
+      id: claimId,
+      type: claim.type,
+      subject: {
+        type: claim.subject.type,
+        refId: persisted.subjectId,
+      },
+      target: {
+        type: 'address',
+        refId: persisted.addressId,
+      },
+    },
+    evidenceSummary,
     address:
       addressInput === null
         ? null

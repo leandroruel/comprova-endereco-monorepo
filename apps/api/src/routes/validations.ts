@@ -69,6 +69,21 @@ const dtoFromResult = (result: FastPathResult): ValidationDto => ({
     detail: s.detail,
     evidence_id: s.evidenceId ?? null,
   })),
+  claim: result.claim
+    ? {
+        id: result.claim.id,
+        type: result.claim.type as 'business_registered_address' | 'address_exists',
+        subject: {
+          type: result.claim.subject.type as 'organization' | 'person',
+          id: result.claim.subject.refId,
+        },
+        target: {
+          type: 'address' as const,
+          id: result.claim.target.refId,
+        },
+      }
+    : null,
+  evidence_summary: result.evidenceSummary ?? null,
   explanation: result.explanation,
   created_at: result.createdAt.toISOString(),
   expires_at: result.expiresAt.toISOString(),

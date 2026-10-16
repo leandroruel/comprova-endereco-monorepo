@@ -3,6 +3,7 @@ SET statement_timeout = '60s';
 SET idle_in_transaction_session_timeout = '30s';
 SET application_name = 'comprova-migrations';
 
+-- pgfence-ignore drop-table
 DROP TABLE IF EXISTS auth_user, auth_session, auth_account CASCADE;
 
 CREATE TABLE "user" (

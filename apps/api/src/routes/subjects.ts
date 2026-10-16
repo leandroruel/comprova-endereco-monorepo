@@ -112,6 +112,19 @@ export const registerSubjectRoutes = (instance: FastifyInstance, deps: SubjectRo
         const validationIds = validations.map((v) => v.validationId)
 
         if (validationIds.length > 0) {
+          const claims = await tx
+            .select({ claimId: t.claim.claimId })
+            .from(t.claim)
+            .where(inArray(t.claim.validationId, validationIds))
+          if (claims.length > 0) {
+            await tx.delete(t.claimEvidence).where(
+              inArray(
+                t.claimEvidence.claimId,
+                claims.map((c) => c.claimId),
+              ),
+            )
+          }
+          await tx.delete(t.claim).where(inArray(t.claim.validationId, validationIds))
           await tx.delete(t.signal).where(inArray(t.signal.validationId, validationIds))
         }
         await tx

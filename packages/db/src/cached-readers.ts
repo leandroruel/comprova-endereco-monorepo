@@ -12,9 +12,8 @@ import type {
   OtherActiveCnpj,
   RegistryReader,
   SignalCacheReader,
-  CachedSignal,
 } from '@comprova/core'
-import { cacheable, type CacheStore } from './cache.js'
+import { type CacheStore } from './cache.js'
 import {
   makeCepReader,
   makeCnaeCategoriaReader,

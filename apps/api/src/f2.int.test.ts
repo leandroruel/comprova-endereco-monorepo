@@ -211,7 +211,7 @@ describe('batch', () => {
       url: '/v1/batches',
       headers: authJson,
       payload: {
-        items: [
+        documents: [
           { type: 'CNPJ', value: '12345678000195' },
           { type: 'CNPJ', value: '11111111111111' },
         ],
@@ -262,7 +262,7 @@ describe('batch', () => {
       url: '/v1/batches',
       headers: authJson,
       payload: {
-        items: [{ type: 'CNPJ', value: '12345678000195' }],
+        documents: [{ type: 'CNPJ', value: '12345678000195' }],
         mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
