@@ -4,7 +4,7 @@ import Redis from 'ioredis'
 import { buildApp, buildFastPathDeps } from './app.js'
 import { loadConfig } from './config.js'
 import { startBatchLoop } from './services/batch-processor.js'
-import { startPublisherLoop } from './services/outbox-publisher.js'
+import { startPublisherLoop } from './modules/webhooks/outbox-publisher.js'
 
 const config = loadConfig()
 const logger = createLogger({ level: config.LOG_LEVEL, base: { service: 'api' } })

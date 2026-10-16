@@ -3,7 +3,7 @@ import type { Db } from '@comprova/db'
 import { and, eq, isNull } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { keyPrefixOf, type ApiKeyHasher } from '../api-keys.js'
+import { keyPrefixOf, type ApiKeyHasher } from '../shared/api-keys.js'
 
 export interface TenantContext {
   readonly tenantId: string

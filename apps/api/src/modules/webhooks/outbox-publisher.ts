@@ -4,7 +4,8 @@ import { withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
-import { decryptSecret, signWebhookPayload } from '../webhooks.js'
+import { decryptSecret } from '../../shared/secretbox.js'
+import { signWebhookPayload } from './webhook-crypto.js'
 
 export interface PublisherDeps {
   readonly db: Db
