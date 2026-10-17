@@ -36,9 +36,11 @@ const menuItemClass =
 function UserMenu({
   userEmail,
   onNavigate,
+  onLogout,
 }: {
   readonly userEmail?: string
   readonly onNavigate?: (page: string) => void
+  readonly onLogout?: () => void
 }) {
   const hasIdentity = userEmail !== undefined && userEmail.length > 0
   const displayName = hasIdentity ? (userEmail.split('@')[0] ?? userEmail) : 'Conta'
@@ -79,6 +81,21 @@ function UserMenu({
             <Settings className="h-3.5 w-3.5 text-muted-foreground" />
             Configurações
           </DropdownMenu.Item>
+          {onLogout && (
+            <>
+              <DropdownMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+              <DropdownMenu.Item
+                className={cn(
+                  menuItemClass,
+                  'text-destructive focus:bg-destructive/10 focus:text-destructive',
+                )}
+                onSelect={onLogout}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Sair
+              </DropdownMenu.Item>
+            </>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -143,16 +160,7 @@ export function DashboardLayout({
         </nav>
 
         <div className="border-t border-sidebar-border p-4">
-          <UserMenu userEmail={userEmail} onNavigate={onNavigate} />
-          {onLogout && (
-            <button
-              onClick={onLogout}
-              className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-            >
-              <LogOut className="h-3 w-3" />
-              Sair
-            </button>
-          )}
+          <UserMenu userEmail={userEmail} onNavigate={onNavigate} onLogout={onLogout} />
         </div>
       </aside>
 
