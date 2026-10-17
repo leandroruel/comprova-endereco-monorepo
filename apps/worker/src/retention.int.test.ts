@@ -184,6 +184,13 @@ describe('retention de evidence material (ALTO-2)', () => {
       retentionDays: -1,
       detail: {},
     })
+    const materialSha = (
+      await adminPool.db
+        .select({ sha256: t.evidence.sha256 })
+        .from(t.evidence)
+        .where(eq(t.evidence.evidenceId, evidenceId))
+    )[0]?.sha256
+    if (materialSha === undefined) throw new Error('evidence row missing')
 
     const subject = await createSubject(adminPool.db, tenant)
     const validationId = await createValidation(adminPool.db, tenant, subject)
@@ -204,6 +211,7 @@ describe('retention de evidence material (ALTO-2)', () => {
       tenantId: tenant,
       claimId,
       evidenceId,
+      evidenceSha256: materialSha,
       checker: 'vlm_streetview',
       checkerVersion: '1.0.0',
       stance: 'supports',
@@ -237,11 +245,16 @@ describe('retention de evidence material (ALTO-2)', () => {
 
     // O histórico da observação permanece, mas sem ponteiro para o material.
     const evidenceRows = await adminPool.db
-      .select({ evidenceId: t.claimEvidence.evidenceId })
+      .select({
+        evidenceId: t.claimEvidence.evidenceId,
+        evidenceSha256: t.claimEvidence.evidenceSha256,
+      })
       .from(t.claimEvidence)
       .where(eq(t.claimEvidence.claimEvidenceId, claimEvidenceId))
     expect(evidenceRows.length).toBe(1)
     expect(evidenceRows[0]?.evidenceId).toBeNull()
+    // V-3: o digest durável NÃO é apagado pela retenção.
+    expect(evidenceRows[0]?.evidenceSha256).toEqual(materialSha)
 
     const signalRows = await adminPool.db
       .select({ evidenceId: t.signal.evidenceId })

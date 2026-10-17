@@ -18,7 +18,7 @@ import {
   runMigrations,
 } from '@comprova/db'
 import * as t from '@comprova/db'
-import { addressKeys, canonicalizeAddress, loadPolicy, systemClock } from '@comprova/core'
+import { addressKeys, canonicalizeAddress, loadPolicy, policyHashOf, systemClock } from '@comprova/core'
 import { makeT0Checkers, makeT1Checkers, makeStreetViewVlm } from '@comprova/checkers'
 import {
   makeFakeGeocoder,
@@ -44,7 +44,8 @@ const adminPool = createDbPool(db.adminUrl)
 await seedGoldenDataset(adminPool.db)
 const tenant = await createTenant(adminPool.db, { name: 'f3-tenant' })
 
-const policy = loadPolicy(readFileSync(path.join(repoRoot, 'policies', '2026.12.1.yaml'), 'utf8'))
+const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.12.1.yaml'), 'utf8')
+const policy = loadPolicy(policyYaml)
 
 const registry = makeRegistryReader(adminPool.db)
 const t1Checkers = makeT1Checkers({
@@ -90,6 +91,7 @@ const fastPathDeps = {
     cnaeCategoria: makeCnaeCategoriaReader(adminPool.db),
   }),
   policy,
+  policyHash: policyHashOf(policyYaml),
   clock: systemClock,
   docHmacKey: 'test-doc-hmac-key',
 }
@@ -97,7 +99,7 @@ const fastPathDeps = {
 const mkValidation = async (cnpj: string, idem: string) =>
   runFastPath(
     fastPathDeps,
-    { tenantId: tenant, apiKeyId: 'test' },
+    { tenantId: tenant, apiKeyId: null },
     {
       documentType: 'CNPJ',
       documentValue: cnpj,

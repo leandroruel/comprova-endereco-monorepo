@@ -11,7 +11,7 @@ import {
   runMigrations,
 } from '@comprova/db'
 import * as t from '@comprova/db'
-import { loadPolicy, systemClock } from '@comprova/core'
+import { loadPolicy, policyHashOf, systemClock } from '@comprova/core'
 import { makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
@@ -31,7 +31,8 @@ const adminPool = createDbPool(db.adminUrl)
 await seedGoldenDataset(adminPool.db)
 const tenant = await createTenant(adminPool.db, { name: 'deep-tenant' })
 
-const policy = loadPolicy(readFileSync(path.join(repoRoot, 'policies', '2026.11.1.yaml'), 'utf8'))
+const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.11.1.yaml'), 'utf8')
+const policy = loadPolicy(policyYaml)
 
 afterAll(async () => {
   await adminPool.end()
@@ -51,6 +52,7 @@ const fastPathDeps = {
     cnaeCategoria: makeCnaeCategoriaReader(adminPool.db),
   }),
   policy,
+  policyHash: policyHashOf(policyYaml),
   clock: systemClock,
   docHmacKey: 'test-doc-hmac-key',
 }
@@ -81,7 +83,7 @@ describe('deepEnrich (activity core)', () => {
   it('enriquece validacao com sinais T1, atualiza veredito e popula cache de endereco', async () => {
     const created = await runFastPath(
       fastPathDeps,
-      { tenantId: tenant, apiKeyId: 'test' },
+      { tenantId: tenant, apiKeyId: null },
       {
         documentType: 'CNPJ',
         documentValue: '12345678000195',
@@ -119,7 +121,7 @@ describe('deepEnrich (activity core)', () => {
   it('caos: providers fora do ar degradam para unknown, sem veredito falso', async () => {
     const created = await runFastPath(
       fastPathDeps,
-      { tenantId: tenant, apiKeyId: 'test' },
+      { tenantId: tenant, apiKeyId: null },
       {
         documentType: 'CNPJ',
         documentValue: '90123456000131',
@@ -150,7 +152,7 @@ describe('deepEnrich (activity core)', () => {
   it('Fase 14 — claim_evidence é append-only e imutável entre execuções', async () => {
     const created = await runFastPath(
       fastPathDeps,
-      { tenantId: tenant, apiKeyId: 'test' },
+      { tenantId: tenant, apiKeyId: null },
       {
         documentType: 'CNPJ',
         documentValue: '12345678000195',
@@ -237,7 +239,7 @@ describe('deepEnrich (activity core)', () => {
   it('Fase 7 — cria claim e claim_evidence para validação sem claim (legado)', async () => {
     const created = await runFastPath(
       fastPathDeps,
-      { tenantId: tenant, apiKeyId: 'test' },
+      { tenantId: tenant, apiKeyId: null },
       {
         documentType: 'CNPJ',
         documentValue: '12345678000195',
@@ -305,7 +307,7 @@ describe('deepEnrich (activity core)', () => {
   it('Fase 19 — claim_evidence vincula artefato material opcional (evidence)', async () => {
     const created = await runFastPath(
       fastPathDeps,
-      { tenantId: tenant, apiKeyId: 'test' },
+      { tenantId: tenant, apiKeyId: null },
       {
         documentType: 'CNPJ',
         documentValue: '12345678000195',
@@ -347,6 +349,7 @@ describe('deepEnrich (activity core)', () => {
       claimId,
       signalId: null,
       evidenceId: materialId,
+      evidenceSha256: Buffer.alloc(32),
       checker: 'street_view_vlm',
       checkerVersion: '1.0.0',
       stance: 'supports',
@@ -390,7 +393,7 @@ describe('deepEnrich (activity core)', () => {
   it('Fase 19/BAIXO-8 — backfill não propaga signal.evidence_id legado', async () => {
     const created = await runFastPath(
       fastPathDeps,
-      { tenantId: tenant, apiKeyId: 'test' },
+      { tenantId: tenant, apiKeyId: null },
       {
         documentType: 'CNPJ',
         documentValue: '12345678000195',

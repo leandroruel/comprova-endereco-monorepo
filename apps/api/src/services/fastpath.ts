@@ -8,6 +8,8 @@ import {
   isValidClaimCombination,
   buildAssessmentExplanation,
   evaluateClaim,
+  SCORER_VERSION,
+  evidenceSetHashOfObservations,
   type AssessmentExplanation,
   type Claim,
   type ClaimType,
@@ -30,7 +32,14 @@ import * as t from '@comprova/db'
 
 export interface FastPathTenantContext {
   readonly tenantId: string
-  readonly apiKeyId: string
+  /**
+   * V-1: credencial que originou a asserção. `null` quando não há api_key
+   * (ex.: batch), caso em que `validation.api_key_id` fica NULL — nunca se
+   * atribui uma credencial arbitrária.
+   */
+  readonly apiKeyId: string | null
+  /** Snapshot dos scopes efetivos no momento da emissão (V-1/§3). */
+  readonly issuerScopes?: readonly string[] | null
 }
 
 export interface FastPathRequest {
@@ -62,6 +71,8 @@ export interface FastPathDeps {
   readonly registry: RegistryReader
   readonly checkers: readonly Checker[]
   readonly policy: Policy
+  /** V-5: digest do conteúdo efetivo da policy carregada. */
+  readonly policyHash: string
   readonly clock: Clock
   readonly docHmacKey: string
   readonly cep?: CepReader
@@ -590,32 +601,6 @@ export const runFastPath = async (
       }
     }
 
-    await tx.insert(t.validation).values({
-      validationId,
-      tenantId: tenant.tenantId,
-      subjectId,
-      addressId,
-      mode: req.mode,
-      status,
-      verdict: decision.verdict,
-      score: normalizedScore,
-      confidence: decision.confidence,
-      policyVersion,
-      legalBasis: req.legalBasis,
-      idempotencyKey: req.idempotencyKey,
-      consentRef: req.consentRef ?? null,
-      userId: req.userId ?? null,
-      explanation: {
-        summary: decision.explanation,
-        code: explanationDetail.code,
-        supporting_evidence: [...explanationDetail.supportingEvidenceIds],
-        contradicting_evidence: [...explanationDetail.contradictingEvidenceIds],
-      },
-      deepContext: deepContextOf(registryRecord, docDigitsValid),
-      createdAt: now,
-      expiresAt,
-    })
-
     // O claim é sempre criado junto da validation: nunca deve existir uma
     // validation persistida sem o seu claim (ver ADR-0016).
     await tx.insert(t.claim).values({
@@ -638,6 +623,7 @@ export const runFastPath = async (
           signalId: e.signalId,
           // Fast path (T0) não produz artefato material; `evidence_id` fica nulo.
           evidenceId: null,
+          evidenceSha256: null,
           checker: e.checker,
           checkerVersion: e.checkerVersion,
           stance: evidenceStanceOf(e.stance),
@@ -671,6 +657,57 @@ export const runFastPath = async (
       )
     }
 
+    // §9/§10: evidence-set hash determinístico, calculado sobre o estado
+    // PERSISTIDO (float4/jsonb já normalizados) para ser reproduzível a partir
+    // do banco. Usa `evidence_sha256` (durável), nunca `evidence_id` (efêmero).
+    const observationRows = await tx
+      .select({
+        id: t.claimEvidence.claimEvidenceId,
+        checker: t.claimEvidence.checker,
+        checkerVersion: t.claimEvidence.checkerVersion,
+        stance: t.claimEvidence.stance,
+        strength: t.claimEvidence.strength,
+        confidence: t.claimEvidence.confidence,
+        source: t.claimEvidence.source,
+        observedAt: t.claimEvidence.observedAt,
+        evidenceSha256: t.claimEvidence.evidenceSha256,
+        detail: t.claimEvidence.detail,
+      })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimId))
+    const evidenceSetHash = evidenceSetHashOfObservations(observationRows)
+
+    await tx.insert(t.validation).values({
+      validationId,
+      tenantId: tenant.tenantId,
+      subjectId,
+      addressId,
+      mode: req.mode,
+      status,
+      verdict: decision.verdict,
+      score: normalizedScore,
+      confidence: decision.confidence,
+      policyVersion,
+      policyHash: deps.policyHash,
+      scorerVersion: SCORER_VERSION,
+      legalBasis: req.legalBasis,
+      idempotencyKey: req.idempotencyKey,
+      consentRef: req.consentRef ?? null,
+      userId: req.userId ?? null,
+      apiKeyId: tenant.apiKeyId,
+      issuerScopes: tenant.issuerScopes != null ? [...tenant.issuerScopes] : null,
+      evidenceSetHash,
+      explanation: {
+        summary: decision.explanation,
+        code: explanationDetail.code,
+        supporting_evidence: [...explanationDetail.supportingEvidenceIds],
+        contradicting_evidence: [...explanationDetail.contradictingEvidenceIds],
+      },
+      deepContext: deepContextOf(registryRecord, docDigitsValid),
+      createdAt: now,
+      expiresAt,
+    })
+
     await tx.insert(t.outbox).values({
       aggregate: 'validation',
       aggregateId: validationId,
@@ -694,7 +731,7 @@ export const runFastPath = async (
 
     await tx.insert(t.auditLog).values({
       tenantId: tenant.tenantId,
-      actor: `api-key:${tenant.apiKeyId}`,
+      actor: tenant.apiKeyId === null ? 'system:batch' : `api-key:${tenant.apiKeyId}`,
       action: 'validation.create',
       targetType: 'validation',
       targetId: validationId,

@@ -40,7 +40,7 @@ import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
-import { loadPolicyFile } from './policy-loader.js'
+import { readPolicyFile } from './policy-loader.js'
 
 export const buildFastPathDeps = (
   db: Db,
@@ -50,7 +50,7 @@ export const buildFastPathDeps = (
   const cached = cache !== undefined ? makeCachedReaders(db, cache) : null
   const registry = cached?.registry ?? makeRegistryReader(db)
   const cep = cached?.cep ?? makeCepReader(db)
-  const policy = loadPolicyFile(config.POLICY_VERSION)
+  const { policy, policyHash } = readPolicyFile(config.POLICY_VERSION)
   return {
     db,
     registry,
@@ -64,6 +64,7 @@ export const buildFastPathDeps = (
       cnaeCategoria: cached?.cnaeCategoria ?? makeCnaeCategoriaReader(db),
     }),
     policy,
+    policyHash,
     clock: systemClock,
     docHmacKey: docHmacKeyFromPepper(config.API_KEY_PEPPER),
   }

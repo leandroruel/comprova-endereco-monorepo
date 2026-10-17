@@ -1,6 +1,13 @@
 import type { Signal, Stance } from './types.js'
 import type { Policy, Verdict } from './policy.js'
 
+/**
+ * Versão da implementação responsável por transformar sinais em
+ * verdict/score/confidence (`weightedScore`/`decide`). Bump explícito sempre que
+ * a semântica de cálculo mudar, para que o resultado seja reprodutível.
+ */
+export const SCORER_VERSION = '1'
+
 export const STANCE_SIGN: Readonly<Record<Stance, number>> = {
   supports: 1,
   neutral: 0,

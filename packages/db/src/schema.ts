@@ -99,6 +99,9 @@ export const apiKey = pgTable(
     uniqueIndex('api_key_prefix_uq')
       .on(t.keyPrefix)
       .where(sql`revoked_at IS NULL`),
+    // Chave única de apoio para a FK composta de `validation` (V-1):
+    // garante que validation.tenant_id = api_key.tenant_id.
+    unique('api_key_id_tenant_uq').on(t.apiKeyId, t.tenantId),
   ],
 )
 
@@ -384,6 +387,14 @@ export const validation = pgTable(
       .references(() => legalBasis.code),
     consentRef: text('consent_ref'),
     userId: text('user_id'),
+    // V-1: credencial que originou a asserção (nullable: histórico e batch).
+    apiKeyId: uuid('api_key_id'),
+    // V-1: snapshot da autoridade efetiva no momento da emissão.
+    issuerScopes: text('issuer_scopes').array(),
+    // V-5/§8/§9: binding de policy, scorer e conjunto de evidências.
+    policyHash: text('policy_hash'),
+    scorerVersion: text('scorer_version'),
+    evidenceSetHash: text('evidence_set_hash'),
     idempotencyKey: text('idempotency_key'),
     workflowId: text('workflow_id'),
     explanation: jsonb('explanation').$type<{
@@ -401,6 +412,18 @@ export const validation = pgTable(
     primaryKey({ columns: [t.validationId, t.createdAt] }),
     index('idx_validation_tenant_time').on(t.tenantId, t.createdAt.desc()),
     index('idx_validation_subject').on(t.subjectId, t.createdAt.desc()),
+    // FK composta (V-1): valida existência E coerência de tenant do issuer.
+    foreignKey({
+      columns: [t.apiKeyId, t.tenantId],
+      foreignColumns: [apiKey.apiKeyId, apiKey.tenantId],
+      name: 'validation_api_key_tenant_fk',
+    }),
+    // FK composta (§14.8/§19): garante que o subject é do MESMO tenant.
+    foreignKey({
+      columns: [t.subjectId, t.tenantId],
+      foreignColumns: [subject.subjectId, subject.tenantId],
+      name: 'validation_subject_tenant_fk',
+    }),
   ],
 )
 
@@ -461,6 +484,11 @@ export const claimEvidence = pgTable(
     signalId: uuid('signal_id'),
     /** Artefato material associado (nullable: observações sem arquivo/documento). */
     evidenceId: uuid('evidence_id').references(() => evidence.evidenceId),
+    /**
+     * V-3: digest DURÁVEL do material (`evidence.sha256`). Preservado após a
+     * retenção apagar o artefato e anular `evidence_id`. Nullable.
+     */
+    evidenceSha256: bytea('evidence_sha256'),
     checker: text('checker').notNull(),
     checkerVersion: text('checker_version').notNull(),
     stance: evidenceStanceEnum('stance').notNull(),

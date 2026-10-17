@@ -81,7 +81,7 @@ const processItem = async (deps: BatchProcessorDeps, item: PendingItem): Promise
     }
     const result = await runFastPath(
       { ...deps.fastPath, db: deps.adminDb },
-      { tenantId: item.tenantId, apiKeyId: item.batchId },
+      { tenantId: item.tenantId, apiKeyId: null },
       req,
     )
     await deps.adminDb

@@ -191,7 +191,13 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
   },
 
   create: async (
-    tenant: { readonly tenantId: string; readonly apiKeyId: string } | undefined,
+    tenant:
+      | {
+          readonly tenantId: string
+          readonly apiKeyId: string
+          readonly scopes: readonly string[]
+        }
+      | undefined,
     userId: string | null | undefined,
     idempotencyKey: string | undefined,
     body: CreateValidationRequest,
@@ -226,7 +232,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     }
     const result = await runFastPath(
       deps.fastPath,
-      { tenantId: tenant.tenantId, apiKeyId: tenant.apiKeyId },
+      { tenantId: tenant.tenantId, apiKeyId: tenant.apiKeyId, issuerScopes: tenant.scopes },
       fastRequest,
     )
     if (result.requestMismatch === true) {

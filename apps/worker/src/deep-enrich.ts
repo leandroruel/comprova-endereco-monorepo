@@ -5,6 +5,7 @@ import {
   evaluateClaim,
   observationFromSignal,
   weightedScore,
+  evidenceSetHashOfObservations,
   type CheckContext,
   type Checker,
   type ClaimType,
@@ -338,74 +339,99 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
         ...priorToBackfill.map((row) => row.evidenceId),
         ...freshSignals.map((s) => s.evidenceId ?? null),
       ].filter((id): id is string => id !== null && id.length > 0)
-      const materialEvidenceIds = new Set(
-        candidateEvidenceIds.length === 0
-          ? []
-          : (
-              await tx
-                .select({ evidenceId: t.evidence.evidenceId })
-                .from(t.evidence)
-                .where(inArray(t.evidence.evidenceId, [...new Set(candidateEvidenceIds)]))
-            ).map((row) => row.evidenceId),
-      )
+      // V-3: além de existir, o material precisa do digest para o binding
+      // durável em `claim_evidence.evidence_sha256`.
+      const materialShaByEvidenceId = new Map<string, Buffer>()
+      if (candidateEvidenceIds.length > 0) {
+        const materialRows = await tx
+          .select({ evidenceId: t.evidence.evidenceId, sha256: t.evidence.sha256 })
+          .from(t.evidence)
+          .where(inArray(t.evidence.evidenceId, [...new Set(candidateEvidenceIds)]))
+        for (const row of materialRows) {
+          materialShaByEvidenceId.set(row.evidenceId, Buffer.from(row.sha256))
+        }
+      }
       const materialEvidenceIdOf = (candidate: string | null): string | null =>
-        candidate !== null && materialEvidenceIds.has(candidate) ? candidate : null
+        candidate !== null && materialShaByEvidenceId.has(candidate) ? candidate : null
+      const materialShaOf = (materialId: string | null): Buffer | null =>
+        materialId === null ? null : (materialShaByEvidenceId.get(materialId) ?? null)
 
-      const evidenceValues = [
-        ...priorToBackfill.map((row) => ({
-          claimEvidenceId: randomUUID(),
-          tenantId: input.tenantId,
-          claimId,
-          signalId: row.signalId,
-          // Vínculo opcional com artefato material; nulo para T0 sem arquivo
-          // (ou para ids legados que não existem em `evidence`).
-          evidenceId: materialEvidenceIdOf(row.evidenceId),
-          checker: row.checkerId,
-          checkerVersion: row.checkerVersion,
-          stance: row.stance === 'neutral' ? ('unknown' as const) : row.stance,
-          strength: row.strength,
-          confidence: row.confidence,
-          source: row.source,
-          observedAt: row.observedAt,
-          ttlSeconds: row.ttlSeconds,
-          expiresAt: new Date(row.observedAt.getTime() + row.ttlSeconds * 1000),
-          detail: row.detail,
-        })),
-        ...freshSignals.map((s, index) => ({
-          claimEvidenceId: randomUUID(),
-          tenantId: input.tenantId,
-          claimId,
-          signalId: freshSignalIds[index] ?? null,
-          evidenceId: materialEvidenceIdOf(s.evidenceId ?? null),
-          checker: s.checkerId,
-          checkerVersion: s.checkerVersion,
-          stance: s.stance === 'neutral' ? ('unknown' as const) : s.stance,
-          strength: s.strength,
-          confidence: s.confidence,
-          source: s.source,
-          observedAt: new Date(s.observedAt),
-          ttlSeconds: s.ttlSeconds,
-          expiresAt: new Date(Date.parse(s.observedAt) + s.ttlSeconds * 1000),
-          detail: s.detail,
-        })),
+      const observations = [
+        ...priorToBackfill.map((row) => {
+          const materialId = materialEvidenceIdOf(row.evidenceId)
+          return {
+            claimEvidenceId: randomUUID(),
+            tenantId: input.tenantId,
+            claimId,
+            signalId: row.signalId,
+            // Vínculo opcional com artefato material; nulo para T0 sem arquivo
+            // (ou para ids legados que não existem em `evidence`).
+            evidenceId: materialId,
+            evidenceSha256: materialShaOf(materialId),
+            checker: row.checkerId,
+            checkerVersion: row.checkerVersion,
+            stance: row.stance === 'neutral' ? ('unknown' as const) : row.stance,
+            strength: row.strength,
+            confidence: row.confidence,
+            source: row.source,
+            observedAt: row.observedAt,
+            ttlSeconds: row.ttlSeconds,
+            expiresAt: new Date(row.observedAt.getTime() + row.ttlSeconds * 1000),
+            detail: row.detail,
+          }
+        }),
+        ...freshSignals.map((s, index) => {
+          const materialId = materialEvidenceIdOf(s.evidenceId ?? null)
+          return {
+            claimEvidenceId: randomUUID(),
+            tenantId: input.tenantId,
+            claimId,
+            signalId: freshSignalIds[index] ?? null,
+            evidenceId: materialId,
+            evidenceSha256: materialShaOf(materialId),
+            checker: s.checkerId,
+            checkerVersion: s.checkerVersion,
+            stance: s.stance === 'neutral' ? ('unknown' as const) : s.stance,
+            strength: s.strength,
+            confidence: s.confidence,
+            source: s.source,
+            observedAt: new Date(s.observedAt),
+            ttlSeconds: s.ttlSeconds,
+            expiresAt: new Date(Date.parse(s.observedAt) + s.ttlSeconds * 1000),
+            detail: s.detail,
+          }
+        }),
       ]
 
-      if (evidenceValues.length > 0) {
-        await tx.insert(t.claimEvidence).values(evidenceValues)
+      if (observations.length > 0) {
+        await tx.insert(t.claimEvidence).values(observations)
       }
     }
 
+    // §9/§10: evidências duráveis do conjunto usado pelo resultado final.
     const evidenceRows =
       claimId === null
         ? []
         : await tx
-            .select({ id: t.claimEvidence.claimEvidenceId, stance: t.claimEvidence.stance })
+            .select({
+              id: t.claimEvidence.claimEvidenceId,
+              checker: t.claimEvidence.checker,
+              checkerVersion: t.claimEvidence.checkerVersion,
+              stance: t.claimEvidence.stance,
+              strength: t.claimEvidence.strength,
+              confidence: t.claimEvidence.confidence,
+              source: t.claimEvidence.source,
+              observedAt: t.claimEvidence.observedAt,
+              evidenceSha256: t.claimEvidence.evidenceSha256,
+              detail: t.claimEvidence.detail,
+            })
             .from(t.claimEvidence)
             .where(eq(t.claimEvidence.claimId, claimId))
     const explanationDetail = buildAssessmentExplanation(
       decision,
       evidenceRows.map((row) => ({ id: row.id, stance: row.stance })),
     )
+    const evidenceSetHash = evidenceSetHashOfObservations(evidenceRows)
 
     await tx
       .update(t.validation)
@@ -414,6 +440,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
         verdict: decision.verdict,
         score: Math.tanh(score),
         confidence: decision.confidence,
+        evidenceSetHash,
         explanation: {
           summary: decision.explanation,
           code: explanationDetail.code,

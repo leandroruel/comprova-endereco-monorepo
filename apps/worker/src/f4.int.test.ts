@@ -12,7 +12,7 @@ import {
   runMigrations,
 } from '@comprova/db'
 import * as t from '@comprova/db'
-import { addressKeys, canonicalizeAddress, loadPolicy, systemClock } from '@comprova/core'
+import { addressKeys, canonicalizeAddress, loadPolicy, policyHashOf, systemClock } from '@comprova/core'
 import { makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -30,7 +30,8 @@ const adminPool = createDbPool(db.adminUrl)
 await seedGoldenDataset(adminPool.db)
 const tenant = await createTenant(adminPool.db, { name: 'f4-tenant' })
 
-const policy = loadPolicy(readFileSync(path.join(repoRoot, 'policies', '2026.12.1.yaml'), 'utf8'))
+const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.12.1.yaml'), 'utf8')
+const policy = loadPolicy(policyYaml)
 
 const contabilidadeKey = addressKeys(
   canonicalizeAddress({
@@ -81,12 +82,13 @@ describe('partner_graph (F4)', () => {
         cnaeCategoria: makeCnaeCategoriaReader(adminPool.db),
       }),
       policy,
+      policyHash: policyHashOf(policyYaml),
       clock: systemClock,
       docHmacKey: 'test-doc-hmac-key',
     }
     const created = await runFastPath(
       fastPathDeps,
-      { tenantId: tenant, apiKeyId: 'test' },
+      { tenantId: tenant, apiKeyId: null },
       {
         documentType: 'CNPJ',
         documentValue: '23456789000195',

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
 
@@ -36,6 +37,14 @@ export const PolicySchema = z.object({
 
 export type HardRule = z.infer<typeof HardRuleSchema>
 export type Policy = z.infer<typeof PolicySchema>
+
+/**
+ * Digest do CONTEÚDO EFETIVO da policy (os bytes do YAML carregado), não do
+ * caminho/nome do arquivo nem de um objeto JS serializado de forma não canônica.
+ * `policy_version + policy_hash` identifica inequivocamente o conteúdo usado.
+ */
+export const policyHashOf = (yamlContent: string): string =>
+  createHash('sha256').update(yamlContent, 'utf8').digest('hex')
 
 export const loadPolicy = (yamlContent: string, expectedVersion?: string): Policy => {
   const raw: unknown = parseYaml(yamlContent)

@@ -243,6 +243,13 @@ snapshot das linhas de `claim_evidence`:
 A imutabilidade é pré-requisito para a camada de credenciais (uma credencial não
 pode referenciar evidência mutável).
 
+> **Atualização (ADR-0017):** a imutabilidade deixou de ser apenas convenção de
+> código e passou a ser **garantida pelo banco** pelo trigger
+> `claim_evidence_guard_trg`. A única exceção é a desvinculação do material
+> expirado (`evidence_id X → NULL`), com o digest (`evidence_sha256`) preservado.
+> Também foram adicionados os bindings de issuer/policy/scorer/evidence-set e o
+> digest durável do material — ver `docs/adr/0017-verifiability-bindings.md`.
+
 ### Integridade relacional e retenção (migrações 0024–0027)
 
 Auditoria de integridade (2026-10-16) endureceu o modelo sem alterar a lógica de
