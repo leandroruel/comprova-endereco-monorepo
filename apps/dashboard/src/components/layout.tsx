@@ -1,7 +1,16 @@
 import { type ReactNode, useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { cn } from '@/lib/utils'
-import { Activity, ChevronRight, FileSearch, Globe } from 'lucide-react'
-import { LogOut } from 'lucide-react'
+import {
+  Activity,
+  ChevronRight,
+  ChevronsUpDown,
+  FileSearch,
+  Globe,
+  LogOut,
+  Settings,
+  User,
+} from 'lucide-react'
 
 interface NavItem {
   readonly id: string
@@ -13,6 +22,68 @@ const navItems: readonly NavItem[] = [
   { id: 'validations', label: 'Validações', icon: <FileSearch className="h-4 w-4" /> },
   { id: 'bulk', label: 'Busca em lote', icon: <Activity className="h-4 w-4" /> },
 ]
+
+const initialsOf = (name: string): string => {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  const first = parts[0]?.[0] ?? ''
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : ''
+  return (first + last).toUpperCase() || '?'
+}
+
+const menuItemClass =
+  'flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 motion-reduce:transition-none'
+
+function UserMenu({
+  userEmail,
+  onNavigate,
+}: {
+  readonly userEmail?: string
+  readonly onNavigate?: (page: string) => void
+}) {
+  const hasIdentity = userEmail !== undefined && userEmail.length > 0
+  const displayName = hasIdentity ? (userEmail.split('@')[0] ?? userEmail) : 'Conta'
+  const showEmail = hasIdentity && userEmail.includes('@')
+
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          aria-label="Menu do usuário"
+          className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-[10px] font-semibold text-foreground">
+            {initialsOf(displayName)}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-medium text-foreground">{displayName}</span>
+            {showEmail && (
+              <span className="block truncate text-[11px] text-muted-foreground">{userEmail}</span>
+            )}
+          </span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-sidebar-muted" />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          side="top"
+          align="start"
+          sideOffset={6}
+          className="animate-fade-in z-50 min-w-[11rem] rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md motion-reduce:animate-none"
+        >
+          <DropdownMenu.Item className={menuItemClass} onSelect={() => onNavigate?.('profile')}>
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
+            Perfil
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className={menuItemClass} onSelect={() => onNavigate?.('settings')}>
+            <Settings className="h-3.5 w-3.5 text-muted-foreground" />
+            Configurações
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
 
 export function DashboardLayout({
   children,
@@ -72,15 +143,11 @@ export function DashboardLayout({
         </nav>
 
         <div className="border-t border-sidebar-border p-4">
-          {userEmail && (
-            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="truncate font-medium text-foreground">{userEmail.split('@')[0]}</span>
-            </div>
-          )}
+          <UserMenu userEmail={userEmail} onNavigate={onNavigate} />
           {onLogout && (
             <button
               onClick={onLogout}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+              className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
             >
               <LogOut className="h-3 w-3" />
               Sair
