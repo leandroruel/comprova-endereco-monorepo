@@ -29,7 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # O gitleaks calcula o range do PR (HEAD^..HEAD). Com o clone raso
+      # padrão (fetch-depth: 1) o commit pai não existe e o scan aborta sem
+      # escanear nada.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Check for secrets
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -37,4 +42,4 @@ jobs:
       - name: Audit dependencies
         run: |
           curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          trivy fs --scanners vuln,secret --exit-code 1 .
+          trivy fs --scanners vuln,secret --exit-code 1 --ignorefile .trivyignore.yaml .
