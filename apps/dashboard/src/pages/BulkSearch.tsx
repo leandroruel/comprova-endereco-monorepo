@@ -5,7 +5,7 @@ import { Badge, Button, Card, CardContent, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, Download, FileText, Upload, XCircle } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3000'
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 const API_KEY = 'cvk_-oHrqOQw3f50608XbFVB74C-OwyVSDTM'
 
 interface BatchItem {

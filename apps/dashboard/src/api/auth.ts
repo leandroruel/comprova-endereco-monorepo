@@ -1,5 +1,6 @@
 import { createAuthClient } from 'better-auth/react'
 
+// Mesma origem (túnel/proxy) por padrão; sobrescrevível via VITE_API_BASE.
 export const authClient = createAuthClient({
-  baseURL: 'http://localhost:3000',
+  baseURL: import.meta.env.VITE_API_BASE || window.location.origin,
 })

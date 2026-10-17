@@ -1,4 +1,7 @@
-const API_BASE = 'http://localhost:3000'
+// Origem da API. Vazio em dev: a UI usa a mesma origem e o proxy do Vite
+// (vite.config.ts) encaminha /v1|/api|/readyz para a API local. Permite
+// sobrescrever via VITE_API_BASE (ex.: apontar para a API pública).
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 const API_KEY = 'cvk_-oHrqOQw3f50608XbFVB74C-OwyVSDTM'
 
 export interface ValidationSignal {
