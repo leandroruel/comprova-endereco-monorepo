@@ -1,0 +1,15 @@
+# A constante `SECRET_KEY_MULTIBASE` em `data-integrity.test.ts` é a chave
+# privada do VETOR DE TESTE NORMATIVO B.3 da W3C (eddsa-jcs-2022), publicada na
+# própria especificação:
+#   https://www.w3.org/TR/vc-di-eddsa/#b-3-representation-eddsa-jcs-2022
+# Não é um segredo: existe apenas para provar interoperabilidade byte a byte.
+# O detector genérico a sinaliza por causa do nome da constante.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "vetor de teste público da W3C (eddsa-jcs-2022)"
+paths = ['''packages/credential/src/data-integrity\.test\.ts$''']
+regexTarget = "line"
+regexes = ['''SECRET_KEY_MULTIBASE''']

@@ -2,18 +2,24 @@ import type {
   AssertionObservation,
   AssertionPayload,
   AssertionSource,
-  Credential,
   CredentialObservation,
 } from './assertion.js'
-import { canonicalAssertionBytes } from './canonical.js'
+import { ASSERTION_METHOD, createDataIntegrityProof } from './data-integrity.js'
 import { evidenceSetHashOfCredential } from './evidence.js'
-import type { IssuerIdentity } from './issuer.js'
+import { verificationMethodOf, type IssuerIdentity } from './issuer.js'
 import type { Signer } from './signer.js'
 import { deriveCredentialSubjectId } from './subject.js'
+import { toVerifiableCredential, type SecuredVerifiableCredential } from './vc.js'
 
 export interface BuildCredentialDeps {
   readonly issuer: IssuerIdentity
   readonly signer: Signer
+  /**
+   * `created` do proof (Data Integrity). Quando ausente, é derivado da própria
+   * assertion (`completed_at`, ou `created_at` quando nulo), de modo que
+   * `mesma assertion → mesmos bytes assinados`.
+   */
+  readonly proofCreatedAt?: Date
 }
 
 const byId = (a: { readonly id: string }, b: { readonly id: string }): number =>
@@ -36,19 +42,16 @@ const toCredentialObservation = (o: AssertionObservation): CredentialObservation
 })
 
 /**
- * Constrói (mas não persiste) a credencial de uma assertion já carregada
- * (FASE 9). Puro: não acessa banco. Recusa emitir credencial parcial — resultado
- * incompleto, bindings ausentes ou `evidence_set_hash` incoerente com o conjunto
- * de observações abortam a emissão.
+ * Normaliza a assertion de domínio já carregada (FASE 2/9). Puro: não acessa
+ * banco. Recusa emitir credencial parcial — resultado incompleto, bindings
+ * ausentes ou `evidence_set_hash` incoerente com o conjunto de observações
+ * abortam a emissão.
  *
  * As observações e os arrays de explicação são ordenados antes de montar o
  * payload, de modo que `mesma assertion → mesmos bytes`, independentemente da
  * ordem devolvida pelo PostgreSQL.
  */
-export const buildCredential = async (
-  source: AssertionSource,
-  deps: BuildCredentialDeps,
-): Promise<Credential> => {
+export const buildAssertion = (source: AssertionSource, issuerId: string): AssertionPayload => {
   const v = source.validation
 
   if (v.verdict === null || v.score === null || v.confidence === null) {
@@ -71,10 +74,10 @@ export const buildCredential = async (
     unknown: observations.filter((o) => o.stance === 'unknown').length,
   }
 
-  const payload: AssertionPayload = {
+  return {
     format: 'comprova-assertion-v1',
     issuer: {
-      id: deps.issuer.id,
+      id: issuerId,
       authorization: v.issuerScopes === null ? null : { scopes: [...v.issuerScopes] },
     },
     subject: {
@@ -90,7 +93,7 @@ export const buildCredential = async (
       type: source.claim.type,
       subject_type: source.claim.subjectType,
       target: {
-        type: 'address',
+        type: source.claim.targetType,
         id: source.claim.addressId,
         building_key: source.addressBuildingKey,
       },
@@ -124,15 +127,29 @@ export const buildCredential = async (
       expires_at: v.expiresAt.toISOString(),
     },
   }
+}
 
-  const signature = await deps.signer.sign(canonicalAssertionBytes(payload))
+/**
+ * `AssertionSource → assertion interna → Verifiable Credential (W3C 2.0) →
+ * Data Integrity proof (eddsa-jcs-2022)`. Puro (não acessa banco); o `signer` e
+ * a identidade do issuer entram por dependência.
+ */
+export const buildCredential = async (
+  source: AssertionSource,
+  deps: BuildCredentialDeps,
+): Promise<SecuredVerifiableCredential> => {
+  const credential = toVerifiableCredential(buildAssertion(source, deps.issuer.id))
 
-  return {
-    payload,
-    proof: {
-      type: 'Ed25519Signature',
-      key_id: deps.issuer.keyId,
-      signature: Buffer.from(signature).toString('base64url'),
-    },
-  }
+  const proof = await createDataIntegrityProof(credential, {
+    verificationMethod: verificationMethodOf(deps.issuer),
+    proofPurpose: ASSERTION_METHOD,
+    created: (
+      deps.proofCreatedAt ??
+      source.validation.completedAt ??
+      source.validation.createdAt
+    ).toISOString(),
+    signer: deps.signer,
+  })
+
+  return { ...credential, proof }
 }

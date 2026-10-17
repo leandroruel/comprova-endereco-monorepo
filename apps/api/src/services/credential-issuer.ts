@@ -4,8 +4,8 @@ import type { Db } from '@comprova/db'
 import {
   buildCredential,
   type AssertionSource,
-  type Credential,
   type IssuerIdentity,
+  type SecuredVerifiableCredential,
   type Signer,
 } from '@comprova/credential'
 
@@ -96,6 +96,7 @@ export const loadAssertionSource = async (
         claimId: t.claim.claimId,
         type: t.claim.type,
         subjectType: t.claim.subjectType,
+        targetType: t.claim.targetType,
         addressId: t.claim.addressId,
       })
       .from(t.claim)
@@ -168,6 +169,7 @@ export const loadAssertionSource = async (
         id: claim.claimId,
         type: claim.type,
         subjectType: claim.subjectType,
+        targetType: claim.targetType,
         addressId: claim.addressId,
       },
       addressBuildingKey:
@@ -187,7 +189,7 @@ export const issueCredential = async (
   tenantId: string,
   validationId: string,
   deps: IssueCredentialDeps,
-): Promise<Credential> => {
+): Promise<SecuredVerifiableCredential> => {
   const source = await loadAssertionSource(db, tenantId, validationId)
   return buildCredential(source, deps)
 }

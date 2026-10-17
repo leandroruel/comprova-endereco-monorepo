@@ -2,7 +2,11 @@
 
 ## Status
 
-Aceito (2026-10-17)
+Aceito (2026-10-17). **Parcialmente superseded por
+[ADR-0020](0020-verifiable-credential-data-model-2.md)**: a forma da credencial,
+a canonicalização do material assinado, o envelope de assinatura e a API do
+verifier (§1, §2, §3 e §9) foram substituídos pela VC Data Model 2.0 com Data
+Integrity `eddsa-jcs-2022`. As decisões §4–§8 continuam em vigor.
 
 ## Contexto
 
