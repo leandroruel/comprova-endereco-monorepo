@@ -6,8 +6,9 @@ import {
   generateEd25519KeyPair,
   localIssuer,
   makeEd25519Signer,
+  verificationMethodOf,
   verifyCredential,
-  type Credential,
+  type SecuredVerifiableCredential,
 } from '@comprova/credential'
 import {
   createApiKey,
@@ -133,10 +134,11 @@ const keyPair = generateEd25519KeyPair()
 const issuer = localIssuer(tenantId, 'key-1')
 const signer = makeEd25519Signer(keyPair.privateKey)
 
-const issue = (validationId: string): Promise<Credential> =>
+const issue = (validationId: string): Promise<SecuredVerifiableCredential> =>
   issueCredential(appPool.db, tenantId, validationId, { issuer, signer })
 
-const transport = (credential: Credential): Credential => JSON.parse(JSON.stringify(credential)) as Credential
+const transport = (credential: SecuredVerifiableCredential): SecuredVerifiableCredential =>
+  JSON.parse(JSON.stringify(credential)) as SecuredVerifiableCredential
 
 const newValidation = async (): Promise<string> => {
   const res = await postCnpj()
@@ -154,22 +156,30 @@ describe('emissão e verificação independente', () => {
     const credential = transport(await issue(validationId))
 
     expect(observations.length).toBeGreaterThan(0)
-    expect(credential.payload.format).toBe('comprova-assertion-v1')
-    expect(credential.payload.issuer.id).toBe(`comprova:issuer:${tenantId}`)
-    expect(credential.payload.issuer.authorization).toEqual({
-      scopes: ['validate:read', 'validate:write'],
+    expect(credential['@context'][0]).toBe('https://www.w3.org/ns/credentials/v2')
+    expect(credential.type).toEqual(['VerifiableCredential', 'comprova:AddressCredential'])
+    expect(credential.issuer).toBe(`comprova:issuer:${tenantId}`)
+    expect(credential.credentialSubject['comprova:docType']).toBe('CNPJ')
+    expect(credential.credentialSubject.id).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(credential.credentialSubject['comprova:claim'].id).toBe(claimId)
+    expect(credential.credentialSubject['comprova:claim']['comprova:targetType']).toBe('address')
+    expect(credential['comprova:evidenceSetHash']).toBe(row?.evidenceSetHash)
+    expect(credential.evidence).toHaveLength(observations.length)
+    expect(credential['comprova:evidenceSetHash']).toBe(evidenceSetHashOfObservations(observations))
+    expect(credential['comprova:policy']).toEqual({
+      'comprova:version': POLICY_VERSION,
+      'comprova:hash': policyHashOf(policyYaml),
     })
-    expect(credential.payload.subject.id).toMatch(/^sha256:[0-9a-f]{64}$/)
-    expect(credential.payload.claim.id).toBe(claimId)
-    expect(credential.payload.evidence.set_hash).toBe(row?.evidenceSetHash)
-    expect(credential.payload.evidence.observations).toHaveLength(observations.length)
-    expect(credential.payload.evidence.set_hash).toBe(evidenceSetHashOfObservations(observations))
-    expect(credential.payload.policy).toEqual({
-      version: POLICY_VERSION,
-      hash: policyHashOf(policyYaml),
+    expect(credential['comprova:algorithm']).toEqual({ 'comprova:scorerVersion': SCORER_VERSION })
+    expect(credential['comprova:result']['comprova:verdict']).toBe(row?.verdict)
+    if (row?.completedAt === null) {
+      expect(credential['comprova:result']).not.toHaveProperty('comprova:completedAt')
+    } else {
+      expect(credential['comprova:result']['comprova:completedAt']).toBe(row!.completedAt!.toISOString())
+    }
+    expect(credential['comprova:authorization']).toEqual({
+      'comprova:scopes': ['validate:read', 'validate:write'],
     })
-    expect(credential.payload.algorithm.scorer_version).toBe(SCORER_VERSION)
-    expect(credential.payload.result.status).toBe('completed')
 
     const subjectRow = (
       await adminPool.db
@@ -184,23 +194,34 @@ describe('emissão e verificação independente', () => {
       verifyCredential(credential, {
         publicKey: keyPair.publicKey,
         expectedIssuerId: issuer.id,
-        expectedKeyId: 'key-1',
+        expectedVerificationMethod: verificationMethodOf(issuer),
       }),
     ).toEqual({ valid: true })
   })
 
-  const tamperCases: ReadonlyArray<readonly [string, (credential: Credential) => void]> = [
-    ['issuer', (c) => (c.payload.issuer.id = `comprova:issuer:${randomUUID()}`)],
-    ['subject', (c) => (c.payload.subject.id = `sha256:${'f'.repeat(64)}`)],
-    ['claim', (c) => (c.payload.claim.type = 'address_exists')],
-    ['verdict', (c) => (c.payload.result.verdict = 'NOT_FOUND')],
-    ['score', (c) => (c.payload.result.score = 0.123)],
-    ['confidence', (c) => (c.payload.result.confidence = 0.123)],
-    ['evidence_set_hash', (c) => (c.payload.evidence.set_hash = 'a'.repeat(64))],
-    ['policy_hash', (c) => (c.payload.policy.hash = 'b'.repeat(64))],
-    ['scorer_version', (c) => (c.payload.algorithm.scorer_version = 'tampered')],
-    ['timestamp', (c) => (c.payload.timestamps.created_at = '2000-01-01T00:00:00.000Z')],
-    ['evidence digest', (c) => (c.payload.evidence.observations[0]!.evidence_sha256 = 'c'.repeat(64))],
+  const tamperCases: ReadonlyArray<readonly [string, (credential: SecuredVerifiableCredential) => void]> = [
+    ['issuer', (c) => (c.issuer = `comprova:issuer:${randomUUID()}`)],
+    ['subject', (c) => (c.credentialSubject.id = `sha256:${'f'.repeat(64)}`)],
+    ['claim', (c) => (c.credentialSubject['comprova:claim']['comprova:claimType'] = 'address_exists')],
+    [
+      'target_type',
+      (c) =>
+        ((c.credentialSubject['comprova:claim'] as Record<string, unknown>)['comprova:targetType'] =
+          'parcel'),
+    ],
+    ['address', (c) => (c.credentialSubject['comprova:claim']['comprova:address'].id = randomUUID())],
+    [
+      'building_key',
+      (c) => (c.credentialSubject['comprova:claim']['comprova:address']['comprova:buildingKey'] = 'b64:AAAA'),
+    ],
+    ['verdict', (c) => (c['comprova:result']['comprova:verdict'] = 'NOT_FOUND')],
+    ['score', (c) => (c['comprova:result']['comprova:score'] = 0.123)],
+    ['confidence', (c) => (c['comprova:result']['comprova:confidence'] = 0.123)],
+    ['evidence_set_hash', (c) => (c['comprova:evidenceSetHash'] = 'a'.repeat(64))],
+    ['policy_hash', (c) => (c['comprova:policy']['comprova:hash'] = 'b'.repeat(64))],
+    ['scorer_version', (c) => (c['comprova:algorithm']['comprova:scorerVersion'] = 'tampered')],
+    ['timestamp', (c) => (c.validFrom = '2000-01-01T00:00:00.000Z')],
+    ['evidence digest', (c) => (c.evidence[0]!['comprova:evidenceSha256'] = 'c'.repeat(64))],
   ]
 
   it.each(tamperCases)('rejeita adulteração de %s', async (_name, mutate) => {
@@ -251,9 +272,7 @@ describe('emissão e verificação independente', () => {
       .where(eq(t.validation.validationId, validationId))
 
     const credential = transport(await issue(validationId))
-    expect(
-      credential.payload.evidence.observations.some((o) => o.evidence_sha256 === sha.toString('hex')),
-    ).toBe(true)
+    expect(credential.evidence.some((o) => o['comprova:evidenceSha256'] === sha.toString('hex'))).toBe(true)
     expect(verifyCredential(credential, { publicKey: keyPair.publicKey }).valid).toBe(true)
 
     // Retenção: desvincula e apaga o material físico (evidence_sha256 é preservado).
