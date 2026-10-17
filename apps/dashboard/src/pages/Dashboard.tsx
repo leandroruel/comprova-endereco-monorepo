@@ -208,8 +208,12 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
               </CardContent>
             </Card>
           )}
-          {history.map((validation) => (
-            <ValidationCard key={validation.validation_id} validation={validation} />
+          {history.map((validation, index) => (
+            <ValidationCard
+              key={validation.validation_id}
+              validation={validation}
+              defaultCollapsed={index > 0}
+            />
           ))}
         </div>
       </div>

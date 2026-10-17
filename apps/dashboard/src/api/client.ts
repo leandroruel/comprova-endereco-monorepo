@@ -47,6 +47,7 @@ export interface ValidationDto {
   evidence_summary?: EvidenceSummaryDto | null
   explanation: string | null
   explanation_detail?: AssessmentExplanationDto | null
+  address_unavailable_reason?: 'cnpj_not_in_snapshot' | 'address_not_provided' | null
   created_at: string
   expires_at: string
 }
