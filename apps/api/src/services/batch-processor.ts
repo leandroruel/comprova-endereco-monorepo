@@ -14,6 +14,7 @@ interface PendingItem {
   readonly itemId: string
   readonly batchId: string
   readonly tenantId: string
+  readonly userId: string | null
   readonly docType: 'CNPJ' | 'CPF'
   readonly docDigits: string
   readonly legalBasis: string
@@ -31,6 +32,7 @@ const claimPendingItems = async (
         itemId: t.batchItem.itemId,
         batchId: t.batchItem.batchId,
         tenantId: t.batchItem.tenantId,
+        userId: t.batch.userId,
         docType: t.batchItem.docType,
         docDigits: t.batchItem.docDigits,
         legalBasis: t.batch.legalBasis,
@@ -78,6 +80,10 @@ const processItem = async (deps: BatchProcessorDeps, item: PendingItem): Promise
       legalBasis: item.legalBasis,
       mode: 'fast',
       idempotencyKey: `batch:${item.batchId}:${item.itemId}`,
+      // V-1: registra o actor humano que originou o lote. Não há api_key nesta
+      // origem (a credencial é a sessão do usuário), então `api_key_id` fica NULL
+      // e `validation.user_id` responde "quem autorizou" sem inventar credencial.
+      userId: item.userId,
     }
     const result = await runFastPath(
       { ...deps.fastPath, db: deps.adminDb },

@@ -17,7 +17,9 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
+import { buildApp, buildFastPathDeps } from './app.js'
+import type { AppConfig } from './config.js'
+import { batchTick } from './services/batch-processor.js'
 
 // Pré-requisitos de verificabilidade (V-1, V-3, V-5, §8, §9, §12):
 //  - issuer/api_key + snapshot de autoridade;
@@ -45,22 +47,23 @@ const key = await createApiKey(adminPool.db, tenantId, PEPPER, {
 })
 
 const appPool = createDbPool(db.appUrl)
+const config: AppConfig = {
+  DATABASE_URL: db.appUrl,
+  REDIS_URL: testRedis.url,
+  API_KEY_PEPPER: PEPPER,
+  PORT: 3000,
+  HOST: '127.0.0.1',
+  LOG_LEVEL: 'silent',
+  POLICY_VERSION,
+  TEMPORAL_ENABLED: false,
+  VLM_ENABLED: false,
+  TEMPORAL_ADDRESS: 'localhost:7233',
+  TEMPORAL_NAMESPACE: 'default',
+  TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
+  WORKER_LOOPS: false,
+}
 const app = await buildApp({
-  config: {
-    DATABASE_URL: db.appUrl,
-    REDIS_URL: testRedis.url,
-    API_KEY_PEPPER: PEPPER,
-    PORT: 3000,
-    HOST: '127.0.0.1',
-    LOG_LEVEL: 'silent',
-    POLICY_VERSION,
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
-    WORKER_LOOPS: false,
-  },
+  config,
   db: appPool.db,
   redis,
   logger: createLogger({ level: 'silent' }),
@@ -433,5 +436,109 @@ describe('V-3 — binding criptográfico do material', () => {
     await expect(
       insertObservation(claimId, { evidenceId: materialId, evidenceSha256: null }),
     ).rejects.toThrow()
+  })
+})
+
+describe('imutabilidade da asserção (claim)', () => {
+  const claimOf = async (validationId: string): Promise<string> => {
+    const rows = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, validationId))
+    const claimId = rows[0]?.claimId
+    if (claimId === undefined) throw new Error('claim row missing')
+    return claimId
+  }
+
+  it('não permite reescrever o conteúdo da asserção', async () => {
+    const res = await postCnpj()
+    const claimId = await claimOf(res.json().validation_id as string)
+    const where = eq(t.claim.claimId, claimId)
+
+    await expect(adminPool.db.update(t.claim).set({ type: 'address_exists' }).where(where)).rejects.toThrow()
+    await expect(adminPool.db.update(t.claim).set({ subjectType: 'person' }).where(where)).rejects.toThrow()
+    await expect(
+      adminPool.db.update(t.claim).set({ validationId: randomUUID() }).where(where),
+    ).rejects.toThrow()
+    await expect(
+      adminPool.db.update(t.claim).set({ targetType: 'address', subjectId: randomUUID() }).where(where),
+    ).rejects.toThrow()
+  })
+
+  it('DELETE do claim continua permitido (retenção/LGPD)', async () => {
+    const res = await postCnpj()
+    const claimId = await claimOf(res.json().validation_id as string)
+    await adminPool.db.delete(t.claim).where(eq(t.claim.claimId, claimId))
+    const remaining = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.claimId, claimId))
+    expect(remaining.length).toBe(0)
+  })
+})
+
+describe('identidade imutável da validation (completude de 0030)', () => {
+  it('não permite reescrever validation_id nem legal_basis', async () => {
+    const res = await postCnpj()
+    const validationId = res.json().validation_id as string
+    const where = eq(t.validation.validationId, validationId)
+
+    await expect(
+      adminPool.db.update(t.validation).set({ validationId: randomUUID() }).where(where),
+    ).rejects.toThrow()
+    await expect(
+      adminPool.db.update(t.validation).set({ legalBasis: 'CONTRACT_EXECUTION' }).where(where),
+    ).rejects.toThrow()
+
+    // A identidade segue intacta.
+    const row = await validationRow(validationId)
+    expect(row?.legalBasis).toBe('FRAUD_PREVENTION')
+  })
+})
+
+describe('V-1 — actor de origem batch', () => {
+  it('propaga o user_id do lote para validation.user_id (sem api_key)', async () => {
+    const userId = `batch-user-${randomUUID()}`
+    await adminPool.db
+      .insert(t.authUser)
+      .values({ id: userId, name: 'Batch Owner', email: `${userId}@test.local` })
+
+    const batchId = randomUUID()
+    const itemId = randomUUID()
+    await adminPool.db.insert(t.batch).values({
+      batchId,
+      tenantId,
+      userId,
+      status: 'queued',
+      totalItems: 1,
+      mode: 'fast',
+      legalBasis: 'FRAUD_PREVENTION',
+    })
+    await adminPool.db.insert(t.batchItem).values({
+      itemId,
+      batchId,
+      tenantId,
+      position: 0,
+      docType: 'CNPJ',
+      docDigits: '12345678000195',
+      status: 'pending',
+    })
+
+    const fastPath = buildFastPathDeps(appPool.db, config)
+    await batchTick({ adminDb: adminPool.db, fastPath })
+
+    const items = await adminPool.db
+      .select({ validationId: t.batchItem.validationId })
+      .from(t.batchItem)
+      .where(eq(t.batchItem.itemId, itemId))
+    const validationId = items[0]?.validationId
+    if (validationId === undefined || validationId === null) {
+      throw new Error('batch item was not linked to a validation')
+    }
+
+    const row = await validationRow(validationId)
+    expect(row?.userId).toBe(userId)
+    // Sem credencial sintética: a origem batch não inventa api_key.
+    expect(row?.apiKeyId).toBeNull()
   })
 })
