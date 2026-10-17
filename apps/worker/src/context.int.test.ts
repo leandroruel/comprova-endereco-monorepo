@@ -1,7 +1,8 @@
 import { makeFakeObjectStore } from '@comprova/providers'
 import type { EvidenceWriter } from '@comprova/checkers'
-import { buildT2Checkers, type DeepWorkerEnv } from './activities.js'
-import { makeEvidenceWriter } from './evidence.js'
+import { buildT2Checkers } from './context.js'
+import type { WorkerEnv } from './config.js'
+import { makeEvidenceWriter } from './modules/evidence/evidence.service.js'
 import { createDbPool } from '@comprova/db'
 import { createTenant, startTestDb, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import { runMigrations } from '@comprova/db'
@@ -12,7 +13,7 @@ await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD 
 const adminPool = createDbPool(db.adminUrl)
 const tenant = await createTenant(adminPool.db, { name: 'vlm-flag-tenant' })
 
-const envWith = (vlmEnabled: boolean): DeepWorkerEnv => ({
+const envWith = (vlmEnabled: boolean): WorkerEnv => ({
   databaseUrl: db.appUrl,
   policyVersion: '2026.12.1',
   repoRoot: process.cwd(),

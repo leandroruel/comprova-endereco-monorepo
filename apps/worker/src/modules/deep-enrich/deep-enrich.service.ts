@@ -1,0 +1,177 @@
+import type { Db } from '@comprova/db'
+import { withTenant } from '@comprova/db'
+import {
+  buildAssessmentExplanation,
+  decide,
+  evaluateClaim,
+  evidenceSetHashOfObservations,
+  observationFromSignal,
+  weightedScore,
+  type Checker,
+  type ClaimType,
+  type Clock,
+  type Policy,
+  type Signal,
+  type SignalCacheReader,
+  type SubjectType,
+  type Verdict,
+} from '@comprova/core'
+import type { DeepEnrichInput, DeepEnrichResult } from './deep-enrich.schema.js'
+import {
+  emitOutcomeEvents,
+  linkClaimEvidence,
+  persistFreshSignals,
+  readEvidenceSet,
+  resolveClaimId,
+  updateValidationOutcome,
+} from './deep-enrich.persistence.js'
+import { runCheckersSequentially, signalFromRow } from './deep-enrich.signals.js'
+import { buildCheckContext, loadValidationState } from './deep-enrich.state.js'
+
+export interface DeepEnrichDeps {
+  readonly db: Db
+  readonly t1Checkers: readonly Checker[]
+  readonly t2Checkers?: readonly Checker[]
+  readonly policy: Policy
+  readonly clock: Clock
+  readonly signalCache?: SignalCacheReader
+}
+
+const AMBIGUITY_THRESHOLD = 0.55
+
+const isAmbiguous = (decision: { readonly verdict: Verdict; readonly confidence: number }): boolean =>
+  decision.verdict === 'INSUFFICIENT_EVIDENCE' || decision.confidence < AMBIGUITY_THRESHOLD
+
+const claimTypeOf = (docType: string): ClaimType =>
+  docType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
+
+const subjectTypeOf = (docType: string): SubjectType => (docType === 'CNPJ' ? 'organization' : 'person')
+
+export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): Promise<DeepEnrichResult> => {
+  const now = deps.clock.now()
+  const state = await loadValidationState(deps.db, input.tenantId, input.validationId)
+  const signals = state.priorSignals.map(signalFromRow)
+
+  const ctx = buildCheckContext({
+    validation: state.validation,
+    subject: state.subject,
+    addressRow: state.addressRow,
+    priorSignals: signals,
+    clock: deps.clock,
+  })
+
+  const newSignals = await runCheckersSequentially({
+    checkers: deps.t1Checkers,
+    prior: signals,
+    ctx,
+    docType: state.subject.docType,
+    addressId: state.validation.addressId,
+    ...(deps.signalCache !== undefined ? { signalCache: deps.signalCache } : {}),
+  })
+
+  const signalsAfterT1: readonly Signal[] = [...signals, ...newSignals]
+  const scoreAfterT1 = weightedScore(signalsAfterT1, deps.policy, now)
+  const decisionAfterT1 = decide({
+    signals: signalsAfterT1,
+    score: scoreAfterT1,
+    policy: deps.policy,
+    now,
+  })
+  const maxTier = input.maxTier ?? 2
+  const t2Signals =
+    isAmbiguous(decisionAfterT1) && maxTier >= 2 && deps.t2Checkers !== undefined
+      ? await runCheckersSequentially({
+          checkers: deps.t2Checkers,
+          prior: signalsAfterT1,
+          ctx,
+          docType: state.subject.docType,
+          addressId: state.validation.addressId,
+          ...(deps.signalCache !== undefined ? { signalCache: deps.signalCache } : {}),
+        })
+      : []
+
+  const claimType = claimTypeOf(state.subject.docType)
+  const subjectType = subjectTypeOf(state.subject.docType)
+
+  const outcome = await withTenant(deps.db, input.tenantId, async (tx) => {
+    const existingCheckerIds = new Set(signals.map((s) => `${s.checkerId}@${s.checkerVersion}`))
+    const freshSignals = [...newSignals, ...t2Signals].filter(
+      (s) => !existingCheckerIds.has(`${s.checkerId}@${s.checkerVersion}`),
+    )
+
+    const claimId = await resolveClaimId(tx, {
+      tenantId: input.tenantId,
+      validationId: input.validationId,
+      subjectId: state.validation.subjectId,
+      addressId: state.validation.addressId,
+      claimType,
+      subjectType,
+    })
+
+    const { score, decision } = evaluateClaim({
+      claim: { id: claimId ?? '', type: claimType },
+      evidence: [...signalsAfterT1, ...t2Signals].map(observationFromSignal),
+      policy: deps.policy,
+      now,
+    })
+    const stillPartial = isAmbiguous(decision)
+
+    const freshSignalIds = await persistFreshSignals(tx, {
+      validationId: input.validationId,
+      addressId: state.validation.addressId,
+      signals: freshSignals,
+      now,
+    })
+
+    await linkClaimEvidence(tx, {
+      tenantId: input.tenantId,
+      claimId,
+      priorSignals: state.priorSignals,
+      freshSignals,
+      freshSignalIds,
+    })
+
+    const evidenceRows = await readEvidenceSet(tx, claimId)
+    const explanationDetail = buildAssessmentExplanation(
+      decision,
+      evidenceRows.map((row) => ({ id: row.id, stance: row.stance })),
+    )
+
+    await updateValidationOutcome(tx, {
+      validationId: input.validationId,
+      stillPartial,
+      verdict: decision.verdict,
+      score,
+      confidence: decision.confidence,
+      evidenceSetHash: evidenceSetHashOfObservations(evidenceRows),
+      explanation: {
+        summary: decision.explanation,
+        code: explanationDetail.code,
+        supporting_evidence: explanationDetail.supportingEvidenceIds,
+        contradicting_evidence: explanationDetail.contradictingEvidenceIds,
+      },
+      now,
+    })
+
+    await emitOutcomeEvents(tx, {
+      tenantId: input.tenantId,
+      validationId: input.validationId,
+      claimId,
+      claimType,
+      stillPartial,
+      verdict: decision.verdict,
+    })
+
+    return { score, decision, stillPartial }
+  })
+
+  return {
+    status: outcome.stillPartial ? 'partial' : 'completed',
+    verdict: outcome.decision.verdict,
+    confidence: outcome.decision.confidence,
+    score: Math.tanh(outcome.score),
+    explanation: outcome.decision.explanation,
+    newSignals: newSignals.length + t2Signals.length,
+    t2Signals: t2Signals.length,
+  }
+}

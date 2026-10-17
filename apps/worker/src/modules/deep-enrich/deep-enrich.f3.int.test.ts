@@ -31,12 +31,13 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
-import { deepEnrich } from './deep-enrich.js'
-import { makeEvidenceWriter, retentionTick } from './evidence.js'
-import { runFastPath } from '../../api/src/services/fastpath.js'
+import { deepEnrich } from './deep-enrich.service.js'
+import { makeEvidenceWriter } from '../evidence/evidence.service.js'
+import { retentionTick } from '../evidence/evidence-retention.service.js'
+import { runFastPath } from '../../../../api/src/services/fastpath.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const repoRoot = path.resolve(here, '../../..')
+const repoRoot = path.resolve(here, '../../../../../')
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })

@@ -10,8 +10,9 @@ import * as t from '@comprova/db'
 import { makeFakeObjectStore } from '@comprova/providers'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
-import { validationRetentionTick } from './retention.js'
-import { makeEvidenceWriter, retentionTick } from './evidence.js'
+import { validationRetentionTick } from './retention.service.js'
+import { makeEvidenceWriter } from '../evidence/evidence.service.js'
+import { retentionTick } from '../evidence/evidence-retention.service.js'
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })
