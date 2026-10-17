@@ -1,8 +1,9 @@
 import { createLogger, createMetrics } from '@comprova/observability'
-import { createDbPool, eq, inArray, runMigrations, sql, withTenant } from '@comprova/db'
+import { createDbPool, and, eq, inArray, runMigrations, sql, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import {
   createApiKey,
+  createSubject,
   createTenant,
   seedGoldenDataset,
   startTestDb,
@@ -459,6 +460,199 @@ describe('RLS: isolamento de tenant em claim e evidencia', () => {
       tx.select().from(t.claimEvidence).where(eq(t.claimEvidence.claimId, claimB)),
     )
     expect(cross.length).toBe(0)
+  })
+
+  // MÉDIO-5: FK composta garante claim.tenant_id = subject.tenant_id.
+  it('nao permite claim do tenant A apontando para subject do tenant B', async () => {
+    const subjectB = await createSubject(adminPool.db, rlsTenantB)
+    await expect(
+      withTenant(appRolePool.db, rlsTenantA, (tx) =>
+        tx.insert(t.claim).values({
+          claimId: randomUUID(),
+          tenantId: rlsTenantA,
+          validationId: randomUUID(),
+          subjectId: subjectB,
+          type: 'business_registered_address',
+          subjectType: 'organization',
+          targetType: 'address',
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  // MÉDIO-4: constraint trigger garante que claim_evidence.signal_id pertence à
+  // MESMA validation do claim (e, por consequência, ao mesmo tenant).
+  it('nao permite claim_evidence apontando para signal de outra validation', async () => {
+    const { claimId: claimA } = await seedClaim(rlsTenantA)
+    const foreignSignalId = randomUUID()
+    await adminPool.db.insert(t.signal).values({
+      signalId: foreignSignalId,
+      validationId: randomUUID(),
+      checkerId: 'probe',
+      checkerVersion: '1.0.0',
+      stance: 'supports',
+      strength: 0.5,
+      confidence: 0.9,
+      source: 'test:probe',
+      observedAt: new Date(),
+      ttlSeconds: 60,
+      detail: {},
+    })
+    await expect(
+      withTenant(appRolePool.db, rlsTenantA, (tx) =>
+        tx.insert(t.claimEvidence).values({
+          claimEvidenceId: randomUUID(),
+          tenantId: rlsTenantA,
+          claimId: claimA,
+          signalId: foreignSignalId,
+          checker: 'probe',
+          checkerVersion: '1.0.0',
+          stance: 'supports',
+          strength: 0.5,
+          confidence: 0.9,
+          source: 'test:probe',
+          observedAt: new Date(),
+          ttlSeconds: 60,
+          expiresAt: new Date(Date.now() + 60_000),
+          detail: {},
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+})
+
+// MÉDIO-3: o banco garante "1 claim + 1 signal = 1 claim_evidence".
+describe('integridade relacional: unicidade de claim_evidence (0024)', () => {
+  it('nao permite duas observacoes para o mesmo claim + signal', async () => {
+    const res = await postCnpj()
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    const claims = await claimRowsFor(body.validation_id)
+    const claimRow = claims[0]
+    if (claimRow === undefined) throw new Error('claim row missing')
+
+    // Novo signal da MESMA validation, ainda sem observação associada.
+    const signalId = randomUUID()
+    await adminPool.db.insert(t.signal).values({
+      signalId,
+      validationId: body.validation_id,
+      checkerId: 'probe',
+      checkerVersion: '1.0.0',
+      stance: 'supports',
+      strength: 0.5,
+      confidence: 0.9,
+      source: 'test:probe',
+      observedAt: new Date(),
+      ttlSeconds: 60,
+      detail: {},
+    })
+
+    const base = {
+      tenantId,
+      claimId: claimRow.claimId,
+      signalId,
+      checker: 'probe',
+      checkerVersion: '1.0.0',
+      stance: 'supports' as const,
+      strength: 0.5,
+      confidence: 0.9,
+      source: 'test:probe',
+      observedAt: new Date(),
+      ttlSeconds: 60,
+      expiresAt: new Date(Date.now() + 60_000),
+      detail: {},
+    }
+    await adminPool.db.insert(t.claimEvidence).values({ claimEvidenceId: randomUUID(), ...base })
+    await expect(
+      adminPool.db.insert(t.claimEvidence).values({ claimEvidenceId: randomUUID(), ...base }),
+    ).rejects.toThrow()
+  })
+})
+
+// BAIXO-7: POST, GET e replay devem representar o MESMO estado persistido.
+describe('consistencia de endereco entre POST, GET e replay (BAIXO-7)', () => {
+  it('POST, GET e replay devolvem o mesmo address', async () => {
+    const headers = { 'idempotency-key': `addr-${randomUUID()}` }
+    const created = await postCnpj(headers)
+    expect(created.statusCode).toBe(200)
+    const post = created.json()
+    expect(post.address).not.toBeNull()
+
+    const got = await app.inject({
+      method: 'GET',
+      url: `/v1/validations/${post.validation_id}`,
+      headers: authJson,
+    })
+    expect(got.statusCode).toBe(200)
+    const read = got.json()
+
+    const replay = await postCnpj(headers)
+    expect(replay.statusCode).toBe(200)
+    const replayed = replay.json()
+
+    expect(read.address).toEqual(post.address)
+    expect(replayed.address).toEqual(post.address)
+  })
+
+  it('GET e POST concordam em address nulo quando nao ha endereco', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/validations',
+      headers: authJson,
+      payload: {
+        document: { type: 'CPF', value: '529.982.247-25' },
+        address: null,
+        mode: 'fast',
+        legal_basis: 'CONSENT',
+        consent_ref: 'consent-no-address',
+      },
+    })
+    expect(created.statusCode).toBe(200)
+    const post = created.json()
+    expect(post.address).toBeNull()
+
+    const got = await app.inject({
+      method: 'GET',
+      url: `/v1/validations/${post.validation_id}`,
+      headers: authJson,
+    })
+    expect(got.statusCode).toBe(200)
+    expect(got.json().address).toBeNull()
+  })
+})
+
+// PARTE 12: a constraint do banco deve ser a última linha de defesa sob concorrência.
+describe('concorrencia: mesma Idempotency-Key em paralelo', () => {
+  it('duas requisicoes simultaneas produzem 1 validation, 1 claim e nenhuma duplicata', async () => {
+    const idempotencyKey = `concurrent-${randomUUID()}`
+    const headers = { 'idempotency-key': idempotencyKey }
+    const [a, b] = await Promise.all([postCnpj(headers), postCnpj(headers)])
+    expect(a.statusCode).toBe(200)
+    expect(b.statusCode).toBe(200)
+
+    const idA = a.json().validation_id
+    const idB = b.json().validation_id
+    expect(idA).toBe(idB)
+
+    const claims = await claimRowsFor(idA)
+    expect(claims.length).toBe(1)
+    const claimRow = claims[0]
+    if (claimRow === undefined) throw new Error('claim row missing')
+
+    const evidences = await evidenceRowsFor(claimRow.claimId)
+    const signalIds = evidences.map((e) => e.signalId).filter((x): x is string => x !== null)
+    expect(new Set(signalIds).size).toBe(signalIds.length)
+
+    const idemRows = await adminPool.db
+      .select()
+      .from(t.validationIdempotency)
+      .where(
+        and(
+          eq(t.validationIdempotency.tenantId, tenantId),
+          eq(t.validationIdempotency.idempotencyKey, idempotencyKey),
+        ),
+      )
+    expect(idemRows.length).toBe(1)
   })
 })
 

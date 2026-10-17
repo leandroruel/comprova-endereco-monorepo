@@ -94,6 +94,44 @@ Cada validação grava `user_id`. O endpoint `/v1/stats` filtra por user_id:
 4. Dashboard poll GET /v1/batches/:id a cada 3s
 5. Export: GET /v1/batches/:id/export?format=csv|json
 
+## Isolamento, integridade e retenção
+
+- **RLS FORCE por tenant** em `subject`, `validation`, `validation_idempotency`,
+  `usage_event`, `webhook_*`, `audit_log`, `batch`, `batch_item`, `claim`,
+  `claim_evidence`. O runtime sempre acessa via `withTenant` (`SET LOCAL app.tenant_id`).
+- **Integridade relacional** (migrações 0024–0027): unicidade
+  `claim_evidence (claim_id, signal_id)`; FK composta
+  `claim (subject_id, tenant_id) → subject (subject_id, tenant_id)`; constraint
+  trigger deferido garantindo `claim_evidence.signal_id` da mesma validation; remoção
+  do índice de idempotência enganoso `validation_idem_uq`. Detalhes em ADR-0016.
+- **`evidence` é global** (sem `tenant_id`/RLS): o vínculo tenant-scoped é
+  `claim_evidence` (RLS FORCE) e `claim_evidence.evidence_id` é ponteiro opcional.
+  **`signal`** é derivado da validation (sem `tenant_id`/RLS); a coerência tenant é
+  garantida pela cadeia `signal.validation_id → validation.tenant_id` + trigger 0026.
+- **Retenção** (matriz de TTL em ADR-0016): `validation` expira por `expires_at` e
+  remove o grafo `claim_evidence → claim → signal → validation_idempotency`;
+  `evidence` expira por `retention_until` com **desvinculação antes** da remoção do
+  objeto físico. `subject`/`canonical_address` têm ciclo próprio e **não** são
+  removidos pela retenção.
+
+### Por que o batch e a retenção usam conexão admin
+
+`batchTick` (`apps/api/src/services/batch-processor.ts`) e os ticks de retenção
+(`apps/worker`) rodam com `DATABASE_ADMIN_URL`, não com `app_user`:
+
+- o batch processa itens de **múltiplos** tenants em um único tick (a RLS é por
+  tenant e não há tenant "atual"): ele adquire leases com `FOR UPDATE SKIP LOCKED`
+  sobre `batch_item` (RLS FORCE) e finaliza batches de vários tenants;
+- a retenção precisa apagar `evidence` (o `app_user` não tem `DELETE`) e varrer
+  validações expiradas de todos os tenants.
+
+Superfície/risco: são jobs internos de background, sem entrada de usuário direta,
+executados em processo próprio, e o `runFastPath` do batch grava `tenant_id`
+explicitamente (o contexto `withTenant` continua sendo aplicado). **Não** concedemos
+`DELETE` global ao `app_user` nem ampliamos privilégios do runtime. Um papel dedicado
+de worker (entre `app_user` e admin) é possível no futuro, mas exigiria migração de
+grants — não é necessário hoje.
+
 ## Políticas de scoring
 
 | Versão    | Mudanças                                                             |

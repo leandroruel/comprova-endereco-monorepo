@@ -1,4 +1,4 @@
-import { eq } from '@comprova/db'
+import { eq, inArray } from '@comprova/db'
 import {
   buildAssessmentExplanation,
   decide,
@@ -331,14 +331,35 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
 
       const priorToBackfill = priorSignals.filter((row) => !existingEvidenceSignalIds.has(row.signalId))
 
+      // BAIXO-8: `signal.evidence_id` pode carregar semântica legada (apontar para
+      // um `claim_evidence_id`, não para `evidence`). Só propagamos para
+      // `claim_evidence.evidence_id` os ids que existem de fato em `evidence`.
+      const candidateEvidenceIds = [
+        ...priorToBackfill.map((row) => row.evidenceId),
+        ...freshSignals.map((s) => s.evidenceId ?? null),
+      ].filter((id): id is string => id !== null && id.length > 0)
+      const materialEvidenceIds = new Set(
+        candidateEvidenceIds.length === 0
+          ? []
+          : (
+              await tx
+                .select({ evidenceId: t.evidence.evidenceId })
+                .from(t.evidence)
+                .where(inArray(t.evidence.evidenceId, [...new Set(candidateEvidenceIds)]))
+            ).map((row) => row.evidenceId),
+      )
+      const materialEvidenceIdOf = (candidate: string | null): string | null =>
+        candidate !== null && materialEvidenceIds.has(candidate) ? candidate : null
+
       const evidenceValues = [
         ...priorToBackfill.map((row) => ({
           claimEvidenceId: randomUUID(),
           tenantId: input.tenantId,
           claimId,
           signalId: row.signalId,
-          // Vínculo opcional com artefato material; nulo para T0 sem arquivo.
-          evidenceId: row.evidenceId,
+          // Vínculo opcional com artefato material; nulo para T0 sem arquivo
+          // (ou para ids legados que não existem em `evidence`).
+          evidenceId: materialEvidenceIdOf(row.evidenceId),
           checker: row.checkerId,
           checkerVersion: row.checkerVersion,
           stance: row.stance === 'neutral' ? ('unknown' as const) : row.stance,
@@ -355,7 +376,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
           tenantId: input.tenantId,
           claimId,
           signalId: freshSignalIds[index] ?? null,
-          evidenceId: s.evidenceId ?? null,
+          evidenceId: materialEvidenceIdOf(s.evidenceId ?? null),
           checker: s.checkerId,
           checkerVersion: s.checkerVersion,
           stance: s.stance === 'neutral' ? ('unknown' as const) : s.stance,

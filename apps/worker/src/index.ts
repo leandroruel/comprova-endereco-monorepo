@@ -28,11 +28,15 @@ const retentionStore =
         secretAccessKey: env.s3SecretAccessKey,
       })
     : makeFakeObjectStore()
-const retentionDb = createDbPool(env.databaseUrl)
-const stopRetention = startRetentionLoop(retentionDb.db, retentionStore)
+// A retenção precisa de privilégio de manutenção (DATABASE_ADMIN_URL):
+// remover `evidence` (sem DELETE para app_user) e varrer o grafo de validações
+// expiradas de todos os tenants (RLS é por tenant). Ver ADR de retenção.
 const adminUrl = process.env.DATABASE_ADMIN_URL
+const adminRetentionPool = adminUrl !== undefined && adminUrl !== '' ? createDbPool(adminUrl) : null
+const retentionPool = adminRetentionPool ?? createDbPool(env.databaseUrl)
+const stopRetention = startRetentionLoop(retentionPool.db, retentionStore)
 const stopValidationRetention =
-  adminUrl !== undefined && adminUrl !== '' ? startValidationRetentionLoop(createDbPool(adminUrl).db) : null
+  adminRetentionPool !== null ? startValidationRetentionLoop(adminRetentionPool.db) : null
 
 const worker = await Worker.create({
   taskQueue,

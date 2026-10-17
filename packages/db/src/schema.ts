@@ -6,6 +6,7 @@ import {
   char,
   customType,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -353,7 +354,12 @@ export const subject = pgTable(
     docEnc: bytea('doc_enc'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique('subject_tenant_hmac_uq').on(t.tenantId, t.docType, t.docHmac)],
+  (t) => [
+    unique('subject_tenant_hmac_uq').on(t.tenantId, t.docType, t.docHmac),
+    // Chave única de apoio para a FK composta de `claim` (MÉDIO-5):
+    // garante que claim.tenant_id = subject.tenant_id.
+    unique('subject_subject_id_tenant_id_key').on(t.subjectId, t.tenantId),
+  ],
 )
 
 export const validation = pgTable(
@@ -416,45 +422,64 @@ export const claimSubjectTypeEnum = pgEnum('claim_subject_type', ['organization'
 export const claimTargetTypeEnum = pgEnum('claim_target_type', ['address'])
 export const evidenceStanceEnum = pgEnum('evidence_stance', ['supports', 'contradicts', 'unknown'])
 
-export const claim = pgTable('claim', {
-  claimId: uuid('claim_id').primaryKey(),
-  tenantId: uuid('tenant_id')
-    .notNull()
-    .references(() => tenant.tenantId),
-  validationId: uuid('validation_id').notNull(),
-  subjectId: uuid('subject_id')
-    .notNull()
-    .references(() => subject.subjectId),
-  addressId: uuid('address_id').references(() => canonicalAddress.addressId),
-  type: claimTypeEnum('type').notNull(),
-  subjectType: claimSubjectTypeEnum('subject_type').notNull(),
-  targetType: claimTargetTypeEnum('target_type').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const claim = pgTable(
+  'claim',
+  {
+    claimId: uuid('claim_id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.tenantId),
+    validationId: uuid('validation_id').notNull(),
+    subjectId: uuid('subject_id').notNull(),
+    addressId: uuid('address_id').references(() => canonicalAddress.addressId),
+    type: claimTypeEnum('type').notNull(),
+    subjectType: claimSubjectTypeEnum('subject_type').notNull(),
+    targetType: claimTargetTypeEnum('target_type').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // FK composta (MÉDIO-5): valida subject existente E coerência de tenant.
+  // Substitui a antiga FK simples `claim_subject_id_fkey`.
+  (t) => [
+    foreignKey({
+      columns: [t.subjectId, t.tenantId],
+      foreignColumns: [subject.subjectId, subject.tenantId],
+      name: 'claim_subject_tenant_fk',
+    }).onDelete('cascade'),
+  ],
+)
 
-export const claimEvidence = pgTable('claim_evidence', {
-  claimEvidenceId: uuid('claim_evidence_id').primaryKey(),
-  tenantId: uuid('tenant_id')
-    .notNull()
-    .references(() => tenant.tenantId),
-  claimId: uuid('claim_id')
-    .notNull()
-    .references(() => claim.claimId),
-  signalId: uuid('signal_id'),
-  /** Artefato material associado (nullable: observações sem arquivo/documento). */
-  evidenceId: uuid('evidence_id').references(() => evidence.evidenceId),
-  checker: text('checker').notNull(),
-  checkerVersion: text('checker_version').notNull(),
-  stance: evidenceStanceEnum('stance').notNull(),
-  strength: real('strength').notNull(),
-  confidence: real('confidence').notNull(),
-  source: text('source').notNull(),
-  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
-  ttlSeconds: integer('ttl_seconds').notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  detail: jsonb('detail').$type<Record<string, unknown>>().notNull().default({}),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const claimEvidence = pgTable(
+  'claim_evidence',
+  {
+    claimEvidenceId: uuid('claim_evidence_id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.tenantId),
+    claimId: uuid('claim_id')
+      .notNull()
+      .references(() => claim.claimId),
+    signalId: uuid('signal_id'),
+    /** Artefato material associado (nullable: observações sem arquivo/documento). */
+    evidenceId: uuid('evidence_id').references(() => evidence.evidenceId),
+    checker: text('checker').notNull(),
+    checkerVersion: text('checker_version').notNull(),
+    stance: evidenceStanceEnum('stance').notNull(),
+    strength: real('strength').notNull(),
+    confidence: real('confidence').notNull(),
+    source: text('source').notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+    ttlSeconds: integer('ttl_seconds').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    detail: jsonb('detail').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // MÉDIO-3: 1 claim + 1 signal = 1 claim_evidence.
+  (t) => [
+    uniqueIndex('idx_claim_evidence_claim_signal_uq')
+      .on(t.claimId, t.signalId)
+      .where(sql`signal_id IS NOT NULL`),
+  ],
+)
 
 export const signal = pgTable(
   'signal',

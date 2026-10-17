@@ -15,6 +15,26 @@ export const validationRetentionTick = async (db: Db, limit = 200): Promise<numb
   if (expired.length === 0) return 0
 
   const validationIds = expired.map((row) => row.validationId)
+
+  // ALTO-1: a retenção remove o grafo inteiro da validation como uma unidade
+  // lógica, respeitando dependências:
+  //   claim_evidence -> claim -> signal / validation
+  // `subject` e `canonical_address` possuem ciclo de vida próprio e NÃO são
+  // removidos aqui (ver ADR de retenção).
+  const claims = await db
+    .select({ claimId: t.claim.claimId })
+    .from(t.claim)
+    .where(inArray(t.claim.validationId, validationIds))
+  if (claims.length > 0) {
+    await db.delete(t.claimEvidence).where(
+      inArray(
+        t.claimEvidence.claimId,
+        claims.map((claim) => claim.claimId),
+      ),
+    )
+    await db.delete(t.claim).where(inArray(t.claim.validationId, validationIds))
+  }
+
   await db.delete(t.signal).where(inArray(t.signal.validationId, validationIds))
   await db.delete(t.validationIdempotency).where(inArray(t.validationIdempotency.validationId, validationIds))
   await db.delete(t.validation).where(inArray(t.validation.validationId, validationIds))

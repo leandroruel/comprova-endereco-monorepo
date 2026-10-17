@@ -62,7 +62,7 @@ conceitos e nomes canônicos (evitando a confusão `evidence` × `claim_evidence
 Combinações inválidas são bloqueadas por `isValidClaimCombination` (matriz
 `VALID_CLAIM_SUBJECT_MATRIX`), não aceitas silenciosamente.
 
-### Banco (migrações 0022 e 0023)
+### Banco (migrações 0022–0027)
 
 - `claim` (RLS FORCE, UNIQUE `(validation_id, type)`, FK `subject_id → subject`,
   `address_id → canonical_address`; sem FK para `validation` — PK composta por
@@ -84,7 +84,9 @@ ON DELETE CASCADE`, FK `evidence_id → evidence` **opcional**, índices por
   que origina a `claim_evidence`; `claim_evidence` sem `signal` é permitida
   explicitamente para o futuro (observações não derivadas de checker). Essa coluna
   **não** tem FK: o PK de `signal` é composto `(signal_id, created_at)` e não há
-  UNIQUE apenas em `signal_id`; a ligação é lógica, garantida pela pipeline.
+  UNIQUE apenas em `signal_id`; a ligação é garantida pela pipeline e reforçada no
+  banco pelo constraint trigger deferido da 0026 (ver "Integridade relacional e
+  retenção" abaixo).
 - Stance de evidência **persistida**: `supports | contradicts | unknown`. O `neutral`
   dos signals mapeia para `unknown` no momento da gravação (observação sem posição).
   Em memória, porém, a evidência preserva o stance fiel do signal (inclui `neutral`)
@@ -240,6 +242,72 @@ snapshot das linhas de `claim_evidence`:
 
 A imutabilidade é pré-requisito para a camada de credenciais (uma credencial não
 pode referenciar evidência mutável).
+
+### Integridade relacional e retenção (migrações 0024–0027)
+
+Auditoria de integridade (2026-10-16) endureceu o modelo sem alterar a lógica de
+negócio (scoring, thresholds, verdicts, checkers, policy, `building_key`):
+
+- **0024 — `UNIQUE (claim_id, signal_id) WHERE signal_id IS NOT NULL`** em
+  `claim_evidence`. Invariante: **1 claim + 1 signal = 1 claim_evidence**. A
+  idempotência de runtime cobre o caso sequencial; a constraint é a última linha de
+  defesa sob concorrência (fast path × deep path × batch). Antes de criá-la, a
+  migration aborta com mensagem explícita se houver duplicatas históricas (não apaga
+  nada em silêncio).
+- **0025 — FK composta `claim (subject_id, tenant_id) → subject (subject_id, tenant_id)`**
+  (substitui a FK simples `claim_subject_id_fkey`). Invariante:
+  `claim.tenant_id = subject.tenant_id`. A FK simples validava apenas a existência do
+  subject (o check de FK roda como owner e ignora RLS), permitindo claim do tenant A
+  apontar para subject do tenant B. Requer `UNIQUE (subject_id, tenant_id)` em
+  `subject` (trivialmente única, pois `subject_id` é PK).
+- **0026 — `CONSTRAINT TRIGGER` deferido** `claim_evidence_signal_guard`. Invariante:
+  `claim_evidence.signal_id` deve pertencer à **mesma validation** do claim (e,
+  portanto, ao mesmo tenant). Não é FK porque `signal` é particionada por
+  `created_at` (PK `(signal_id, created_at)`) e o PG exige a coluna de particionamento
+  em índices únicos — logo `UNIQUE(signal_id)` e a FK `claim_evidence.signal_id →
+signal` são impossíveis. O trigger é **`DEFERRABLE INITIALLY DEFERRED`** (roda no
+  `COMMIT`), o que é essencial: o fast path insere `claim_evidence` **antes** de
+  `signal` na mesma transação; ao final, ambos existem. `signal_id IS NULL` (observação
+  sem signal) não é afetado.
+- **0027 — remove `validation_idem_uq (tenant_id, idempotency_key, created_at)`**.
+  Como `created_at` é a coluna de particionamento e muda a cada escrita, o índice
+  nunca deduplica. A deduplicação real é a PK `validation_idempotency
+(tenant_id, idempotency_key)`.
+
+**`evidence` é global por design.** Não possui `tenant_id` nem RLS: é um artefato
+material (imagem/snapshot/payload) referenciado por id opaco. O vínculo
+**tenant-scoped** é `claim_evidence` (RLS FORCE), e `claim_evidence.evidence_id` é
+apenas um ponteiro opcional. A leitura cross-tenant de material é impedida porque um
+tenant só alcança `claim_evidence` do próprio tenant. **`signal` é derivado
+exclusivamente de uma `validation`** (não tem ciclo de vida próprio de tenant): não
+recebe `tenant_id` nem RLS; a coerência tenant é garantida pela cadeia
+`signal.validation_id → validation.tenant_id` + o trigger 0026.
+
+### Retenção e LGPD (TTL por camada)
+
+A retenção remove o grafo da validation como uma unidade lógica
+(`claim_evidence → claim → signal → validation_idempotency → validation`),
+respeitando dependências e **sem** tocar entidades de ciclo de vida próprio
+(`subject`, `canonical_address`). O material (`evidence`) tem retenção própria e
+robusta a crash/retry: **(1)** transição de estado no banco (anula
+`claim_evidence.evidence_id`, `signal.evidence_id`, `address_signal_cache.evidence_id`)
+→ **(2)** remoção do objeto físico (idempotente) → **(3)** `DELETE FROM evidence`.
+Nunca o objeto é removido antes de o banco deixar de referenciá-lo.
+
+| Entidade            |                              TTL | Quem remove                       | Ordem                         |
+| ------------------- | -------------------------------: | --------------------------------- | ----------------------------- |
+| `validation`        |           `expires_at` (30 dias) | `validationRetentionTick` (admin) | por último                    |
+| `signal`            |             segue a `validation` | `validationRetentionTick` (admin) | após `claim_evidence`/`claim` |
+| `claim`             |             segue a `validation` | `validationRetentionTick` (admin) | após `claim_evidence`         |
+| `claim_evidence`    | segue a `validation` (histórico) | `validationRetentionTick` (admin) | primeiro                      |
+| `evidence`          |  `retention_until` (por captura) | `retentionTick` (admin)           | desvincula → storage → delete |
+| `subject`           |     ciclo próprio (erasure LGPD) | `DELETE /v1/subjects/:id`         | fora da retenção              |
+| `canonical_address` |                    ciclo próprio | não removido pela retenção        | —                             |
+
+**Privilégio (least privilege).** A retenção roda com `DATABASE_ADMIN_URL` (papel de
+manutenção), não com `app_user`: precisa remover `evidence` (sem `DELETE` para
+`app_user`) e varrer validações expiradas de **todos** os tenants (RLS é por tenant).
+**Não** concedemos `DELETE` global ao `app_user`.
 
 ## Por que signal não foi removido
 

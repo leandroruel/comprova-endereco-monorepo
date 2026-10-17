@@ -134,7 +134,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     if (result === null) {
       return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('validation'))
     }
-    const { validation, signals, claim, evidenceSummary } = result
+    const { validation, signals, claim, evidenceSummary, address } = result
 
     const body: ValidationDto = {
       validation_id: validation.validationId,
@@ -143,7 +143,16 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       confidence: validation.confidence,
       score: validation.score,
       policy_version: validation.policyVersion,
-      address: null,
+      // BAIXO-7: GET devolve o MESMO endereço do POST (estado persistido).
+      address:
+        address === null
+          ? null
+          : {
+              building_key: address.buildingKey,
+              country: address.country,
+              uf: address.uf,
+              geo_precision: address.geoPrecision,
+            },
       signals: signals.map((signal): ValidationDto['signals'][number] => ({
         checker: signal.checkerId,
         checker_version: signal.checkerVersion,

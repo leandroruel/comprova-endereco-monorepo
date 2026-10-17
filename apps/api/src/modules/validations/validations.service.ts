@@ -20,6 +20,38 @@ const evidenceSummaryForClaim = async (
   }
 }
 
+// BAIXO-7: mesma representação de endereço usada pelo POST (fast path/replay),
+// para que POST e GET devolvam o MESMO estado persistido. O `building_key` é
+// serializado como `b64:<base64url>` — idêntico ao fast path.
+const loadAddressSummary = async (
+  tx: DbTx,
+  addressId: string,
+): Promise<{
+  buildingKey: string
+  country: string
+  uf: string | null
+  geoPrecision: 'ROOFTOP' | 'RANGE_INTERPOLATED' | 'GEOMETRIC_CENTER' | 'APPROXIMATE' | 'NONE'
+} | null> => {
+  const rows = await tx
+    .select({
+      buildingKey: t.canonicalAddress.buildingKey,
+      countryCode: t.canonicalAddress.countryCode,
+      uf: t.canonicalAddress.uf,
+      geoPrecision: t.canonicalAddress.geoPrecision,
+    })
+    .from(t.canonicalAddress)
+    .where(eq(t.canonicalAddress.addressId, addressId))
+    .limit(1)
+  const row = rows[0]
+  if (row === undefined) return null
+  return {
+    buildingKey: `b64:${Buffer.from(row.buildingKey).toString('base64url')}`,
+    country: row.countryCode,
+    uf: row.uf,
+    geoPrecision: row.geoPrecision,
+  }
+}
+
 export const getValidationDetails = async (db: Db, tenantId: string, validationId: string) =>
   withTenant(db, tenantId, async (tx) => {
     const rows = await tx
@@ -31,6 +63,7 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
         confidence: t.validation.confidence,
         policyVersion: t.validation.policyVersion,
         explanation: t.validation.explanation,
+        addressId: t.validation.addressId,
         createdAt: t.validation.createdAt,
         expiresAt: t.validation.expiresAt,
       })
@@ -74,7 +107,9 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
     const claim = claimRows[0] ?? null
     const evidenceSummary = claim === null ? null : await evidenceSummaryForClaim(tx, claim.claimId)
 
-    return { validation, signals, claim, evidenceSummary }
+    const address = validation.addressId === null ? null : await loadAddressSummary(tx, validation.addressId)
+
+    return { validation, signals, claim, evidenceSummary, address }
   })
 
 export const setWorkflowId = async (

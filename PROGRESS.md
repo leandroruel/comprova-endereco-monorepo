@@ -2,6 +2,43 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Integridade relacional e retenção — correções da auditoria (2026-10-16)
+
+Endurecimento de integridade/tenant-isolation/retenção **sem alterar a lógica de
+negócio** (scoring, thresholds, verdicts, checkers, policy, `building_key`).
+
+- **ALTO-1 — retenção do grafo de claim.** `validationRetentionTick` passa a remover
+  `claim_evidence → claim` antes de `signal`/`validation_idempotency`/`validation`,
+  eliminando órfãos. `subject` e `canonical_address` **não** são removidos (ciclo
+  próprio).
+- **ALTO-2 — retenção de `evidence` material.** Nova ordem robusta a crash/retry:
+  (1) desvincula (`claim_evidence.evidence_id`, `signal.evidence_id`,
+  `address_signal_cache.evidence_id` → NULL) → (2) remove o objeto do storage
+  (idempotente) → (3) `DELETE FROM evidence`. Nunca o objeto físico é removido antes
+  do banco.
+- **MÉDIO-3 — unicidade `claim_evidence (claim_id, signal_id)`** (0024): "1 claim +
+  1 signal = 1 claim_evidence"; pré-checagem explícita aborta em duplicatas históricas.
+- **MÉDIO-5 — FK composta `claim (subject_id, tenant_id) → subject (subject_id,
+tenant_id)`** (0025): garante `claim.tenant_id = subject.tenant_id` (antes, a FK
+  simples permitia claim do tenant A apontar para subject do tenant B).
+- **MÉDIO-4 — constraint trigger deferido** (0026): `claim_evidence.signal_id` deve
+  pertencer à mesma validation do claim (FK impossível: `signal` é particionada).
+  Deferido para o `COMMIT` porque o fast path insere `claim_evidence` antes de `signal`.
+- **BAIXO-6 — remove `validation_idem_uq`** (0027): o índice incluía `created_at`
+  (partição) e nunca deduplicava; a PK `validation_idempotency` é a barreira real.
+- **BAIXO-7 — POST × GET × replay** devolvem o **mesmo** `address` (GET agora lê
+  `canonical_address`).
+- **BAIXO-8 — backfill legado**: o deep path só propaga `signal.evidence_id` para
+  `claim_evidence.evidence_id` quando o id existe de fato em `evidence`.
+- **BAIXO-9 — batch/retenção com conexão admin** documentado (RLS é por tenant; jobs
+  são cross-tenant e a retenção apaga `evidence`, sem `DELETE` para `app_user`).
+- **Testes** — +9 (retenção de claim/evidence, unicidade, tenant/subject,
+  claim_evidence↔signal, consistência POST/GET/replay, concorrência, backfill legado).
+  Suíte: **147/147**.
+- **Integridade (dev)**: órfãos/duplicatas/cross-tenant = **0**; 87.741 signals sem
+  `claim_evidence` são de validations **sem claim** (era pré-claim + benchmark), não
+  violação atual.
+
 ## Revisão Claim → Claim Evidence — correções e desambiguação (2026-10-16)
 
 - **Desambiguação `evidence` × `claim_evidence`** (migração `0023_claim_evidence_material.sql`): o PK de `claim_evidence` chamava-se `evidence_id`, colidindo com o artefato material `evidence`. Renomeado para `claim_evidence_id`; adicionado `claim_evidence.evidence_id` (FK **opcional** → `evidence`) e a FK `claim.address_id → canonical_address`. pgfence: `[SAFE]`.
@@ -135,7 +172,7 @@ pnpm install
 pnpm db:migrate
 pnpm db:seed         # cria API key dev
 pnpm dev             # levanta tudo (API :3000, dashboard :5173, worker, ingestor)
-pnpm test            # 138/138 testes
+pnpm test            # 147/147 testes
 pnpm db:fence        # pgfence gate de migrações
 ```
 

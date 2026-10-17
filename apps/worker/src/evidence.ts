@@ -1,4 +1,4 @@
-import { lte, eq, inArray, sql } from '@comprova/db'
+import { lte, inArray, sql } from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -7,29 +7,47 @@ import type { ObjectStore } from '@comprova/providers'
 export const retentionTick = async (db: Db, store: ObjectStore): Promise<number> => {
   const now = new Date()
 
+  // ALTO-2: retenção de material robusta a crash/retry.
+  // Ordem: (1) transição de estado no banco -> (2) remoção do objeto físico ->
+  // (3) limpeza final no banco. Nunca removemos o objeto antes de garantir que
+  // nenhuma referência aponta para ele.
   const expiredEvidence = await db
     .select({ evidenceId: t.evidence.evidenceId, s3Uri: t.evidence.s3Uri })
     .from(t.evidence)
     .where(lte(t.evidence.retentionUntil, now))
     .limit(500)
-  for (const row of expiredEvidence) {
-    const key = row.s3Uri.split('/').slice(-2).join('/')
-    if (key.length > 0) {
-      await store.delete(key).catch(() => undefined)
-    }
-    await db.delete(t.evidence).where(eq(t.evidence.evidenceId, row.evidenceId))
-  }
 
-  const expiredValidations = await db
-    .select({ validationId: t.validation.validationId })
-    .from(t.validation)
-    .where(lte(t.validation.expiresAt, now))
-    .limit(500)
-  if (expiredValidations.length > 0) {
-    const ids = expiredValidations.map((v) => v.validationId)
-    await db.delete(t.signal).where(inArray(t.signal.validationId, ids))
-    await db.delete(t.validationIdempotency).where(inArray(t.validationIdempotency.validationId, ids))
-    await db.delete(t.validation).where(inArray(t.validation.validationId, ids))
+  let removedEvidence = 0
+  if (expiredEvidence.length > 0) {
+    const evidenceIds = expiredEvidence.map((row) => row.evidenceId)
+
+    // (1) DB state transition: `claim_evidence` é o histórico da observação e
+    // permanece; apenas o ponteiro opcional para o artefato material é anulado.
+    // O mesmo para `signal` e `address_signal_cache` (ambos sem FK para evidence).
+    await db
+      .update(t.claimEvidence)
+      .set({ evidenceId: null })
+      .where(inArray(t.claimEvidence.evidenceId, evidenceIds))
+    await db.update(t.signal).set({ evidenceId: null }).where(inArray(t.signal.evidenceId, evidenceIds))
+    await db
+      .update(t.addressSignalCache)
+      .set({ evidenceId: null })
+      .where(inArray(t.addressSignalCache.evidenceId, evidenceIds))
+
+    // (2) Storage: remover o objeto físico (idempotente; ausência não é erro).
+    for (const row of expiredEvidence) {
+      const key = row.s3Uri.split('/').slice(-2).join('/')
+      if (key.length > 0) {
+        await store.delete(key).catch(() => undefined)
+      }
+    }
+
+    // (3) DB cleanup: nenhuma FK/ponteiro referencia mais o material.
+    const deleted = await db
+      .delete(t.evidence)
+      .where(inArray(t.evidence.evidenceId, evidenceIds))
+      .returning({ evidenceId: t.evidence.evidenceId })
+    removedEvidence = deleted.length
   }
 
   await db.execute(sql`
@@ -54,7 +72,7 @@ export const retentionTick = async (db: Db, store: ObjectStore): Promise<number>
     )
     .catch(() => undefined)
 
-  return expiredEvidence.length + expiredValidations.length
+  return removedEvidence
 }
 
 export const startRetentionLoop = (db: Db, store: ObjectStore, intervalMs = 86_400_000): (() => void) => {

@@ -384,4 +384,66 @@ describe('deepEnrich (activity core)', () => {
       }),
     ).rejects.toThrow()
   })
+
+  // BAIXO-8: `signal.evidence_id` legado (aponta para `claim_evidence_id`, não
+  // para `evidence`) NÃO deve ser propagado no backfill — só ids materiais reais.
+  it('Fase 19/BAIXO-8 — backfill não propaga signal.evidence_id legado', async () => {
+    const created = await runFastPath(
+      fastPathDeps,
+      { tenantId: tenant, apiKeyId: 'test' },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'fast',
+        idempotencyKey: 'baixo8-legacy',
+      },
+    )
+    const claimRows = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    const claimId = claimRows[0]?.claimId
+    if (claimId === undefined) throw new Error('claim row missing')
+
+    // Um id que existe em `claim_evidence` (semântica legada), mas NÃO em `evidence`.
+    const existing = await adminPool.db
+      .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimId))
+      .limit(1)
+    const legacyEvidenceId = existing[0]?.claimEvidenceId
+    if (legacyEvidenceId === undefined) throw new Error('claim_evidence row missing')
+
+    // Signal legado, SEM claim_evidence, com `evidence_id` "envenenado".
+    const legacySignalId = randomUUID()
+    await adminPool.db.insert(t.signal).values({
+      signalId: legacySignalId,
+      validationId: created.validationId,
+      checkerId: 'legacy_checker',
+      checkerVersion: '0.0.1',
+      stance: 'supports',
+      strength: 0.4,
+      confidence: 0.5,
+      source: 'legacy',
+      observedAt: new Date(),
+      ttlSeconds: 3600,
+      detail: {},
+      evidenceId: legacyEvidenceId,
+    })
+
+    // Não deve lançar (sem a correção, a FK rejeitaria o id legado).
+    await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { tenantId: tenant, validationId: created.validationId },
+    )
+
+    const backfilled = await adminPool.db
+      .select({ evidenceId: t.claimEvidence.evidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.signalId, legacySignalId))
+    expect(backfilled.length).toBe(1)
+    expect(backfilled[0]?.evidenceId).toBeNull()
+  })
 })
