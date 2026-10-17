@@ -145,17 +145,18 @@ Simulador: `pnpm --filter @comprova/ingestor start -- policy:simulate <versao> [
 
 ## Componentes
 
-| Camada                                                       | Onde                 | Fase |
-| ------------------------------------------------------------ | -------------------- | ---- |
-| Dashboard (React+Vite, Better Auth, TanStack Query)          | `apps/dashboard`     | 6+   |
-| API HTTP (Fastify, auth, rate limit, batch, export)          | `apps/api`           | 0-6  |
-| Worker Temporal (deep path T1/T2)                            | `apps/worker`        | 2-3  |
-| Ingestor (Receita, CNEFE, CEP, profiles, simulador)          | `apps/ingestor`      | 1+   |
-| Domínio puro (FP: Signal, Checker, scoring, address keys)    | `packages/core`      | 0+   |
-| DB (migrações SQL, Drizzle, adapters, RLS)                   | `packages/db`        | 0+   |
-| Checkers T0/T1/T2                                            | `packages/checkers`  | 1-3  |
-| Providers (Nominatim, Overpass, Street View, VLM, BrasilAPI) | `packages/providers` | 2-3  |
-| SDK TypeScript                                               | `packages/sdk`       | 6    |
+| Camada                                                       | Onde                  | Fase |
+| ------------------------------------------------------------ | --------------------- | ---- |
+| Dashboard (React+Vite, Better Auth, TanStack Query)          | `apps/dashboard`      | 6+   |
+| API HTTP (Fastify, auth, rate limit, batch, export)          | `apps/api`            | 0-6  |
+| Worker Temporal (deep path T1/T2)                            | `apps/worker`         | 2-3  |
+| Ingestor (Receita, CNEFE, CEP, profiles, simulador)          | `apps/ingestor`       | 1+   |
+| Domínio puro (FP: Signal, Checker, scoring, address keys)    | `packages/core`       | 0+   |
+| DB (migrações SQL, Drizzle, adapters, RLS)                   | `packages/db`         | 0+   |
+| Checkers T0/T1/T2                                            | `packages/checkers`   | 1-3  |
+| Providers (Nominatim, Overpass, Street View, VLM, BrasilAPI) | `packages/providers`  | 2-3  |
+| SDK TypeScript                                               | `packages/sdk`        | 6    |
+| Camada de emissão de credencial (assertion → assinatura)     | `packages/credential` | 7    |
 
 ## Capacidade (medido em dev)
 

@@ -11,6 +11,7 @@
     "@comprova/checkers": "workspace:*",
     "@comprova/contracts": "workspace:*",
     "@comprova/core": "workspace:*",
+    "@comprova/credential": "workspace:*",
     "@comprova/db": "workspace:*",
     "@comprova/observability": "workspace:*",
     "@fastify/cors": "^11.3.1",

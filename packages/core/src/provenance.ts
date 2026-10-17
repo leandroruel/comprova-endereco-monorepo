@@ -28,7 +28,17 @@ export interface EvidenceSetEntry {
   readonly detail: unknown
 }
 
-const canonicalJson = (value: unknown): string => {
+/**
+ * Canonicalização JSON determinística usada por este módulo e reutilizada pela
+ * camada de emissão de credenciais (`@comprova/credential`), para que o material
+ * assinado seja reproduzível pelo mesmo algoritmo que produz `evidence_set_hash`.
+ *
+ * Propriedades: ordena chaves de objetos recursivamente; preserva a ordem de
+ * arrays; descarta propriedades de objeto com valor `undefined`; serializa
+ * `null` (e `undefined` em posição de valor) como `null`; usa `JSON.stringify`
+ * para primitivos. Total sobre o subconjunto de valores JSON.
+ */
+export const canonicalJson = (value: unknown): string => {
   if (value === null || value === undefined) return 'null'
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
   if (typeof value === 'object') {
