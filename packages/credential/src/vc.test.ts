@@ -97,19 +97,21 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
     expect(vc['comprova:result']['comprova:completedAt']).toBe('2026-01-01T00:00:01.000Z')
   })
 
-  it('no fluxo rápido (`completed_at` nulo) `validFrom` é `created_at`, não a emissão', () => {
+  it('`validFrom` é `completed_at` — nunca `created_at` (início da requisição)', () => {
     const vc = toVerifiableCredential(
       assertion({
         timestamps: {
           created_at: '2026-01-01T00:00:00.000Z',
-          completed_at: null,
+          // Análise demorada: a conclusão é 5 min depois do início.
+          completed_at: '2026-01-01T00:05:00.000Z',
           expires_at: '2026-01-31T00:00:00.000Z',
         },
       }),
     )
 
-    expect(vc.validFrom).toBe('2026-01-01T00:00:00.000Z')
-    expect(vc['comprova:result']['comprova:completedAt']).toBeUndefined()
+    expect(vc.validFrom).toBe('2026-01-01T00:05:00.000Z')
+    expect(vc.validFrom).not.toBe('2026-01-01T00:00:00.000Z')
+    expect(vc['comprova:result']['comprova:completedAt']).toBe('2026-01-01T00:05:00.000Z')
   })
 
   it('mapeia o subject sem expor o material de identidade', () => {
@@ -216,16 +218,10 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
           confidence: 0.3,
           explanation: null,
         },
-        timestamps: {
-          created_at: '2026-01-01T00:00:00.000Z',
-          completed_at: null,
-          expires_at: '2026-01-31T00:00:00.000Z',
-        },
       }),
     )
 
     expect(vc['comprova:authorization']).toBeUndefined()
-    expect(vc['comprova:result']['comprova:completedAt']).toBeUndefined()
     expect(vc['comprova:result']['comprova:explanation']).toBeUndefined()
     expect(vc.credentialSubject['comprova:claim']['comprova:address']).toEqual({})
     expect(VerifiableCredentialSchema.safeParse(vc).success).toBe(true)

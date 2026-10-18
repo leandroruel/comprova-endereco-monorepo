@@ -26,9 +26,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
+import { buildApp, buildFastPathDeps } from './app.js'
 import type { AppConfig } from './config.js'
 import { CredentialIssuanceError, issueCredential } from './services/credential-issuer.js'
+import { runFastPath } from './services/fastpath.js'
 
 // FASE 12 — ponta a ponta: validation persistida → credential builder → credencial
 // assinada → JSON transportável → verifier independente → VALID. Também cobre a
@@ -188,15 +189,12 @@ describe('emissão e verificação independente', () => {
     })
     expect(credential['comprova:algorithm']).toEqual({ 'comprova:scorerVersion': SCORER_VERSION })
     expect(credential['comprova:result']['comprova:verdict']).toBe(row?.verdict)
-    if (row?.completedAt === null) {
-      expect(credential['comprova:result']).not.toHaveProperty('comprova:completedAt')
-      // Fluxo rápido: a conclusão acontece dentro da requisição e `completed_at`
-      // não é persistido, então `validFrom` é o limite inferior persistido.
-      expect(credential.validFrom).toBe(row!.createdAt!.toISOString())
-    } else {
-      expect(credential['comprova:result']['comprova:completedAt']).toBe(row!.completedAt!.toISOString())
-      expect(credential.validFrom).toBe(row!.completedAt!.toISOString())
-    }
+    // O fluxo rápido persiste o instante da CONCLUSÃO da análise; `validFrom` é
+    // esse instante (nunca o início da requisição).
+    expect(row!.completedAt).not.toBeNull()
+    expect(row!.completedAt!.getTime()).toBeGreaterThanOrEqual(row!.createdAt!.getTime())
+    expect(credential['comprova:result']['comprova:completedAt']).toBe(row!.completedAt!.toISOString())
+    expect(credential.validFrom).toBe(row!.completedAt!.toISOString())
     expect(credential['comprova:authorization']).toEqual({
       'comprova:scopes': ['validate:read', 'validate:write'],
     })
@@ -268,6 +266,43 @@ describe('emissão e verificação independente', () => {
     const tampered = transport(credential)
     tampered.proof.created = new Date(0).toISOString()
     expect(verifyCredential(tampered, { trusted }).valid).toBe(false)
+  })
+
+  it('não antecipa `validFrom`: registra o instante da CONCLUSÃO da análise, não o início da requisição', async () => {
+    // Relógio que avança a cada leitura: a primeira é o início de `runFastPath`
+    // (`created_at`); as seguintes vêm depois da Receita, do enriquecimento do
+    // endereço e dos checkers (`completed_at`). Sem relógio próprio, uma análise
+    // demorada receberia `validFrom` anterior ao veredito.
+    const startedAt = new Date('2026-05-01T00:00:00.000Z')
+    const finishedAt = new Date('2026-05-01T00:03:30.000Z')
+    let reads = 0
+    const slowClock = { now: (): Date => (reads++ === 0 ? startedAt : finishedAt) }
+    const fastPath = { ...buildFastPathDeps(appPool.db, config), clock: slowClock }
+
+    const result = await runFastPath(
+      fastPath,
+      { tenantId, apiKeyId: null, issuerScopes: null },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'fast',
+        idempotencyKey: null,
+      },
+    )
+
+    const row = await validationRow(result.validationId)
+    expect(row!.createdAt!.toISOString()).toBe(startedAt.toISOString())
+    expect(row!.completedAt!.toISOString()).toBe(finishedAt.toISOString())
+    expect(row!.completedAt!.getTime()).toBeGreaterThan(row!.createdAt!.getTime())
+
+    const credential = transport(await issue(result.validationId))
+    expect(credential.validFrom).toBe(finishedAt.toISOString())
+    expect(credential['comprova:result']['comprova:completedAt']).toBe(finishedAt.toISOString())
+    // `validFrom` NÃO antecede a conclusão real da análise.
+    expect(Date.parse(credential.validFrom)).toBeGreaterThan(row!.createdAt!.getTime())
+    expect(verifyCredential(credential, { trusted, expectedIssuerId: issuer.id })).toEqual({ valid: true })
   })
 
   it('deriva o issuer do tenant escopado e da origem configurada (não existe issuer avulso)', async () => {
@@ -398,6 +433,19 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     await expect(issue(validationId)).rejects.toMatchObject({ failure: 'VALIDATION_NOT_FINAL' })
   })
 
+  it('recusa validação concluída sem instante de conclusão (registro antigo) — não presume `created_at`', async () => {
+    // Política explícita para dados anteriores: sem `completed_at` a conclusão
+    // real é desconhecida, e `created_at` (início da requisição) não é aceito
+    // como substituto.
+    const validationId = await newValidation()
+    await adminPool.db
+      .update(t.validation)
+      .set({ completedAt: null })
+      .where(eq(t.validation.validationId, validationId))
+
+    await expect(issue(validationId)).rejects.toMatchObject({ failure: 'COMPLETION_TIME_MISSING' })
+  })
+
   it('recusa validation sem claim', async () => {
     const subjectId = await createSubject(adminPool.db, tenantId)
     const validationId = randomUUID()
@@ -415,6 +463,9 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
       scorerVersion: SCORER_VERSION,
       evidenceSetHash: 'a'.repeat(64),
       legalBasis: 'FRAUD_PREVENTION',
+      // Concluída e com instante de conclusão: o que falta aqui é só o claim.
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      completedAt: new Date('2026-01-01T00:00:02.000Z'),
       expiresAt: new Date(Date.now() + 86_400_000),
     })
 

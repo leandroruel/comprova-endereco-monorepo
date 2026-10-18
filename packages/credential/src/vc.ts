@@ -103,7 +103,11 @@ const ComprovaResultSchema = z.object({
   'comprova:verdict': z.string().min(1),
   'comprova:score': z.number(),
   'comprova:confidence': z.number(),
-  /** `validation.completed_at`; omitido quando nulo (não se inventa timestamp). */
+  /**
+   * `validation.completed_at` (o mesmo instante de `validFrom`). Opcional no
+   * schema por tolerância de leitura: o emissor sempre o escreve, mas ele é
+   * proveniência descritiva — a verificação temporal usa `validFrom`.
+   */
   'comprova:completedAt': z.iso.datetime().optional(),
   'comprova:explanation': ComprovaExplanationSchema.optional(),
 })
@@ -189,18 +193,18 @@ const explanationOf = (
  * certificada — não a data de emissão da prova.
  *
  * A informação certificada é o VEREDITO da validation: ele passa a existir
- * quando a validation atinge o estado terminal, registrado em `completed_at`.
- * No fluxo rápido a conclusão acontece dentro da própria requisição e
- * `completed_at` não é persistido; aí `created_at` é o limite inferior
- * persistido da conclusão (o veredito é produzido no mesmo instante) e mantém a
- * janela coerente com `expires_at` (= `created_at` + 30d, ADR-0024 §5).
+ * quando a análise é concluída, e é isso que `completed_at` registra (o fluxo
+ * rápido preenche no fim da requisição; o deep path, ao concluir o worker). Por
+ * isso `validFrom` é `completed_at` — nunca `created_at`, que é o instante em
+ * que a REQUISIÇÃO começou, antes da Receita, do enriquecimento e dos checkers,
+ * e que declararia válido o que ainda não existia. Sem `completed_at` o início
+ * da validade é desconhecido e `buildAssertion` recusa emitir (ADR-0024 §5).
  *
  * A emissão (`proof.created`) NÃO entra nesta conta: reemitir a mesma
  * validation em outro momento não pode deslocar o início da validade daquilo
  * que a credencial afirma sobre o passado.
  */
-const validFromOf = (timestamps: AssertionPayload['timestamps']): string =>
-  timestamps.completed_at ?? timestamps.created_at
+const validFromOf = (timestamps: AssertionPayload['timestamps']): string => timestamps.completed_at
 
 /**
  * Mapping interno → W3C (puro, determinístico). Campos ausentes (`null` no
@@ -233,9 +237,8 @@ export const toVerifiableCredential = (assertion: AssertionPayload): VerifiableC
     'comprova:verdict': assertion.result.verdict,
     'comprova:score': assertion.result.score,
     'comprova:confidence': assertion.result.confidence,
-    ...(assertion.timestamps.completed_at === null
-      ? {}
-      : { 'comprova:completedAt': assertion.timestamps.completed_at }),
+    // Sempre presente: a emissão exige `completed_at` (ver `buildAssertion`).
+    'comprova:completedAt': assertion.timestamps.completed_at,
     ...(assertion.result.explanation === null
       ? {}
       : { 'comprova:explanation': explanationOf(assertion.result.explanation) }),

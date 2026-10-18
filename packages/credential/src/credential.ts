@@ -45,7 +45,8 @@ const toCredentialObservation = (o: AssertionObservation): CredentialObservation
 /**
  * Normaliza a assertion de domínio já carregada (FASE 2/9). Puro: não acessa
  * banco. Recusa emitir credencial parcial — resultado incompleto, bindings
- * ausentes ou `evidence_set_hash` incoerente com o conjunto de observações
+ * ausentes, `completed_at` ausente (não há como declarar `validFrom` sem
+ * presumir) ou `evidence_set_hash` incoerente com o conjunto de observações
  * abortam a emissão.
  *
  * As observações e os arrays de explicação são ordenados antes de montar o
@@ -64,6 +65,16 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
   }
   if (v.policyHash === null || v.scorerVersion === null || v.evidenceSetHash === null) {
     throw new Error('validation bindings (policy_hash/scorer_version/evidence_set_hash) are missing')
+  }
+  // `completed_at` é o início da validade da informação certificada (ADR-0024
+  // §5). Quando ele falta (registro anterior ao preenchimento do campo), o
+  // instante real da conclusão é DESCONHECIDO: presumir `created_at` afirmaria
+  // válido o que ainda não existia, então a emissão é recusada explicitamente.
+  const completedAt = v.completedAt
+  if (completedAt === null) {
+    throw new Error(
+      'validation has no completion timestamp (completed_at); refusing to guess when the result started to be valid',
+    )
   }
 
   const observations = [...source.observations].sort(byId).map(toCredentialObservation)
@@ -129,7 +140,7 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
     legal_basis: v.legalBasis,
     timestamps: {
       created_at: v.createdAt.toISOString(),
-      completed_at: v.completedAt === null ? null : v.completedAt.toISOString(),
+      completed_at: completedAt.toISOString(),
       expires_at: v.expiresAt.toISOString(),
     },
   }

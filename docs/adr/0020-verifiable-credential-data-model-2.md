@@ -313,22 +313,24 @@ A VC 2.0 usa `validFrom`/`validUntil` (não existe mais `issuanceDate`):
 | `validation.completed_at` | `comprova:result.comprova:completedAt` (se ≠ NULL) |
 
 > **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
-> §5:** `validFrom` passou a ser `completed_at ?? created_at` — o início da
-> validade é o momento em que o **veredito** passou a existir (a conclusão da
-> validation), e não o início da validação. No fluxo rápido, em que
-> `completed_at` é NULL, o fallback persistido é `created_at`.
+> §5:** `validFrom` passou a ser **`completed_at`** — o início da validade é o
+> momento em que o **veredito** passou a existir (a conclusão da análise), e não
+> o início da validação. O fluxo rápido, que antes não preenchia `completed_at`,
+> passou a persistir o instante real da conclusão; não há fallback para
+> `created_at`.
 
 `completed_at` pode ser `NULL` (fast path) e **não** é preenchido (o domínio não
 foi alterado para preenchê-lo).
 
 > **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
-> §5:** a única parte da frase acima que continua valendo é "não é preenchido".
-> Pela regra nova, quando `completed_at` é NULL o fallback de `validFrom` é
-> `created_at` (o limite inferior persistido da conclusão — ver a nota acima), e
-> `comprova:completedAt` continua simplesmente ausente. Nenhum timestamp é
-> fabricado. A elegibilidade continua sendo só `status = 'completed'`. A tensão
-> entre retenção (30d) e material (180–365d) continua decisão de produto, fora do
-> escopo.
+> §5:** a segunda metade da frase acima deixou de valer. O fluxo rápido passou a
+> preencher `completed_at` com o instante real da conclusão (mesma semântica do
+> deep path: `partial`/`queued` continuam NULL) e `validFrom` é esse instante —
+> **sem** fallback para `created_at`, que é o início da requisição. Um registro
+> terminal sem `completed_at` tem conclusão desconhecida e a emissão é recusada
+> (`COMPLETION_TIME_MISSING`); nenhum timestamp é fabricado. A elegibilidade
+> continua sendo só `status = 'completed'`. A tensão entre retenção (30d) e
+> material (180–365d) continua decisão de produto, fora do escopo.
 
 ### 9. Verifier independente
 
@@ -452,7 +454,8 @@ Eles foram decididos aqui, com justificativa acima, e a troca é localizada:
 > **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md):**
 > os itens 2 e 3 foram revistos (§4 e §5 do ADR-0024): `proof.created` voltou a
 > ser o instante real da emissão (com relógio injetável) e `validFrom` passou a
-> ser `completed_at ?? created_at`. Os demais itens seguem como decididos aqui.
+> ser `completed_at` — a conclusão da análise, que o fluxo rápido agora persiste.
+> Os demais itens seguem como decididos aqui.
 
 ## Consequências
 

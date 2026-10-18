@@ -93,8 +93,14 @@ export const AssertionPayloadSchema = z.object({
   }),
   legal_basis: z.string().min(1),
   timestamps: z.object({
+    /** Início da validation (`validation.created_at`); NÃO é `validFrom`. */
     created_at: z.iso.datetime(),
-    completed_at: z.iso.datetime().nullable(),
+    /**
+     * Conclusão da análise (`validation.completed_at`), persistida pelo fluxo
+     * rápido e pelo deep path. É o `validFrom` do documento (ADR-0024 §5) e, por
+     * isso, pré-requisito da emissão: `buildAssertion` recusa emitir sem ele.
+     */
+    completed_at: z.iso.datetime(),
     expires_at: z.iso.datetime(),
   }),
 })
@@ -136,6 +142,7 @@ export interface AssertionSource {
     readonly issuerScopes: readonly string[] | null
     readonly explanation: AssertionPayload['result']['explanation']
     readonly createdAt: Date
+    /** Conclusão da análise; pré-requisito da emissão (`completed_at` do domínio). */
     readonly completedAt: Date | null
     readonly expiresAt: Date
   }

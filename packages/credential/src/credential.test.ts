@@ -253,20 +253,18 @@ describe('tempo: `proof.created` e `validFrom`', () => {
 
     expect(credential.proof.created).not.toBe('2026-01-01T00:00:01.000Z')
     expect(credential.validFrom).toBe('2026-01-01T00:00:01.000Z')
+    expect(credential.validFrom).not.toBe('2026-01-01T00:00:00.000Z')
     expect(credential['comprova:result']['comprova:completedAt']).toBe('2026-01-01T00:00:01.000Z')
   })
 
-  it('no fluxo rápido (`completed_at` nulo), `validFrom` é `created_at` — nunca a emissão', async () => {
-    const credential = await buildCredential(source(twoObservations(), { completedAt: null }), {
-      issuer,
-      signer,
-      now: clock,
-    })
-
-    expect(credential.validFrom).toBe('2026-01-01T00:00:00.000Z')
-    expect(credential['comprova:result']['comprova:completedAt']).toBeUndefined()
-    expect(credential.proof.created).toBe(issuance.toISOString())
-    expect(credential.proof.created).not.toBe(credential.validFrom)
+  it('recusa emitir sem instante de conclusão (não presume `created_at` como `validFrom`)', async () => {
+    // Validação terminal sem `completed_at` (registro anterior ao preenchimento
+    // do campo): a conclusão real é desconhecida, então não há `validFrom`
+    // honesto a declarar — nem `created_at` (início da requisição) nem a
+    // emissão servem.
+    await expect(
+      buildCredential(source(twoObservations(), { completedAt: null }), { issuer, signer, now: clock }),
+    ).rejects.toThrow(/completed_at/)
   })
 
   it('reemitir a mesma validation produz uma NOVA prova sobre o MESMO documento', async () => {

@@ -16,11 +16,20 @@ import {
  * desse grafo é consultada. A camada `@comprova/credential` é pura.
  *
  * Elegibilidade (FASE 9/10): só emite para `status = 'completed'` com resultado
- * completo e bindings presentes. NÃO emite silenciosamente para `partial`.
+ * completo, bindings presentes e o instante de conclusão registrado
+ * (`completed_at`). NÃO emite silenciosamente para `partial`, e NÃO presume
+ * `created_at` como conclusão quando `completed_at` falta: o fluxo rápido já
+ * persiste o instante real da conclusão e um registro sem ele tem data de
+ * conclusão desconhecida (falha `COMPLETION_TIME_MISSING`).
  */
 
 export type CredentialIssuanceFailure =
-  'VALIDATION_NOT_FOUND' | 'VALIDATION_NOT_FINAL' | 'CLAIM_MISSING' | 'SUBJECT_MISSING' | 'EVIDENCE_MISSING'
+  | 'VALIDATION_NOT_FOUND'
+  | 'VALIDATION_NOT_FINAL'
+  | 'COMPLETION_TIME_MISSING'
+  | 'CLAIM_MISSING'
+  | 'SUBJECT_MISSING'
+  | 'EVIDENCE_MISSING'
 
 export class CredentialIssuanceError extends Error {
   readonly failure: CredentialIssuanceFailure
@@ -88,6 +97,15 @@ export const loadAssertionSource = async (
       throw new CredentialIssuanceError(
         'VALIDATION_NOT_FINAL',
         `validation ${validationId} is not final (status=${v.status}); refusing to emit a partial credential`,
+      )
+    }
+    // `completed_at` é o `validFrom` do documento (ADR-0024 §5). Faltando ele
+    // (registro anterior ao preenchimento do campo), a data de conclusão é
+    // DESCONHECIDA: usar `created_at` afirmaria válido o que ainda não existia.
+    if (v.completedAt === null) {
+      throw new CredentialIssuanceError(
+        'COMPLETION_TIME_MISSING',
+        `validation ${validationId} has no completion timestamp (completed_at); refusing to guess when the result started to be valid`,
       )
     }
 

@@ -99,6 +99,14 @@ unidirecional, sem expor CPF/CNPJ/`doc_hmac`, sem ler ou alterar
 `subject.doc_hmac`/`subject_id`. A URL é um identificador pseudônimo, **não** um
 endpoint: não existe (nem passa a existir) resolução pública de subject.
 
+**Linkabilidade (deliberada):** o digest **não** inclui a origem, então o sufixo
+do subject é o mesmo antes e depois de uma migração de domínio. É o preço de o
+pseudônimo ser estável por (tenant, documento) — que é justamente o objetivo de
+um identificador estável. Incluir a origem no digest daria um identificador novo
+a cada domínio sem esconder nada: quem recebe duas credenciais do mesmo sujeito
+correlaciona-as pelo próprio digest (ele é função do `doc_hmac`, por design).
+Correlacionar subjects **entre tenants diferentes** continua impossível.
+
 ### 4. `proof.created`: o instante real da criação da prova
 
 - `buildCredential(source, { issuer, signer, now? })`; `created = (now ?? (() =>
@@ -113,30 +121,39 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
   não há tabela de credenciais emitidas. Ou seja: **reemitir ≠ reproduzir**; o
   procedimento para reproduzir é documentado, o produto é que decide se o quer.
 
-### 5. `validFrom`: início da validade do veredito
+### 5. `validFrom`: início da validade do veredito (o instante REAL da conclusão)
 
-| Domínio                      | Documento W3C                                      |
-| ---------------------------- | -------------------------------------------------- |
-| `completed_at ?? created_at` | `validFrom`                                        |
-| `validation.expires_at`      | `validUntil`                                       |
-| `validation.completed_at`    | `comprova:result.comprova:completedAt` (se ≠ NULL) |
+| Domínio                   | Documento W3C                            |
+| ------------------------- | ---------------------------------------- |
+| `validation.completed_at` | `validFrom` **e** `comprova:completedAt` |
+| `validation.expires_at`   | `validUntil`                             |
+| `validation.created_at`   | (nenhum: é o início da requisição)       |
 
 - A informação certificada é o **veredito** da validation: ele passa a existir
-  quando a validation atinge o estado terminal, registrado em `completed_at`.
-  `validFrom = created_at` (decisão anterior) declarava válido o que ainda não
-  existia durante a janela em que a validação estava pendente.
-- **Fluxo rápido** (`apps/api/src/services/fastpath.ts`): a conclusão acontece
-  dentro da própria requisição e `completed_at` **não** é persistido. Nesse caso
-  `created_at` é o limite inferior persistido da conclusão — o veredito é
-  produzido no mesmo instante — e mantém a janela coerente com `expires_at`
-  (= `created_at` + 30d). Regra final: `validFrom = completed_at ?? created_at`.
-- **Limitação conhecida e aceita:** se `completed_at` for NULL numa validação que
-  concluiu mais tarde, `validFrom` fica mais cedo que a conclusão real. É
-  conservador (nunca declara válido depois do que se sabe) e preferível a usar a
-  emissão, que deslocaria o início da validade a cada reemissão e tornaria
-  `validFrom` dependente de quando alguém pediu a credencial.
+  quando a análise é concluída. `validFrom = created_at` (decisão anterior)
+  declarava válido o que ainda não existia durante a janela em que a validação
+  estava pendente.
+- **`created_at` não é a conclusão.** O fluxo rápido captura `now` no início de
+  `runFastPath` (`apps/api/src/services/fastpath.ts`), antes das consultas à
+  Receita, do enriquecimento do endereço e dos checkers — a conclusão pode vir
+  segundos depois. Por isso o fluxo rápido passou a **persistir
+  `completed_at`** no fim da análise quando o resultado é terminal completo,
+  com a mesma semântica do deep path (`updateValidationOutcome`): `partial` e
+  `queued` continuam NULL (o worker preenche quando concluir). **Sem migração:**
+  a coluna já existia e era preenchida só pelo deep path.
+- **Registros sem `completed_at` (dados anteriores):** a emissão é
+  **recusada** — `COMPLETION_TIME_MISSING` na fronteira
+  (`apps/api/src/services/credential-issuer.ts`) e
+  `validation has no completion timestamp (completed_at)` em `buildAssertion`.
+  Não se presume `created_at`: com a conclusão desconhecida não há `validFrom`
+  honesto a declarar, e declarar mais cedo do que se sabe é afirmar o que não se
+  sabe. Como as duas rotas que produzem `status = 'completed'` passam a gravar o
+  campo, a recusa atinge apenas registros criados antes desta correção.
 - `proof.created` **não** entra em `validFrom`: emitir não define desde quando a
   informação vale.
+- A janela de validade continua `[completed_at, expires_at]`, e `expires_at`
+  segue como o início da requisição mais 30 dias (retenção): a análise consome
+  parte da janela. Mudar essa base é decisão de produto, fora do escopo.
 
 ### 6. Verificador: a chave confiável carrega a identidade do método (obrigatória)
 
@@ -176,15 +193,24 @@ sobre o documento cru, com a chave de `trusted`, exigindo
   `publicKey`/`expectedVerificationMethod`), `issuer.ts`
   (`localIssuer(origem, tenant, keyId)`, `parseIssuerOrigin`,
   `issuerScopeOf`), `subject.ts` (`deriveCredentialSubjectId` recebe `issuerId`),
-  `credential.ts` (`now` no lugar de `proofCreatedAt`) e
-  `apps/api/src/services/credential-issuer.ts` (`IssueCredentialDeps` recebe
-  `issuerOrigin`/`keyId`/`now`; a falha `ISSUER_MISMATCH` deixa de existir).
+  `credential.ts` (`now` no lugar de `proofCreatedAt`; `buildAssertion` recusa
+  `completed_at` ausente e `AssertionPayload['timestamps']['completed_at']` deixa
+  de ser nullable) e `apps/api/src/services/credential-issuer.ts`
+  (`IssueCredentialDeps` recebe `issuerOrigin`/`keyId`/`now`; a falha
+  `ISSUER_MISMATCH` deixa de existir e surge `COMPLETION_TIME_MISSING`).
+- **Mudança de domínio (campo que já existia):** o fluxo rápido passa a gravar
+  `validation.completed_at` (instante da conclusão). É o único ponto de escrita
+  novo: nada de coluna, índice, tabela ou regra de elegibilidade nova.
+- **`comprova:completedAt` na leitura:** segue `optional` no schema da
+  credencial. O emissor sempre o escreve (é o mesmo instante de `validFrom`),
+  mas ele é proveniência descritiva; a verificação temporal usa `validFrom`,
+  que é obrigatório.
 - **Atribuição de issuer:** o serviço **deriva** o issuer da origem configurada +
   tenant escopado pela leitura (RLS), então não existe mais caminho para um
   caller atribuir a assertion de um tenant ao issuer de outro — a garantia virou
   estrutural, não uma checagem que podia ser contornada.
-- **Nenhuma migração:** nada novo é persistido; a regra de `validFrom` usa
-  `completed_at`, que já existe.
+- **Nenhuma migração:** nada de schema novo; `validFrom` usa `completed_at`, que
+  já existia (preenchido pelo deep path, agora também pelo fluxo rápido).
 - **Configuração:** `CREDENTIAL_ISSUER_ORIGIN` é obrigatória para a API subir
   (documentada no `.env.example` e no README).
 - Não havia consumidor externo do documento nem emissão por HTTP quando estas
@@ -197,16 +223,20 @@ sobre o documento cru, com a chave de `trusted`, exigindo
   inválido.
 - `subject.test.ts`: URL no namespace do issuer, determinismo, isolamento por
   tenant e por origem, ausência de `doc_hmac`/`tenant_id`, digest inalterado.
-- `vc.test.ts`: `validFrom` = conclusão; fluxo rápido (`completed_at` nulo) →
-  `created_at`; subject como URL.
+- `vc.test.ts`: `validFrom` = `completed_at` (nunca `created_at`); subject como
+  URL.
 - `credential.test.ts`: `proof.created` = relógio injetado, distinto de
   `created_at`/`completed_at`; reemissão gera nova prova sobre o mesmo documento;
-  caso negativo do método confiável (mesma chave assinando `#key-1` e `#key-2`);
-  chave errada, issuer esperado incompatível, `proofPurpose` incorreto,
-  adulteração de todos os campos assinados.
+  recusa de emissão sem `completed_at`; caso negativo do método confiável (mesma
+  chave assinando `#key-1` e `#key-2`); chave errada, issuer esperado
+  incompatível, `proofPurpose` incorreto, adulteração de todos os campos
+  assinados.
 - `apps/api/src/credential.int.test.ts`: fluxo ponta a ponta (validation →
-  credencial → verificação), `validFrom` do fluxo rápido, issuer derivado do
-  tenant, `proof.created` real e adulterável, retenção do material físico.
+  credencial → verificação), `validFrom` do fluxo rápido, **fluxo rápido com
+  relógio que avança entre início e conclusão da requisição** (o `completed_at`
+  persistido é a conclusão, e `validFrom` não a antecede), registro concluído sem
+  `completed_at` → `COMPLETION_TIME_MISSING`, issuer derivado do tenant,
+  `proof.created` real e adulterável, retenção do material físico.
 - O vetor normativo B.3 (`data-integrity.test.ts`) e o RFC 8785 continuam
   passando — a canonicalização e o cryptosuite não foram tocados.
 
