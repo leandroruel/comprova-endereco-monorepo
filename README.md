@@ -4,6 +4,13 @@ Address Intelligence API: valida o endereço de um CNPJ/CPF cruzando múltiplos 
 
 ## Quickstart
 
+Requer Node `>=22.12` e pnpm 12 (`corepack enable`, ou `npm i -g pnpm@12`): o
+`packageManager` do repo pina `pnpm@12.14.0` e versões anteriores não conseguem
+provisioná-lo. O pnpm 12 traz de padrão uma quarentena de 24h para versões
+recém-publicadas (`minimumReleaseAge`) — um `pnpm install` que falhe com
+`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` está recusando uma release nova, não
+quebrado.
+
 ```bash
 pnpm install
 pnpm db:migrate
@@ -84,7 +91,7 @@ nem polyfills. O resto continua no Node, que é mais rápido e tem os containers
 do Testcontainers.
 
 Pré-requisito para o projeto `dashboard` (o download do Chromium não roda no
-`pnpm install`, por não estar entre os `onlyBuiltDependencies`):
+`pnpm install`: é um download, não um build script aprovado em `allowBuilds`):
 
 ```bash
 npx playwright install chromium              # macOS/Windows

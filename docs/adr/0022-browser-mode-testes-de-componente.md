@@ -47,8 +47,9 @@ veio junto em vez de virar uma segunda frente sobre os mesmos arquivos.
 - `poolOptions.forks.singleFork` (v3) virou `maxWorkers: 1` no pool reescrito do
   v4, preservando a isolação por arquivo de que os testes de integração precisam
   (um container por arquivo).
-- Os navegadores **não** são baixados no `pnpm install` (`pnpm.onlyBuiltDependencies`
-  só permite `esbuild`): `npx playwright install chromium` é pré-requisito local e
+- Os navegadores **não** são baixados no `pnpm install` (é um download, não um
+  build script — o `allowBuilds` do `pnpm-workspace.yaml` só libera `esbuild`):
+  `npx playwright install chromium` é pré-requisito local e
   passo do workflow de CI (`npx playwright install --with-deps chromium`). Sem o
   binário o teste falha com mensagem explícita, e não com erro obscuro.
 - Timeout do projeto `dashboard` limitado a 30s: as asserções de locator tentam de

@@ -1,3 +1,26 @@
 packages:
   - apps/*
   - packages/*
+# Build scripts aprovados por nome. Antes ficava em `package.json#pnpm
+# .onlyBuiltDependencies`; o pnpm 11+ só lê isso daqui, e o `strictDepBuilds`
+# (ligado por padrão) falha o install se algum build não estiver decidido.
+allowBuilds:
+  esbuild: true
+  # Transitivos que o pnpm 10 já ignorava (nunca rodaram aqui): `@swc/core` vem
+  # de @temporalio/worker, `protobufjs` de @temporalio/client e `ssh2`/
+  # `cpu-features` do testcontainers (só testes). Negar explicitamente é a
+  # decisão revisada — e o registro de que não queremos esses builds.
+  '@swc/core': false
+  protobufjs: false
+  ssh2: false
+  cpu-features: false
+# O vitest declara `jsdom` como peer opcional, e o `autoInstallPeers` o
+# resolvia mesmo sem ninguém usá-lo: os testes de componente rodam no Chromium
+# (Browser Mode) e o jsdom saiu das dependências no mesmo PR. A aresta removida
+# tira o jsdom e sua árvore do lockfile. Se um dia voltar a existir teste com
+# `environment: 'jsdom'`, é esta linha que precisa sair.
+overrides:
+  'vitest>jsdom': '-'
+permissions:
+  '@tanstack/react-table':
+    skills: false
