@@ -1,6 +1,5 @@
 import { createDbPool, runMigrations } from '@comprova/db'
-import { createHmac } from 'node:crypto'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createCLILogger } from '@comprova/observability'
@@ -125,21 +124,21 @@ switch (command) {
   case 'load-tenant': {
     const pool = createDbPool(adminUrl, { max: 1 })
     try {
+      const { apiKey, makeApiKeyHasher, newApiKey, keyPrefixOf, tenant } = await import('@comprova/db')
       const tenantId = randomUUID()
-      await pool.db.insert((await import('@comprova/db')).tenant).values({
+      await pool.db.insert(tenant).values({
         tenantId,
         name: 'load-tenant',
         rateLimitRps: 100_000,
         burst: 200_000,
       })
       const pepper = process.env.API_KEY_PEPPER ?? 'dev-pepper-change-me'
-      const plaintext = `cvk_${randomBytes(24).toString('base64url')}`
-      const keyHash = createHmac('sha256', pepper).update(plaintext).digest()
-      await pool.db.insert((await import('@comprova/db')).apiKey).values({
+      const plaintext = newApiKey()
+      await pool.db.insert(apiKey).values({
         apiKeyId: randomUUID(),
         tenantId,
-        keyPrefix: plaintext.slice(0, 12),
-        keyHash: Buffer.from(keyHash),
+        keyPrefix: keyPrefixOf(plaintext),
+        keyHash: makeApiKeyHasher(pepper).hash(plaintext),
       })
       cli.info(plaintext)
     } finally {

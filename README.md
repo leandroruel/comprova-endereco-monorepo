@@ -12,9 +12,11 @@ recém-publicadas (`minimumReleaseAge`) — um `pnpm install` que falhe com
 quebrado.
 
 ```bash
+cp .env.example .env   # defaults do docker-compose; ajuste os segredos
 pnpm install
 pnpm db:migrate
-pnpm db:seed
+pnpm db:seed           # imprime a API key do tenant de dev
+# cole a chave em VITE_API_KEY no .env
 pnpm dev
 ```
 
@@ -26,6 +28,24 @@ pnpm dev
 | Redis/Valkey                    | 6379             |
 | Temporal                        | 7233 / 8233 (UI) |
 | Object storage (S3-compatible)  | 9000             |
+
+## Ambiente
+
+Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
+`.gitignore` protege o arquivo. Dois pontos que costumam pegar:
+
+- **`VITE_API_KEY`** é a chave que o dashboard manda no `Authorization: Bearer`.
+  O `envDir` do Vite aponta para a raiz, então é o mesmo arquivo que os scripts
+  do backend leem (`tsx --env-file=.env`); só o que começa com `VITE_` chega ao
+  browser. Sem a chave a API responde 401 e o dashboard loga o motivo no
+  console. Uma chave nova sai de `pnpm db:seed` (tenant de dev) ou de
+  `pnpm --filter @comprova/ingestor start -- load-tenant` (tenant de carga).
+- **`API_KEY_PEPPER`** é o segredo do HMAC das chaves (a linha guarda só o
+  HMAC, nunca a chave). Trocar o pepper **invalida todas as chaves emitidas** —
+  o `pnpm db:seed` só cria outra se o tenant de dev não tiver nenhuma ativa.
+  Para revogar uma chave, `UPDATE api_key SET revoked_at = now() WHERE ...`; a
+  API confere a revogação no banco, mas guarda o resultado por 60s em memória
+  (cache por prefixo), então o 401 pode demorar até um minuto.
 
 ## Dashboard
 
@@ -62,7 +82,7 @@ pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
 pnpm format       # prettier
 pnpm db:migrate   # aplica migrações SQL
-pnpm db:seed      # tenant dev + API key
+pnpm db:seed      # tenant dev + imprime a API key
 pnpm db:fence     # pgfence: gate de segurança de migrações
 pnpm seed:golden  # dataset dourado (8 classes de veredito)
 

@@ -488,9 +488,6 @@ importers:
       '@comprova/observability':
         specifier: workspace:^
         version: link:../observability
-      '@node-rs/argon2':
-        specifier: ^2.2.2
-        version: 2.2.2
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.9.1)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9)

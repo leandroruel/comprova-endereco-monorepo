@@ -12,7 +12,6 @@
     "@comprova/contracts": "workspace:*",
     "@comprova/core": "workspace:*",
     "@comprova/observability": "workspace:^",
-    "@node-rs/argon2": "^2.2.2",
     "drizzle-orm": "^0.45.4",
     "ioredis": "^6.0.0",
     "postgres": "^3.4.9",
