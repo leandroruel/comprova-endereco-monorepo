@@ -1,5 +1,5 @@
 import type { KeyObject } from 'node:crypto'
-import { verifyDataIntegrityProof, type DataIntegrityFailure } from './data-integrity.js'
+import { ASSERTION_METHOD, verifyDataIntegrityProof, type DataIntegrityFailure } from './data-integrity.js'
 import { evidenceSetHashOfCredential } from './evidence.js'
 import {
   observationOfEvidence,
@@ -14,6 +14,7 @@ export type CredentialVerificationFailure =
   | 'UNSUPPORTED_CRYPTOSUITE'
   | 'ISSUER_MISMATCH'
   | 'VERIFICATION_METHOD_MISMATCH'
+  | 'PROOF_PURPOSE_MISMATCH'
   | 'INVALID_TIMESTAMP'
   | 'EVIDENCE_SET_MISMATCH'
   | 'INVALID_SIGNATURE'
@@ -33,6 +34,8 @@ const proofFailure = (reason: DataIntegrityFailure): CredentialVerificationFailu
   switch (reason) {
     case 'UNSUPPORTED_CRYPTOSUITE':
       return 'UNSUPPORTED_CRYPTOSUITE'
+    case 'PROOF_PURPOSE_MISMATCH':
+      return 'PROOF_PURPOSE_MISMATCH'
     case 'INVALID_SIGNATURE':
       return 'INVALID_SIGNATURE'
     case 'MALFORMED_PROOF':
@@ -56,12 +59,13 @@ const timestampOf = (value: string): number | null => {
  * O que é verificado, nesta ordem:
  *  1. forma do documento (VC 2.0 + extensões Comprova);
  *  2. `@context[0]` e `type` de uma Verifiable Credential;
- *  3. expectativas de issuer e de `verificationMethod`, quando fornecidas;
+ *  3. expectativa de issuer (quando fornecida) e binding do
+ *     `proof.verificationMethod` ao issuer declarado (§5.9);
  *  4. a janela de validade (`validFrom` ≤ `validUntil`);
  *  5. o binding do conjunto de evidências (recomputado a partir da própria
  *     credencial — nunca do material físico);
  *  6. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
- *     recebido, sem o `proof`).
+ *     recebido, sem o `proof`), exigindo `proofPurpose: assertionMethod`.
  */
 export const verifyCredential = (
   credential: unknown,
@@ -82,9 +86,19 @@ export const verifyCredential = (
   if (options.expectedIssuerId !== undefined && secured.issuer !== options.expectedIssuerId) {
     return { valid: false, reason: 'ISSUER_MISMATCH' }
   }
+
+  // §5.9 Verification Method Binding: sem resolução remota de chave, o binding é
+  // estrutural — o método de verificação precisa pertencer ao issuer declarado
+  // (`<issuer>#<keyId>`). Sem esta checagem, um documento assinado por A poderia
+  // se declarar emitido por B e passaria.
+  const verificationMethod = secured.proof.verificationMethod
+  const issuerFragment = `${secured.issuer}#`
+  if (!verificationMethod.startsWith(issuerFragment) || verificationMethod.length === issuerFragment.length) {
+    return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
+  }
   if (
     options.expectedVerificationMethod !== undefined &&
-    secured.proof.verificationMethod !== options.expectedVerificationMethod
+    verificationMethod !== options.expectedVerificationMethod
   ) {
     return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
   }
@@ -105,7 +119,10 @@ export const verifyCredential = (
     return { valid: false, reason: 'EVIDENCE_SET_MISMATCH' }
   }
 
-  const proof = verifyDataIntegrityProof(raw, { publicKey: options.publicKey })
+  const proof = verifyDataIntegrityProof(raw, {
+    publicKey: options.publicKey,
+    expectedProofPurpose: ASSERTION_METHOD,
+  })
   if (!proof.valid) return { valid: false, reason: proofFailure(proof.reason) }
 
   return { valid: true }

@@ -4,8 +4,11 @@ import {
   COMPROVA_CONTEXT_URL,
   COMPROVA_CREDENTIAL_TYPE,
   COMPROVA_EVIDENCE_TYPE,
+  observationOfEvidence,
   SecuredVerifiableCredentialSchema,
   toVerifiableCredential,
+  urnUuidOf,
+  uuidOfUrn,
   VC_CONTEXT_URL,
   VerifiableCredentialSchema,
 } from './vc.js'
@@ -95,12 +98,12 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
   it('mapeia claim e endereço preservando `building_key` como binding', () => {
     const vc = toVerifiableCredential(assertion())
     const claim = vc.credentialSubject['comprova:claim']
-    expect(claim.id).toBe('22222222-2222-4222-8222-222222222222')
+    expect(claim.id).toBe('urn:uuid:22222222-2222-4222-8222-222222222222')
     expect(claim['comprova:claimType']).toBe('business_registered_address')
     expect(claim['comprova:subjectType']).toBe('organization')
     expect(claim['comprova:targetType']).toBe('address')
     expect(claim['comprova:address']).toEqual({
-      id: '33333333-3333-4333-8333-333333333333',
+      id: 'urn:uuid:33333333-3333-4333-8333-333333333333',
       'comprova:buildingKey': 'b64:AAAA',
     })
   })
@@ -109,7 +112,7 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
     const vc = toVerifiableCredential(assertion())
     expect(vc.evidence).toHaveLength(1)
     expect(vc.evidence[0]).toEqual({
-      id: '44444444-4444-4444-8444-444444444444',
+      id: 'urn:uuid:44444444-4444-4444-8444-444444444444',
       type: [COMPROVA_EVIDENCE_TYPE],
       'comprova:checker': 'registry_match',
       'comprova:checkerVersion': '1',
@@ -124,6 +127,31 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
     expect(vc['comprova:evidenceSetHash']).toBe('b'.repeat(64))
   })
 
+  it('expressa todo `id` como URL (`urn:uuid:`) e o desfaz para o evidence_set_hash', () => {
+    const vc = toVerifiableCredential(assertion())
+    const claim = vc.credentialSubject['comprova:claim']
+
+    // §4.4: `id` precisa ser uma URL (nunca um UUID nu).
+    expect(vc.evidence[0]!.id).toBe(urnUuidOf('44444444-4444-4444-8444-444444444444'))
+    expect(claim.id).toMatch(/^urn:uuid:[0-9a-f-]{36}$/)
+    expect(claim['comprova:address'].id).toMatch(/^urn:uuid:[0-9a-f-]{36}$/)
+    expect(vc['comprova:result']['comprova:explanation']?.['comprova:supportingEvidence']).toEqual([
+      urnUuidOf('44444444-4444-4444-8444-444444444444'),
+    ])
+
+    // O domínio (e portanto o hash) continua com UUIDs: a conversão é do mapping.
+    expect(uuidOfUrn(vc.evidence[0]!.id)).toBe('44444444-4444-4444-8444-444444444444')
+    expect(observationOfEvidence(vc.evidence[0]!).id).toBe('44444444-4444-4444-8444-444444444444')
+
+    // Um `id` que não seja URL não é aceito pelo schema.
+    expect(
+      VerifiableCredentialSchema.safeParse({
+        ...vc,
+        evidence: [{ ...vc.evidence[0]!, id: '44444444-4444-4444-8444-444444444444' }],
+      }).success,
+    ).toBe(false)
+  })
+
   it('mapeia resultado, policy, algoritmo, autorização e base legal', () => {
     const vc = toVerifiableCredential(assertion())
     expect(vc['comprova:result']).toEqual({
@@ -134,7 +162,7 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
       'comprova:explanation': {
         'comprova:code': 'ADDRESS_CONFIRMED',
         'comprova:summary': 'ok',
-        'comprova:supportingEvidence': ['44444444-4444-4444-8444-444444444444'],
+        'comprova:supportingEvidence': ['urn:uuid:44444444-4444-4444-8444-444444444444'],
         'comprova:contradictingEvidence': [],
       },
     })

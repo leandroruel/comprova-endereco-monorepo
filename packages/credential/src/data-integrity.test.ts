@@ -1,8 +1,14 @@
-import { createHash, createPrivateKey, createPublicKey, type KeyObject } from 'node:crypto'
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign as ed25519Sign,
+  type KeyObject,
+} from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { createDataIntegrityProof, verifyDataIntegrityProof } from './data-integrity.js'
 import { canonicalize } from './jcs.js'
-import { decodeMultibaseBase58Btc } from './multibase.js'
+import { decodeMultibaseBase58Btc, encodeMultibaseBase58Btc } from './multibase.js'
 import { generateEd25519KeyPair, makeEd25519Signer } from './signer.js'
 
 /**
@@ -165,5 +171,49 @@ describe('data integrity proof (eddsa-jcs-2022)', () => {
       valid: false,
       reason: 'PROOF_CONTEXT_MISMATCH',
     })
+  })
+
+  it('verifica provas com propriedades assinadas adicionais (expires, domain, challenge, nonce)', () => {
+    const keyPair = generateEd25519KeyPair()
+    const options = {
+      ...proofOptions,
+      expires: '2027-01-01T00:00:00Z',
+      domain: 'example.org',
+      challenge: 'challenge-1',
+      nonce: 'nonce-1',
+    }
+
+    // A Data Integrity permite propriedades extras no proof; elas fazem parte do
+    // proofConfig assinado e não podem ser descartadas pelo verificador.
+    const hashData = Buffer.concat([
+      createHash('sha256').update(canonicalize(options), 'utf8').digest(),
+      createHash('sha256').update(canonicalize(document), 'utf8').digest(),
+    ])
+    const proofValue = encodeMultibaseBase58Btc(ed25519Sign(null, hashData, keyPair.privateKey))
+    const secured = { ...document, proof: { ...options, proofValue } }
+
+    expect(verifyDataIntegrityProof(secured, { publicKey: keyPair.publicKey })).toEqual({ valid: true })
+
+    const tampered = { ...secured, proof: { ...secured.proof, domain: 'other.example' } }
+    expect(verifyDataIntegrityProof(tampered, { publicKey: keyPair.publicKey })).toEqual({
+      valid: false,
+      reason: 'INVALID_SIGNATURE',
+    })
+  })
+
+  it('aplica `expectedProofPurpose`, quando fornecido', () => {
+    expect(
+      verifyDataIntegrityProof(securedDocument(), {
+        publicKey: vectorPublicKey(),
+        expectedProofPurpose: 'authentication',
+      }),
+    ).toEqual({ valid: false, reason: 'PROOF_PURPOSE_MISMATCH' })
+
+    expect(
+      verifyDataIntegrityProof(securedDocument(), {
+        publicKey: vectorPublicKey(),
+        expectedProofPurpose: 'assertionMethod',
+      }),
+    ).toEqual({ valid: true })
   })
 })

@@ -109,9 +109,9 @@ describe('buildCredential + verifyCredential', () => {
     expect(credential.validUntil).toBe('2026-01-31T00:00:00.000Z')
     expect(credential.credentialSubject.id).toMatch(/^sha256:[0-9a-f]{64}$/)
     expect(credential.credentialSubject['comprova:docType']).toBe('CNPJ')
-    expect(credential.credentialSubject['comprova:claim'].id).toBe(CLAIM_ID)
+    expect(credential.credentialSubject['comprova:claim'].id).toBe(`urn:uuid:${CLAIM_ID}`)
     expect(credential.credentialSubject['comprova:claim']['comprova:address']).toEqual({
-      id: ADDRESS_ID,
+      id: `urn:uuid:${ADDRESS_ID}`,
       'comprova:buildingKey': 'b64:AAAA',
     })
     expect(credential.evidence).toHaveLength(2)
@@ -141,6 +141,37 @@ describe('buildCredential + verifyCredential', () => {
     ).toEqual({ valid: true })
   })
 
+  it('é autocontida: o JSON transportado verifica sem nenhum dado além da chave pública', async () => {
+    const credential = transport(await emit())
+
+    // Nenhuma dependência de PostgreSQL/Redis/Temporal/S3/API: o verificador só
+    // recebe o documento e a chave pública.
+    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({ valid: true })
+
+    const json = JSON.stringify(credential)
+    for (const internal of [
+      'validation_id',
+      'validationId',
+      'evidence_id',
+      's3_uri',
+      'doc_hmac',
+      'doc_enc',
+    ]) {
+      expect(json).not.toContain(internal)
+    }
+  })
+
+  it('não assina o ponteiro material: um `evidence_id` distinto produz a mesma prova', async () => {
+    const withoutPointer = await emit()
+    const withPointer: AssertionObservation[] = twoObservations().map((observation, index) => ({
+      ...observation,
+      evidenceId: `s3-${index}`,
+    }))
+    const other = await buildCredential(source(withPointer), { issuer, signer })
+
+    expect(other.proof.proofValue).toBe(withoutPointer.proof.proofValue)
+  })
+
   it('é determinística: a ordem das observações vinda do banco não muda os bytes assinados', async () => {
     const forward = await emit(twoObservations())
     const backward = await emit([...twoObservations()].reverse())
@@ -164,7 +195,7 @@ describe('buildCredential + verifyCredential', () => {
 
   it('preserva evidence_sha256 sem depender de evidence_id', async () => {
     const credential = await emit()
-    const linked = credential.evidence.find((e) => e.id === '00000000-0000-4000-8000-000000000002')
+    const linked = credential.evidence.find((e) => e.id === 'urn:uuid:00000000-0000-4000-8000-000000000002')
     expect(linked?.['comprova:evidenceSha256']).toBe(Buffer.alloc(32, 9).toString('hex'))
     expect(JSON.stringify(credential)).not.toContain('evidence_id')
     expect(JSON.stringify(credential)).not.toContain('s3_uri')
@@ -206,7 +237,8 @@ describe('adulteração da credencial', () => {
       ;(c.credentialSubject['comprova:claim'] as Record<string, unknown>)['comprova:targetType'] = 'parcel'
     })
     await expectInvalid((c) => {
-      c.credentialSubject['comprova:claim']['comprova:address'].id = '99999999-9999-4999-8999-999999999999'
+      c.credentialSubject['comprova:claim']['comprova:address'].id =
+        'urn:uuid:99999999-9999-4999-8999-999999999999'
     })
     await expectInvalid((c) => {
       c.credentialSubject['comprova:claim']['comprova:address']['comprova:buildingKey'] = 'b64:BBBB'
@@ -294,6 +326,34 @@ describe('adulteração da credencial', () => {
     })
   })
 
+  it('amarra o `verificationMethod` ao issuer declarado (§5.9)', async () => {
+    // Sem resolução de chave, o binding é estrutural: um proof válido de outro
+    // issuer (ou o próprio issuer com o método alterado) não pode se declarar
+    // emitido por este issuer.
+    const credential = await valid()
+    credential.proof.verificationMethod = 'comprova:issuer:99999999-9999-4999-8999-999999999999#key-1'
+    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({
+      valid: false,
+      reason: 'VERIFICATION_METHOD_MISMATCH',
+    })
+
+    const noFragment = await valid()
+    noFragment.proof.verificationMethod = `comprova:issuer:${TENANT}#`
+    expect(verifyCredential(noFragment, { publicKey: keyPair.publicKey })).toEqual({
+      valid: false,
+      reason: 'VERIFICATION_METHOD_MISMATCH',
+    })
+  })
+
+  it('exige `proofPurpose: assertionMethod` (uma prova para outro motivo não vale como credencial)', async () => {
+    const credential = await valid()
+    credential.proof.proofPurpose = 'authentication'
+    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({
+      valid: false,
+      reason: 'PROOF_PURPOSE_MISMATCH',
+    })
+  })
+
   it('detecta incoerência entre o conjunto de evidências e o evidence_set_hash', async () => {
     const credential = await valid()
     // Adultera o conjunto E re-sela o hash: a assinatura continua cobrindo os
@@ -330,6 +390,13 @@ describe('adulteração da credencial', () => {
     const noPurpose = await valid()
     ;(noPurpose.proof as Record<string, unknown>).proofPurpose = undefined
     expect(verifyCredential(noPurpose, { publicKey: keyPair.publicKey })).toEqual({
+      valid: false,
+      reason: 'MALFORMED_CREDENTIAL',
+    })
+
+    const noMethod = await valid()
+    ;(noMethod.proof as Record<string, unknown>).verificationMethod = undefined
+    expect(verifyCredential(noMethod, { publicKey: keyPair.publicKey })).toEqual({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })

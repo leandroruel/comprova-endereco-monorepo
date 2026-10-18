@@ -20,6 +20,12 @@ import { DataIntegrityProofSchema } from './data-integrity.js'
  *    (obrigatório);
  *  - `proof` (Data Integrity 1.0 §2.1).
  *
+ * Todo `id` do documento é uma URL (§4.4): os identificadores internos são
+ * UUIDs e aparecem como `urn:uuid:<uuid>` (o próprio exemplo normativo da spec,
+ * e o formato usado no vetor B.3). O domínio continua com UUIDs; a conversão
+ * para URL/IRI acontece só neste mapping e é desfeita em `observationOfEvidence`
+ * para que o `evidence_set_hash` continue sendo o hash dos UUIDs do domínio.
+ *
  * Tudo que é específico da Comprova vive no namespace
  * `https://comprova.dev/ns/credentials/v2#`, declarado no `@context` inline e
  * usado na forma de IRI compacto (`comprova:…`). Nenhum termo W3C é
@@ -35,6 +41,19 @@ export const COMPROVA_SUBJECT_TYPE = 'comprova:AddressSubject'
 export const COMPROVA_CLAIM_TYPE = 'comprova:AddressClaim'
 export const COMPROVA_EVIDENCE_TYPE = 'comprova:Evidence'
 
+const URN_UUID_PREFIX = 'urn:uuid:'
+
+/**
+ * Identificador de recurso no documento: uma URL. O Data Model 2.0 (§4.4) exige
+ * que `id` seja uma única URL — um UUID nu é um IRI relativo e não é
+ * interoperável —, e a spec exemplifica com `urn:uuid:`.
+ */
+export type UrnUuid = `urn:uuid:${string}`
+export const UrnUuidSchema = z.templateLiteral([URN_UUID_PREFIX, z.uuid()])
+export const urnUuidOf = (uuid: string): UrnUuid => `${URN_UUID_PREFIX}${uuid}`
+/** Inverso de `urnUuidOf`. O schema acima garante o prefixo na entrada. */
+export const uuidOfUrn = (urn: UrnUuid): string => urn.slice(URN_UUID_PREFIX.length)
+
 /** `@context` do documento: o contexto base da VC 2.0 + o prefixo Comprova. */
 const context = (): [typeof VC_CONTEXT_URL, { comprova: typeof COMPROVA_CONTEXT_URL }] => [
   VC_CONTEXT_URL,
@@ -42,12 +61,12 @@ const context = (): [typeof VC_CONTEXT_URL, { comprova: typeof COMPROVA_CONTEXT_
 ]
 
 const ComprovaAddressSchema = z.object({
-  id: z.uuid().optional(),
+  id: UrnUuidSchema.optional(),
   'comprova:buildingKey': z.string().min(1).optional(),
 })
 
 const ComprovaClaimSchema = z.object({
-  id: z.uuid(),
+  id: UrnUuidSchema,
   type: z.array(z.string()).min(1),
   'comprova:claimType': z.enum(['business_registered_address', 'address_exists']),
   'comprova:subjectType': z.enum(['organization', 'person']),
@@ -57,7 +76,7 @@ const ComprovaClaimSchema = z.object({
 })
 
 const ComprovaEvidenceSchema = z.object({
-  id: z.uuid(),
+  id: UrnUuidSchema,
   type: z.array(z.string()).min(1),
   'comprova:checker': z.string().min(1),
   'comprova:checkerVersion': z.string().min(1),
@@ -74,8 +93,8 @@ const ComprovaEvidenceSchema = z.object({
 const ComprovaExplanationSchema = z.object({
   'comprova:code': z.string(),
   'comprova:summary': z.string(),
-  'comprova:supportingEvidence': z.array(z.uuid()),
-  'comprova:contradictingEvidence': z.array(z.uuid()),
+  'comprova:supportingEvidence': z.array(UrnUuidSchema),
+  'comprova:contradictingEvidence': z.array(UrnUuidSchema),
 })
 
 const ComprovaResultSchema = z.object({
@@ -136,12 +155,12 @@ export type SecuredVerifiableCredential = z.infer<typeof SecuredVerifiableCreden
 const addressOf = (
   target: AssertionPayload['claim']['target'],
 ): VerifiableCredential['credentialSubject']['comprova:claim']['comprova:address'] => ({
-  ...(target.id === null ? {} : { id: target.id }),
+  ...(target.id === null ? {} : { id: urnUuidOf(target.id) }),
   ...(target.building_key === null ? {} : { 'comprova:buildingKey': target.building_key }),
 })
 
 const evidenceOf = (observation: CredentialObservation): ComprovaEvidence => ({
-  id: observation.id,
+  id: urnUuidOf(observation.id),
   type: [COMPROVA_EVIDENCE_TYPE],
   'comprova:checker': observation.checker,
   'comprova:checkerVersion': observation.checker_version,
@@ -159,8 +178,8 @@ const explanationOf = (
 ): NonNullable<VerifiableCredential['comprova:result']['comprova:explanation']> => ({
   'comprova:code': explanation.code,
   'comprova:summary': explanation.summary,
-  'comprova:supportingEvidence': [...explanation.supporting_evidence],
-  'comprova:contradictingEvidence': [...explanation.contradicting_evidence],
+  'comprova:supportingEvidence': explanation.supporting_evidence.map(urnUuidOf),
+  'comprova:contradictingEvidence': explanation.contradicting_evidence.map(urnUuidOf),
 })
 
 /**
@@ -180,7 +199,7 @@ export const toVerifiableCredential = (assertion: AssertionPayload): VerifiableC
     type: [COMPROVA_SUBJECT_TYPE],
     'comprova:docType': assertion.subject.doc_type,
     'comprova:claim': {
-      id: assertion.claim.id,
+      id: urnUuidOf(assertion.claim.id),
       type: [COMPROVA_CLAIM_TYPE],
       'comprova:claimType': assertion.claim.type,
       'comprova:subjectType': assertion.claim.subject_type,
@@ -214,7 +233,7 @@ export const toVerifiableCredential = (assertion: AssertionPayload): VerifiableC
 
 /** W3C → observação interna, para recompor o `evidence_set_hash` no verifier. */
 export const observationOfEvidence = (evidence: ComprovaEvidence): CredentialObservation => ({
-  id: evidence.id,
+  id: uuidOfUrn(evidence.id),
   checker: evidence['comprova:checker'],
   checker_version: evidence['comprova:checkerVersion'],
   stance: evidence['comprova:stance'],

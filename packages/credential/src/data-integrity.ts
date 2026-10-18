@@ -27,18 +27,29 @@ export const DATA_INTEGRITY_PROOF_TYPE = 'DataIntegrityProof'
 export const EDDSA_JCS_2022 = 'eddsa-jcs-2022'
 export const ASSERTION_METHOD = 'assertionMethod'
 
-export const DataIntegrityProofSchema = z.object({
+/**
+ * Campos do proof reconhecidos pela Comprova. As opções do proof estão ABERTAS
+ * (`looseObject`): a Data Integrity permite propriedades adicionais no proof
+ * (`expires`, `domain`, `challenge`, `nonce`, `previousProof`, …), elas fazem
+ * parte do material assinado e NÃO podem ser descartadas na verificação.
+ */
+const PROOF_FIELDS = {
   type: z.string().min(1),
   cryptosuite: z.string().min(1),
   created: z.iso.datetime().optional(),
-  verificationMethod: z.string().min(1).optional(),
+  verificationMethod: z.string().min(1),
   proofPurpose: z.string().min(1),
   '@context': z.unknown().optional(),
+} as const
+
+export const UnsignedDataIntegrityProofSchema = z.looseObject(PROOF_FIELDS)
+export const DataIntegrityProofSchema = z.looseObject({
+  ...PROOF_FIELDS,
   proofValue: z.string().min(1),
 })
 
 export type DataIntegrityProof = z.infer<typeof DataIntegrityProofSchema>
-export type UnsignedDataIntegrityProof = Omit<DataIntegrityProof, 'proofValue'>
+export type UnsignedDataIntegrityProof = z.infer<typeof UnsignedDataIntegrityProofSchema>
 
 export interface CreateDataIntegrityProofOptions {
   readonly verificationMethod: string
@@ -58,6 +69,7 @@ export type DataIntegrityFailure =
   | 'MALFORMED_PROOF'
   | 'UNSUPPORTED_CRYPTOSUITE'
   | 'PROOF_CONTEXT_MISMATCH'
+  | 'PROOF_PURPOSE_MISMATCH'
   | 'INVALID_PROOF_VALUE'
   | 'INVALID_SIGNATURE'
 
@@ -80,11 +92,13 @@ const hashData = (
 ): Buffer => Buffer.concat([sha256(canonicalize(proofOptions)), sha256(canonicalize(unsecuredDocument))])
 
 /**
- * §3.3.5 Proof Configuration: clona as opções, valida `type`/`cryptosuite` e
- * canoniza com JCS. `created`, quando presente, precisa ser `dateTimeStamp`.
+ * §3.3.5 Proof Configuration: valida `type`/`cryptosuite` e devolve uma CÓPIA
+ * das opções — inclusive propriedades adicionais assinadas (`expires`, `domain`,
+ * …), que não podem ser removidas. `created`, quando presente, precisa ser
+ * `dateTimeStamp`.
  */
 const proofConfiguration = (options: UnsignedDataIntegrityProof): UnsignedDataIntegrityProof => {
-  const parsed = DataIntegrityProofSchema.omit({ proofValue: true }).safeParse(options)
+  const parsed = UnsignedDataIntegrityProofSchema.safeParse(options)
   if (!parsed.success) {
     throw new DataIntegrityError(`invalid proof options: ${parsed.error.message}`)
   }
@@ -130,6 +144,12 @@ export const createDataIntegrityProof = async (
 export interface VerifyDataIntegrityProofOptions {
   /** Chave pública do emissor, fornecida diretamente (MVP; ver ADR-0019). */
   readonly publicKey: KeyObject
+  /**
+   * §4.4 `expectedProofPurpose`: garante que a prova foi criada para o motivo
+   * esperado (`assertionMethod` para uma credencial). Quando omitido, nenhuma
+   * expectativa é aplicada.
+   */
+  readonly expectedProofPurpose?: string
 }
 
 const contextStartsWith = (document: unknown, proof: unknown): boolean =>
@@ -143,21 +163,32 @@ const contextStartsWith = (document: unknown, proof: unknown): boolean =>
  * uma versão normalizada) e a chave pública. Remove o `proof`, restaura o
  * `@context` a partir das opções do proof, recomputa `hashData` e verifica a
  * assinatura Ed25519.
+ *
+ * O `proofConfig` é derivado do proof **cru** (menos `proofValue`), não de uma
+ * versão filtrada pelo schema: propriedades assinadas que a Comprova não conhece
+ * precisam continuar cobertas pela assinatura (e verificáveis).
  */
 export const verifyDataIntegrityProof = (
   securedDocument: Record<string, unknown>,
   options: VerifyDataIntegrityProofOptions,
 ): DataIntegrityVerificationResult => {
-  const parsed = DataIntegrityProofSchema.safeParse(securedDocument['proof'])
+  const rawProof = securedDocument['proof']
+  const parsed = DataIntegrityProofSchema.safeParse(rawProof)
   if (!parsed.success) return { valid: false, reason: 'MALFORMED_PROOF' }
 
   const proof = parsed.data
   if (proof.type !== DATA_INTEGRITY_PROOF_TYPE || proof.cryptosuite !== EDDSA_JCS_2022) {
     return { valid: false, reason: 'UNSUPPORTED_CRYPTOSUITE' }
   }
+  if (options.expectedProofPurpose !== undefined && proof.proofPurpose !== options.expectedProofPurpose) {
+    return { valid: false, reason: 'PROOF_PURPOSE_MISMATCH' }
+  }
 
   const document = without(securedDocument, 'proof')
-  const proofOptions = without(proof, 'proofValue')
+  const proofOptions = without(
+    rawProof as Record<string, unknown>,
+    'proofValue',
+  ) as UnsignedDataIntegrityProof
 
   // §3.3.2 passos 5–6: o `@context` do documento precisa começar pelos valores
   // do `@context` do proof (mesma ordem), e é restaurado a partir dele.

@@ -161,7 +161,7 @@ describe('emissão e verificação independente', () => {
     expect(credential.issuer).toBe(`comprova:issuer:${tenantId}`)
     expect(credential.credentialSubject['comprova:docType']).toBe('CNPJ')
     expect(credential.credentialSubject.id).toMatch(/^sha256:[0-9a-f]{64}$/)
-    expect(credential.credentialSubject['comprova:claim'].id).toBe(claimId)
+    expect(credential.credentialSubject['comprova:claim'].id).toBe(`urn:uuid:${claimId}`)
     expect(credential.credentialSubject['comprova:claim']['comprova:targetType']).toBe('address')
     expect(credential['comprova:evidenceSetHash']).toBe(row?.evidenceSetHash)
     expect(credential.evidence).toHaveLength(observations.length)
@@ -209,7 +209,10 @@ describe('emissão e verificação independente', () => {
         ((c.credentialSubject['comprova:claim'] as Record<string, unknown>)['comprova:targetType'] =
           'parcel'),
     ],
-    ['address', (c) => (c.credentialSubject['comprova:claim']['comprova:address'].id = randomUUID())],
+    [
+      'address',
+      (c) => (c.credentialSubject['comprova:claim']['comprova:address'].id = `urn:uuid:${randomUUID()}`),
+    ],
     [
       'building_key',
       (c) => (c.credentialSubject['comprova:claim']['comprova:address']['comprova:buildingKey'] = 'b64:AAAA'),
@@ -315,6 +318,16 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
 
     await expect(issue(otherValidationId)).rejects.toBeInstanceOf(CredentialIssuanceError)
     await expect(issue(otherValidationId)).rejects.toMatchObject({ failure: 'VALIDATION_NOT_FOUND' })
+  })
+
+  it('recusa issuer que não pertence ao tenant da validation', async () => {
+    const validationId = await newValidation()
+    await expect(
+      issueCredential(appPool.db, tenantId, validationId, {
+        issuer: localIssuer(randomUUID(), 'key-1'),
+        signer,
+      }),
+    ).rejects.toMatchObject({ failure: 'ISSUER_MISMATCH' })
   })
 
   it('recusa validation não final (partial) — terminalidade exige status=completed', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { policyHashOf } from './policy.js'
-import { canonicalEvidenceSet, evidenceSetHash, type EvidenceSetEntry } from './provenance.js'
+import { canonicalEvidenceSet, canonicalJson, evidenceSetHash, type EvidenceSetEntry } from './provenance.js'
 
 const base: EvidenceSetEntry = {
   id: 'aaaaaaaa-0000-0000-0000-000000000000',
@@ -60,6 +60,30 @@ describe('evidenceSetHash', () => {
   it('hashes diferentes para conjuntos diferentes', () => {
     expect(evidenceSetHash([withId('a')])).not.toBe(evidenceSetHash([withId('b')]))
     expect(evidenceSetHash([base])).not.toBe(evidenceSetHash([base, base]))
+  })
+})
+
+describe('canonicalJson', () => {
+  it('rejeita números não finitos em vez de os colapsar em `null`', () => {
+    expect(() => canonicalJson([Number.NaN])).toThrow(TypeError)
+    expect(() => canonicalJson([Number.POSITIVE_INFINITY])).toThrow(TypeError)
+    expect(() => canonicalJson({ a: Number.NEGATIVE_INFINITY })).toThrow(TypeError)
+    // `null` e `NaN` não podem compartilhar a mesma representação.
+    expect(canonicalJson([null])).toBe('[null]')
+    // Um campo numérico do domínio não pode virar `null` silenciosamente no hash.
+    expect(() => evidenceSetHash([{ ...base, strength: Number.NaN }])).toThrow(TypeError)
+  })
+
+  it('rejeita valores que não são objetos JSON simples', () => {
+    expect(() => canonicalJson(new Date())).toThrow(TypeError)
+    expect(() => canonicalJson([new Map([['a', 1]])])).toThrow(TypeError)
+    expect(() => canonicalJson([() => 1])).toThrow(TypeError)
+  })
+
+  it('mantém a representação determinística para valores JSON válidos', () => {
+    expect(canonicalJson({ b: 1, a: [null, true, 'x'] })).toBe('{"a":[null,true,"x"],"b":1}')
+    expect(canonicalJson([{ b: undefined, a: 1 }])).toBe('[{"a":1}]')
+    expect(canonicalJson(-0)).toBe('0')
   })
 })
 

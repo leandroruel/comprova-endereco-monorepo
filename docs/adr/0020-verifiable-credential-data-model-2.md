@@ -81,6 +81,12 @@ ADR-0017) **não** é reutilizado no proof. Ele é o canonicalizador do
 em `jcs.ts`, isolado na credential layer. `evidence_set_hash` continua
 byte-idêntico ao comportamento anterior — os dois contratos não se misturam.
 
+`canonicalJson` foi endurecido na revisão: ele agora **rejeita** números não
+finitos (que `JSON.stringify` converteria silenciosamente em `null`, criando
+colisão entre `NaN`/`±Infinity` e `null` no hash) e objetos que não são JSON
+simples (`Date`, `Map`, `Set`, classes). A serialização de todo valor JSON válido
+é idêntica à anterior — nenhum `evidence_set_hash` já persistido muda.
+
 O proof emitido é:
 
 ```json
@@ -115,9 +121,11 @@ dados. O `created` reaproveita um instante real da assertion — não inventa um
 `issuer` continua sendo o **tenant**: `comprova:issuer:<tenant_id>` (string URI,
 sem objeto `issuer`, sem DID). `verificationMethod` é
 `<issuer.id>#<keyId>`; a chave fica no fragmento, então trocar a identidade por
-`did:web:…#<keyId>` numa etapa futura não muda o restante do documento. Não há
-DID/DID Document/resolução/rotação: a chave pública é injetada no verifier
-(ADR-0019 §3). `api_key_id`/`user_id` continuam fora da credencial;
+`did:web:…#<keyId>` numa etapa futura não muda o restante do documento. Ele é
+**obrigatório** no proof e o verifier o amarra ao `issuer` declarado (§9): como
+não há resolução de chave, o binding é estrutural (`<issuer>#<fragmento não
+vazio>`). Não há DID/DID Document/resolução/rotação: a chave pública é injetada
+no verifier (ADR-0019 §3). `api_key_id`/`user_id` continuam fora da credencial;
 `issuer_scopes` é transportado como `comprova:authorization.scopes`.
 
 ### 4. `@context`, `type` e namespace
@@ -173,6 +181,15 @@ DID/DID Document/resolução/rotação: a chave pública é injetada no verifier
 | `claim.target.building_key`            | `…comprova:claim.comprova:address.comprova:buildingKey` |
 | `validation.legal_basis`               | `comprova:legalBasis`                                   |
 
+**Todo `id` é uma URL.** O Data Model 2.0 (§4.4) exige que `id` seja uma única
+URL — um UUID nu é um IRI relativo e não é interoperável —, e a própria spec
+exemplifica com `urn:uuid:` (o mesmo formato do vetor normativo B.3). Assim,
+`claim.id`, `claim.target.id` e cada `evidence[].id` são `urn:uuid:<uuid>`. O
+domínio continua com UUIDs: a conversão existe só no mapping (`urnUuidOf`) e é
+desfeita em `observationOfEvidence` (`uuidOfUrn`), de modo que o
+`evidence_set_hash` continue sendo o hash dos UUIDs do domínio.
+`credentialSubject.id` permanece o digest `sha256:…` (um IRI válido por si).
+
 `id` do subject continua vindo de `deriveCredentialSubjectId` (ADR-0019 §5):
 determinístico, com escopo por tenant, unidirecional. Nunca `doc_hmac`,
 `doc_enc`, `subject_id` interno ou `validation.id`.
@@ -201,7 +218,7 @@ A evidência usa a propriedade W3C `evidence` (§5.6), um item por
 ```json
 "evidence": [
   {
-    "id": "<claim_evidence.id>",
+    "id": "urn:uuid:<claim_evidence.id>",
     "type": ["comprova:Evidence"],
     "comprova:checker": "registry_match",
     "comprova:checkerVersion": "1",
@@ -216,7 +233,10 @@ A evidência usa a propriedade W3C `evidence` (§5.6), um item por
 ]
 ```
 
-- `id` e `type` são exigidos pela §5.6; o restante é namespace Comprova.
+- `id` e `type` são exigidos pela §5.6; o restante é namespace Comprova. O `id`
+  é a URL `urn:uuid:<claim_evidence.id>` (§4.4); `comprova:supportingEvidence` e
+  `comprova:contradictingEvidence` usam a mesma forma, para que possam ser
+  confrontados diretamente com `evidence[].id`.
 - **Nunca** entram `evidence_id` (FK efêmera) nem `s3_uri` (material físico).
 - O binding durável é `comprova:evidenceSha256` (`claim_evidence.evidence_sha256`)
   mais `comprova:evidenceSetHash` (= `validation.evidence_set_hash`).
@@ -241,7 +261,7 @@ A evidência usa a propriedade W3C `evidence` (§5.6), um item por
   "comprova:explanation": {
     "comprova:code": "ADDRESS_CONFIRMED",
     "comprova:summary": "…",
-    "comprova:supportingEvidence": ["<claim_evidence.id>"],
+    "comprova:supportingEvidence": ["urn:uuid:<claim_evidence.id>"],
     "comprova:contradictingEvidence": []
   }
 },
@@ -284,17 +304,29 @@ Ordem das checagens:
 
 1. forma (VC 2.0 + extensões Comprova);
 2. `@context[0]` é o contexto base e `type` contém `VerifiableCredential`;
-3. expectativas de issuer e de `verificationMethod`, quando fornecidas;
+3. expectativa de `issuer` (quando fornecida) e **binding do
+   `proof.verificationMethod` ao issuer declarado** (§5.9): o método precisa ser
+   `<issuer>#<keyId>` (fragmento não vazio) e, se `expectedVerificationMethod`
+   for passado, coincidir exatamente. Sem isto, um documento legítimo de A
+   poderia se declarar emitido por B;
 4. janela de validade bem formada (`validFrom ≤ validUntil`);
 5. `comprova:evidenceSetHash` reconferido a partir da própria credencial;
 6. proof Data Integrity `eddsa-jcs-2022` sobre o documento **cru** recebido
    (menos `proof`) — nunca sobre a versão normalizada pelo schema, para que a
-   normalização não possa encobrir/alterar um campo.
+   normalização não possa encobrir/alterar um campo —, exigindo
+   `proofPurpose = assertionMethod` (uma prova emitida para outro motivo não vale
+   como credencial).
+
+No primitivo, o `proofConfig` é derivado do proof **cru** (menos `proofValue`),
+não de uma cópia filtrada pelo schema: a Data Integrity permite propriedades
+assinadas adicionais no proof (`expires`, `domain`, `challenge`, `nonce`,
+`previousProof`, …) e elas precisam continuar cobertas pela assinatura e
+verificáveis por terceiros.
 
 Falhas classificadas: `MALFORMED_CREDENTIAL`, `UNSUPPORTED_CREDENTIAL`,
 `UNSUPPORTED_CRYPTOSUITE`, `ISSUER_MISMATCH`,
-`VERIFICATION_METHOD_MISMATCH`, `INVALID_TIMESTAMP`, `EVIDENCE_SET_MISMATCH`,
-`INVALID_SIGNATURE`.
+`VERIFICATION_METHOD_MISMATCH`, `PROOF_PURPOSE_MISMATCH`, `INVALID_TIMESTAMP`,
+`EVIDENCE_SET_MISMATCH`, `INVALID_SIGNATURE`.
 
 Verificação ≠ validação: expiração no passado é política do consumidor, não do
 `verifyCredential`.
@@ -314,9 +346,13 @@ Também são cobertos: vetores do RFC 8785 (números, escaping, ordenação por 
 units UTF-16, rejeição de `NaN`/`Infinity`), base58btc/Multibase, o mapping
 completo, adulteração de cada campo assinado e classificação de falhas. Em
 `credential.test.ts` há ainda: determinismo por ordem de observações e por ordem
-de propriedades JSON, casos negativos (sem `@context`/`type`/`issuer`/
-`credentialSubject`/`proof`, cryptosuite inesperada) e a retenção de material
-(cenário de integração na API).
+de propriedades JSON, autocontenção (transporte JSON + verificação só com a chave
+pública), invariância ao ponteiro material (`evidence_id`), binding do
+`verificationMethod` ao issuer, `proofPurpose` obrigatório, casos negativos (sem
+`@context`/`type`/`issuer`/`credentialSubject`/`proof`, cryptosuite inesperada) e
+a retenção de material (cenário de integração na API). Em `data-integrity.test.ts`
+há uma prova assinada com propriedades adicionais (`expires`, `domain`,
+`challenge`, `nonce`) para garantir que a verificação não as descarta.
 
 ### 11. Compatibilidade com o contrato anterior
 
@@ -333,6 +369,12 @@ de propriedades JSON, casos negativos (sem `@context`/`type`/`issuer`/
   materializavam o envelope experimental substituído. Antes da remoção,
   verificou-se que não havia consumidores fora do próprio pacote e dos testes
   (a API só usava o tipo `Credential`, agora `SecuredVerifiableCredential`).
+- Na revisão de conformidade desta PR, os `id` do documento passaram de UUID nu
+  para `urn:uuid:<uuid>` (Data Model §4.4) e o verifier passou a exigir
+  `proofPurpose = assertionMethod` e o binding `verificationMethod ↔ issuer`.
+  Nada disso altera `AssertionPayload` (o domínio continua com UUIDs) nem o
+  `evidence_set_hash`; são mudanças de forma do documento W3C e de política de
+  verificação, feitas antes de existir qualquer consumidor do documento.
 
 ## Itens deliberadamente NÃO implementados
 
@@ -361,7 +403,8 @@ Eles foram decididos aqui, com justificativa acima, e a troca é localizada:
 3. `created_at → validFrom` e `completed_at → comprova:completedAt` (em vez de
    `validFrom = completed_at`) (§8);
 4. `id` da credencial omitido (§ abaixo);
-5. contagem de stances não duplicada no documento (§6).
+5. contagem de stances não duplicada no documento (§6);
+6. identificadores internos (UUID) expressos como URL `urn:uuid:` (§5).
 
 ## Consequências
 

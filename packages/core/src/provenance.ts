@@ -29,25 +29,47 @@ export interface EvidenceSetEntry {
 }
 
 /**
- * Canonicalização JSON determinística usada por este módulo e reutilizada pela
- * camada de emissão de credenciais (`@comprova/credential`), para que o material
- * assinado seja reproduzível pelo mesmo algoritmo que produz `evidence_set_hash`.
+ * Canonicalização JSON determinística usada por este módulo para produzir o
+ * `evidence_set_hash` (ADR-0017). Ela NÃO é usada pelo material assinado da
+ * credencial: o proof usa JCS/RFC 8785 (`jcs.ts`, ADR-0020). Os dois contratos
+ * são independentes e não se misturam.
  *
  * Propriedades: ordena chaves de objetos recursivamente; preserva a ordem de
  * arrays; descarta propriedades de objeto com valor `undefined`; serializa
  * `null` (e `undefined` em posição de valor) como `null`; usa `JSON.stringify`
- * para primitivos. Total sobre o subconjunto de valores JSON.
+ * para primitivos — logo `-0` vira `0`, como exige o RFC 8785.
+ *
+ * É TOTAL sobre valores JSON e **rejeita** o que não tem representação JSON
+ * inequívoca: números não finitos (`NaN`/`±Infinity`, que `JSON.stringify`
+ * silenciosamente converteria em `null` e produziriam colisão com `null`) e
+ * objetos que não são objetos JSON simples (`Date`, `Map`, `Set`, classes), cuja
+ * serialificação por `Object.entries` perderia informação.
  */
+const isPlainObject = (value: object): boolean => {
+  const prototype = Object.getPrototypeOf(value) as unknown
+  return prototype === Object.prototype || prototype === null
+}
+
 export const canonicalJson = (value: unknown): string => {
   if (value === null || value === undefined) return 'null'
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`canonicalJson: número não finito (${String(value)}) não tem representação JSON`)
+    }
+    return JSON.stringify(value)
+  }
   if (typeof value === 'object') {
+    if (!isPlainObject(value)) {
+      throw new TypeError('canonicalJson: apenas objetos JSON simples podem ser canonicalizados')
+    }
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, v]) => v !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
   }
-  return JSON.stringify(value)
+  if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
+  throw new TypeError(`canonicalJson: valor de tipo ${typeof value} não tem representação JSON`)
 }
 
 export const canonicalEvidenceSet = (entries: readonly EvidenceSetEntry[]): string =>
