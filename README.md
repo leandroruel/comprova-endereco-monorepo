@@ -4,6 +4,13 @@ Address Intelligence API: valida o endereço de um CNPJ/CPF cruzando múltiplos 
 
 ## Quickstart
 
+Requer Node `>=22.12` e pnpm 12 (`corepack enable`, ou `npm i -g pnpm@12`): o
+`packageManager` do repo pina `pnpm@12.14.0` e versões anteriores não conseguem
+provisioná-lo. O pnpm 12 traz de padrão uma quarentena de 24h para versões
+recém-publicadas (`minimumReleaseAge`) — um `pnpm install` que falhe com
+`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` está recusando uma release nova, não
+quebrado.
+
 ```bash
 pnpm install
 pnpm db:migrate
@@ -49,7 +56,8 @@ Abre `http://localhost:5173`:
 
 ```bash
 pnpm dev          # tudo (API, dashboard, worker, ingestor)
-pnpm test         # 109/109 testes
+pnpm test         # suíte completa (projetos `node` e `dashboard`)
+pnpm test:browser # só os testes de componente, no Chromium real
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
 pnpm format       # prettier
@@ -67,6 +75,37 @@ pnpm --filter @comprova/ingestor start -- profiles:recompute
 pnpm --filter @comprova/ingestor start -- load-tenant
 pnpm --filter @comprova/ingestor start -- policy:simulate <versao> [--report]
 ```
+
+## Testes
+
+A suíte roda em dois projetos do Vitest, escolhidos pela extensão do arquivo:
+
+| Projeto     | Ambiente                   | Alcança                                          |
+| ----------- | -------------------------- | ------------------------------------------------ |
+| `node`      | Node, `pool: forks`        | `*.test.ts(x)` de API, worker, ingestor, pacotes |
+| `dashboard` | Chromium real (Playwright) | `apps/dashboard/src/**/*.test.tsx`               |
+
+Testes de componente (`*.test.tsx`) rodam no browser de verdade: eventos de
+ponteiro/teclado, foco e árvore de acessibilidade são os do Chromium, sem jsdom
+nem polyfills. O resto continua no Node, que é mais rápido e tem os containers
+do Testcontainers.
+
+Pré-requisito para o projeto `dashboard` (o download do Chromium não roda no
+`pnpm install`: é um download, não um build script aprovado em `allowBuilds`):
+
+```bash
+npx playwright install chromium              # macOS/Windows
+npx playwright install --with-deps chromium  # Linux: traz também as libs do sistema (pede sudo)
+```
+
+É uma vez por máquina; no CI é um passo do workflow, com o mesmo `--with-deps`.
+
+Os testes de componente não carregam a folha de estilo (Tailwind), então
+asserções de visibilidade valem para elementos com caixa própria — cor e
+espaçamento não são testados.
+
+Quando um teste de browser falha, o Vitest grava um screenshot em
+`.vitest/attachments/failure-screenshots/` (gitignored).
 
 ## Modos de validação
 

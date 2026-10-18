@@ -1,100 +1,122 @@
-// @vitest-environment jsdom
-import '@/test/polyfills'
-import { cleanup, render, screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { page, userEvent } from 'vitest/browser'
+import { describe, expect, it, vi } from 'vitest'
+import { render } from 'vitest-browser-react'
 import { DashboardLayout } from './layout'
 
-afterEach(cleanup)
-
-const userMenu = (): HTMLElement => screen.getByRole('button', { name: 'Menu do usuário' })
+const userMenu = () => page.getByRole('button', { name: 'Menu do usuário' })
 
 describe('DashboardLayout', () => {
-  it('renderiza o conteúdo e a navegação lateral', () => {
-    render(<DashboardLayout>conteúdo da página</DashboardLayout>)
+  it('renderiza o conteúdo e a navegação lateral', async () => {
+    await render(<DashboardLayout>conteúdo da página</DashboardLayout>)
 
-    expect(screen.getByText('conteúdo da página')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Validações' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Busca em lote' })).toBeTruthy()
+    await expect.element(page.getByText('conteúdo da página', { exact: true })).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Busca em lote' })).toBeVisible()
   })
 
   it('troca de aba e avisa a navegação ao clicar no menu lateral', async () => {
     const onNavigate = vi.fn()
-    const user = userEvent.setup()
-    render(<DashboardLayout onNavigate={onNavigate}>conteúdo</DashboardLayout>)
+    await render(<DashboardLayout onNavigate={onNavigate}>conteúdo</DashboardLayout>)
 
-    await user.click(screen.getByRole('button', { name: 'Busca em lote' }))
+    await page.getByRole('button', { name: 'Busca em lote' }).click()
 
     expect(onNavigate).toHaveBeenCalledWith('bulk')
   })
 
   it('identifica o usuário no gatilho do menu e alterna o estado acessível', async () => {
-    const user = userEvent.setup()
-    render(<DashboardLayout userEmail="ana.souza@empresa.com">conteúdo</DashboardLayout>)
+    await render(<DashboardLayout userEmail="ana.souza@empresa.com">conteúdo</DashboardLayout>)
 
     const trigger = userMenu()
-    expect(trigger.getAttribute('aria-expanded')).toBe('false')
-    expect(within(trigger).getByText('ana.souza')).toBeTruthy()
-    expect(within(trigger).getByText('ana.souza@empresa.com')).toBeTruthy()
-    expect(within(trigger).getByText('A')).toBeTruthy()
+    await expect.element(trigger).toHaveAttribute('aria-expanded', 'false')
+    await expect.element(trigger.getByText('ana.souza', { exact: true })).toBeVisible()
+    await expect.element(trigger.getByText('ana.souza@empresa.com', { exact: true })).toBeVisible()
+    await expect.element(trigger.getByText('A', { exact: true })).toBeVisible()
 
-    await user.click(trigger)
+    const triggerEl = trigger.element()
+    await trigger.click()
 
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    // Enquanto o menu está aberto, o Radix marca o resto da página como
+    // `aria-hidden` (o gatilho inclusive), então o locator deixa de resolver o
+    // papel `button`. A referência capturada antes do clique continua válida.
+    await expect.poll(() => triggerEl.getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('cai em "Conta" quando não há e-mail', () => {
-    render(<DashboardLayout>conteúdo</DashboardLayout>)
+  it('cai em "Conta" quando não há e-mail', async () => {
+    await render(<DashboardLayout>conteúdo</DashboardLayout>)
 
     const trigger = userMenu()
-    expect(within(trigger).getByText('Conta')).toBeTruthy()
-    expect(within(trigger).getByText('C')).toBeTruthy()
+    await expect.element(trigger.getByText('Conta', { exact: true })).toBeVisible()
+    await expect.element(trigger.getByText('C', { exact: true })).toBeVisible()
   })
 
   it('abre o menu com Perfil e Configurações e encaminha a navegação', async () => {
     const onNavigate = vi.fn()
-    const user = userEvent.setup()
-    render(
+    await render(
       <DashboardLayout userEmail="ana@empresa.com" onNavigate={onNavigate}>
         conteúdo
       </DashboardLayout>,
     )
 
-    await user.click(userMenu())
-    await user.click(await screen.findByRole('menuitem', { name: /Perfil/ }))
+    await userMenu().click()
+    await page.getByRole('menuitem', { name: /Perfil/ }).click()
 
     expect(onNavigate).toHaveBeenCalledWith('profile')
 
-    await user.click(userMenu())
-    await user.click(await screen.findByRole('menuitem', { name: /Configurações/ }))
+    await userMenu().click()
+    await page.getByRole('menuitem', { name: /Configurações/ }).click()
 
     expect(onNavigate).toHaveBeenCalledWith('settings')
   })
 
   it('mostra a ação destrutiva de sair apenas quando há onLogout', async () => {
     const onLogout = vi.fn()
-    const user = userEvent.setup()
-    render(
+    await render(
       <DashboardLayout userEmail="ana@empresa.com" onLogout={onLogout}>
         conteúdo
       </DashboardLayout>,
     )
 
-    await user.click(userMenu())
+    await userMenu().click()
     // Perfil existe sempre; "Sair" só com logout conectado.
-    expect(await screen.findByRole('menuitem', { name: /Perfil/ })).toBeTruthy()
-    await user.click(screen.getByRole('menuitem', { name: /Sair/ }))
+    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
+    await page.getByRole('menuitem', { name: /Sair/ }).click()
 
     expect(onLogout).toHaveBeenCalledTimes(1)
   })
 
   it('omite "Sair" quando o logout não está conectado', async () => {
-    const user = userEvent.setup()
-    render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
+    await render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
 
-    await user.click(userMenu())
+    await userMenu().click()
 
-    expect(await screen.findByRole('menuitem', { name: /Perfil/ })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: /Sair/ })).toBeNull()
+    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
+    await expect.element(page.getByRole('menuitem', { name: /Sair/ })).not.toBeInTheDocument()
+  })
+
+  // Teclado e foco reais (CDP) — a diferença prática do browser mode: no jsdom o
+  // Radix não recebia eventos de teclado de verdade e o foco não era gerenciado.
+  it('abre o menu pelo teclado, ativa o primeiro item e fecha com Escape', async () => {
+    const onNavigate = vi.fn()
+    await render(
+      <DashboardLayout userEmail="ana@empresa.com" onNavigate={onNavigate}>
+        conteúdo
+      </DashboardLayout>,
+    )
+
+    const triggerEl = userMenu().element() as HTMLElement
+    triggerEl.focus()
+    await userEvent.keyboard('{Enter}')
+
+    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
+    // O Radix move o foco para o primeiro item ao abrir com teclado.
+    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toHaveFocus()
+
+    await userEvent.keyboard('{Enter}')
+    expect(onNavigate).toHaveBeenCalledWith('profile')
+
+    await userMenu().click()
+    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).not.toBeInTheDocument()
   })
 })

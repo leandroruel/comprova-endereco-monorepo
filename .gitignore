@@ -6,3 +6,6 @@ coverage/
 .turbo/
 tmp/
 *.tsbuildinfo
+
+# Artefatos do Vitest (relatórios, anexos e screenshots de falha do browser).
+.vitest/
