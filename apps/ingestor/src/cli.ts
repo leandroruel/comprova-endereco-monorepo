@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createCLILogger } from '@comprova/observability'
+import { parseSnapshotMonth } from './cli-args.js'
 
 const cli = createCLILogger('ingestor', process.env.LOG_LEVEL ?? 'info')
 import { createTenant, seedGoldenDataset } from '@comprova/testing'
@@ -27,12 +28,11 @@ const fixtures = async (): Promise<void> => {
   }
 }
 
-const ingestEstabelecimentos = async (file: string, limit?: number, snapshot?: string): Promise<void> => {
+const ingestEstabelecimentos = async (file: string, snapshotMonth: string, limit?: number): Promise<void> => {
   const { ingestReceitaEstabelecimentos } = await import('./receita-estabelecimentos.js')
   await runMigrations({ adminUrl, rolePassword: process.env.APP_DB_PASSWORD })
   const pool = createDbPool(adminUrl, { max: 4 })
   try {
-    const snapshotMonth = (snapshot ?? '2026-09') + '-01'
     const stats = await ingestReceitaEstabelecimentos(pool.db, file, snapshotMonth, {
       ...(limit !== undefined ? { limit } : {}),
     })
@@ -50,7 +50,7 @@ const ingestMunicipios = async (file: string): Promise<void> => {
   await runMigrations({ adminUrl, rolePassword: process.env.APP_DB_PASSWORD })
   const pool = createDbPool(adminUrl, { max: 1 })
   try {
-    const count = await ingestReceitaMunicipios(pool.db, file, '2026-09')
+    const count = await ingestReceitaMunicipios(pool.db, file)
     cli.info(`ingested ${count} municipios`)
   } finally {
     await pool.end()
@@ -154,9 +154,9 @@ switch (command) {
     const snapFlag = process.argv.indexOf('--snapshot')
     const snapshot = snapFlag > 0 ? process.argv[snapFlag + 1] : undefined
     if (!file) {
-      throw new Error('usage: ingestor receita:estabelecimentos <csv> [--limit N] [--snapshot 2026-09]')
+      throw new Error('usage: ingestor receita:estabelecimentos <csv> --snapshot YYYY-MM [--limit N]')
     }
-    await ingestEstabelecimentos(file, limit, snapshot)
+    await ingestEstabelecimentos(file, parseSnapshotMonth(snapshot), limit)
     break
   }
   case 'profiles:recompute': {
@@ -234,7 +234,7 @@ switch (command) {
   }
   default:
     cli.info(
-      'comandos: fixtures | receita:estabelecimentos <csv> [--limit N] | policy:simulate <versao> [--report]',
+      'comandos: fixtures | receita:estabelecimentos <csv> --snapshot YYYY-MM [--limit N] | policy:simulate <versao> [--report]',
     )
     cli.info('gate adiada (Fase 1): ingestao completa do dump real + medicao de tempo')
 }

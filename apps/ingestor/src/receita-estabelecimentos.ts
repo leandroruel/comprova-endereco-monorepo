@@ -281,14 +281,10 @@ export const ingestReceitaEstabelecimentos = async (
   return { rows: count, snapshotMonth, elapsedMs: Date.now() - started }
 }
 
-export const ingestReceitaMunicipios = async (
-  db: Db,
-  csvPath: string,
-  snapshotMonth: string,
-): Promise<number> => {
+export const ingestReceitaMunicipios = async (db: Db, csvPath: string): Promise<number> => {
   const stream = createReadStream(csvPath, { encoding: 'latin1' })
   const rl = createInterface({ input: stream, crlfDelay: Infinity })
-  const rows: { codigoReceita: number; nomeNorm: string; snapshotMonth: string }[] = []
+  const rows: { codigoReceita: number; nomeNorm: string }[] = []
   for await (const line of rl) {
     if (line.trim().length === 0) continue
     const [codeRaw, nameRaw] = line.split(';').map(unquote)
@@ -297,7 +293,6 @@ export const ingestReceitaMunicipios = async (
     rows.push({
       codigoReceita: Number(code),
       nomeNorm: normalizeText(nameRaw),
-      snapshotMonth,
     })
   }
   if (rows.length > 0) {
