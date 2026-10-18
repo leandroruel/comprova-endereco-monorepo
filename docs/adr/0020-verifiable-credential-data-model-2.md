@@ -318,16 +318,17 @@ A VC 2.0 usa `validFrom`/`validUntil` (não existe mais `issuanceDate`):
 > validation), e não o início da validação. No fluxo rápido, em que
 > `completed_at` é NULL, o fallback persistido é `created_at`.
 
-`completed_at` pode ser `NULL` (fast path) e **não** é preenchido nem usado como
-fallback de `validFrom`: quando ausente, a propriedade simplesmente não existe.
+`completed_at` pode ser `NULL` (fast path) e **não** é preenchido (o domínio não
+foi alterado para preenchê-lo).
 
-> **Atualizado pelo ADR-0024 §5:** ver a nota acima — quando `completed_at` é
-> NULL, ele **é** usado como fallback de `validFrom` (por ser o limite inferior
-> persistido da conclusão). `completed_at` continua não sendo preenchido.
-> Nenhum timestamp é fabricado. A elegibilidade continua sendo só
-> `status = 'completed'`; o domínio não foi alterado para preencher
-> `completed_at`. A tensão entre retenção (30d) e material (180–365d) continua
-> decisão de produto, fora do escopo.
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §5:** a única parte da frase acima que continua valendo é "não é preenchido".
+> Pela regra nova, quando `completed_at` é NULL o fallback de `validFrom` é
+> `created_at` (o limite inferior persistido da conclusão — ver a nota acima), e
+> `comprova:completedAt` continua simplesmente ausente. Nenhum timestamp é
+> fabricado. A elegibilidade continua sendo só `status = 'completed'`. A tensão
+> entre retenção (30d) e material (180–365d) continua decisão de produto, fora do
+> escopo.
 
 ### 9. Verifier independente
 
