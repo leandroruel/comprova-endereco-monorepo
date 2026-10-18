@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 
-const deriveKey = (pepper: string): Buffer =>
-  createHash('sha256').update(`webhook-secret:${pepper}`).digest()
+const deriveKey = (pepper: string): Buffer => createHash('sha256').update(`webhook-secret:${pepper}`).digest()
 
 export const encryptSecret = (pepper: string, plaintext: string): Buffer => {
   const iv = randomBytes(12)

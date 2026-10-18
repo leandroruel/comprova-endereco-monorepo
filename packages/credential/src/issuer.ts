@@ -16,3 +16,11 @@ export const localIssuer = (tenantId: string, keyId: string): IssuerIdentity => 
   id: issuerIdOf(tenantId),
   keyId,
 })
+
+/**
+ * Referência de chave publicada no `proof.verificationMethod` (Data Integrity).
+ * É um URI no mesmo espaço de nomes do issuer, com a chave como fragmento;
+ * trocar por `did:web:…#<keyId>` numa futura implementação DID não muda o
+ * restante da credencial.
+ */
+export const verificationMethodOf = (issuer: IssuerIdentity): string => `${issuer.id}#${issuer.keyId}`

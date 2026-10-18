@@ -3,9 +3,10 @@ import { eq, withTenant } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import {
   buildCredential,
+  issuerIdOf,
   type AssertionSource,
-  type Credential,
   type IssuerIdentity,
+  type SecuredVerifiableCredential,
   type Signer,
 } from '@comprova/credential'
 
@@ -20,7 +21,12 @@ import {
  */
 
 export type CredentialIssuanceFailure =
-  'VALIDATION_NOT_FOUND' | 'VALIDATION_NOT_FINAL' | 'CLAIM_MISSING' | 'SUBJECT_MISSING' | 'EVIDENCE_MISSING'
+  | 'VALIDATION_NOT_FOUND'
+  | 'VALIDATION_NOT_FINAL'
+  | 'CLAIM_MISSING'
+  | 'SUBJECT_MISSING'
+  | 'EVIDENCE_MISSING'
+  | 'ISSUER_MISMATCH'
 
 export class CredentialIssuanceError extends Error {
   readonly failure: CredentialIssuanceFailure
@@ -96,6 +102,7 @@ export const loadAssertionSource = async (
         claimId: t.claim.claimId,
         type: t.claim.type,
         subjectType: t.claim.subjectType,
+        targetType: t.claim.targetType,
         addressId: t.claim.addressId,
       })
       .from(t.claim)
@@ -168,6 +175,7 @@ export const loadAssertionSource = async (
         id: claim.claimId,
         type: claim.type,
         subjectType: claim.subjectType,
+        targetType: claim.targetType,
         addressId: claim.addressId,
       },
       addressBuildingKey:
@@ -187,7 +195,16 @@ export const issueCredential = async (
   tenantId: string,
   validationId: string,
   deps: IssueCredentialDeps,
-): Promise<Credential> => {
+): Promise<SecuredVerifiableCredential> => {
+  // O issuer é derivado do MESMO tenant que escopa a leitura (RLS): um caller
+  // não pode atribuir a assertion de um tenant ao issuer de outro.
+  if (deps.issuer.id !== issuerIdOf(tenantId)) {
+    throw new CredentialIssuanceError(
+      'ISSUER_MISMATCH',
+      `issuer ${deps.issuer.id} does not belong to tenant ${tenantId}`,
+    )
+  }
+
   const source = await loadAssertionSource(db, tenantId, validationId)
   return buildCredential(source, deps)
 }

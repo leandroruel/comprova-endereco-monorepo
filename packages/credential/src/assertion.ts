@@ -5,16 +5,22 @@ import { z } from 'zod'
  *
  * Este NÃO é um modelo de domínio novo nem uma fonte de verdade: é um snapshot
  * derivado do grafo persistido `validation → claim → claim_evidence → signal`.
- * A fonte de verdade continua sendo o banco; aqui só se congela o conteúdo que
- * será canonicalizado e assinado.
+ * A fonte de verdade continua sendo o banco; aqui só se congela o conteúdo
+ * derivado (o material efetivamente assinado é o documento W3C mapeado a partir
+ * dele em `vc.ts`, não este objeto).
  *
  * Todas as propriedades do payload são obrigatórias (campos ausentes são
  * explicitamente `null`), para que a forma do objeto canonicalizado seja fixa e
  * determinística.
+ *
+ * Papel na arquitetura (ADR-0020): esta é a representação INTERNA da Comprova.
+ * Ela NÃO é o documento W3C — a conversão para `VerifiableCredential` (VC Data
+ * Model 2.0) é um mapping explícito em `vc.ts`. O domínio
+ * (`validation → claim → claim_evidence → evidence`) continua sendo a única
+ * fonte de verdade, e não é remodelado para acomodar a VC.
  */
 
 const HEX_256 = /^[0-9a-f]{64}$/
-const BASE64URL = /^[A-Za-z0-9_-]+$/
 
 export const HexSha256Schema = z.string().regex(HEX_256)
 
@@ -31,6 +37,9 @@ export const CredentialObservationSchema = z.object({
   evidence_sha256: HexSha256Schema.nullable(),
   detail: z.unknown(),
 })
+
+/** `claim.target_type` do domínio (enum `claim_target_type` da migration 0022). */
+export const ClaimTargetTypeSchema = z.enum(['address'])
 
 export const CredentialExplanationSchema = z.object({
   code: z.string(),
@@ -54,7 +63,7 @@ export const AssertionPayloadSchema = z.object({
     type: z.enum(['business_registered_address', 'address_exists']),
     subject_type: z.enum(['organization', 'person']),
     target: z.object({
-      type: z.literal('address'),
+      type: ClaimTargetTypeSchema,
       id: z.uuid().nullable(),
       building_key: z.string().nullable(),
     }),
@@ -90,23 +99,8 @@ export const AssertionPayloadSchema = z.object({
   }),
 })
 
-export const CredentialProofSchema = z.object({
-  type: z.literal('Ed25519Signature'),
-  /** Referência à chave do issuer; a chave pública é fornecida ao verifier. */
-  key_id: z.string().min(1),
-  /** Assinatura Ed25519 (base64url) sobre `canonicalAssertionBytes(payload)`. */
-  signature: z.string().regex(BASE64URL),
-})
-
-export const CredentialSchema = z.object({
-  payload: AssertionPayloadSchema,
-  proof: CredentialProofSchema,
-})
-
 export type CredentialObservation = z.infer<typeof CredentialObservationSchema>
 export type AssertionPayload = z.infer<typeof AssertionPayloadSchema>
-export type CredentialProof = z.infer<typeof CredentialProofSchema>
-export type Credential = z.infer<typeof CredentialSchema>
 
 /** Observação carregada de `claim_evidence`, no formato "plain" de `AssertionSource`. */
 export interface AssertionObservation {
@@ -153,6 +147,8 @@ export interface AssertionSource {
     readonly id: string
     readonly type: AssertionPayload['claim']['type']
     readonly subjectType: AssertionPayload['claim']['subject_type']
+    /** `claim.target_type` (coluna NOT NULL do domínio). */
+    readonly targetType: AssertionPayload['claim']['target']['type']
     readonly addressId: string | null
   }
   /** `building_key` do endereço-alvo já formatado (`b64:<base64url>`), ou null. */

@@ -12,7 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Nenhum step faz git push: não persistir o GITHUB_TOKEN no .git/config.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -29,7 +32,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # O gitleaks calcula o range do PR (HEAD^..HEAD). Com o clone raso
+      # padrão (fetch-depth: 1) o commit pai não existe e o scan aborta sem
+      # escanear nada.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # O `curl | sh` do Trivy roda no mesmo workspace; sem persistência, ele
+          # não encontra o GITHUB_TOKEN no repositório.
+          persist-credentials: false
       - name: Check for secrets
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -37,4 +48,4 @@ jobs:
       - name: Audit dependencies
         run: |
           curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          trivy fs --scanners vuln,secret --exit-code 1 .
+          trivy fs --scanners vuln,secret --exit-code 1 --ignorefile .trivyignore.yaml .
