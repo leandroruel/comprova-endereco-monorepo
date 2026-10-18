@@ -1,5 +1,14 @@
-const API_BASE = 'http://localhost:3000'
-const API_KEY = 'cvk_-oHrqOQw3f50608XbFVB74C-OwyVSDTM'
+// Origem da API e chave: a chave vem do `.env` (o `envDir` do Vite aponta para
+// a raiz do repo — ver README e `.env.example`). Sem ela a API responde 401.
+// Atenção: isto é uma facilidade de desenvolvimento — num dashboard público a
+// chave não pode viver no bundle (precisaria de sessão/BFF).
+export const API_BASE = 'http://localhost:3000'
+
+const apiKey = import.meta.env.VITE_API_KEY ?? ''
+if (apiKey === '' && import.meta.env.DEV && import.meta.env.MODE !== 'test') {
+  console.error('[api] VITE_API_KEY não definido — copie .env.example para .env')
+}
+export const API_KEY = apiKey
 
 export interface ValidationSignal {
   checker: string
