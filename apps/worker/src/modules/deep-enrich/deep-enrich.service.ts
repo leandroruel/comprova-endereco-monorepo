@@ -48,7 +48,14 @@ const claimTypeOf = (docType: string): ClaimType =>
 const subjectTypeOf = (docType: string): SubjectType => (docType === 'CNPJ' ? 'organization' : 'person')
 
 export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): Promise<DeepEnrichResult> => {
-  const now = deps.clock.now()
+  /**
+   * Instante de AVALIAÇÃO: referência única dos cálculos (freshness/score/
+   * decisão, em T1 e no resultado final) e do TTL dos sinais em cache. Os
+   * verificadores podem levar tempo, então este instante NÃO é o de conclusão —
+   * `completed_at` é lido separadamente onde o resultado terminal fica pronto
+   * (ver `completedAt` em `updateValidationOutcome`).
+   */
+  const evaluatedAt = deps.clock.now()
   const state = await loadValidationState(deps.db, input.tenantId, input.validationId)
   const signals = state.priorSignals.map(signalFromRow)
 
@@ -70,12 +77,12 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
   })
 
   const signalsAfterT1: readonly Signal[] = [...signals, ...newSignals]
-  const scoreAfterT1 = weightedScore(signalsAfterT1, deps.policy, now)
+  const scoreAfterT1 = weightedScore(signalsAfterT1, deps.policy, evaluatedAt)
   const decisionAfterT1 = decide({
     signals: signalsAfterT1,
     score: scoreAfterT1,
     policy: deps.policy,
-    now,
+    now: evaluatedAt,
   })
   const maxTier = input.maxTier ?? 2
   const t2Signals =
@@ -112,7 +119,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       claim: { id: claimId ?? '', type: claimType },
       evidence: [...signalsAfterT1, ...t2Signals].map(observationFromSignal),
       policy: deps.policy,
-      now,
+      now: evaluatedAt,
     })
     const stillPartial = isAmbiguous(decision)
 
@@ -120,7 +127,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       validationId: input.validationId,
       addressId: state.validation.addressId,
       signals: freshSignals,
-      now,
+      now: evaluatedAt,
     })
 
     await linkClaimEvidence(tx, {
@@ -136,6 +143,39 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       decision,
       evidenceRows.map((row) => ({ id: row.id, stance: row.stance })),
     )
+    const evidenceSetHash = evidenceSetHashOfObservations(evidenceRows)
+
+    /**
+     * Instante de CONCLUSÃO (`completed_at`) — ADR-0024 §5. É o instante em que a
+     * validação se tornou terminal PELA PRIMEIRA VEZ, não o horário da última
+     * execução do worker:
+     *
+     * - `partial` não conclui: `updateValidationOutcome` mantém `completed_at`
+     *   NULL (e uma conclusão anterior fica retraída junto com o status);
+     * - replay que REPRODUZ o resultado terminal persistido (mesmo veredito sobre
+     *   o mesmo conjunto de evidências) PRESERVA o `completed_at` original:
+     *   reexecutar o worker não é reconcluir, e mover o instante mudaria o
+     *   `validFrom` de credenciais emitidas depois, sem conclusão nova;
+     * - resultado terminal NOVO (veredito ou evidências diferentes — a primeira
+     *   conclusão de uma validação `queued`/`partial`, ou um registro legado
+     *   concluído sem timestamp) grava o instante real, lido aqui, depois de
+     *   todos os verificadores (T1/T2), dos cálculos e do resultado final.
+     *
+     * A comparação usa veredito + hash do conjunto de evidências (valores exatos);
+     * `score`/`confidence` ficam de fora porque são colunas `real` (float4) e a
+     * comparação de float não é confiável — são funções determinísticas do
+     * conjunto de evidências e da policy, que o hash já amarra.
+     */
+    const previous = state.validation
+    const completedAt =
+      // Replay do mesmo resultado terminal: preserva o `completed_at` original.
+      previous.status === 'completed' &&
+      previous.completedAt !== null &&
+      !stillPartial &&
+      decision.verdict === previous.verdict &&
+      evidenceSetHash === previous.evidenceSetHash
+        ? previous.completedAt
+        : deps.clock.now()
 
     await updateValidationOutcome(tx, {
       validationId: input.validationId,
@@ -143,14 +183,14 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       verdict: decision.verdict,
       score,
       confidence: decision.confidence,
-      evidenceSetHash: evidenceSetHashOfObservations(evidenceRows),
+      evidenceSetHash,
       explanation: {
         summary: decision.explanation,
         code: explanationDetail.code,
         supporting_evidence: explanationDetail.supportingEvidenceIds,
         contradicting_evidence: explanationDetail.contradictingEvidenceIds,
       },
-      now,
+      completedAt,
     })
 
     await emitOutcomeEvents(tx, {

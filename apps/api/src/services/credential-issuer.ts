@@ -3,9 +3,8 @@ import { eq, withTenant } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import {
   buildCredential,
-  issuerIdOf,
+  localIssuer,
   type AssertionSource,
-  type IssuerIdentity,
   type SecuredVerifiableCredential,
   type Signer,
 } from '@comprova/credential'
@@ -17,16 +16,23 @@ import {
  * desse grafo é consultada. A camada `@comprova/credential` é pura.
  *
  * Elegibilidade (FASE 9/10): só emite para `status = 'completed'` com resultado
- * completo e bindings presentes. NÃO emite silenciosamente para `partial`.
+ * completo, bindings presentes, o instante de conclusão registrado
+ * (`completed_at`) e janela de validade não vazia (`completed_at < expires_at`).
+ * NÃO emite silenciosamente para `partial`, NÃO presume `created_at` como
+ * conclusão quando `completed_at` falta, e NÃO estende `expires_at` para caber
+ * na credencial: um registro sem timestamp de conclusão falha com
+ * `COMPLETION_TIME_MISSING` e um que concluiu fora do prazo, com
+ * `VALIDITY_WINDOW_INVALID`.
  */
 
 export type CredentialIssuanceFailure =
   | 'VALIDATION_NOT_FOUND'
   | 'VALIDATION_NOT_FINAL'
+  | 'COMPLETION_TIME_MISSING'
+  | 'VALIDITY_WINDOW_INVALID'
   | 'CLAIM_MISSING'
   | 'SUBJECT_MISSING'
   | 'EVIDENCE_MISSING'
-  | 'ISSUER_MISMATCH'
 
 export class CredentialIssuanceError extends Error {
   readonly failure: CredentialIssuanceFailure
@@ -94,6 +100,26 @@ export const loadAssertionSource = async (
       throw new CredentialIssuanceError(
         'VALIDATION_NOT_FINAL',
         `validation ${validationId} is not final (status=${v.status}); refusing to emit a partial credential`,
+      )
+    }
+    // `completed_at` é o `validFrom` do documento (ADR-0024 §5). Faltando ele
+    // (registro anterior ao preenchimento do campo), a data de conclusão é
+    // DESCONHECIDA: usar `created_at` afirmaria válido o que ainda não existia.
+    if (v.completedAt === null) {
+      throw new CredentialIssuanceError(
+        'COMPLETION_TIME_MISSING',
+        `validation ${validationId} has no completion timestamp (completed_at); refusing to guess when the result started to be valid`,
+      )
+    }
+    // Janela não vazia: `validFrom = completed_at` e `validUntil = expires_at`
+    // (ADR-0024 §5). Quando a análise concluiu no ou depois do horizonte
+    // persistido, a credencial nasceria vazia/expirada — e `expires_at` é o
+    // horizonte de retenção, que a emissão não estende (a política de 30 dias é
+    // decisão de produto, não desta fronteira).
+    if (v.completedAt.getTime() >= v.expiresAt.getTime()) {
+      throw new CredentialIssuanceError(
+        'VALIDITY_WINDOW_INVALID',
+        `validation ${validationId} concluded at ${v.completedAt.toISOString()} at or after its validity limit (${v.expiresAt.toISOString()}); refusing to emit an expired credential`,
       )
     }
 
@@ -185,8 +211,20 @@ export const loadAssertionSource = async (
   })
 
 export interface IssueCredentialDeps {
-  readonly issuer: IssuerIdentity
+  /**
+   * Origem HTTPS controlada pelo projeto (`CREDENTIAL_ISSUER_ORIGIN`). O `id` do
+   * issuer é derivado dela + tenant, então o caller não escolhe o issuer: não
+   * existe caminho para atribuir a assertion de um tenant ao issuer de outro.
+   */
+  readonly issuerOrigin: string
+  /** Chave usada para assinar (fragmento do `proof.verificationMethod`). */
+  readonly keyId: string
   readonly signer: Signer
+  /**
+   * Relógio da emissão (`proof.created` = momento real da prova). Injetável para
+   * testes; default: o relógio do sistema.
+   */
+  readonly now?: () => Date
 }
 
 /** `validation_id → carrega o grafo → payload → canonicalização → assinatura → credencial`. */
@@ -196,15 +234,10 @@ export const issueCredential = async (
   validationId: string,
   deps: IssueCredentialDeps,
 ): Promise<SecuredVerifiableCredential> => {
-  // O issuer é derivado do MESMO tenant que escopa a leitura (RLS): um caller
-  // não pode atribuir a assertion de um tenant ao issuer de outro.
-  if (deps.issuer.id !== issuerIdOf(tenantId)) {
-    throw new CredentialIssuanceError(
-      'ISSUER_MISMATCH',
-      `issuer ${deps.issuer.id} does not belong to tenant ${tenantId}`,
-    )
-  }
+  // O issuer é derivado do MESMO tenant que escopa a leitura (RLS): uma
+  // validation de outro tenant nem é encontrada (VALIDATION_NOT_FOUND).
+  const issuer = localIssuer(deps.issuerOrigin, tenantId, deps.keyId)
 
   const source = await loadAssertionSource(db, tenantId, validationId)
-  return buildCredential(source, deps)
+  return buildCredential(source, { issuer, signer: deps.signer, now: deps.now })
 }

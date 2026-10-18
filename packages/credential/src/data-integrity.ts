@@ -20,8 +20,9 @@ import type { Signer } from './signer.js'
  *  6. `proofValue` = multibase base58btc (`z…`) de `proofBytes`.
  *
  * O `created` é opcional na Data Integrity, mas aqui é sempre emitido; ele é
- * responsabilidade do emissor (a camada de credencial o deriva da assertion,
- * para manter `mesma assertion → mesmos bytes`).
+ * responsabilidade do emissor e precisa ser o momento REAL da criação da prova
+ * (§2.1.1) — a camada de credencial o recebe de um relógio injetável, e nunca o
+ * deriva de um timestamp histórico da assertion (ADR-0024 §4).
  */
 export const DATA_INTEGRITY_PROOF_TYPE = 'DataIntegrityProof'
 export const EDDSA_JCS_2022 = 'eddsa-jcs-2022'

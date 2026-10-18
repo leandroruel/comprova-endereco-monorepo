@@ -14,7 +14,7 @@ import { DataIntegrityProofSchema } from './data-integrity.js'
  *                   → DataIntegrityProof (eddsa-jcs-2022)
  *
  * Terminologia W3C usada, sem invenção:
- *  - `@context`, `type`, `issuer`, `validFrom`, `validUntil` (§4.2–4.9);
+ *  - `@context`, `type`, `issuer`, `validFrom` (§4.6/§4.10), `validUntil`;
  *  - `credentialSubject` (§4.8);
  *  - `evidence` (§5.6) — cada evidência tem `id` (opcional) e `type`
  *    (obrigatório);
@@ -25,6 +25,8 @@ import { DataIntegrityProofSchema } from './data-integrity.js'
  * e o formato usado no vetor B.3). O domínio continua com UUIDs; a conversão
  * para URL/IRI acontece só neste mapping e é desfeita em `observationOfEvidence`
  * para que o `evidence_set_hash` continue sendo o hash dos UUIDs do domínio.
+ * `issuer`, `credentialSubject.id` e `proof.verificationMethod` são URLs HTTPS
+ * sob a origem configurada do projeto (`issuer.ts`), nunca esquemas inventados.
  *
  * Tudo que é específico da Comprova vive no namespace
  * `https://comprova.dev/ns/credentials/v2#`, declarado no `@context` inline e
@@ -101,7 +103,11 @@ const ComprovaResultSchema = z.object({
   'comprova:verdict': z.string().min(1),
   'comprova:score': z.number(),
   'comprova:confidence': z.number(),
-  /** `validation.completed_at`; omitido quando nulo (não se inventa timestamp). */
+  /**
+   * `validation.completed_at` (o mesmo instante de `validFrom`). Opcional no
+   * schema por tolerância de leitura: o emissor sempre o escreve, mas ele é
+   * proveniência descritiva — a verificação temporal usa `validFrom`.
+   */
   'comprova:completedAt': z.iso.datetime().optional(),
   'comprova:explanation': ComprovaExplanationSchema.optional(),
 })
@@ -183,6 +189,24 @@ const explanationOf = (
 })
 
 /**
+ * `validFrom` (VC Data Model 2.0 §4.10) é o início da validade da informação
+ * certificada — não a data de emissão da prova.
+ *
+ * A informação certificada é o VEREDITO da validation: ele passa a existir
+ * quando a análise é concluída, e é isso que `completed_at` registra (o fluxo
+ * rápido preenche no fim da requisição; o deep path, ao concluir o worker). Por
+ * isso `validFrom` é `completed_at` — nunca `created_at`, que é o instante em
+ * que a REQUISIÇÃO começou, antes da Receita, do enriquecimento e dos checkers,
+ * e que declararia válido o que ainda não existia. Sem `completed_at` o início
+ * da validade é desconhecido e `buildAssertion` recusa emitir (ADR-0024 §5).
+ *
+ * A emissão (`proof.created`) NÃO entra nesta conta: reemitir a mesma
+ * validation em outro momento não pode deslocar o início da validade daquilo
+ * que a credencial afirma sobre o passado.
+ */
+const validFromOf = (timestamps: AssertionPayload['timestamps']): string => timestamps.completed_at
+
+/**
  * Mapping interno → W3C (puro, determinístico). Campos ausentes (`null` no
  * modelo interno) são OMITIDOS no documento, e não materializados como `null`:
  * o VC é JSON-LD e um valor `null` não tem significado. A forma continua
@@ -192,7 +216,7 @@ export const toVerifiableCredential = (assertion: AssertionPayload): VerifiableC
   '@context': context(),
   type: [VERIFIABLE_CREDENTIAL_TYPE, COMPROVA_CREDENTIAL_TYPE],
   issuer: assertion.issuer.id,
-  validFrom: assertion.timestamps.created_at,
+  validFrom: validFromOf(assertion.timestamps),
   validUntil: assertion.timestamps.expires_at,
   credentialSubject: {
     id: assertion.subject.id,
@@ -213,9 +237,8 @@ export const toVerifiableCredential = (assertion: AssertionPayload): VerifiableC
     'comprova:verdict': assertion.result.verdict,
     'comprova:score': assertion.result.score,
     'comprova:confidence': assertion.result.confidence,
-    ...(assertion.timestamps.completed_at === null
-      ? {}
-      : { 'comprova:completedAt': assertion.timestamps.completed_at }),
+    // Sempre presente: a emissão exige `completed_at` (ver `buildAssertion`).
+    'comprova:completedAt': assertion.timestamps.completed_at,
     ...(assertion.result.explanation === null
       ? {}
       : { 'comprova:explanation': explanationOf(assertion.result.explanation) }),

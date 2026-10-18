@@ -4,6 +4,7 @@ import * as t from '@comprova/db'
 import { evidenceSetHashOfObservations, policyHashOf, SCORER_VERSION } from '@comprova/core'
 import {
   generateEd25519KeyPair,
+  issuerIdOf,
   localIssuer,
   makeEd25519Signer,
   verificationMethodOf,
@@ -25,9 +26,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
+import { buildApp, buildFastPathDeps } from './app.js'
 import type { AppConfig } from './config.js'
 import { CredentialIssuanceError, issueCredential } from './services/credential-issuer.js'
+import { runFastPath } from './services/fastpath.js'
 
 // FASE 12 — ponta a ponta: validation persistida → credential builder → credencial
 // assinada → JSON transportável → verifier independente → VALID. Também cobre a
@@ -57,6 +59,7 @@ const config: AppConfig = {
   DATABASE_URL: db.appUrl,
   REDIS_URL: testRedis.url,
   API_KEY_PEPPER: PEPPER,
+  CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
   PORT: 3000,
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
@@ -131,11 +134,20 @@ const observationsOf = (claimId: string) =>
     .where(eq(t.claimEvidence.claimId, claimId))
 
 const keyPair = generateEd25519KeyPair()
-const issuer = localIssuer(tenantId, 'key-1')
+const ISSUER_ORIGIN = 'https://issuer.test'
+const KEY_ID = 'key-1'
+const issuer = localIssuer(ISSUER_ORIGIN, tenantId, KEY_ID)
 const signer = makeEd25519Signer(keyPair.privateKey)
+/** Método confiável declarado pelo consumidor (identidade + chave). */
+const trusted = { id: verificationMethodOf(issuer), publicKey: keyPair.publicKey }
 
-const issue = (validationId: string): Promise<SecuredVerifiableCredential> =>
-  issueCredential(appPool.db, tenantId, validationId, { issuer, signer })
+const issue = (validationId: string, now?: () => Date): Promise<SecuredVerifiableCredential> =>
+  issueCredential(appPool.db, tenantId, validationId, {
+    issuerOrigin: ISSUER_ORIGIN,
+    keyId: KEY_ID,
+    signer,
+    now,
+  })
 
 const transport = (credential: SecuredVerifiableCredential): SecuredVerifiableCredential =>
   JSON.parse(JSON.stringify(credential)) as SecuredVerifiableCredential
@@ -158,9 +170,14 @@ describe('emissão e verificação independente', () => {
     expect(observations.length).toBeGreaterThan(0)
     expect(credential['@context'][0]).toBe('https://www.w3.org/ns/credentials/v2')
     expect(credential.type).toEqual(['VerifiableCredential', 'comprova:AddressCredential'])
-    expect(credential.issuer).toBe(`comprova:issuer:${tenantId}`)
+    expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
+    expect(credential.issuer).toBe(issuer.id)
+    expect(credential.issuer).toMatch(/^https:\/\/issuer\.test\/issuers\/[A-Za-z0-9_-]{43}$/)
+    expect(credential.issuer).not.toContain(tenantId)
     expect(credential.credentialSubject['comprova:docType']).toBe('CNPJ')
-    expect(credential.credentialSubject.id).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(credential.credentialSubject.id).toMatch(
+      /^https:\/\/issuer\.test\/issuers\/[A-Za-z0-9_-]{43}\/subjects\/[0-9a-f]{64}$/,
+    )
     expect(credential.credentialSubject['comprova:claim'].id).toBe(`urn:uuid:${claimId}`)
     expect(credential.credentialSubject['comprova:claim']['comprova:targetType']).toBe('address')
     expect(credential['comprova:evidenceSetHash']).toBe(row?.evidenceSetHash)
@@ -172,11 +189,12 @@ describe('emissão e verificação independente', () => {
     })
     expect(credential['comprova:algorithm']).toEqual({ 'comprova:scorerVersion': SCORER_VERSION })
     expect(credential['comprova:result']['comprova:verdict']).toBe(row?.verdict)
-    if (row?.completedAt === null) {
-      expect(credential['comprova:result']).not.toHaveProperty('comprova:completedAt')
-    } else {
-      expect(credential['comprova:result']['comprova:completedAt']).toBe(row!.completedAt!.toISOString())
-    }
+    // O fluxo rápido persiste o instante da CONCLUSÃO da análise; `validFrom` é
+    // esse instante (nunca o início da requisição).
+    expect(row!.completedAt).not.toBeNull()
+    expect(row!.completedAt!.getTime()).toBeGreaterThanOrEqual(row!.createdAt!.getTime())
+    expect(credential['comprova:result']['comprova:completedAt']).toBe(row!.completedAt!.toISOString())
+    expect(credential.validFrom).toBe(row!.completedAt!.toISOString())
     expect(credential['comprova:authorization']).toEqual({
       'comprova:scopes': ['validate:read', 'validate:write'],
     })
@@ -189,19 +207,19 @@ describe('emissão e verificação independente', () => {
     )[0]
     expect(JSON.stringify(credential)).not.toContain(subjectRow!.docHmac.toString('hex'))
 
-    // O verifier só recebe a credencial (JSON) e a chave pública.
+    // O verifier só recebe a credencial (JSON), a chave pública confiável e o id
+    // do método ao qual essa chave pertence.
     expect(
       verifyCredential(credential, {
-        publicKey: keyPair.publicKey,
+        trusted,
         expectedIssuerId: issuer.id,
-        expectedVerificationMethod: verificationMethodOf(issuer),
       }),
     ).toEqual({ valid: true })
   })
 
   const tamperCases: ReadonlyArray<readonly [string, (credential: SecuredVerifiableCredential) => void]> = [
-    ['issuer', (c) => (c.issuer = `comprova:issuer:${randomUUID()}`)],
-    ['subject', (c) => (c.credentialSubject.id = `sha256:${'f'.repeat(64)}`)],
+    ['issuer', (c) => (c.issuer = `${ISSUER_ORIGIN}/issuers/${randomUUID()}`)],
+    ['subject', (c) => (c.credentialSubject.id = `${issuer.id}/subjects/${'f'.repeat(64)}`)],
     ['claim', (c) => (c.credentialSubject['comprova:claim']['comprova:claimType'] = 'address_exists')],
     [
       'target_type',
@@ -230,7 +248,69 @@ describe('emissão e verificação independente', () => {
   it.each(tamperCases)('rejeita adulteração de %s', async (_name, mutate) => {
     const credential = transport(await issue(await newValidation()))
     mutate(credential)
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey }).valid).toBe(false)
+    expect(verifyCredential(credential, { trusted }).valid).toBe(false)
+  })
+
+  it('marca a prova com o instante real da emissão, não com a janela da validation', async () => {
+    const validationId = await newValidation()
+    const row = await validationRow(validationId)
+    const issuedAt = new Date('2026-03-01T00:00:00.000Z')
+
+    const credential = transport(await issue(validationId, () => issuedAt))
+
+    expect(credential.proof.created).toBe(issuedAt.toISOString())
+    expect(credential.proof.created).not.toBe(credential.validFrom)
+    expect(credential.proof.created).not.toBe(row!.createdAt!.toISOString())
+    expect(credential.proof.created).not.toBe(credential['comprova:result']['comprova:completedAt'])
+    // Adulterar o instante de assinatura invalida o proof: ele está assinado.
+    const tampered = transport(credential)
+    tampered.proof.created = new Date(0).toISOString()
+    expect(verifyCredential(tampered, { trusted }).valid).toBe(false)
+  })
+
+  it('não antecipa `validFrom`: registra o instante da CONCLUSÃO da análise, não o início da requisição', async () => {
+    // Relógio que avança a cada leitura: a primeira é o início de `runFastPath`
+    // (`created_at`); as seguintes vêm depois da Receita, do enriquecimento do
+    // endereço e dos checkers (`completed_at`). Sem relógio próprio, uma análise
+    // demorada receberia `validFrom` anterior ao veredito.
+    const startedAt = new Date('2026-05-01T00:00:00.000Z')
+    const finishedAt = new Date('2026-05-01T00:03:30.000Z')
+    let reads = 0
+    const slowClock = { now: (): Date => (reads++ === 0 ? startedAt : finishedAt) }
+    const fastPath = { ...buildFastPathDeps(appPool.db, config), clock: slowClock }
+
+    const result = await runFastPath(
+      fastPath,
+      { tenantId, apiKeyId: null, issuerScopes: null },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'fast',
+        idempotencyKey: null,
+      },
+    )
+
+    const row = await validationRow(result.validationId)
+    expect(row!.createdAt!.toISOString()).toBe(startedAt.toISOString())
+    expect(row!.completedAt!.toISOString()).toBe(finishedAt.toISOString())
+    expect(row!.completedAt!.getTime()).toBeGreaterThan(row!.createdAt!.getTime())
+
+    const credential = transport(await issue(result.validationId))
+    expect(credential.validFrom).toBe(finishedAt.toISOString())
+    expect(credential['comprova:result']['comprova:completedAt']).toBe(finishedAt.toISOString())
+    // `validFrom` NÃO antecede a conclusão real da análise.
+    expect(Date.parse(credential.validFrom)).toBeGreaterThan(row!.createdAt!.getTime())
+    expect(verifyCredential(credential, { trusted, expectedIssuerId: issuer.id })).toEqual({ valid: true })
+  })
+
+  it('deriva o issuer do tenant escopado e da origem configurada (não existe issuer avulso)', async () => {
+    const credential = await issue(await newValidation())
+
+    expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
+    expect(credential.issuer).not.toBe(issuerIdOf(ISSUER_ORIGIN, randomUUID()))
+    expect(credential.proof.verificationMethod).toBe(`${credential.issuer}#${KEY_ID}`)
   })
 
   it('permanece verificável após a remoção do material físico (retenção)', async () => {
@@ -276,7 +356,7 @@ describe('emissão e verificação independente', () => {
 
     const credential = transport(await issue(validationId))
     expect(credential.evidence.some((o) => o['comprova:evidenceSha256'] === sha.toString('hex'))).toBe(true)
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey }).valid).toBe(true)
+    expect(verifyCredential(credential, { trusted }).valid).toBe(true)
 
     // Retenção: desvincula e apaga o material físico (evidence_sha256 é preservado).
     await adminPool.db
@@ -286,7 +366,7 @@ describe('emissão e verificação independente', () => {
     await adminPool.db.delete(t.evidence).where(eq(t.evidence.evidenceId, evidenceId))
 
     // A credencial já emitida continua válida: depende do binding, não do S3.
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey }).valid).toBe(true)
+    expect(verifyCredential(credential, { trusted }).valid).toBe(true)
   })
 })
 
@@ -320,14 +400,17 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     await expect(issue(otherValidationId)).rejects.toMatchObject({ failure: 'VALIDATION_NOT_FOUND' })
   })
 
-  it('recusa issuer que não pertence ao tenant da validation', async () => {
+  it('não existe caminho para atribuir a assertion a outro issuer', async () => {
+    // O issuer deixou de ser parâmetro: ele é derivado da origem configurada +
+    // tenant escopado pela leitura (RLS). O tenant é o único eixo de atribuição.
     const validationId = await newValidation()
-    await expect(
-      issueCredential(appPool.db, tenantId, validationId, {
-        issuer: localIssuer(randomUUID(), 'key-1'),
-        signer,
-      }),
-    ).rejects.toMatchObject({ failure: 'ISSUER_MISMATCH' })
+    const credential = await issueCredential(appPool.db, tenantId, validationId, {
+      issuerOrigin: ISSUER_ORIGIN,
+      keyId: KEY_ID,
+      signer,
+    })
+
+    expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
   })
 
   it('recusa validation não final (partial) — terminalidade exige status=completed', async () => {
@@ -350,6 +433,59 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     await expect(issue(validationId)).rejects.toMatchObject({ failure: 'VALIDATION_NOT_FINAL' })
   })
 
+  it('recusa validação concluída sem instante de conclusão (registro antigo) — não presume `created_at`', async () => {
+    // Política explícita para dados anteriores: sem `completed_at` a conclusão
+    // real é desconhecida, e `created_at` (início da requisição) não é aceito
+    // como substituto.
+    const validationId = await newValidation()
+    await adminPool.db
+      .update(t.validation)
+      .set({ completedAt: null })
+      .where(eq(t.validation.validationId, validationId))
+
+    await expect(issue(validationId)).rejects.toMatchObject({ failure: 'COMPLETION_TIME_MISSING' })
+  })
+
+  it('protege a janela de validade: `completed_at < expires_at` emite; igual ou posterior recusa (sem estender o prazo)', async () => {
+    const setCompletion = (validationId: string, completedAt: Date) =>
+      adminPool.db
+        .update(t.validation)
+        .set({ completedAt })
+        .where(eq(t.validation.validationId, validationId))
+
+    // Conclusão 1 ms antes do horizonte: janela mínima, mas válida e verificável.
+    const atEdge = await newValidation()
+    const edgeRow = await validationRow(atEdge)
+    const lastInstant = new Date(edgeRow!.expiresAt!.getTime() - 1)
+    await setCompletion(atEdge, lastInstant)
+
+    const credential = transport(await issue(atEdge))
+    expect(credential.validFrom).toBe(lastInstant.toISOString())
+    expect(credential.validUntil).toBe(edgeRow!.expiresAt!.toISOString())
+    expect(Date.parse(credential.validFrom)).toBeLessThan(Date.parse(credential.validUntil!))
+    expect(verifyCredential(credential, { trusted, expectedIssuerId: issuer.id })).toEqual({ valid: true })
+
+    // `completed_at == expires_at` (janela vazia) e `completed_at > expires_at`
+    // (janela invertida): recusa explícita — e `expires_at` (horizonte de
+    // retenção, política de 30 dias) NÃO é recalculado nem estendido.
+    for (const [label, delta] of [
+      ['igual', 0],
+      ['posterior', 1],
+    ] as const) {
+      const validationId = await newValidation()
+      const row = await validationRow(validationId)
+      await setCompletion(validationId, new Date(row!.expiresAt!.getTime() + delta))
+
+      await expect(issue(validationId), label).rejects.toMatchObject({
+        failure: 'VALIDITY_WINDOW_INVALID',
+      })
+
+      const after = await validationRow(validationId)
+      expect(after!.completedAt!.getTime(), label).toBeGreaterThanOrEqual(after!.expiresAt!.getTime())
+      expect(after!.expiresAt!.getTime(), label).toBe(row!.expiresAt!.getTime())
+    }
+  })
+
   it('recusa validation sem claim', async () => {
     const subjectId = await createSubject(adminPool.db, tenantId)
     const validationId = randomUUID()
@@ -367,6 +503,9 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
       scorerVersion: SCORER_VERSION,
       evidenceSetHash: 'a'.repeat(64),
       legalBasis: 'FRAUD_PREVENTION',
+      // Concluída e com instante de conclusão: o que falta aqui é só o claim.
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      completedAt: new Date('2026-01-01T00:00:02.000Z'),
       expiresAt: new Date(Date.now() + 86_400_000),
     })
 

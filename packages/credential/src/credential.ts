@@ -15,11 +15,12 @@ export interface BuildCredentialDeps {
   readonly issuer: IssuerIdentity
   readonly signer: Signer
   /**
-   * `created` do proof (Data Integrity). Quando ausente, é derivado da própria
-   * assertion (`completed_at`, ou `created_at` quando nulo), de modo que
-   * `mesma assertion → mesmos bytes assinados`.
+   * Relógio da emissão. `proof.created` é o momento REAL em que a prova
+   * criptográfica é criada (Data Integrity 1.0 §2.1.1) — nunca um timestamp
+   * histórico da validation (ADR-0024 §4). Injetável para testes
+   * determinísticos; default: `() => new Date()`.
    */
-  readonly proofCreatedAt?: Date
+  readonly now?: () => Date
 }
 
 const byId = (a: { readonly id: string }, b: { readonly id: string }): number =>
@@ -44,12 +45,17 @@ const toCredentialObservation = (o: AssertionObservation): CredentialObservation
 /**
  * Normaliza a assertion de domínio já carregada (FASE 2/9). Puro: não acessa
  * banco. Recusa emitir credencial parcial — resultado incompleto, bindings
- * ausentes ou `evidence_set_hash` incoerente com o conjunto de observações
- * abortam a emissão.
+ * ausentes, `completed_at` ausente (não há como declarar `validFrom` sem
+ * presumir), janela de validade vazia/invertida (`completed_at >= expires_at`) ou
+ * `evidence_set_hash` incoerente com o conjunto de observações abortam a emissão.
  *
  * As observações e os arrays de explicação são ordenados antes de montar o
  * payload, de modo que `mesma assertion → mesmos bytes`, independentemente da
  * ordem devolvida pelo PostgreSQL.
+ *
+ * O `issuerId` (URL do issuer) entra em dois lugares do payload: como `issuer`
+ * do documento e como namespace do `credentialSubject.id` (`subject.ts`). O
+ * `proof.created` NÃO é derivado daqui: ele é o instante real da assinatura.
  */
 export const buildAssertion = (source: AssertionSource, issuerId: string): AssertionPayload => {
   const v = source.validation
@@ -59,6 +65,26 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
   }
   if (v.policyHash === null || v.scorerVersion === null || v.evidenceSetHash === null) {
     throw new Error('validation bindings (policy_hash/scorer_version/evidence_set_hash) are missing')
+  }
+  // `completed_at` é o início da validade da informação certificada (ADR-0024
+  // §5). Quando ele falta (registro anterior ao preenchimento do campo), o
+  // instante real da conclusão é DESCONHECIDO: presumir `created_at` afirmaria
+  // válido o que ainda não existia, então a emissão é recusada explicitamente.
+  const completedAt = v.completedAt
+  if (completedAt === null) {
+    throw new Error(
+      'validation has no completion timestamp (completed_at); refusing to guess when the result started to be valid',
+    )
+  }
+  // Janela não vazia: `validFrom < validUntil` (VC 2.0 §4.10). `expires_at` é o
+  // horizonte persistido (retenção, ADR-0019/0024) e NÃO é estendido na emissão:
+  // uma validação que concluiu no ou depois do horizonte não pode virar
+  // credencial com janela vazia/invertida — a informação certificada já está
+  // fora do prazo.
+  if (completedAt.getTime() >= v.expiresAt.getTime()) {
+    throw new Error(
+      `validation concluded at ${completedAt.toISOString()} at or after its validity limit (${v.expiresAt.toISOString()}); refusing to emit a credential with an empty or inverted window`,
+    )
   }
 
   const observations = [...source.observations].sort(byId).map(toCredentialObservation)
@@ -82,6 +108,7 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
     },
     subject: {
       id: deriveCredentialSubjectId({
+        issuerId,
         tenantId: source.tenantId,
         docType: source.subject.docType,
         docHmac: source.subject.docHmac,
@@ -123,7 +150,7 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
     legal_basis: v.legalBasis,
     timestamps: {
       created_at: v.createdAt.toISOString(),
-      completed_at: v.completedAt === null ? null : v.completedAt.toISOString(),
+      completed_at: completedAt.toISOString(),
       expires_at: v.expiresAt.toISOString(),
     },
   }
@@ -133,6 +160,12 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
  * `AssertionSource → assertion interna → Verifiable Credential (W3C 2.0) →
  * Data Integrity proof (eddsa-jcs-2022)`. Puro (não acessa banco); o `signer` e
  * a identidade do issuer entram por dependência.
+ *
+ * O documento (sem `proof`) é determinístico em função da assertion. O proof
+ * NÃO é: `created` é o instante real da assinatura. Duas emissões da mesma
+ * validation produzem documentos iguais e provas diferentes — reaproveitar o
+ * instante da primeira é uma decisão explícita de quem chama (`now`), não um
+ * efeito de a camada "adivinhar" o tempo a partir da validation (ADR-0024 §4).
  */
 export const buildCredential = async (
   source: AssertionSource,
@@ -143,11 +176,7 @@ export const buildCredential = async (
   const proof = await createDataIntegrityProof(credential, {
     verificationMethod: verificationMethodOf(deps.issuer),
     proofPurpose: ASSERTION_METHOD,
-    created: (
-      deps.proofCreatedAt ??
-      source.validation.completedAt ??
-      source.validation.createdAt
-    ).toISOString(),
+    created: (deps.now ?? (() => new Date()))().toISOString(),
     signer: deps.signer,
   })
 

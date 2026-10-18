@@ -1,3 +1,4 @@
+import { IssuerOriginSchema } from '@comprova/credential'
 import { z } from 'zod'
 
 const EnvSchema = z.object({
@@ -5,6 +6,13 @@ const EnvSchema = z.object({
   DATABASE_ADMIN_URL: z.string().optional(),
   REDIS_URL: z.string().min(1),
   API_KEY_PEPPER: z.string().min(8),
+  /**
+   * Origem HTTPS controlada pelo projeto: base do `issuer` e do
+   * `credentialSubject.id` das credenciais emitidas (ADR-0024). Sem default —
+   * a biblioteca não declara controle de domínio nenhum —, validada e
+   * normalizada por `parseIssuerOrigin`.
+   */
+  CREDENTIAL_ISSUER_ORIGIN: IssuerOriginSchema,
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),

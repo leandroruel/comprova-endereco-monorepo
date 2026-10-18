@@ -520,6 +520,14 @@ export const runFastPath = async (
   const status = statusFor(req.mode, decision.verdict, decision.confidence)
   const validationId = randomUUID()
   const expiresAt = new Date(now.getTime() + 30 * 86_400_000)
+  // `now` é o instante em que a requisição COMEÇOU (`created_at`); a conclusão da
+  // análise (Receita + enriquecimento + checkers + evaluateClaim) só acontece
+  // aqui. `completed_at` registra esse instante — é ele que a credencial usa como
+  // `validFrom` (ADR-0024 §5), então não pode ser substituído por `created_at`.
+  // Mesma semântica do deep path (`updateValidationOutcome`): só a validação
+  // terminal completa tem instante de conclusão; `queued`/`partial` ficam NULL e
+  // o deep path preenche quando concluir. Não há migração: a coluna já existe.
+  const completedAt = status === 'completed' ? deps.clock.now() : null
 
   const persisted = await withTenant(deps.db, tenant.tenantId, async (tx) => {
     const subjectRows = await tx
@@ -705,6 +713,7 @@ export const runFastPath = async (
       },
       deepContext: deepContextOf(registryRecord, docDigitsValid),
       createdAt: now,
+      completedAt,
       expiresAt,
     })
 

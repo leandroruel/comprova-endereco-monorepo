@@ -22,12 +22,29 @@ export type CredentialVerificationFailure =
 export type CredentialVerificationResult =
   { readonly valid: true } | { readonly valid: false; readonly reason: CredentialVerificationFailure }
 
-export interface VerifierOptions {
-  /** Chave pública do issuer, fornecida diretamente (MVP). Resolver a chave é dependência da camada de resolução. */
+/**
+ * Método de verificação em que o consumidor confia: a chave pública **e** o
+ * identificador do método ao qual ela está vinculada
+ * (`<issuer>#<keyId>`, como em `verificationMethodOf`).
+ *
+ * A identidade é obrigatória: um `KeyObject` avulso não declara em QUEM se está
+ * confiando, e aceitar só a chave deixaria a credencial escolher o
+ * `verificationMethod` que quer ser (integridade criptográfica ≠ confiança na
+ * chave do issuer — ADR-0024 §6).
+ */
+export interface TrustedVerificationMethod {
+  readonly id: string
   readonly publicKey: KeyObject
+}
+
+export interface VerifierOptions {
+  /** Método de verificação confiável (obrigatório; ver `TrustedVerificationMethod`). */
+  readonly trusted: TrustedVerificationMethod
+  /**
+   * Issuer esperado. Quando informado, precisa ser exatamente o `issuer` da
+   * credencial; quando omitido, o issuer é o que o `trusted.id` já delimita.
+   */
   readonly expectedIssuerId?: string
-  /** `proof.verificationMethod` esperado (ex.: `comprova:issuer:<tenant>#<keyId>`). */
-  readonly expectedVerificationMethod?: string
 }
 
 const proofFailure = (reason: DataIntegrityFailure): CredentialVerificationFailure => {
@@ -52,20 +69,29 @@ const timestampOf = (value: string): number | null => {
 
 /**
  * Verificador independente (FASE 11). Recebe apenas a credencial (JSON já
- * parseado) e a chave pública. NÃO acessa PostgreSQL, Redis, Temporal, S3 nem a
- * API: a integridade e a assinatura são verificadas só com o material da
- * credencial.
+ * parseado) e o método de verificação confiável. NÃO acessa PostgreSQL, Redis,
+ * Temporal, S3 nem a API: a integridade e a assinatura são verificadas só com o
+ * material da credencial.
  *
  * O que é verificado, nesta ordem:
  *  1. forma do documento (VC 2.0 + extensões Comprova);
  *  2. `@context[0]` e `type` de uma Verifiable Credential;
- *  3. expectativa de issuer (quando fornecida) e binding do
- *     `proof.verificationMethod` ao issuer declarado (§5.9);
- *  4. a janela de validade (`validFrom` ≤ `validUntil`);
- *  5. o binding do conjunto de evidências (recomputado a partir da própria
+ *  3. expectativa de issuer (quando fornecida);
+ *  4. coerência estrutural `verificationMethod ↔ issuer` declarado (§5.9) e
+ *     vínculo com o método confiável: o `verificationMethod` precisa ser
+ *     EXATAMENTE `options.trusted.id` (§4);
+ *  5. a janela de validade (`validFrom` < `validUntil`, não vazia);
+ *  6. o binding do conjunto de evidências (recomputado a partir da própria
  *     credencial — nunca do material físico);
- *  6. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
- *     recebido, sem o `proof`), exigindo `proofPurpose: assertionMethod`.
+ *  7. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
+ *     recebido, sem o `proof`), com a chave pública confiável, exigindo
+ *     `proofPurpose: assertionMethod`.
+ *
+ * Escopo: este verificador cobre integridade criptográfica e o vínculo entre a
+ * chave confiável e a identidade declarada. Ele NÃO decide validade temporal da
+ * credencial (expirada é política do consumidor), NEM status/revogação, NEM se
+ * o issuer é uma entidade legítima — essas são responsabilidades distintas, e
+ * misturá-las é o que a API de `trusted` evita (ADR-0024 §6).
  */
 export const verifyCredential = (
   credential: unknown,
@@ -89,17 +115,17 @@ export const verifyCredential = (
 
   // §5.9 Verification Method Binding: sem resolução remota de chave, o binding é
   // estrutural — o método de verificação precisa pertencer ao issuer declarado
-  // (`<issuer>#<keyId>`). Sem esta checagem, um documento assinado por A poderia
-  // se declarar emitido por B e passaria.
+  // (`<issuer>#<keyId>`, com fragmento não vazio). Sem esta checagem, um
+  // documento assinado por A poderia se declarar emitido por B e passaria.
   const verificationMethod = secured.proof.verificationMethod
   const issuerFragment = `${secured.issuer}#`
   if (!verificationMethod.startsWith(issuerFragment) || verificationMethod.length === issuerFragment.length) {
     return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
   }
-  if (
-    options.expectedVerificationMethod !== undefined &&
-    verificationMethod !== options.expectedVerificationMethod
-  ) {
+  // Vínculo com a chave confiável: a assinatura tem de ser do método que o
+  // consumidor declarou confiar. Só a chave pública não basta — ela é
+  // reaproveitável entre métodos (`#key-1`, `#key-2`) do mesmo issuer.
+  if (verificationMethod !== options.trusted.id) {
     return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
   }
 
@@ -108,7 +134,10 @@ export const verifyCredential = (
   if (validFrom === null || (secured.validUntil !== undefined && validUntil === null)) {
     return { valid: false, reason: 'INVALID_TIMESTAMP' }
   }
-  if (validUntil !== null && validFrom > validUntil) {
+  // Janela NÃO vazia: `validFrom < validUntil` (VC 2.0 §4.10), a mesma garantia
+  // que a emissão impõe (`buildAssertion`). `validFrom == validUntil` é uma
+  // janela de duração zero — não é uma credencial "válida por um instante".
+  if (validUntil !== null && validFrom >= validUntil) {
     return { valid: false, reason: 'INVALID_TIMESTAMP' }
   }
 
@@ -120,7 +149,7 @@ export const verifyCredential = (
   }
 
   const proof = verifyDataIntegrityProof(raw, {
-    publicKey: options.publicKey,
+    publicKey: options.trusted.publicKey,
     expectedProofPurpose: ASSERTION_METHOD,
   })
   if (!proof.valid) return { valid: false, reason: proofFailure(proof.reason) }

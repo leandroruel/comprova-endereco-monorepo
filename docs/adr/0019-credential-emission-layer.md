@@ -6,7 +6,11 @@ Aceito (2026-10-17). **Parcialmente superseded por
 [ADR-0020](0020-verifiable-credential-data-model-2.md)**: a forma da credencial,
 a canonicalização do material assinado, o envelope de assinatura e a API do
 verifier (§1, §2, §3 e §9) foram substituídos pela VC Data Model 2.0 com Data
-Integrity `eddsa-jcs-2022`. As decisões §4–§8 continuam em vigor.
+Integrity `eddsa-jcs-2022`. **O §4 (issuer) e o §5 (subject) foram substituídos
+pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)**: o `issuer`
+passou a ser uma URL HTTPS com escopo opaco do tenant e o
+`credentialSubject.id` passou a ser uma URL no namespace do issuer (o digest do
+pseudônimo não mudou). As decisões §6–§8 continuam em vigor.
 
 ## Contexto
 
@@ -73,6 +77,11 @@ autoridade vigente — conceito de domínio já existente, não secreto). Separa
 preservada: `issuer = tenant`, `actor = api_key_id|user_id`,
 `authorization = issuer_scopes`.
 
+> **Substituído pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §2:** o `id` do issuer passou a ser `<origem HTTPS>/issuers/<escopo do tenant>`
+> (origem configurada e validada; o `tenant_id` interno não aparece na URL). O
+> issuer continua sendo o tenant.
+
 ### 5. Subject
 
 `deriveCredentialSubjectId({ tenantId, docType, docHmac }) =
@@ -81,6 +90,11 @@ prefixado por `sha256:`. É determinístico, tem escopo por issuer (inclui
 `tenant_id`, evitando correlação cross-tenant que o `doc_hmac` sozinho
 permitiria), é unidirecional (não expõe `doc_hmac`) e **não** lê nem altera
 `subject.doc_hmac`/`subject_id`.
+
+> **Substituído pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §3:** o digest é o mesmo, mas o identificador passou a ser
+> `<issuer.id>/subjects/<digest>` (URL HTTPS) em vez do esquema proprietário
+> `sha256:<digest>`.
 
 ### 6. Evidence binding
 

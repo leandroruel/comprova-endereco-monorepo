@@ -6,11 +6,10 @@ import type { CheckContext, Clock, DocKind, Signal } from '@comprova/core'
 import { registryRecordFromDeepContext } from './deep-enrich.registry.js'
 import type { PriorSignalRow } from './deep-enrich.signals.js'
 
-type ValidationRow = {
-  readonly deepContext: Record<string, unknown> | null
-  readonly subjectId: string
-  readonly addressId: string | null
-}
+type ValidationRow = Pick<
+  typeof t.validation.$inferSelect,
+  'status' | 'verdict' | 'evidenceSetHash' | 'completedAt' | 'deepContext' | 'subjectId' | 'addressId'
+>
 
 type SubjectRow = { readonly docType: DocKind }
 
