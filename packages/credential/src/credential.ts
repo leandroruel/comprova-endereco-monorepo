@@ -15,11 +15,12 @@ export interface BuildCredentialDeps {
   readonly issuer: IssuerIdentity
   readonly signer: Signer
   /**
-   * `created` do proof (Data Integrity). Quando ausente, é derivado da própria
-   * assertion (`completed_at`, ou `created_at` quando nulo), de modo que
-   * `mesma assertion → mesmos bytes assinados`.
+   * Relógio da emissão. `proof.created` é o momento REAL em que a prova
+   * criptográfica é criada (Data Integrity 1.0 §2.1.1) — nunca um timestamp
+   * histórico da validation (ADR-0024 §4). Injetável para testes
+   * determinísticos; default: `() => new Date()`.
    */
-  readonly proofCreatedAt?: Date
+  readonly now?: () => Date
 }
 
 const byId = (a: { readonly id: string }, b: { readonly id: string }): number =>
@@ -50,6 +51,10 @@ const toCredentialObservation = (o: AssertionObservation): CredentialObservation
  * As observações e os arrays de explicação são ordenados antes de montar o
  * payload, de modo que `mesma assertion → mesmos bytes`, independentemente da
  * ordem devolvida pelo PostgreSQL.
+ *
+ * O `issuerId` (URL do issuer) entra em dois lugares do payload: como `issuer`
+ * do documento e como namespace do `credentialSubject.id` (`subject.ts`). O
+ * `proof.created` NÃO é derivado daqui: ele é o instante real da assinatura.
  */
 export const buildAssertion = (source: AssertionSource, issuerId: string): AssertionPayload => {
   const v = source.validation
@@ -82,6 +87,7 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
     },
     subject: {
       id: deriveCredentialSubjectId({
+        issuerId,
         tenantId: source.tenantId,
         docType: source.subject.docType,
         docHmac: source.subject.docHmac,
@@ -133,6 +139,12 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
  * `AssertionSource → assertion interna → Verifiable Credential (W3C 2.0) →
  * Data Integrity proof (eddsa-jcs-2022)`. Puro (não acessa banco); o `signer` e
  * a identidade do issuer entram por dependência.
+ *
+ * O documento (sem `proof`) é determinístico em função da assertion. O proof
+ * NÃO é: `created` é o instante real da assinatura. Duas emissões da mesma
+ * validation produzem documentos iguais e provas diferentes — reaproveitar o
+ * instante da primeira é uma decisão explícita de quem chama (`now`), não um
+ * efeito de a camada "adivinhar" o tempo a partir da validation (ADR-0024 §4).
  */
 export const buildCredential = async (
   source: AssertionSource,
@@ -143,11 +155,7 @@ export const buildCredential = async (
   const proof = await createDataIntegrityProof(credential, {
     verificationMethod: verificationMethodOf(deps.issuer),
     proofPurpose: ASSERTION_METHOD,
-    created: (
-      deps.proofCreatedAt ??
-      source.validation.completedAt ??
-      source.validation.createdAt
-    ).toISOString(),
+    created: (deps.now ?? (() => new Date()))().toISOString(),
     signer: deps.signer,
   })
 

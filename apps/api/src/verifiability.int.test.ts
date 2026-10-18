@@ -51,6 +51,7 @@ const config: AppConfig = {
   DATABASE_URL: db.appUrl,
   REDIS_URL: testRedis.url,
   API_KEY_PEPPER: PEPPER,
+  CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
   PORT: 3000,
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',

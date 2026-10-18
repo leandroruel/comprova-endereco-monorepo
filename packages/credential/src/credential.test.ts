@@ -2,15 +2,19 @@ import { evidenceSetHashOfObservations } from '@comprova/core'
 import { describe, expect, it } from 'vitest'
 import type { AssertionObservation, AssertionSource } from './assertion.js'
 import { buildCredential } from './credential.js'
-import { verificationMethodOf, type IssuerIdentity, localIssuer } from './issuer.js'
+import { issuerIdOf, verificationMethodOf, type IssuerIdentity, localIssuer } from './issuer.js'
 import { generateEd25519KeyPair, makeEd25519Signer } from './signer.js'
 import { VC_CONTEXT_URL, type SecuredVerifiableCredential } from './vc.js'
 import { verifyCredential } from './verifier.js'
 
+const ISSUER_ORIGIN = 'https://issuer.test'
 const TENANT = '11111111-1111-4111-8111-111111111111'
 const VALIDATION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const CLAIM_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const ADDRESS_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+
+/** Instante de assinatura injetado: mantém as provas determinísticas no teste. */
+const PROOF_CREATED_AT = new Date('2026-02-01T00:00:00.000Z')
 
 const observation = (
   overrides: Partial<AssertionObservation> & { readonly id: string },
@@ -67,8 +71,10 @@ const source = (
 })
 
 const keyPair = generateEd25519KeyPair()
-const issuer: IssuerIdentity = localIssuer(TENANT, 'key-1')
+const issuer: IssuerIdentity = localIssuer(ISSUER_ORIGIN, TENANT, 'key-1')
 const signer = makeEd25519Signer(keyPair.privateKey)
+/** Método confiável que o consumidor declara conhecer (chave + identidade). */
+const trusted = { id: verificationMethodOf(issuer), publicKey: keyPair.publicKey }
 
 const twoObservations = (): AssertionObservation[] => [
   observation({
@@ -80,7 +86,7 @@ const twoObservations = (): AssertionObservation[] => [
 ]
 
 const emit = async (observations = twoObservations()): Promise<SecuredVerifiableCredential> =>
-  buildCredential(source(observations), { issuer, signer })
+  buildCredential(source(observations), { issuer, signer, now: () => PROOF_CREATED_AT })
 
 const transport = (credential: SecuredVerifiableCredential): SecuredVerifiableCredential =>
   JSON.parse(JSON.stringify(credential)) as SecuredVerifiableCredential
@@ -104,10 +110,14 @@ describe('buildCredential + verifyCredential', () => {
 
     expect(credential['@context'][0]).toBe(VC_CONTEXT_URL)
     expect(credential.type).toEqual(['VerifiableCredential', 'comprova:AddressCredential'])
-    expect(credential.issuer).toBe(`comprova:issuer:${TENANT}`)
-    expect(credential.validFrom).toBe('2026-01-01T00:00:00.000Z')
+    expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, TENANT))
+    expect(credential.issuer).toMatch(/^https:\/\/issuer\.test\/issuers\/[A-Za-z0-9_-]{43}$/)
+    // `validFrom` é o início da validade do veredito: a conclusão da validation.
+    expect(credential.validFrom).toBe('2026-01-01T00:00:01.000Z')
     expect(credential.validUntil).toBe('2026-01-31T00:00:00.000Z')
-    expect(credential.credentialSubject.id).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(credential.credentialSubject.id).toMatch(
+      /^https:\/\/issuer\.test\/issuers\/[A-Za-z0-9_-]{43}\/subjects\/[0-9a-f]{64}$/,
+    )
     expect(credential.credentialSubject['comprova:docType']).toBe('CNPJ')
     expect(credential.credentialSubject['comprova:claim'].id).toBe(`urn:uuid:${CLAIM_ID}`)
     expect(credential.credentialSubject['comprova:claim']['comprova:address']).toEqual({
@@ -126,27 +136,28 @@ describe('buildCredential + verifyCredential', () => {
     expect(credential.proof.type).toBe('DataIntegrityProof')
     expect(credential.proof.cryptosuite).toBe('eddsa-jcs-2022')
     expect(credential.proof.proofPurpose).toBe('assertionMethod')
-    expect(credential.proof.verificationMethod).toBe(`comprova:issuer:${TENANT}#key-1`)
+    expect(credential.proof.verificationMethod).toBe(verificationMethodOf(issuer))
+    expect(credential.proof.verificationMethod).toBe(`${issuer.id}#key-1`)
+    expect(credential.proof.created).toBe(PROOF_CREATED_AT.toISOString())
     expect(credential.proof.proofValue).toMatch(/^z[1-9A-HJ-NP-Za-km-z]+$/)
   })
 
-  it('é verificável por um processo independente que só recebe a credencial e a chave pública', async () => {
+  it('é verificável por um processo independente que só recebe a credencial, a chave pública e o método confiável', async () => {
     const credential = transport(await emit())
     expect(
       verifyCredential(credential, {
-        publicKey: keyPair.publicKey,
+        trusted,
         expectedIssuerId: issuer.id,
-        expectedVerificationMethod: verificationMethodOf(issuer),
       }),
     ).toEqual({ valid: true })
   })
 
-  it('é autocontida: o JSON transportado verifica sem nenhum dado além da chave pública', async () => {
+  it('é autocontida: o JSON transportado verifica sem nenhum dado além da chave confiável', async () => {
     const credential = transport(await emit())
 
     // Nenhuma dependência de PostgreSQL/Redis/Temporal/S3/API: o verificador só
-    // recebe o documento e a chave pública.
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({ valid: true })
+    // recebe o documento, a chave pública e o id do método em que se confia.
+    expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
 
     const json = JSON.stringify(credential)
     for (const internal of [
@@ -167,7 +178,7 @@ describe('buildCredential + verifyCredential', () => {
       ...observation,
       evidenceId: `s3-${index}`,
     }))
-    const other = await buildCredential(source(withPointer), { issuer, signer })
+    const other = await buildCredential(source(withPointer), { issuer, signer, now: () => PROOF_CREATED_AT })
 
     expect(other.proof.proofValue).toBe(withoutPointer.proof.proofValue)
   })
@@ -187,8 +198,7 @@ describe('buildCredential + verifyCredential', () => {
     expect(JSON.stringify(reversed)).not.toBe(JSON.stringify(credential))
     expect(
       verifyCredential(reversed, {
-        publicKey: keyPair.publicKey,
-        expectedVerificationMethod: verificationMethodOf(issuer),
+        trusted,
       }),
     ).toEqual({ valid: true })
   })
@@ -214,21 +224,85 @@ describe('buildCredential + verifyCredential', () => {
   })
 })
 
+describe('tempo: `proof.created` e `validFrom`', () => {
+  const issuance = new Date('2026-02-01T00:00:00.000Z')
+  const clock = (): Date => issuance
+
+  it('marca a prova com o instante real da emissão, nunca com um timestamp da validation', async () => {
+    const credential = await buildCredential(source(twoObservations()), { issuer, signer, now: clock })
+
+    // validation.created_at = 2026-01-01T00:00:00Z; completed_at = +1s.
+    expect(credential.proof.created).toBe(issuance.toISOString())
+    expect(credential.proof.created).not.toBe(credential.validFrom)
+    expect(credential.proof.created).not.toBe(credential['comprova:result']['comprova:completedAt'])
+  })
+
+  it('sem relógio injetado, `proof.created` é o relógio do sistema (a prova é criada agora)', async () => {
+    const credential = await buildCredential(source(twoObservations()), { issuer, signer })
+    const created = Date.parse(credential.proof.created ?? '')
+
+    expect(Number.isFinite(created)).toBe(true)
+    expect(Math.abs(created - Date.now())).toBeLessThan(60_000)
+    // Nenhum timestamp histórico da validation vira instante de assinatura.
+    expect(credential.proof.created).not.toBe(credential.validFrom)
+    expect(credential.proof.created).not.toBe(credential['comprova:result']['comprova:completedAt'])
+  })
+
+  it('`validFrom` é a conclusão da validation (o veredito só existe a partir dela)', async () => {
+    const credential = await buildCredential(source(twoObservations()), { issuer, signer, now: clock })
+
+    expect(credential.proof.created).not.toBe('2026-01-01T00:00:01.000Z')
+    expect(credential.validFrom).toBe('2026-01-01T00:00:01.000Z')
+    expect(credential['comprova:result']['comprova:completedAt']).toBe('2026-01-01T00:00:01.000Z')
+  })
+
+  it('no fluxo rápido (`completed_at` nulo), `validFrom` é `created_at` — nunca a emissão', async () => {
+    const credential = await buildCredential(source(twoObservations(), { completedAt: null }), {
+      issuer,
+      signer,
+      now: clock,
+    })
+
+    expect(credential.validFrom).toBe('2026-01-01T00:00:00.000Z')
+    expect(credential['comprova:result']['comprova:completedAt']).toBeUndefined()
+    expect(credential.proof.created).toBe(issuance.toISOString())
+    expect(credential.proof.created).not.toBe(credential.validFrom)
+  })
+
+  it('reemitir a mesma validation produz uma NOVA prova sobre o MESMO documento', async () => {
+    const first = await emit()
+    const second = await buildCredential(source(twoObservations()), {
+      issuer,
+      signer,
+      now: () => new Date('2026-02-02T00:00:00.000Z'),
+    })
+    const { proof: firstProof, ...firstDocument } = first
+    const { proof: secondProof, ...secondDocument } = second
+
+    // O documento (sem proof) é função da assertion; a prova carrega o instante
+    // real de cada assinatura. Reproduzir bytes do proof exigiria reaproveitar o
+    // `created` da primeira emissão de forma explícita (`now`).
+    expect(firstDocument).toEqual(secondDocument)
+    expect(firstProof.created).not.toBe(secondProof.created)
+    expect(firstProof.proofValue).not.toBe(secondProof.proofValue)
+  })
+})
+
 describe('adulteração da credencial', () => {
   const valid = async (): Promise<SecuredVerifiableCredential> => transport(await emit())
 
   const expectInvalid = async (mutate: (credential: SecuredVerifiableCredential) => void): Promise<void> => {
     const credential = await valid()
     mutate(credential)
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey }).valid).toBe(false)
+    expect(verifyCredential(credential, { trusted }).valid).toBe(false)
   }
 
   it('detecta alteração em issuer, subject, claim e endereço', async () => {
     await expectInvalid((c) => {
-      c.issuer = 'comprova:issuer:99999999-9999-4999-8999-999999999999'
+      c.issuer = 'https://issuer.test/issuers/outro-issuer'
     })
     await expectInvalid((c) => {
-      c.credentialSubject.id = 'sha256:' + 'f'.repeat(64)
+      c.credentialSubject.id = `${issuer.id}/subjects/${'f'.repeat(64)}`
     })
     await expectInvalid((c) => {
       c.credentialSubject['comprova:claim']['comprova:claimType'] = 'address_exists'
@@ -294,33 +368,34 @@ describe('adulteração da credencial', () => {
   })
 
   it('classifica falhas estruturais, de contexto, issuer e chave', async () => {
-    expect(verifyCredential({}, { publicKey: keyPair.publicKey })).toEqual({
+    expect(verifyCredential({}, { trusted })).toEqual({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
-    expect(verifyCredential([], { publicKey: keyPair.publicKey })).toEqual({
+    expect(verifyCredential([], { trusted })).toEqual({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
 
     const credential = await valid()
-    expect(
-      verifyCredential(
-        { ...credential, '@context': ['https://example.org'] },
-        { publicKey: keyPair.publicKey },
-      ),
-    ).toEqual({ valid: false, reason: 'UNSUPPORTED_CREDENTIAL' })
+    expect(verifyCredential({ ...credential, '@context': ['https://example.org'] }, { trusted })).toEqual({
+      valid: false,
+      reason: 'UNSUPPORTED_CREDENTIAL',
+    })
 
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey, expectedIssuerId: 'x' })).toEqual({
+    expect(verifyCredential(credential, { trusted, expectedIssuerId: 'x' })).toEqual({
       valid: false,
       reason: 'ISSUER_MISMATCH',
     })
     expect(
-      verifyCredential(credential, { publicKey: keyPair.publicKey, expectedVerificationMethod: 'other#key' }),
+      verifyCredential(credential, {
+        expectedIssuerId: issuer.id,
+        trusted: { id: `${issuer.id}#outra-chave`, publicKey: keyPair.publicKey },
+      }),
     ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' })
 
     const otherKey = generateEd25519KeyPair()
-    expect(verifyCredential(credential, { publicKey: otherKey.publicKey })).toEqual({
+    expect(verifyCredential(credential, { trusted: { ...trusted, publicKey: otherKey.publicKey } })).toEqual({
       valid: false,
       reason: 'INVALID_SIGNATURE',
     })
@@ -331,15 +406,42 @@ describe('adulteração da credencial', () => {
     // issuer (ou o próprio issuer com o método alterado) não pode se declarar
     // emitido por este issuer.
     const credential = await valid()
-    credential.proof.verificationMethod = 'comprova:issuer:99999999-9999-4999-8999-999999999999#key-1'
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({
+    credential.proof.verificationMethod = 'https://issuer.test/issuers/outro-issuer#key-1'
+    expect(verifyCredential(credential, { trusted })).toEqual({
       valid: false,
       reason: 'VERIFICATION_METHOD_MISMATCH',
     })
 
     const noFragment = await valid()
-    noFragment.proof.verificationMethod = `comprova:issuer:${TENANT}#`
-    expect(verifyCredential(noFragment, { publicKey: keyPair.publicKey })).toEqual({
+    noFragment.proof.verificationMethod = `${issuer.id}#`
+    expect(verifyCredential(noFragment, { trusted })).toEqual({
+      valid: false,
+      reason: 'VERIFICATION_METHOD_MISMATCH',
+    })
+  })
+
+  it('exige que o `verificationMethod` seja exatamente o método confiável', async () => {
+    // A MESMA chave pública assina os dois métodos (`#key-1` e `#key-2`), então a
+    // assinatura é válida para a chave fornecida nos dois casos. Só o vínculo
+    // explícito entre a chave confiável e o id do método distingue os dois: sem
+    // ele, a credencial escolheria em qual método o consumidor estaria confiando.
+    const keyId = 'key-2'
+    const otherIssuer = localIssuer(ISSUER_ORIGIN, TENANT, keyId)
+    const credential = transport(
+      await buildCredential(source(twoObservations()), {
+        issuer: otherIssuer,
+        signer,
+        now: () => PROOF_CREATED_AT,
+      }),
+    )
+
+    expect(credential.proof.verificationMethod).toBe(verificationMethodOf(otherIssuer))
+    expect(
+      verifyCredential(credential, {
+        trusted: { id: verificationMethodOf(otherIssuer), publicKey: keyPair.publicKey },
+      }),
+    ).toEqual({ valid: true })
+    expect(verifyCredential(credential, { trusted })).toEqual({
       valid: false,
       reason: 'VERIFICATION_METHOD_MISMATCH',
     })
@@ -348,7 +450,7 @@ describe('adulteração da credencial', () => {
   it('exige `proofPurpose: assertionMethod` (uma prova para outro motivo não vale como credencial)', async () => {
     const credential = await valid()
     credential.proof.proofPurpose = 'authentication'
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({
+    expect(verifyCredential(credential, { trusted })).toEqual({
       valid: false,
       reason: 'PROOF_PURPOSE_MISMATCH',
     })
@@ -360,7 +462,7 @@ describe('adulteração da credencial', () => {
     // dois, então a falha aparece como assinatura inválida — o binding é o que
     // garante a amarração.
     credential.evidence = credential.evidence.slice(0, 1)
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({
+    expect(verifyCredential(credential, { trusted })).toEqual({
       valid: false,
       reason: 'EVIDENCE_SET_MISMATCH',
     })
@@ -372,7 +474,7 @@ describe('adulteração da credencial', () => {
     for (const member of ['@context', 'type', 'issuer', 'credentialSubject', 'proof'] as const) {
       const incomplete = { ...credential } as Record<string, unknown>
       delete incomplete[member]
-      expect(verifyCredential(incomplete, { publicKey: keyPair.publicKey }), member).toEqual({
+      expect(verifyCredential(incomplete, { trusted }), member).toEqual({
         valid: false,
         reason: 'MALFORMED_CREDENTIAL',
       })
@@ -382,21 +484,21 @@ describe('adulteração da credencial', () => {
   it('recusa cryptosuite inesperada e proof sem os campos exigidos', async () => {
     const credential = await valid()
     credential.proof.cryptosuite = 'eddsa-rdfc-2022'
-    expect(verifyCredential(credential, { publicKey: keyPair.publicKey })).toEqual({
+    expect(verifyCredential(credential, { trusted })).toEqual({
       valid: false,
       reason: 'UNSUPPORTED_CRYPTOSUITE',
     })
 
     const noPurpose = await valid()
     ;(noPurpose.proof as Record<string, unknown>).proofPurpose = undefined
-    expect(verifyCredential(noPurpose, { publicKey: keyPair.publicKey })).toEqual({
+    expect(verifyCredential(noPurpose, { trusted })).toEqual({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
 
     const noMethod = await valid()
     ;(noMethod.proof as Record<string, unknown>).verificationMethod = undefined
-    expect(verifyCredential(noMethod, { publicKey: keyPair.publicKey })).toEqual({
+    expect(verifyCredential(noMethod, { trusted })).toEqual({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })

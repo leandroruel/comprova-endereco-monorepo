@@ -46,6 +46,13 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   Para revogar uma chave, `UPDATE api_key SET revoked_at = now() WHERE ...`; a
   API confere a revogação no banco, mas guarda o resultado por 60s em memória
   (cache por prefixo), então o 401 pode demorar até um minuto.
+- **`CREDENTIAL_ISSUER_ORIGIN`** é a origem HTTPS **controlada pelo projeto**
+  que serve de base para o `issuer` e para o `credentialSubject.id` das
+  credenciais verificáveis (ADR-0024). Não há default e a biblioteca não
+  conhece domínio nenhum: o valor é validado no boot (HTTPS, sem
+  path/query/fragmento) e, enquanto não houver um domínio de produção
+  confirmado, use uma origem reservada (`https://issuer.test`). O `tenant_id`
+  interno **não** aparece na URL — o path do issuer leva um digest do tenant.
 
 ## Dashboard
 

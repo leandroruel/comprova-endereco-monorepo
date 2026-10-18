@@ -9,6 +9,12 @@ canonicalização do material assinado, envelope de assinatura e API do verifier
 = tenant, subject derivado, evidence binding, policy/scorer, terminalidade)
 continuam válidas.
 
+**Substituído parcialmente pelo
+[ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)**: §2
+(`proof.created`), §3 (issuer e `verificationMethod`), §5
+(`credentialSubject.id`), §8 (tempo e `validFrom`) e §9 (verifier). Cada seção
+afetada abaixo traz a nota correspondente; o restante continua valendo.
+
 ## Contexto
 
 O ADR-0019 provou o caminho `validation concluída → snapshot → bytes canônicos →
@@ -116,6 +122,12 @@ possibilidade de override (`proofCreatedAt`). Não existe timestamp de emissão 
 domínio; usar `now()` tornaria a credencial não reproduzível a partir dos mesmos
 dados. O `created` reaproveita um instante real da assertion — não inventa um.
 
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §4:** `proof.created` passou a ser o instante **real** da criação da prova,
+> vindo de um relógio injetável (`now`), nunca de um timestamp da validation.
+> Reemitir a mesma validation produz uma **nova prova** com `created` real; o
+> documento sem `proof` continua determinístico.
+
 ### 3. Issuer e `verificationMethod`
 
 `issuer` continua sendo o **tenant**: `comprova:issuer:<tenant_id>` (string URI,
@@ -127,6 +139,12 @@ não há resolução de chave, o binding é estrutural (`<issuer>#<fragmento nã
 vazio>`). Não há DID/DID Document/resolução/rotação: a chave pública é injetada
 no verifier (ADR-0019 §3). `api_key_id`/`user_id` continuam fora da credencial;
 `issuer_scopes` é transportado como `comprova:authorization.scopes`.
+
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §2:** `issuer.id` passou a ser `<origem HTTPS>/issuers/<escopo do tenant>`
+> (escopo = digest do `tenant_id`, que deixa de aparecer na credencial), sobre uma
+> origem configurada e validada (`CREDENTIAL_ISSUER_ORIGIN`) — nenhum domínio é
+> presumido. `verificationMethod` continua `<issuer.id>#<keyId>`.
 
 ### 4. `@context`, `type` e namespace
 
@@ -189,6 +207,13 @@ domínio continua com UUIDs: a conversão existe só no mapping (`urnUuidOf`) e 
 desfeita em `observationOfEvidence` (`uuidOfUrn`), de modo que o
 `evidence_set_hash` continue sendo o hash dos UUIDs do domínio.
 `credentialSubject.id` permanece o digest `sha256:…` (um IRI válido por si).
+
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §3:** `credentialSubject.id` passou a ser
+> `<issuer.id>/subjects/<digest>` — uma URL HTTPS no namespace do issuer, com o
+> **mesmo digest** de antes no último segmento (o esquema proprietário `sha256:`
+> era o problema). Continua determinístico, com escopo por tenant e sem expor
+> documento/`doc_hmac`; a URL não é endpoint (não há resolução de subject).
 
 `id` do subject continua vindo de `deriveCredentialSubjectId` (ADR-0019 §5):
 determinístico, com escopo por tenant, unidirecional. Nunca `doc_hmac`,
@@ -287,18 +312,35 @@ A VC 2.0 usa `validFrom`/`validUntil` (não existe mais `issuanceDate`):
 | `validation.expires_at`   | `validUntil`                                       |
 | `validation.completed_at` | `comprova:result.comprova:completedAt` (se ≠ NULL) |
 
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §5:** `validFrom` passou a ser `completed_at ?? created_at` — o início da
+> validade é o momento em que o **veredito** passou a existir (a conclusão da
+> validation), e não o início da validação. No fluxo rápido, em que
+> `completed_at` é NULL, o fallback persistido é `created_at`.
+
 `completed_at` pode ser `NULL` (fast path) e **não** é preenchido nem usado como
 fallback de `validFrom`: quando ausente, a propriedade simplesmente não existe.
-Nenhum timestamp é fabricado. A elegibilidade continua sendo só
-`status = 'completed'`; o domínio não foi alterado para preencher
-`completed_at`. A tensão entre retenção (30d) e material (180–365d) continua
-decisão de produto, fora do escopo.
+
+> **Atualizado pelo ADR-0024 §5:** ver a nota acima — quando `completed_at` é
+> NULL, ele **é** usado como fallback de `validFrom` (por ser o limite inferior
+> persistido da conclusão). `completed_at` continua não sendo preenchido.
+> Nenhum timestamp é fabricado. A elegibilidade continua sendo só
+> `status = 'completed'`; o domínio não foi alterado para preencher
+> `completed_at`. A tensão entre retenção (30d) e material (180–365d) continua
+> decisão de produto, fora do escopo.
 
 ### 9. Verifier independente
 
 `verifyCredential(credential, { publicKey, expectedIssuerId?, expectedVerificationMethod? })`
 recebe apenas o JSON da credencial e a chave pública. Não acessa
 PostgreSQL/Redis/Temporal/S3/API.
+
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §6:** a API passou a ser
+> `verifyCredential(credential, { trusted: { id, publicKey }, expectedIssuerId? })`.
+> O `id` do método confiável é **obrigatório** e precisa ser exatamente o
+> `proof.verificationMethod`: uma chave sem identidade não é suficiente para
+> declarar confiança em um método.
 
 Ordem das checagens:
 
@@ -405,6 +447,11 @@ Eles foram decididos aqui, com justificativa acima, e a troca é localizada:
 4. `id` da credencial omitido (§ abaixo);
 5. contagem de stances não duplicada no documento (§6);
 6. identificadores internos (UUID) expressos como URL `urn:uuid:` (§5).
+
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md):**
+> os itens 2 e 3 foram revistos (§4 e §5 do ADR-0024): `proof.created` voltou a
+> ser o instante real da emissão (com relógio injetável) e `validFrom` passou a
+> ser `completed_at ?? created_at`. Os demais itens seguem como decididos aqui.
 
 ## Consequências
 

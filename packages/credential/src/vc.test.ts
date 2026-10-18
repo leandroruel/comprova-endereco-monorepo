@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AssertionPayload } from './assertion.js'
+import { issuerIdOf } from './issuer.js'
 import {
   COMPROVA_CONTEXT_URL,
   COMPROVA_CREDENTIAL_TYPE,
@@ -13,13 +14,18 @@ import {
   VerifiableCredentialSchema,
 } from './vc.js'
 
+const ISSUER_ORIGIN = 'https://issuer.test'
+const TENANT = '11111111-1111-4111-8111-111111111111'
+const ISSUER_ID = issuerIdOf(ISSUER_ORIGIN, TENANT)
+const SUBJECT_ID = `${ISSUER_ID}/subjects/${'a'.repeat(64)}`
+
 const assertion = (overrides: Partial<AssertionPayload> = {}): AssertionPayload => ({
   format: 'comprova-assertion-v1',
   issuer: {
-    id: 'comprova:issuer:11111111-1111-4111-8111-111111111111',
+    id: ISSUER_ID,
     authorization: { scopes: ['validate:write', 'validate:read'] },
   },
-  subject: { id: 'sha256:' + 'a'.repeat(64), doc_type: 'CNPJ' },
+  subject: { id: SUBJECT_ID, doc_type: 'CNPJ' },
   claim: {
     id: '22222222-2222-4222-8222-222222222222',
     type: 'business_registered_address',
@@ -78,20 +84,38 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
     expect(vc['@context'][0]).toBe(VC_CONTEXT_URL)
     expect(vc['@context'][1]).toEqual({ comprova: COMPROVA_CONTEXT_URL })
     expect(vc.type).toEqual(['VerifiableCredential', COMPROVA_CREDENTIAL_TYPE])
-    expect(vc.issuer).toBe('comprova:issuer:11111111-1111-4111-8111-111111111111')
+    expect(vc.issuer).toBe(ISSUER_ID)
+    expect(vc.issuer).toMatch(/^https:\/\/issuer\.test\/issuers\//)
     expect(VerifiableCredentialSchema.safeParse(vc).success).toBe(true)
   })
 
-  it('mapeia os timestamps da validation para a janela de validade', () => {
+  it('`validFrom` é a conclusão da validation (início da validade do veredito)', () => {
     const vc = toVerifiableCredential(assertion())
-    expect(vc.validFrom).toBe('2026-01-01T00:00:00.000Z')
+
+    expect(vc.validFrom).toBe('2026-01-01T00:00:01.000Z')
     expect(vc.validUntil).toBe('2026-01-31T00:00:00.000Z')
     expect(vc['comprova:result']['comprova:completedAt']).toBe('2026-01-01T00:00:01.000Z')
   })
 
+  it('no fluxo rápido (`completed_at` nulo) `validFrom` é `created_at`, não a emissão', () => {
+    const vc = toVerifiableCredential(
+      assertion({
+        timestamps: {
+          created_at: '2026-01-01T00:00:00.000Z',
+          completed_at: null,
+          expires_at: '2026-01-31T00:00:00.000Z',
+        },
+      }),
+    )
+
+    expect(vc.validFrom).toBe('2026-01-01T00:00:00.000Z')
+    expect(vc['comprova:result']['comprova:completedAt']).toBeUndefined()
+  })
+
   it('mapeia o subject sem expor o material de identidade', () => {
     const vc = toVerifiableCredential(assertion())
-    expect(vc.credentialSubject.id).toBe('sha256:' + 'a'.repeat(64))
+    expect(vc.credentialSubject.id).toBe(SUBJECT_ID)
+    expect(vc.credentialSubject.id).toBe(`${ISSUER_ID}/subjects/${'a'.repeat(64)}`)
     expect(vc.credentialSubject['comprova:docType']).toBe('CNPJ')
   })
 
@@ -178,7 +202,7 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
   it('omite (em vez de fabricar) o que não existe no domínio', () => {
     const vc = toVerifiableCredential(
       assertion({
-        issuer: { id: 'comprova:issuer:t', authorization: null },
+        issuer: { id: `${ISSUER_ORIGIN}/issuers/t`, authorization: null },
         claim: {
           id: '22222222-2222-4222-8222-222222222222',
           type: 'address_exists',

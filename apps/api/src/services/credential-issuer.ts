@@ -3,9 +3,8 @@ import { eq, withTenant } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import {
   buildCredential,
-  issuerIdOf,
+  localIssuer,
   type AssertionSource,
-  type IssuerIdentity,
   type SecuredVerifiableCredential,
   type Signer,
 } from '@comprova/credential'
@@ -21,12 +20,7 @@ import {
  */
 
 export type CredentialIssuanceFailure =
-  | 'VALIDATION_NOT_FOUND'
-  | 'VALIDATION_NOT_FINAL'
-  | 'CLAIM_MISSING'
-  | 'SUBJECT_MISSING'
-  | 'EVIDENCE_MISSING'
-  | 'ISSUER_MISMATCH'
+  'VALIDATION_NOT_FOUND' | 'VALIDATION_NOT_FINAL' | 'CLAIM_MISSING' | 'SUBJECT_MISSING' | 'EVIDENCE_MISSING'
 
 export class CredentialIssuanceError extends Error {
   readonly failure: CredentialIssuanceFailure
@@ -185,8 +179,20 @@ export const loadAssertionSource = async (
   })
 
 export interface IssueCredentialDeps {
-  readonly issuer: IssuerIdentity
+  /**
+   * Origem HTTPS controlada pelo projeto (`CREDENTIAL_ISSUER_ORIGIN`). O `id` do
+   * issuer é derivado dela + tenant, então o caller não escolhe o issuer: não
+   * existe caminho para atribuir a assertion de um tenant ao issuer de outro.
+   */
+  readonly issuerOrigin: string
+  /** Chave usada para assinar (fragmento do `proof.verificationMethod`). */
+  readonly keyId: string
   readonly signer: Signer
+  /**
+   * Relógio da emissão (`proof.created` = momento real da prova). Injetável para
+   * testes; default: o relógio do sistema.
+   */
+  readonly now?: () => Date
 }
 
 /** `validation_id → carrega o grafo → payload → canonicalização → assinatura → credencial`. */
@@ -196,15 +202,10 @@ export const issueCredential = async (
   validationId: string,
   deps: IssueCredentialDeps,
 ): Promise<SecuredVerifiableCredential> => {
-  // O issuer é derivado do MESMO tenant que escopa a leitura (RLS): um caller
-  // não pode atribuir a assertion de um tenant ao issuer de outro.
-  if (deps.issuer.id !== issuerIdOf(tenantId)) {
-    throw new CredentialIssuanceError(
-      'ISSUER_MISMATCH',
-      `issuer ${deps.issuer.id} does not belong to tenant ${tenantId}`,
-    )
-  }
+  // O issuer é derivado do MESMO tenant que escopa a leitura (RLS): uma
+  // validation de outro tenant nem é encontrada (VALIDATION_NOT_FOUND).
+  const issuer = localIssuer(deps.issuerOrigin, tenantId, deps.keyId)
 
   const source = await loadAssertionSource(db, tenantId, validationId)
-  return buildCredential(source, deps)
+  return buildCredential(source, { issuer, signer: deps.signer, now: deps.now })
 }
