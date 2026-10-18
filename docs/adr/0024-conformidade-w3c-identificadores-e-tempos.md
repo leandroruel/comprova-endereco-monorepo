@@ -164,14 +164,31 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
     é. Uma execução de minutos registrava o **início** do processamento como
     conclusão.
   - Regra preservada em ambos: resultado terminal **completo** grava a conclusão;
-    `partial`/`queued` mantêm `completed_at = NULL` (idempotentes a retry e
-    replay — um parcial reprocessado continua NULL).
-  - Retry/reprocessamento de um resultado **completo** grava a nova conclusão (o
-    veredito persistido é o último calculado; nunca NULL nem o início). Se um
-    replay passar a `partial`, `updateValidationOutcome` zera `completed_at`
-    porque é assim que a função já se comportava — sem `completed_at` a emissão
-    falha fechada (`COMPLETION_TIME_MISSING`), então nenhuma credencial sai com
-    instante fabricado.
+    `partial`/`queued` mantêm `completed_at = NULL`.
+  - **`completed_at` é o instante da PRIMEIRA conclusão terminal, não o da última
+    execução do worker** (idempotência temporal). Um retry/replay que **reproduz**
+    o resultado terminal persistido — mesmo veredito sobre o mesmo conjunto de
+    evidências (`evidence_set_hash`) — **preserva** o `completed_at` original:
+    reexecutar o worker não é reconcluir, e avançar o instante mudaria o
+    `validFrom` de credenciais emitidas depois sem nenhuma conclusão nova. Uma
+    execução que produz um resultado terminal **novo** (veredito ou evidências
+    diferentes) é uma conclusão nova e grava o instante real — preservar o
+    instante antigo anteciparia a existência de conteúdo que só passou a existir
+    ali. A comparação usa veredito + hash de evidências (valores exatos);
+    `score`/`confidence` ficam de fora porque são colunas `real` (float4) — a
+    comparação de float não é confiável, e são funções determinísticas do
+    conjunto de evidências e da policy. Isso deixa uma deriva sem detecção: se a
+    policy/scorer mudar entre a conclusão original e o replay sem que as
+    evidências mudem, o resultado pode diferir em score/confiança com o mesmo
+    veredito e hash — o instante original é preservado. O binding de policy da
+    linha é fixado na criação e o deep path reavalia com a policy do worker;
+    alinhar essa binding é decisão separada, não desta correção. Casos de borda:
+    um registro legado
+    concluído **sem** `completed_at` que seja reprocessado grava o instante da
+    reexecução (não há original a preservar, e é o único valor honesto
+    disponível); um replay que regresse a `partial` zera `completed_at`
+    (comportamento existente de `updateValidationOutcome` — a conclusão foi
+    retraída junto com o status e a emissão falha fechada).
 - **Garantia de janela não vazia (`validFrom < validUntil`).** `expires_at` é
   ancorado no início da requisição mais 30 dias (retenção), então uma análise que
   só conclui depois desse horizonte — worker retomando validação antiga, fila
@@ -237,10 +254,16 @@ recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
   surgem `COMPLETION_TIME_MISSING` e `VALIDITY_WINDOW_INVALID`).
 - **Mudança interna do worker (sem API pública):**
   `ValidationOutcomeWrite.now` virou `ValidationOutcomeWrite.completedAt` em
-  `deep-enrich.persistence.ts` — o valor é o instante real da conclusão, não o de
-  avaliação, e o nome agora diz isso. `deepEnrich` lê o relógio duas vezes
-  (avaliação e conclusão). Nada muda no schema, na persistência de `partial` ou
-  na arquitetura do Temporal; a activity apenas recebe o instante correto.
+  `deep-enrich.persistence.ts` — o valor é o instante a registrar como conclusão
+  (novo ou preservado do replay), não o de avaliação, e o nome agora diz isso.
+  `deepEnrich` lê o relógio na abertura (avaliação) e só lê de novo quando há
+  conclusão nova a registrar. Nada muda no schema, na persistência de `partial`
+  ou na arquitetura do Temporal.
+- **Mudança de domínio (idempotência temporal):** reexecutar o deep path de uma
+  validação já `completed` deixou de avançar `completed_at` quando o resultado é
+  reproduzido (mesmo veredito + mesmo `evidence_set_hash`). Como `validFrom` é
+  `completed_at`, credenciais emitidas depois de um replay continuam ancoradas na
+  conclusão original.
 - **Mudança de domínio (campo que já existia):** o fluxo rápido passa a gravar
   `validation.completed_at` (instante da conclusão) e a fronteira de emissão
   passa a recusar janela vazia/invertida. Nada de coluna, índice, tabela ou
@@ -295,8 +318,12 @@ recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
   (sem `completed_at`), `deepEnrich` roda com um relógio que avança e o registro
   conclui com `completed_at = T1 > T0`; a credencial emitida daí tem
   `validFrom = completed_at` (nunca `created_at`) e verifica. O mesmo arquivo
-  cobre o caminho parcial (`completed_at` permanece NULL, inclusive em replay) e o
-  replay de um resultado completo (a conclusão avança, nunca volta a NULL).
+  cobre: **replay do mesmo resultado terminal preserva o `completed_at` original**
+  (nunca avança para T2 nem volta a NULL, e a credencial emitida depois do replay
+  continua com `validFrom = T1`); **reexecução com evidências novas é conclusão
+  nova** (mesmo veredito, `evidence_set_hash` diferente → novo instante — prova de
+  que a preservação não é incondicional); e o caminho parcial (`completed_at`
+  permanece NULL, inclusive em replay).
 - O vetor normativo B.3 (`data-integrity.test.ts`) e o RFC 8785 continuam
   passando — a canonicalização e o cryptosuite não foram tocados.
 

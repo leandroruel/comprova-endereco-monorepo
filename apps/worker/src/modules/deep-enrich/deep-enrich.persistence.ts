@@ -248,9 +248,11 @@ export interface ValidationOutcomeWrite {
     readonly contradicting_evidence: readonly string[]
   }
   /**
-   * Instante REAL da conclusão do resultado terminal (não o instante de
-   * avaliação/score). Ignorado quando `stillPartial`: aí `completed_at` fica
-   * NULL, porque a validação ainda pode ser concluída por outra execução.
+   * Instante a registrar como conclusão (`completed_at`): o instante real da
+   * conclusão quando é uma conclusão NOVA, ou o `completed_at` original quando a
+   * execução é replay de um resultado terminal já persistido (ADR-0024 §5).
+   * Ignorado quando `stillPartial`: aí `completed_at` fica NULL, porque a
+   * validação ainda pode ser concluída por outra execução.
    */
   readonly completedAt: Date
 }
