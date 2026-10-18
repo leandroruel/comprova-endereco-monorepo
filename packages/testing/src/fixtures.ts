@@ -1,9 +1,6 @@
-import { type Db } from '@comprova/db'
-import { createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { type Db, makeApiKeyHasher, newApiKey, keyPrefixOf } from '@comprova/db'
+import { randomBytes, randomUUID } from 'node:crypto'
 import * as t from '@comprova/db'
-
-export const hashApiKey = (pepper: string, plaintext: string): Buffer =>
-  createHmac('sha256', pepper).update(plaintext).digest()
 
 export const ensureLegalBasis = async (db: Db): Promise<void> => {
   await db
@@ -45,13 +42,12 @@ export const createApiKey = async (
   opts: CreateApiKeyOptions = {},
 ): Promise<{ readonly apiKeyId: string; readonly plaintext: string }> => {
   const apiKeyId = randomUUID()
-  const plaintext = `cvk${randomBytes(18).toString('hex')}`
-  const keyHash = hashApiKey(pepper, plaintext)
+  const plaintext = newApiKey()
   await db.insert(t.apiKey).values({
     apiKeyId,
     tenantId,
-    keyPrefix: plaintext.slice(0, 12),
-    keyHash: Buffer.from(keyHash),
+    keyPrefix: keyPrefixOf(plaintext),
+    keyHash: makeApiKeyHasher(pepper).hash(plaintext),
     scopes: [...(opts.scopes ?? ['validate:read', 'validate:write'])],
   })
   return { apiKeyId, plaintext }

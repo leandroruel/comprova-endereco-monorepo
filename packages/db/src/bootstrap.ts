@@ -1,8 +1,8 @@
-import { hash } from '@node-rs/argon2'
 import { and, eq, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { createCLILogger } from '@comprova/observability'
 import { createDbPool } from './client.js'
+import { keyPrefixOf, makeApiKeyHasher, newApiKey } from './api-keys.js'
 import * as t from './schema.js'
 
 const logger = createCLILogger('bootstrap')
@@ -38,13 +38,13 @@ const run = async (): Promise<void> => {
       return
     }
 
-    const plaintext = `cvk${randomUUID().replace(/-/g, '')}`
-    const keyHash = await hash(pepper + plaintext)
+    const plaintext = newApiKey()
+    const keyHash = makeApiKeyHasher(pepper).hash(plaintext)
     await pool.db.insert(t.apiKey).values({
       apiKeyId: randomUUID(),
       tenantId: devTenantId,
-      keyPrefix: plaintext.slice(0, 8),
-      keyHash: Buffer.from(keyHash),
+      keyPrefix: keyPrefixOf(plaintext),
+      keyHash,
     })
     logger.info('API key created (will not be shown again):')
     process.stdout.write(`${plaintext}\n`)
