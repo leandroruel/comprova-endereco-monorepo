@@ -1,5 +1,5 @@
-import type { Locator } from '@vitest/browser/context'
-import { page } from '@vitest/browser/context'
+import type { Locator } from 'vitest/browser'
+import { page } from 'vitest/browser'
 import { describe, expect, it } from 'vitest'
 import { render } from 'vitest-browser-react'
 import type { ValidationDto, ValidationSignal } from '@/api/client'
@@ -82,7 +82,7 @@ const rowButton = (checker: string): Locator => {
 
 describe('ValidationResult', () => {
   it('comunica o estado por texto, não apenas por cor', async () => {
-    render(<ValidationResult validation={validation} />)
+    await render(<ValidationResult validation={validation} />)
 
     await expect.element(page.getByRole('heading', { name: 'Comercial confirmado' })).toBeVisible()
     await expect
@@ -101,7 +101,7 @@ describe('ValidationResult', () => {
   })
 
   it('resume as evidências e lista os pontos de atenção', async () => {
-    render(<ValidationResult validation={validation} />)
+    await render(<ValidationResult validation={validation} />)
 
     // A barra de distribuição é só cor: sem a folha de estilo no teste ela não
     // tem caixa própria, então o alvo é a presença (e o nome acessível), não a
@@ -114,7 +114,7 @@ describe('ValidationResult', () => {
   })
 
   it('agrupa as evidências por categoria e permite abrir o detalhe', async () => {
-    render(<ValidationResult validation={validation} />)
+    await render(<ValidationResult validation={validation} />)
 
     const registry = page.getByRole('group', { name: 'Cadastro' })
     await expect.element(registry).toBeVisible()
@@ -135,7 +135,7 @@ describe('ValidationResult', () => {
   })
 
   it('expande todas as evidências com defaultExpanded', async () => {
-    render(<ValidationResult validation={validation} defaultExpanded />)
+    await render(<ValidationResult validation={validation} defaultExpanded />)
 
     for (const s of validation.signals) {
       await expect.poll(() => document.getElementById(panelId(s.checker))).not.toBeNull()
@@ -143,7 +143,7 @@ describe('ValidationResult', () => {
   })
 
   it('recolhe o resultado mantendo o controle acessível', async () => {
-    render(<ValidationResult validation={validation} />)
+    await render(<ValidationResult validation={validation} />)
 
     await page.getByRole('button', { name: 'Recolher resultado' }).click()
 
@@ -154,7 +154,7 @@ describe('ValidationResult', () => {
   })
 
   it('sinaliza resultado parcial e veredito inconclusivo', async () => {
-    render(
+    await render(
       <ValidationResult
         validation={{ ...validation, status: 'queued', verdict: 'INSUFFICIENT_EVIDENCE', confidence: 0.3 }}
       />,
@@ -168,7 +168,7 @@ describe('ValidationResult', () => {
   })
 
   it('explica quando o CNPJ não está na competência carregada', async () => {
-    render(
+    await render(
       <ValidationResult validation={{ ...validation, address_unavailable_reason: 'cnpj_not_in_snapshot' }} />,
     )
 

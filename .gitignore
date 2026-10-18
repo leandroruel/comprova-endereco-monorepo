@@ -7,5 +7,5 @@ coverage/
 tmp/
 *.tsbuildinfo
 
-# Screenshots de falha do Vitest Browser Mode (artefato de diagnóstico).
-__screenshots__/
+# Artefatos do Vitest (relatórios, anexos e screenshots de falha do browser).
+.vitest/

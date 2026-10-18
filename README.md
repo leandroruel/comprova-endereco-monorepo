@@ -94,6 +94,9 @@ Os testes de componente não carregam a folha de estilo (Tailwind), então
 asserções de visibilidade valem para elementos com caixa própria — cor e
 espaçamento não são testados.
 
+Quando um teste de browser falha, o Vitest grava um screenshot em
+`.vitest/attachments/failure-screenshots/` (gitignored).
+
 ## Modos de validação
 
 | Modo   | Descrição                                                    | Requer           |

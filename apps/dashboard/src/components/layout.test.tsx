@@ -1,4 +1,4 @@
-import { page, userEvent } from '@vitest/browser/context'
+import { page, userEvent } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { DashboardLayout } from './layout'
@@ -7,7 +7,7 @@ const userMenu = () => page.getByRole('button', { name: 'Menu do usuário' })
 
 describe('DashboardLayout', () => {
   it('renderiza o conteúdo e a navegação lateral', async () => {
-    render(<DashboardLayout>conteúdo da página</DashboardLayout>)
+    await render(<DashboardLayout>conteúdo da página</DashboardLayout>)
 
     await expect.element(page.getByText('conteúdo da página', { exact: true })).toBeVisible()
     await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
@@ -16,7 +16,7 @@ describe('DashboardLayout', () => {
 
   it('troca de aba e avisa a navegação ao clicar no menu lateral', async () => {
     const onNavigate = vi.fn()
-    render(<DashboardLayout onNavigate={onNavigate}>conteúdo</DashboardLayout>)
+    await render(<DashboardLayout onNavigate={onNavigate}>conteúdo</DashboardLayout>)
 
     await page.getByRole('button', { name: 'Busca em lote' }).click()
 
@@ -24,7 +24,7 @@ describe('DashboardLayout', () => {
   })
 
   it('identifica o usuário no gatilho do menu e alterna o estado acessível', async () => {
-    render(<DashboardLayout userEmail="ana.souza@empresa.com">conteúdo</DashboardLayout>)
+    await render(<DashboardLayout userEmail="ana.souza@empresa.com">conteúdo</DashboardLayout>)
 
     const trigger = userMenu()
     await expect.element(trigger).toHaveAttribute('aria-expanded', 'false')
@@ -42,7 +42,7 @@ describe('DashboardLayout', () => {
   })
 
   it('cai em "Conta" quando não há e-mail', async () => {
-    render(<DashboardLayout>conteúdo</DashboardLayout>)
+    await render(<DashboardLayout>conteúdo</DashboardLayout>)
 
     const trigger = userMenu()
     await expect.element(trigger.getByText('Conta', { exact: true })).toBeVisible()
@@ -51,7 +51,7 @@ describe('DashboardLayout', () => {
 
   it('abre o menu com Perfil e Configurações e encaminha a navegação', async () => {
     const onNavigate = vi.fn()
-    render(
+    await render(
       <DashboardLayout userEmail="ana@empresa.com" onNavigate={onNavigate}>
         conteúdo
       </DashboardLayout>,
@@ -70,7 +70,7 @@ describe('DashboardLayout', () => {
 
   it('mostra a ação destrutiva de sair apenas quando há onLogout', async () => {
     const onLogout = vi.fn()
-    render(
+    await render(
       <DashboardLayout userEmail="ana@empresa.com" onLogout={onLogout}>
         conteúdo
       </DashboardLayout>,
@@ -85,7 +85,7 @@ describe('DashboardLayout', () => {
   })
 
   it('omite "Sair" quando o logout não está conectado', async () => {
-    render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
+    await render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
 
     await userMenu().click()
 
@@ -97,7 +97,7 @@ describe('DashboardLayout', () => {
   // Radix não recebia eventos de teclado de verdade e o foco não era gerenciado.
   it('abre o menu pelo teclado, ativa o primeiro item e fecha com Escape', async () => {
     const onNavigate = vi.fn()
-    render(
+    await render(
       <DashboardLayout userEmail="ana@empresa.com" onNavigate={onNavigate}>
         conteúdo
       </DashboardLayout>,

@@ -1,26 +1,9 @@
 # Supressões temporárias do `trivy fs`. Cada item tem prazo: ao expirar, o
 # scan volta a falhar e a decisão precisa ser revista.
 #
-# Todos os itens abaixo são de `vitest@3.2.7` e de sua árvore (tinypool,
-# @vitest/mocker), usados SOMENTE em testes locais/CI — não entram no runtime
-# da API, do worker ou do ingestor. As correções só existem em `vitest@4`
-# (migração incompatível), que fica como tarefa separada.
-vulnerabilities:
-  - id: CVE-2026-84373
-    statement: >-
-      vitest/@vitest/mocker 3.2.7 (devDependency de teste) — leitura arbitrária
-      de arquivo via HMR WebSocket. Corrigido apenas em vitest 4.1.11+.
-    expired_at: 2027-01-31
-
-  - id: CVE-2026-104848
-    statement: >-
-      tinypool 1.1.1 (transitiva de vitest 3, devDependency) — execução
-      arbitrária de código via poluição de protótipo. Corrigido em tinypool
-      2.1.1, que exige vitest 4.
-    expired_at: 2027-01-31
-
-  - id: CVE-2026-104849
-    statement: >-
-      tinypool 1.1.1 (transitiva de vitest 3, devDependency) — poluição de
-      protótipo para RCE. Corrigido em tinypool 2.1.2, que exige vitest 4.
-    expired_at: 2027-01-31
+# Vazio de propósito: as três supressões anteriores eram de `vitest@3.2.7` e de
+# sua árvore (`@vitest/mocker`, `tinypool`) e deixaram de ser necessárias no
+# vitest 5 — a CVE do HMR WebSocket foi corrigida no 4.1.11 e o `tinypool`
+# deixou de existir sem o pool reescrito do v4. Se voltar a ser preciso suprimir
+# algo, cada item precisa de `statement` (por que é aceitável) e `expired_at`.
+vulnerabilities: []

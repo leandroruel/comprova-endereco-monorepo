@@ -14,11 +14,13 @@ resultado das queries, eventos de ponteiro e teclado são simulados em JS, e o
 nome acessível é calculado por um polyfill. Ou seja, era preciso stubbear APIs da
 plataforma para o Radix funcionar — testando contra um DOM que nenhum usuário vê.
 
-O Vitest 3.2.7 (já instalado) oferece **Browser Mode** com provider Playwright, e
-a documentação recomenda para React: `vitest-browser-react` para renderizar,
-locators (`page`/`screen`) para buscar, `expect.element(...)` para asserção com
-retry e `userEvent` de `@vitest/browser/context` — que dispara eventos reais via
-CDP em vez de simulá-los em JS.
+O Vitest oferece **Browser Mode** com provider Playwright, e a documentação
+recomenda para React: `vitest-browser-react` para renderizar, locators
+(`page`/`screen`) para buscar, `expect.element(...)` para asserção com retry e
+`userEvent` de `vitest/browser` — que dispara eventos reais via CDP em vez de
+simulá-los em JS. O runner subiu para o **Vitest 5** nesta mesma frente (ver
+Decisão): usar o Browser Mode já significava mexer no runner, então o upgrade
+veio junto em vez de virar uma segunda frente sobre os mesmos arquivos.
 
 ## Decisão
 
@@ -29,12 +31,22 @@ CDP em vez de simulá-los em JS.
   `.test.ts` = nó**.
 - Renderização com `vitest-browser-react`; busca e asserção com locators e
   `expect.element(...)`; interação com o `userEvent` do contexto do browser.
-- Dependências: `@vitest/browser` e `playwright` na raiz, `vitest-browser-react`
-  no dashboard. **Saíram** `jsdom`, `@testing-library/{react,dom,user-event}` e o
+- Dependências: `playwright` e `@vitest/browser-playwright` na raiz (no v4+ o
+  provider é uma factory, importada do pacote do provider; o pacote
+  `@vitest/browser` deixou de ser dependência nossa) e `vitest-browser-react` no
+  dashboard. **Saíram** `jsdom`, `@testing-library/{react,dom,user-event}` e o
   `src/test/polyfills.ts`.
-- `vitest-browser-react` fica no **1.x**: a linha 2.x exige `vitest@^4`. O
-  `@vitest/browser` precisa casar de versão com o vitest (ambos `^3.2.0`), então
-  o upgrade dos três vem junto — na frente de robustez de CI/testes.
+- Runner no **`vitest@5.0.5`** com `vitest-browser-react@2.x`: a linha 2.x do
+  wrapper exige `vitest@^4`, e o vitest 3 mantinha CVEs conhecidas (`@vitest/mocker`
+  e `tinypool`) suprimidas à mão no `.trivyignore.yaml`. No v5 elas não existem
+  mais na árvore — o ignorefile ficou **vazio de propósito** — e em troca o
+  `engines.node` do repo subiu para `>=22.12`. O `vite` virou dependência
+  explícita da raiz, como a doc do v5 pede (peer, não dependência do runner).
+- No `vitest-browser-react@2.x` o `render` é assíncrono (`await render(...)`,
+  igual ao `rerender`); os testes foram ajustados.
+- `poolOptions.forks.singleFork` (v3) virou `maxWorkers: 1` no pool reescrito do
+  v4, preservando a isolação por arquivo de que os testes de integração precisam
+  (um container por arquivo).
 - Os navegadores **não** são baixados no `pnpm install` (`pnpm.onlyBuiltDependencies`
   só permite `esbuild`): `npx playwright install chromium` é pré-requisito local e
   passo do workflow de CI (`npx playwright install --with-deps chromium`). Sem o
@@ -53,7 +65,11 @@ CDP em vez de simulá-los em JS.
   de teste do Vitest, sem servidor.
 - **`@playwright/test` só para o dashboard:** segundo runner, segunda
   configuração, segundo relatório.
-- **`vitest-browser-react@2.x`:** exigiria subir o vitest para 4.x nesta frente.
+- **Ficar no `vitest@3` com `vitest-browser-react@1.x`:** era o estado inicial,
+  mas mantinha as CVEs suprimidas à mão e um wrapper uma linha atrás. Adiar o
+  upgrade significaria mexer duas vezes nos mesmos arquivos.
+- **Ir direto para o `vitest@5` sem declarar `vite` na raiz:** deixaria a versão
+  do bundler dos testes sendo resolvida implicitamente como peer do vitest.
 - **`@testing-library/react` para render + `userEvent` do contexto:** a doc do
   Vitest desaconselha o `user-event` do testing-library no Browser Mode (simula
   em vez de disparar); manter o RTL apenas para renderizar não compensa o wrapper
@@ -69,9 +85,13 @@ CDP em vez de simulá-los em JS.
   visibilidade valem para elementos com caixa própria (texto, botões) e não para
   o que é só cor/espaçamento. Se um dia for necessário, o caminho é importar o CSS
   no setup do projeto `dashboard`.
-- Screenshots de falha ficam em `__screenshots__/` ao lado do teste (gitignored),
-  como artefato de diagnóstico.
+- Screenshots de falha ficam em `.vitest/attachments/failure-screenshots/`
+  (gitignored junto com o resto do `.vitest/`), como artefato de diagnóstico.
 - Menos dependências no total: saíram o jsdom e os três pacotes de testing-library.
+- O upgrade do runner zerou o `.trivyignore.yaml`: as CVEs de `@vitest/mocker` e
+  `tinypool` não existem mais na árvore (confirmado com `trivy fs
+--include-dev-deps`), então o gate `security` volta a acusar sozinho qualquer
+  coisa nova que apareça.
 - CI ganha o passo de instalação do Chromium; o projeto de browser hoje são 2
   arquivos / 15 testes e roda em poucos segundos.
 
