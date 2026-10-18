@@ -6,3 +6,6 @@ coverage/
 .turbo/
 tmp/
 *.tsbuildinfo
+
+# Screenshots de falha do Vitest Browser Mode (artefato de diagnóstico).
+__screenshots__/

@@ -49,7 +49,8 @@ Abre `http://localhost:5173`:
 
 ```bash
 pnpm dev          # tudo (API, dashboard, worker, ingestor)
-pnpm test         # 109/109 testes
+pnpm test         # suíte completa (projetos `node` e `dashboard`)
+pnpm test:browser # só os testes de componente, no Chromium real
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
 pnpm format       # prettier
@@ -67,6 +68,31 @@ pnpm --filter @comprova/ingestor start -- profiles:recompute
 pnpm --filter @comprova/ingestor start -- load-tenant
 pnpm --filter @comprova/ingestor start -- policy:simulate <versao> [--report]
 ```
+
+## Testes
+
+A suíte roda em dois projetos do Vitest, escolhidos pela extensão do arquivo:
+
+| Projeto     | Ambiente                   | Alcança                                          |
+| ----------- | -------------------------- | ------------------------------------------------ |
+| `node`      | Node, `pool: forks`        | `*.test.ts(x)` de API, worker, ingestor, pacotes |
+| `dashboard` | Chromium real (Playwright) | `apps/dashboard/src/**/*.test.tsx`               |
+
+Testes de componente (`*.test.tsx`) rodam no browser de verdade: eventos de
+ponteiro/teclado, foco e árvore de acessibilidade são os do Chromium, sem jsdom
+nem polyfills. O resto continua no Node, que é mais rápido e tem os containers
+do Testcontainers.
+
+Pré-requisito para o projeto `dashboard` (o download do Chromium não roda no
+`pnpm install`, por não estar entre os `onlyBuiltDependencies`):
+
+```bash
+npx playwright install chromium   # uma vez por máquina; no CI é um passo do workflow
+```
+
+Os testes de componente não carregam a folha de estilo (Tailwind), então
+asserções de visibilidade valem para elementos com caixa própria — cor e
+espaçamento não são testados.
 
 ## Modos de validação
 

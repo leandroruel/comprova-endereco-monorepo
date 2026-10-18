@@ -1,12 +1,9 @@
-// @vitest-environment jsdom
-import '@/test/polyfills'
-import { cleanup, render, screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import type { Locator } from '@vitest/browser/context'
+import { page } from '@vitest/browser/context'
+import { describe, expect, it } from 'vitest'
+import { render } from 'vitest-browser-react'
 import type { ValidationDto, ValidationSignal } from '@/api/client'
 import { ValidationResult } from './validation-result'
-
-afterEach(cleanup)
 
 const NOW = '2026-10-17T12:00:00.000Z'
 const VALIDATION_ID = 'abcd1234-5678-4abc-9def-000000000001'
@@ -77,100 +74,111 @@ const validation: ValidationDto = {
 
 const panelId = (checker: string): string => `sig-${VALIDATION_ID}-${checker}-panel`
 
-const rowButton = (checker: string): HTMLElement => {
+const rowButton = (checker: string): Locator => {
   const row = document.getElementById(`sig-${VALIDATION_ID}-${checker}`)
   if (row === null) throw new Error(`linha de evidência ausente para ${checker}`)
-  return within(row).getByRole('button')
+  return page.elementLocator(row).getByRole('button')
 }
 
 describe('ValidationResult', () => {
-  it('comunica o estado por texto, não apenas por cor', () => {
+  it('comunica o estado por texto, não apenas por cor', async () => {
     render(<ValidationResult validation={validation} />)
 
-    expect(screen.getByRole('heading', { name: 'Comercial confirmado' })).toBeTruthy()
-    expect(screen.getByText('Endereço compatível com a atividade.')).toBeTruthy()
-    expect(screen.getByText('Endereço de registro da empresa')).toBeTruthy()
-    expect(screen.getByText('alta')).toBeTruthy()
-    expect(screen.getByText('+0.62')).toBeTruthy()
+    await expect.element(page.getByRole('heading', { name: 'Comercial confirmado' })).toBeVisible()
+    await expect
+      .element(page.getByText('Endereço compatível com a atividade.', { exact: true }))
+      .toBeVisible()
+    await expect.element(page.getByText('Endereço de registro da empresa', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('alta', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('+0.62', { exact: true })).toBeVisible()
     // Anel de confiança exposto como imagem com nome acessível.
-    expect(screen.getByRole('img', { name: 'Confiança alta: 90%' })).toBeTruthy()
+    await expect.element(page.getByRole('img', { name: 'Confiança alta: 90%' })).toBeVisible()
     // Rótulos de postura legíveis ao lado dos ícones (nunca só a cor).
-    expect(screen.getAllByText('A favor')).toHaveLength(4)
-    expect(screen.getAllByText('Contra').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Neutro').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Sem dados').length).toBeGreaterThanOrEqual(1)
+    expect(page.getByText('A favor', { exact: true }).elements()).toHaveLength(4)
+    expect(page.getByText('Contra', { exact: true }).elements().length).toBeGreaterThanOrEqual(1)
+    expect(page.getByText('Neutro', { exact: true }).elements().length).toBeGreaterThanOrEqual(1)
+    expect(page.getByText('Sem dados', { exact: true }).elements().length).toBeGreaterThanOrEqual(1)
   })
 
-  it('resume as evidências e lista os pontos de atenção', () => {
+  it('resume as evidências e lista os pontos de atenção', async () => {
     render(<ValidationResult validation={validation} />)
 
-    expect(screen.getByRole('img', { name: '4 a favor, 1 neutro, 1 contra, 1 sem dados' })).toBeTruthy()
-    expect(screen.getByText('Pontos de atenção (2)')).toBeTruthy()
-    expect(screen.getByText(/Provedores de mapa divergem em 420 m/)).toBeTruthy()
+    // A barra de distribuição é só cor: sem a folha de estilo no teste ela não
+    // tem caixa própria, então o alvo é a presença (e o nome acessível), não a
+    // pintura na tela.
+    await expect
+      .element(page.getByRole('img', { name: '4 a favor, 1 neutro, 1 contra, 1 sem dados' }))
+      .toBeInTheDocument()
+    await expect.element(page.getByText('Pontos de atenção (2)', { exact: true })).toBeVisible()
+    await expect.element(page.getByText(/Provedores de mapa divergem em 420 m/)).toBeVisible()
   })
 
   it('agrupa as evidências por categoria e permite abrir o detalhe', async () => {
-    const user = userEvent.setup()
     render(<ValidationResult validation={validation} />)
 
-    const registry = screen.getByRole('group', { name: 'Cadastro' })
-    expect(within(registry).getAllByRole('listitem')).toHaveLength(3)
-    expect(screen.getByRole('group', { name: 'Ocupação do imóvel' })).toBeTruthy()
+    const registry = page.getByRole('group', { name: 'Cadastro' })
+    await expect.element(registry).toBeVisible()
+    expect(registry.getByRole('listitem').elements()).toHaveLength(3)
+    await expect.element(page.getByRole('group', { name: 'Ocupação do imóvel' })).toBeVisible()
 
     const button = rowButton('document_integrity')
-    expect(button.getAttribute('aria-expanded')).toBe('false')
-    expect(button.getAttribute('aria-controls')).toBe(panelId('document_integrity'))
+    await expect.element(button).toHaveAttribute('aria-expanded', 'false')
+    await expect.element(button).toHaveAttribute('aria-controls', panelId('document_integrity'))
 
-    await user.click(button)
-    expect(button.getAttribute('aria-expanded')).toBe('true')
-    expect(document.getElementById(panelId('document_integrity'))).not.toBeNull()
+    await button.click()
+    await expect.element(button).toHaveAttribute('aria-expanded', 'true')
+    await expect.poll(() => document.getElementById(panelId('document_integrity'))).not.toBeNull()
 
-    await user.click(button)
-    expect(button.getAttribute('aria-expanded')).toBe('false')
-    expect(document.getElementById(panelId('document_integrity'))).toBeNull()
+    await button.click()
+    await expect.element(button).toHaveAttribute('aria-expanded', 'false')
+    await expect.poll(() => document.getElementById(panelId('document_integrity'))).toBeNull()
   })
 
-  it('expande todas as evidências com defaultExpanded', () => {
+  it('expande todas as evidências com defaultExpanded', async () => {
     render(<ValidationResult validation={validation} defaultExpanded />)
 
     for (const s of validation.signals) {
-      expect(document.getElementById(panelId(s.checker))).not.toBeNull()
+      await expect.poll(() => document.getElementById(panelId(s.checker))).not.toBeNull()
     }
   })
 
   it('recolhe o resultado mantendo o controle acessível', async () => {
-    const user = userEvent.setup()
     render(<ValidationResult validation={validation} />)
 
-    await user.click(screen.getByRole('button', { name: 'Recolher resultado' }))
+    await page.getByRole('button', { name: 'Recolher resultado' }).click()
 
-    expect(screen.queryByText('Resumo das evidências')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Expandir resultado' }).getAttribute('aria-expanded')).toBe(
-      'false',
-    )
+    await expect.element(page.getByText('Resumo das evidências', { exact: true })).not.toBeInTheDocument()
+    await expect
+      .element(page.getByRole('button', { name: 'Expandir resultado' }))
+      .toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('sinaliza resultado parcial e veredito inconclusivo', () => {
+  it('sinaliza resultado parcial e veredito inconclusivo', async () => {
     render(
       <ValidationResult
         validation={{ ...validation, status: 'queued', verdict: 'INSUFFICIENT_EVIDENCE', confidence: 0.3 }}
       />,
     )
 
-    expect(screen.getByText('resultado parcial')).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Evidência insuficiente' })).toBeTruthy()
-    expect(screen.getByText('O enriquecimento ainda pode alterar este veredito.')).toBeTruthy()
+    await expect.element(page.getByText('resultado parcial', { exact: true })).toBeVisible()
+    await expect.element(page.getByRole('heading', { name: 'Evidência insuficiente' })).toBeVisible()
+    await expect
+      .element(page.getByText('O enriquecimento ainda pode alterar este veredito.', { exact: true }))
+      .toBeVisible()
   })
 
-  it('explica quando o CNPJ não está na competência carregada', () => {
+  it('explica quando o CNPJ não está na competência carregada', async () => {
     render(
       <ValidationResult validation={{ ...validation, address_unavailable_reason: 'cnpj_not_in_snapshot' }} />,
     )
 
-    expect(
-      screen.getByText(
-        'Este CNPJ não está na competência carregada da Receita. As verificações que dependem do cadastro ficam sem dados até a próxima carga.',
-      ),
-    ).toBeTruthy()
+    await expect
+      .element(
+        page.getByText(
+          'Este CNPJ não está na competência carregada da Receita. As verificações que dependem do cadastro ficam sem dados até a próxima carga.',
+          { exact: true },
+        ),
+      )
+      .toBeVisible()
   })
 })
