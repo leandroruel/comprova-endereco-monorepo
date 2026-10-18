@@ -62,6 +62,12 @@ coluna sem índice varre a tabela. `cacheKeys.invalidateAll` (usado por
 `ingestor cache:flush all`) passou a limpar `meta:*`, para que uma ingestão nova não deixe
 proveniência velha em cache.
 
+`cacheable` **coalesce leituras concorrentes com a chave fria**: quem chega enquanto a primeira
+execução está em voo espera a mesma promessa em vez de rodar os 7 `MAX()` de novo. Sem isso, a
+virada do TTL (ou um pico logo depois de um deploy) multiplicava a varredura pelo número de
+requisições simultâneas. O coalescing é por chave e por processo — com N réplicas o teto é N
+execuções.
+
 ### 5. Semântica de snapshot documentada
 
 `snapshot_month` é proveniência **por linha** do último lote que tocou a linha, não chave de
@@ -76,6 +82,10 @@ foi reescrito para descrever isso e o rollback real (reingestão do dump anterio
   adiciona tabela + migração; fica como próximo passo (issue separada).
 - **Índice nas colunas de versão** — só é decisão depois do dump real (custo de índice em dezenas
   de milhões de linhas).
+- **Lock distribuído para a chave fria** — coordenar o coalescing entre réplicas exigiria
+  `SET NX` + espera no Redis, com modos de falha próprios (lock órfão, espera travada), para um
+  endpoint autenticado de baixo tráfego. O ledger de ingestão resolve melhor: elimina a varredura
+  em si, não só a repetição dela.
 - **Particionamento/coexistência por snapshot** — a base é atualizada no lugar de propósito.
 - **Proveniência dentro da credencial** (de qual snapshot saiu o veredito): exigiria binding novo
   no domínio; a credencial continua descrevendo a `validation`, não o dataset.
@@ -85,7 +95,8 @@ foi reescrito para descrever isso e o rollback real (reingestão do dump anterio
 - "Qual versão está carregada?" passa a ter uma resposta única, autenticada e sem acesso ao banco
   (`GET /v1/meta`), e o ingestor não grava proveniência inventada.
 - Limitação conhecida e aceita: as queries de `MAX()` são varreduras completas, amortecidas pelo
-  cache de 5 min. Com o dump real carregado, a primeira chamada com cache frio pode demorar — o
-  caminho correto é o ledger de ingestão (ou índice), não aumentar o TTL.
+  cache de 5 min (e coalescidas quando concorrentes). Com o dump real carregado, a primeira
+  chamada com cache frio pode demorar — o caminho correto é o ledger de ingestão (ou índice), não
+  aumentar o TTL.
 - A credencial continua sem declarar em qual base/snapshot o resultado se apoiou; o valor
   permanece aberto e registrado aqui para não ser esquecido.

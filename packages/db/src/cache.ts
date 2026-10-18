@@ -91,6 +91,31 @@ export const makeRedisCache = (redis: Redis, logger?: CacheLogger): CacheStore =
   }
 }
 
+// Leituras concorrentes com a chave fria compartilham a mesma execução. Sem
+// isso, todo request que chega antes do `set` roda o `fetch` por conta própria:
+// num `fetch` que faz varredura cara (ex.: os `MAX()` de `meta:datasets:v1`), a
+// virada do TTL dispara N varreduras idênticas em vez de uma. O coalescing é
+// por chave e por processo — com réplicas, o teto é uma execução por réplica.
+const inFlight = new Map<string, Promise<unknown>>()
+
+const fetchAndCache = async <T>(
+  cache: CacheStore,
+  key: string,
+  ttlSeconds: number,
+  fetch: () => Promise<T>,
+): Promise<T> => {
+  try {
+    const fresh = await fetch()
+    if (fresh !== null && fresh !== undefined) {
+      await cache.set(key, fresh, ttlSeconds)
+    }
+    return fresh
+  } finally {
+    // Uma falha não pode ficar em voo para sempre: quem chegar depois tenta de novo.
+    inFlight.delete(key)
+  }
+}
+
 export const cacheable = async <T>(
   cache: CacheStore,
   key: string,
@@ -99,9 +124,11 @@ export const cacheable = async <T>(
 ): Promise<T> => {
   const cached = await cache.get<T>(key)
   if (cached !== null) return cached
-  const fresh = await fetch()
-  if (fresh !== null && fresh !== undefined) {
-    await cache.set(key, fresh, ttlSeconds)
-  }
-  return fresh
+
+  const pending = inFlight.get(key) as Promise<T> | undefined
+  if (pending !== undefined) return pending
+
+  const promise = fetchAndCache(cache, key, ttlSeconds, fetch)
+  inFlight.set(key, promise)
+  return promise
 }

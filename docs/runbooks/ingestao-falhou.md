@@ -20,8 +20,12 @@
 
 ## Diagnóstico
 
+Só leitura: nada nesta seção altera base. Em particular, **não** rode a ingestão
+"para ver o erro" — ela grava o `--snapshot` informado nas linhas que tocar e, com
+um mês que não é o do arquivo, deixa proveniência errada. A receita de reingestão
+está em "Ações".
+
 ```bash
-pnpm --filter @comprova/ingestor start -- receita:estabelecimentos <arquivo> --snapshot 2026-09 --limit 1000
 psql $DATABASE_ADMIN_URL -c "SELECT snapshot_month, COUNT(*) FROM ref_receita_estabelecimento GROUP BY 1 ORDER BY 1"
 psql $DATABASE_ADMIN_URL -c "SELECT COUNT(*) FROM ref_receita_estabelecimento WHERE situacao_cadastral = 2"
 psql $DATABASE_ADMIN_URL -c "SELECT valid_from, valid_to, COUNT(*) FROM ref_estabelecimento_history GROUP BY 1, 2 ORDER BY 1 DESC LIMIT 10"
@@ -32,20 +36,24 @@ Não é estado transitório inofensivo: é dado sendo servido.
 
 ## Ações
 
-1. **Arquivo inválido/encoding**: o column-map (`COLUMN_MAP` no
+1. **Reingestão é escrita**: o `--snapshot` é o mês do **arquivo** que está carregando
+   (`YYYY-MM`) — é o valor que vai para `snapshot_month` das linhas tocadas, então nunca reuse o
+   mês de outro carregamento. Para reproduzir a falha, use o mês correto e um `--limit` pequeno:
+   `pnpm --filter @comprova/ingestor start -- receita:estabelecimentos <arquivo> --snapshot <YYYY-MM> --limit 1000`.
+2. **Arquivo inválido/encoding**: o column-map (`COLUMN_MAP` no
    `apps/ingestor/src/receita-estabelecimentos.ts`) assume o layout oficial de Estabelecimentos
    (23 colunas, `;`). Validar header com `head -1 <arquivo> | tr ';' '\n' | wc -l` (deve dar 23).
    Layout mudou? Ajustar o map — **não** improvisar parse manual.
-2. **Conflito de PK**: o upsert tem como alvo `(cnpj_basico, cnpj_ordem, cnpj_dv)`; duplicidade no
+3. **Conflito de PK**: o upsert tem como alvo `(cnpj_basico, cnpj_ordem, cnpj_dv)`; duplicidade no
    dump é absorvida pelo `ON CONFLICT`. Não existe "swap de snapshot" — não há o que falhar no
    meio de uma troca.
-3. **Carga interrompida**: reexecutar com o **mesmo `--snapshot`**. O upsert é idempotente, mas as
+4. **Carga interrompida**: reexecutar com o **mesmo `--snapshot`**. O upsert é idempotente, mas as
    linhas não processadas ainda servem o snapshot anterior (ver "como os dados são carregados").
    Quando o reexecutar terminar, conferir o `GROUP BY snapshot_month` do diagnóstico.
-4. **Performance**: ingestão completa do dump real ainda é gate adiada (dump em download).
+5. **Performance**: ingestão completa do dump real ainda é gate adiada (dump em download).
    Se > X horas (X a definir com o dump real): partir por UF (`--limit` por chunks de arquivo)
    em janelas separadas.
-5. **Pós-ingestão**: recomputar `address_profile` (job da F1-pendente com dump real) e rodar
+6. **Pós-ingestão**: recomputar `address_profile` (job da F1-pendente com dump real) e rodar
    `policy:simulate` se a política de scoring mudar de peso com dados novos.
 
 ## Rollback
