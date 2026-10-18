@@ -46,8 +46,8 @@ const toCredentialObservation = (o: AssertionObservation): CredentialObservation
  * Normaliza a assertion de domínio já carregada (FASE 2/9). Puro: não acessa
  * banco. Recusa emitir credencial parcial — resultado incompleto, bindings
  * ausentes, `completed_at` ausente (não há como declarar `validFrom` sem
- * presumir) ou `evidence_set_hash` incoerente com o conjunto de observações
- * abortam a emissão.
+ * presumir), janela de validade vazia/invertida (`completed_at >= expires_at`) ou
+ * `evidence_set_hash` incoerente com o conjunto de observações abortam a emissão.
  *
  * As observações e os arrays de explicação são ordenados antes de montar o
  * payload, de modo que `mesma assertion → mesmos bytes`, independentemente da
@@ -74,6 +74,16 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
   if (completedAt === null) {
     throw new Error(
       'validation has no completion timestamp (completed_at); refusing to guess when the result started to be valid',
+    )
+  }
+  // Janela não vazia: `validFrom < validUntil` (VC 2.0 §4.10). `expires_at` é o
+  // horizonte persistido (retenção, ADR-0019/0024) e NÃO é estendido na emissão:
+  // uma validação que concluiu no ou depois do horizonte não pode virar
+  // credencial com janela vazia/invertida — a informação certificada já está
+  // fora do prazo.
+  if (completedAt.getTime() >= v.expiresAt.getTime()) {
+    throw new Error(
+      `validation concluded at ${completedAt.toISOString()} at or after its validity limit (${v.expiresAt.toISOString()}); refusing to emit a credential with an empty or inverted window`,
     )
   }
 

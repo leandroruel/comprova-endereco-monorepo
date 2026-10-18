@@ -440,6 +440,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@comprova/credential':
+        specifier: workspace:^
+        version: link:../../packages/credential
       '@comprova/testing':
         specifier: workspace:^
         version: link:../../packages/testing

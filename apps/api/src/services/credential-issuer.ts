@@ -16,17 +16,20 @@ import {
  * desse grafo é consultada. A camada `@comprova/credential` é pura.
  *
  * Elegibilidade (FASE 9/10): só emite para `status = 'completed'` com resultado
- * completo, bindings presentes e o instante de conclusão registrado
- * (`completed_at`). NÃO emite silenciosamente para `partial`, e NÃO presume
- * `created_at` como conclusão quando `completed_at` falta: o fluxo rápido já
- * persiste o instante real da conclusão e um registro sem ele tem data de
- * conclusão desconhecida (falha `COMPLETION_TIME_MISSING`).
+ * completo, bindings presentes, o instante de conclusão registrado
+ * (`completed_at`) e janela de validade não vazia (`completed_at < expires_at`).
+ * NÃO emite silenciosamente para `partial`, NÃO presume `created_at` como
+ * conclusão quando `completed_at` falta, e NÃO estende `expires_at` para caber
+ * na credencial: um registro sem timestamp de conclusão falha com
+ * `COMPLETION_TIME_MISSING` e um que concluiu fora do prazo, com
+ * `VALIDITY_WINDOW_INVALID`.
  */
 
 export type CredentialIssuanceFailure =
   | 'VALIDATION_NOT_FOUND'
   | 'VALIDATION_NOT_FINAL'
   | 'COMPLETION_TIME_MISSING'
+  | 'VALIDITY_WINDOW_INVALID'
   | 'CLAIM_MISSING'
   | 'SUBJECT_MISSING'
   | 'EVIDENCE_MISSING'
@@ -106,6 +109,17 @@ export const loadAssertionSource = async (
       throw new CredentialIssuanceError(
         'COMPLETION_TIME_MISSING',
         `validation ${validationId} has no completion timestamp (completed_at); refusing to guess when the result started to be valid`,
+      )
+    }
+    // Janela não vazia: `validFrom = completed_at` e `validUntil = expires_at`
+    // (ADR-0024 §5). Quando a análise concluiu no ou depois do horizonte
+    // persistido, a credencial nasceria vazia/expirada — e `expires_at` é o
+    // horizonte de retenção, que a emissão não estende (a política de 30 dias é
+    // decisão de produto, não desta fronteira).
+    if (v.completedAt.getTime() >= v.expiresAt.getTime()) {
+      throw new CredentialIssuanceError(
+        'VALIDITY_WINDOW_INVALID',
+        `validation ${validationId} concluded at ${v.completedAt.toISOString()} at or after its validity limit (${v.expiresAt.toISOString()}); refusing to emit an expired credential`,
       )
     }
 

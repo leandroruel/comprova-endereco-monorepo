@@ -11,7 +11,14 @@ import {
   runMigrations,
 } from '@comprova/db'
 import * as t from '@comprova/db'
-import { loadPolicy, policyHashOf, systemClock } from '@comprova/core'
+import { loadPolicy, policyHashOf, systemClock, type Clock } from '@comprova/core'
+import {
+  generateEd25519KeyPair,
+  localIssuer,
+  makeEd25519Signer,
+  verificationMethodOf,
+  verifyCredential,
+} from '@comprova/credential'
 import { makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
@@ -21,6 +28,10 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { deepEnrich } from './deep-enrich.service.js'
 import { runFastPath } from '../../../../api/src/services/fastpath.js'
+import { issueCredential } from '../../../../api/src/services/credential-issuer.js'
+
+/** Origem de teste (TLD reservado), como no resto da suíte. */
+const ISSUER_ORIGIN = 'https://issuer.test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../../../../')
@@ -448,5 +459,125 @@ describe('deepEnrich (activity core)', () => {
       .where(eq(t.claimEvidence.signalId, legacySignalId))
     expect(backfilled.length).toBe(1)
     expect(backfilled[0]?.evidenceId).toBeNull()
+  })
+
+  // Fase 24 (ADR-0024 §5) — relógio controlado: `deepEnrich` pode levar minutos
+  // nos verificadores, então `completed_at` precisa ser lido no FIM (quando o
+  // resultado terminal fica pronto), nunca reaproveitando o instante de avaliação
+  // capturado no início do processamento.
+  describe('Fase 24 — instante de conclusão do deep path', () => {
+    const T0 = new Date('2026-06-01T00:00:00.000Z')
+    const T1 = new Date('2026-06-01T00:07:00.000Z')
+
+    /** Relógio que avançou durante o processamento: 1ª leitura = T0, demais = T1. */
+    const advancingClock = (): Clock => {
+      let reads = 0
+      return { now: () => (reads++ === 0 ? T0 : T1) }
+    }
+
+    const validationRow = async (validationId: string) =>
+      (await adminPool.db.select().from(t.validation).where(eq(t.validation.validationId, validationId)))[0]
+
+    const createQueued = async (idempotencyKey: string, documentValue: string): Promise<string> => {
+      // `created_at` = T0: a validação nasce em `queued` (fast path) no instante
+      // do pedido; o enriquecimento profundo acontece depois.
+      const created = await runFastPath(
+        { ...fastPathDeps, clock: { now: () => T0 } },
+        { tenantId: tenant, apiKeyId: null },
+        {
+          documentType: 'CNPJ',
+          documentValue,
+          addressInput: null,
+          legalBasis: 'FRAUD_PREVENTION',
+          mode: 'deep',
+          idempotencyKey,
+        },
+      )
+      expect(created.status).toBe('queued')
+      return created.validationId
+    }
+
+    it('registra a conclusão real (T1) e emite credencial com validFrom = completed_at', async () => {
+      const validationId = await createQueued('fase24-completion', '12345678000195')
+
+      const before = await validationRow(validationId)
+      expect(before?.createdAt?.toISOString()).toBe(T0.toISOString())
+      // Nada de `completed_at` antecipado: a validação ainda não concluiu.
+      expect(before?.status).toBe('queued')
+      expect(before?.completedAt).toBeNull()
+
+      const result = await deepEnrich(
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: advancingClock() },
+        { tenantId: tenant, validationId },
+      )
+      expect(result.status).toBe('completed')
+
+      const after = await validationRow(validationId)
+      expect(after?.status).toBe('completed')
+      // `created_at` continua sendo o início da validação (T0)...
+      expect(after?.createdAt?.toISOString()).toBe(T0.toISOString())
+      // ...e `completed_at` é a conclusão dos verificadores (T1), não o início.
+      expect(after?.completedAt?.toISOString()).toBe(T1.toISOString())
+      expect(after!.completedAt!.getTime()).toBeGreaterThan(after!.createdAt!.getTime())
+
+      // A credencial daí derivada usa o instante de conclusão como `validFrom`.
+      const keyPair = generateEd25519KeyPair()
+      const issuer = localIssuer(ISSUER_ORIGIN, tenant, 'key-1')
+      const credential = await issueCredential(adminPool.db, tenant, validationId, {
+        issuerOrigin: ISSUER_ORIGIN,
+        keyId: 'key-1',
+        signer: makeEd25519Signer(keyPair.privateKey),
+      })
+
+      expect(credential.validFrom).toBe(T1.toISOString())
+      expect(credential.validFrom).not.toBe(T0.toISOString())
+      expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
+      expect(credential.validUntil).toBe(after?.expiresAt?.toISOString())
+      expect(
+        verifyCredential(credential, {
+          trusted: { id: verificationMethodOf(issuer), publicKey: keyPair.publicKey },
+        }),
+      ).toEqual({ valid: true })
+    })
+
+    it('reprocessar um resultado completo avança a conclusão (nunca a volta a NULL)', async () => {
+      const validationId = await createQueued('fase24-replay', '12345678000195')
+
+      const first = await deepEnrich(
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: advancingClock() },
+        { tenantId: tenant, validationId },
+      )
+      expect(first.status).toBe('completed')
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T1.toISOString())
+
+      // Retry/replay do worker: o veredito persistido é o último calculado, então
+      // a conclusão acompanha — instante real, nunca NULL nem o início (T0).
+      const T2 = new Date('2026-06-01T00:11:00.000Z')
+      const replay = await deepEnrich(
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: { now: () => T2 } },
+        { tenantId: tenant, validationId },
+      )
+      expect(replay.status).toBe('completed')
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T2.toISOString())
+    })
+
+    it('resultado parcial (e seu replay) permanece sem `completed_at`', async () => {
+      const validationId = await createQueued('fase24-partial', '90123456000131')
+
+      for (const run of [1, 2]) {
+        const result = await deepEnrich(
+          { db: adminPool.db, t1Checkers: t1Chaos, policy, clock: advancingClock() },
+          { tenantId: tenant, validationId },
+        )
+        expect(result.status, `execução ${run}`).toBe('partial')
+
+        const row = await validationRow(validationId)
+        expect(row?.status, `execução ${run}`).toBe('partial')
+        // Parcial não é conclusão: `completed_at` continua NULL, sem timestamp
+        // indevido (inclusive no reprocessamento).
+        expect(row?.completedAt, `execução ${run}`).toBeNull()
+        expect(row?.createdAt?.toISOString()).toBe(T0.toISOString())
+      }
+    })
   })
 })

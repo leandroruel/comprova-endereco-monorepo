@@ -53,6 +53,11 @@ export interface FreshSignalsWrite {
   readonly validationId: string
   readonly addressId: string | null
   readonly signals: readonly Signal[]
+  /**
+   * Referência de tempo do cache por endereço (`now + ttl`). É o instante de
+   * avaliação, não o de conclusão: o `observed_at` de cada sinal vem do próprio
+   * sinal.
+   */
   readonly now: Date
 }
 
@@ -242,7 +247,12 @@ export interface ValidationOutcomeWrite {
     readonly supporting_evidence: readonly string[]
     readonly contradicting_evidence: readonly string[]
   }
-  readonly now: Date
+  /**
+   * Instante REAL da conclusão do resultado terminal (não o instante de
+   * avaliação/score). Ignorado quando `stillPartial`: aí `completed_at` fica
+   * NULL, porque a validação ainda pode ser concluída por outra execução.
+   */
+  readonly completedAt: Date
 }
 
 export const updateValidationOutcome = async (tx: DbTx, write: ValidationOutcomeWrite): Promise<void> => {
@@ -260,7 +270,7 @@ export const updateValidationOutcome = async (tx: DbTx, write: ValidationOutcome
         supporting_evidence: [...write.explanation.supporting_evidence],
         contradicting_evidence: [...write.explanation.contradicting_evidence],
       },
-      completedAt: write.stillPartial ? null : write.now,
+      completedAt: write.stillPartial ? null : write.completedAt,
     })
     .where(eq(t.validation.validationId, write.validationId))
 }

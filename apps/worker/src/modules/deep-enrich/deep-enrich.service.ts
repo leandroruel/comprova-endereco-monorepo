@@ -48,7 +48,14 @@ const claimTypeOf = (docType: string): ClaimType =>
 const subjectTypeOf = (docType: string): SubjectType => (docType === 'CNPJ' ? 'organization' : 'person')
 
 export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): Promise<DeepEnrichResult> => {
-  const now = deps.clock.now()
+  /**
+   * Instante de AVALIAÇÃO: referência única dos cálculos (freshness/score/
+   * decisão, em T1 e no resultado final) e do TTL dos sinais em cache. Os
+   * verificadores podem levar tempo, então este instante NÃO é o de conclusão —
+   * `completed_at` é lido separadamente onde o resultado terminal fica pronto
+   * (ver `completedAt` em `updateValidationOutcome`).
+   */
+  const evaluatedAt = deps.clock.now()
   const state = await loadValidationState(deps.db, input.tenantId, input.validationId)
   const signals = state.priorSignals.map(signalFromRow)
 
@@ -70,12 +77,12 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
   })
 
   const signalsAfterT1: readonly Signal[] = [...signals, ...newSignals]
-  const scoreAfterT1 = weightedScore(signalsAfterT1, deps.policy, now)
+  const scoreAfterT1 = weightedScore(signalsAfterT1, deps.policy, evaluatedAt)
   const decisionAfterT1 = decide({
     signals: signalsAfterT1,
     score: scoreAfterT1,
     policy: deps.policy,
-    now,
+    now: evaluatedAt,
   })
   const maxTier = input.maxTier ?? 2
   const t2Signals =
@@ -112,7 +119,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       claim: { id: claimId ?? '', type: claimType },
       evidence: [...signalsAfterT1, ...t2Signals].map(observationFromSignal),
       policy: deps.policy,
-      now,
+      now: evaluatedAt,
     })
     const stillPartial = isAmbiguous(decision)
 
@@ -120,7 +127,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       validationId: input.validationId,
       addressId: state.validation.addressId,
       signals: freshSignals,
-      now,
+      now: evaluatedAt,
     })
 
     await linkClaimEvidence(tx, {
@@ -137,6 +144,12 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       evidenceRows.map((row) => ({ id: row.id, stance: row.stance })),
     )
 
+    // Instante de CONCLUSÃO (`completed_at`): lido agora, depois de todos os
+    // verificadores (T1/T2), dos cálculos e do resultado final, e imediatamente
+    // antes da persistência. Reutilizar o instante de avaliação registraria o
+    // INÍCIO do processamento como conclusão (ADR-0024 §5).
+    const completedAt = deps.clock.now()
+
     await updateValidationOutcome(tx, {
       validationId: input.validationId,
       stillPartial,
@@ -150,7 +163,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
         supporting_evidence: explanationDetail.supportingEvidenceIds,
         contradicting_evidence: explanationDetail.contradictingEvidenceIds,
       },
-      now,
+      completedAt,
     })
 
     await emitOutcomeEvents(tx, {

@@ -446,6 +446,46 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     await expect(issue(validationId)).rejects.toMatchObject({ failure: 'COMPLETION_TIME_MISSING' })
   })
 
+  it('protege a janela de validade: `completed_at < expires_at` emite; igual ou posterior recusa (sem estender o prazo)', async () => {
+    const setCompletion = (validationId: string, completedAt: Date) =>
+      adminPool.db
+        .update(t.validation)
+        .set({ completedAt })
+        .where(eq(t.validation.validationId, validationId))
+
+    // Conclusão 1 ms antes do horizonte: janela mínima, mas válida e verificável.
+    const atEdge = await newValidation()
+    const edgeRow = await validationRow(atEdge)
+    const lastInstant = new Date(edgeRow!.expiresAt!.getTime() - 1)
+    await setCompletion(atEdge, lastInstant)
+
+    const credential = transport(await issue(atEdge))
+    expect(credential.validFrom).toBe(lastInstant.toISOString())
+    expect(credential.validUntil).toBe(edgeRow!.expiresAt!.toISOString())
+    expect(Date.parse(credential.validFrom)).toBeLessThan(Date.parse(credential.validUntil!))
+    expect(verifyCredential(credential, { trusted, expectedIssuerId: issuer.id })).toEqual({ valid: true })
+
+    // `completed_at == expires_at` (janela vazia) e `completed_at > expires_at`
+    // (janela invertida): recusa explícita — e `expires_at` (horizonte de
+    // retenção, política de 30 dias) NÃO é recalculado nem estendido.
+    for (const [label, delta] of [
+      ['igual', 0],
+      ['posterior', 1],
+    ] as const) {
+      const validationId = await newValidation()
+      const row = await validationRow(validationId)
+      await setCompletion(validationId, new Date(row!.expiresAt!.getTime() + delta))
+
+      await expect(issue(validationId), label).rejects.toMatchObject({
+        failure: 'VALIDITY_WINDOW_INVALID',
+      })
+
+      const after = await validationRow(validationId)
+      expect(after!.completedAt!.getTime(), label).toBeGreaterThanOrEqual(after!.expiresAt!.getTime())
+      expect(after!.expiresAt!.getTime(), label).toBe(row!.expiresAt!.getTime())
+    }
+  })
+
   it('recusa validation sem claim', async () => {
     const subjectId = await createSubject(adminPool.db, tenantId)
     const validationId = randomUUID()

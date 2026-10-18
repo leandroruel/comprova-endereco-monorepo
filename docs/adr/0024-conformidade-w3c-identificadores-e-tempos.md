@@ -137,10 +137,9 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
   `runFastPath` (`apps/api/src/services/fastpath.ts`), antes das consultas à
   Receita, do enriquecimento do endereço e dos checkers — a conclusão pode vir
   segundos depois. Por isso o fluxo rápido passou a **persistir
-  `completed_at`** no fim da análise quando o resultado é terminal completo,
-  com a mesma semântica do deep path (`updateValidationOutcome`): `partial` e
-  `queued` continuam NULL (o worker preenche quando concluir). **Sem migração:**
-  a coluna já existia e era preenchida só pelo deep path.
+  `completed_at`** no fim da análise quando o resultado é terminal completo:
+  `partial` e `queued` continuam NULL (o worker preenche quando concluir). **Sem
+  migração:** a coluna já existia e era preenchida só pelo deep path.
 - **Registros sem `completed_at` (dados anteriores):** a emissão é
   **recusada** — `COMPLETION_TIME_MISSING` na fronteira
   (`apps/api/src/services/credential-issuer.ts`) e
@@ -151,6 +150,39 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
   campo, a recusa atinge apenas registros criados antes desta correção.
 - `proof.created` **não** entra em `validFrom`: emitir não define desde quando a
   informação vale.
+- **O instante de conclusão não é o instante de avaliação.** A leitura do relógio
+  que abre o processamento serve aos cálculos (freshness, score, decisão e TTL do
+  cache de sinais); a conclusão é lida **depois** dos verificadores e do resultado
+  final, o mais perto possível da persistência:
+  - **Fluxo rápido:** as duas leituras já eram separadas (`now` no início de
+    `runFastPath`; `completed_at` ao fim da análise).
+  - **Deep path:** `deepEnrich` passou a separar as duas. O `now` inicial virou
+    `evaluatedAt` (avaliação: `weightedScore`, `decide`, `evaluateClaim` e o TTL
+    do `address_signal_cache`) e `completedAt = deps.clock.now()` é lido dentro da
+    transação, imediatamente antes de `updateValidationOutcome`. O campo do write
+    foi renomeado de `now` para `completedAt`, para que o nome diga o que o valor
+    é. Uma execução de minutos registrava o **início** do processamento como
+    conclusão.
+  - Regra preservada em ambos: resultado terminal **completo** grava a conclusão;
+    `partial`/`queued` mantêm `completed_at = NULL` (idempotentes a retry e
+    replay — um parcial reprocessado continua NULL).
+  - Retry/reprocessamento de um resultado **completo** grava a nova conclusão (o
+    veredito persistido é o último calculado; nunca NULL nem o início). Se um
+    replay passar a `partial`, `updateValidationOutcome` zera `completed_at`
+    porque é assim que a função já se comportava — sem `completed_at` a emissão
+    falha fechada (`COMPLETION_TIME_MISSING`), então nenhuma credencial sai com
+    instante fabricado.
+- **Garantia de janela não vazia (`validFrom < validUntil`).** `expires_at` é
+  ancorado no início da requisição mais 30 dias (retenção), então uma análise que
+  só conclui depois desse horizonte — worker retomando validação antiga, fila
+  parada, reprocessamento — produziria `completed_at >= expires_at`, isto é, uma
+  credencial de janela vazia ou invertida. A emissão **recusa** esse caso na
+  fronteira (`VALIDITY_WINDOW_INVALID`) e `buildAssertion` impõe a mesma
+  invariante. **`expires_at` não é recalculado nem estendido na emissão:** ele é o
+  horizonte persistido do registro (o job de retenção apaga a validation em
+  `expires_at`), e esticá-lo aqui mudaria em silêncio tanto a política de 30 dias
+  quanto a retenção. Recusar é a resposta honesta: quando o resultado concluiu
+  fora do prazo, a informação certificada já expirou.
 - A janela de validade continua `[completed_at, expires_at]`, e `expires_at`
   segue como o início da requisição mais 30 dias (retenção): a análise consome
   parte da janela. Mudar essa base é decisão de produto, fora do escopo.
@@ -167,9 +199,9 @@ verifyCredential(credential, {
 Ordem das checagens: forma do documento → contexto/tipo → `expectedIssuerId`
 (se informado) → **`verificationMethod` pertence ao `issuer` declarado**
 (`<issuer>#<fragmento não vazio>`) → **`verificationMethod === trusted.id`** →
-janela de validade → `evidenceSetHash` recomputado → assinatura Data Integrity
-sobre o documento cru, com a chave de `trusted`, exigindo
-`proofPurpose = assertionMethod`.
+janela de validade (**não vazia: `validFrom < validUntil`**) → `evidenceSetHash`
+recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
+`trusted`, exigindo `proofPurpose = assertionMethod`.
 
 - **Por quê:** um `KeyObject` não tem identidade. Com `expectedVerificationMethod`
   opcional, uma assinatura válida com a chave fornecida era aceita para
@@ -181,8 +213,10 @@ sobre o documento cru, com a chave de `trusted`, exigindo
 - **Responsabilidades explícitas e separadas:** (a) integridade criptográfica +
   vínculo com a identidade declarada → `verifyCredential`; (b) confiança na chave
   do issuer → o consumidor, ao escolher `trusted`; (c) validade temporal da
-  credencial → política de quem consome (o verificador só valida a coerência da
-  janela); (d) revogação/status → **não implementado** (fora de escopo).
+  credencial → política de quem consome (o verificador só valida a **coerência** da
+  janela: bem ordenada e não vazia — `validFrom < validUntil`, a mesma invariante
+  que a emissão garante); (d) revogação/status → **não implementado** (fora de
+  escopo).
 - Sem trust registry, sem DID: `trusted` é a chave que o consumidor já confia.
 
 ## Compatibilidade e impacto
@@ -190,17 +224,31 @@ sobre o documento cru, com a chave de `trusted`, exigindo
 - **Mudanças de forma do documento:** `issuer`, `credentialSubject.id` e
   `proof.created` (valores), `validFrom` (semântica).
 - **Mudanças de API:** `verifier.ts` (`trusted` obrigatório em vez de
-  `publicKey`/`expectedVerificationMethod`), `issuer.ts`
+  `publicKey`/`expectedVerificationMethod`; janela de validade exige
+  `validFrom < validUntil`, não apenas `≤`), `issuer.ts`
   (`localIssuer(origem, tenant, keyId)`, `parseIssuerOrigin`,
   `issuerScopeOf`), `subject.ts` (`deriveCredentialSubjectId` recebe `issuerId`),
   `credential.ts` (`now` no lugar de `proofCreatedAt`; `buildAssertion` recusa
-  `completed_at` ausente e `AssertionPayload['timestamps']['completed_at']` deixa
-  de ser nullable) e `apps/api/src/services/credential-issuer.ts`
-  (`IssueCredentialDeps` recebe `issuerOrigin`/`keyId`/`now`; a falha
-  `ISSUER_MISMATCH` deixa de existir e surge `COMPLETION_TIME_MISSING`).
+  `completed_at` ausente **e** janela vazia/invertida
+  (`completed_at >= expires_at`) e
+  `AssertionPayload['timestamps']['completed_at']` deixa de ser nullable) e
+  `apps/api/src/services/credential-issuer.ts` (`IssueCredentialDeps` recebe
+  `issuerOrigin`/`keyId`/`now`; a falha `ISSUER_MISMATCH` deixa de existir e
+  surgem `COMPLETION_TIME_MISSING` e `VALIDITY_WINDOW_INVALID`).
+- **Mudança interna do worker (sem API pública):**
+  `ValidationOutcomeWrite.now` virou `ValidationOutcomeWrite.completedAt` em
+  `deep-enrich.persistence.ts` — o valor é o instante real da conclusão, não o de
+  avaliação, e o nome agora diz isso. `deepEnrich` lê o relógio duas vezes
+  (avaliação e conclusão). Nada muda no schema, na persistência de `partial` ou
+  na arquitetura do Temporal; a activity apenas recebe o instante correto.
 - **Mudança de domínio (campo que já existia):** o fluxo rápido passa a gravar
-  `validation.completed_at` (instante da conclusão). É o único ponto de escrita
-  novo: nada de coluna, índice, tabela ou regra de elegibilidade nova.
+  `validation.completed_at` (instante da conclusão) e a fronteira de emissão
+  passa a recusar janela vazia/invertida. Nada de coluna, índice, tabela ou
+  migração: são duas invariantes sobre campos que já existiam.
+- **Uma dependência de workspace a mais (só em teste):** `apps/worker` declara
+  `@comprova/credential` em `devDependencies`, para o teste de integração provar
+  que a credencial derivada do deep path usa o instante de conclusão. Nenhuma
+  dependência externa nova.
 - **`comprova:completedAt` na leitura:** segue `optional` no schema da
   credencial. O emissor sempre o escreve (é o mesmo instante de `validFrom`),
   mas ele é proveniência descritiva; a verificação temporal usa `validFrom`,
@@ -227,16 +275,28 @@ sobre o documento cru, com a chave de `trusted`, exigindo
   URL.
 - `credential.test.ts`: `proof.created` = relógio injetado, distinto de
   `created_at`/`completed_at`; reemissão gera nova prova sobre o mesmo documento;
-  recusa de emissão sem `completed_at`; caso negativo do método confiável (mesma
+  recusa de emissão sem `completed_at`; recusa de janela vazia/invertida
+  (`completed_at == expires_at` e `completed_at > expires_at`; 1 ms antes ainda
+  emite, com `validFrom < validUntil`); caso negativo do método confiável (mesma
   chave assinando `#key-1` e `#key-2`); chave errada, issuer esperado
-  incompatível, `proofPurpose` incorreto, adulteração de todos os campos
-  assinados.
+  incompatível, `proofPurpose` incorreto, janela de validade vazia/invertida no
+  verificador, adulteração de todos os campos assinados.
 - `apps/api/src/credential.int.test.ts`: fluxo ponta a ponta (validation →
   credencial → verificação), `validFrom` do fluxo rápido, **fluxo rápido com
   relógio que avança entre início e conclusão da requisição** (o `completed_at`
   persistido é a conclusão, e `validFrom` não a antecede), registro concluído sem
-  `completed_at` → `COMPLETION_TIME_MISSING`, issuer derivado do tenant,
-  `proof.created` real e adulterável, retenção do material físico.
+  `completed_at` → `COMPLETION_TIME_MISSING`, **janela de validade na fronteira**
+  (conclusão 1 ms antes do horizonte emite e verifica; conclusão igual ou
+  posterior ao horizonte → `VALIDITY_WINDOW_INVALID`, com `expires_at` intacto),
+  issuer derivado do tenant, `proof.created` real e adulterável, retenção do
+  material físico.
+- `apps/worker/src/modules/deep-enrich/deep-enrich.int.test.ts`: **relógio
+  controlado no deep path** — a validação nasce em `queued` com `created_at = T0`
+  (sem `completed_at`), `deepEnrich` roda com um relógio que avança e o registro
+  conclui com `completed_at = T1 > T0`; a credencial emitida daí tem
+  `validFrom = completed_at` (nunca `created_at`) e verifica. O mesmo arquivo
+  cobre o caminho parcial (`completed_at` permanece NULL, inclusive em replay) e o
+  replay de um resultado completo (a conclusão avança, nunca volta a NULL).
 - O vetor normativo B.3 (`data-integrity.test.ts`) e o RFC 8785 continuam
   passando — a canonicalização e o cryptosuite não foram tocados.
 
@@ -258,4 +318,8 @@ sobre o documento cru, com a chave de `trusted`, exigindo
   domínio existir.
 - **Envelope temporal:** `validUntil` continua sendo `expires_at`
   (= `created_at` + 30d) e a tensão entre retenção (30d) e material
-  (180–365d) continua decisão de produto.
+  (180–365d) continua decisão de produto. A camada não a resolve esticando o
+  prazo: quando a conclusão cai fora do horizonte, a emissão recusa
+  (`VALIDITY_WINDOW_INVALID`). Redefinir a base de `expires_at` (por exemplo,
+  `completed_at` + N dias, com a retenção acompanhando) é a mudança de produto que
+  resolveria o caso — e não foi feita aqui.

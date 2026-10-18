@@ -80,7 +80,7 @@ const timestampOf = (value: string): number | null => {
  *  4. coerência estrutural `verificationMethod ↔ issuer` declarado (§5.9) e
  *     vínculo com o método confiável: o `verificationMethod` precisa ser
  *     EXATAMENTE `options.trusted.id` (§4);
- *  5. a janela de validade (`validFrom` ≤ `validUntil`);
+ *  5. a janela de validade (`validFrom` < `validUntil`, não vazia);
  *  6. o binding do conjunto de evidências (recomputado a partir da própria
  *     credencial — nunca do material físico);
  *  7. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
@@ -134,7 +134,10 @@ export const verifyCredential = (
   if (validFrom === null || (secured.validUntil !== undefined && validUntil === null)) {
     return { valid: false, reason: 'INVALID_TIMESTAMP' }
   }
-  if (validUntil !== null && validFrom > validUntil) {
+  // Janela NÃO vazia: `validFrom < validUntil` (VC 2.0 §4.10), a mesma garantia
+  // que a emissão impõe (`buildAssertion`). `validFrom == validUntil` é uma
+  // janela de duração zero — não é uma credencial "válida por um instante".
+  if (validUntil !== null && validFrom >= validUntil) {
     return { valid: false, reason: 'INVALID_TIMESTAMP' }
   }
 

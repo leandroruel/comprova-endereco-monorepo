@@ -267,6 +267,26 @@ describe('tempo: `proof.created` e `validFrom`', () => {
     ).rejects.toThrow(/completed_at/)
   })
 
+  it('exige janela NÃO vazia: `completed_at < expires_at` (nunca janela invertida ou de duração zero)', async () => {
+    const expiresAt = new Date('2026-01-31T00:00:00.000Z')
+    const at = (completedAt: Date): Promise<SecuredVerifiableCredential> =>
+      buildCredential(source(twoObservations(), { completedAt }), { issuer, signer, now: clock })
+
+    // Janela de duração zero (`validFrom == validUntil`).
+    await expect(at(expiresAt)).rejects.toThrow(/window/)
+
+    // Janela invertida (`validFrom > validUntil`): a validação concluiu depois
+    // do horizonte persistido.
+    await expect(at(new Date(expiresAt.getTime() + 1))).rejects.toThrow(/window/)
+
+    // 1 ms antes do horizonte ainda é uma janela válida.
+    const lastInstant = new Date(expiresAt.getTime() - 1)
+    const credential = await at(lastInstant)
+    expect(credential.validFrom).toBe(lastInstant.toISOString())
+    expect(credential.validUntil).toBe(expiresAt.toISOString())
+    expect(Date.parse(credential.validFrom)).toBeLessThan(Date.parse(credential.validUntil!))
+  })
+
   it('reemitir a mesma validation produz uma NOVA prova sobre o MESMO documento', async () => {
     const first = await emit()
     const second = await buildCredential(source(twoObservations()), {
@@ -452,6 +472,25 @@ describe('adulteração da credencial', () => {
       valid: false,
       reason: 'PROOF_PURPOSE_MISMATCH',
     })
+  })
+
+  it('recusa janela de validade vazia ou invertida (`validFrom` >= `validUntil`)', async () => {
+    const credential = await valid()
+    const validUntil = credential.validUntil!
+
+    // A checagem da janela vem ANTES da assinatura: um documento com bytes
+    // coerentes, mas janela incoerente, é recusado pela janela — a proteção não
+    // depende de a assinatura quebrar.
+    expect(verifyCredential({ ...credential, validFrom: validUntil }, { trusted })).toEqual({
+      valid: false,
+      reason: 'INVALID_TIMESTAMP',
+    })
+    expect(
+      verifyCredential(
+        { ...credential, validFrom: new Date(Date.parse(validUntil) + 1).toISOString() },
+        { trusted },
+      ),
+    ).toEqual({ valid: false, reason: 'INVALID_TIMESTAMP' })
   })
 
   it('detecta incoerência entre o conjunto de evidências e o evidence_set_hash', async () => {

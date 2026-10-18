@@ -331,6 +331,17 @@ foi alterado para preenchê-lo).
 > (`COMPLETION_TIME_MISSING`); nenhum timestamp é fabricado. A elegibilidade
 > continua sendo só `status = 'completed'`. A tensão entre retenção (30d) e
 > material (180–365d) continua decisão de produto, fora do escopo.
+>
+> **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
+> §5 (revisão):** o deep path também separa avaliação de conclusão — `deepEnrich`
+> lia o relógio uma vez, no início, e gravava esse instante em `completed_at`
+> (o início do processamento virando conclusão). Agora `now` inicial =
+> `evaluatedAt` (score/decisão/TTL) e o instante de conclusão é lido depois dos
+> verificadores, imediatamente antes de `updateValidationOutcome` (campo
+> `completedAt` no write). Como `expires_at` segue ancorado em `created_at` + 30d,
+> uma análise que conclua fora desse horizonte seria uma credencial com
+> `validFrom >= validUntil`: a emissão recusa (`VALIDITY_WINDOW_INVALID`) em vez
+> de estender o prazo.
 
 ### 9. Verifier independente
 
@@ -343,7 +354,10 @@ PostgreSQL/Redis/Temporal/S3/API.
 > `verifyCredential(credential, { trusted: { id, publicKey }, expectedIssuerId? })`.
 > O `id` do método confiável é **obrigatório** e precisa ser exatamente o
 > `proof.verificationMethod`: uma chave sem identidade não é suficiente para
-> declarar confiança em um método.
+> declarar confiança em um método. Na mesma revisão, a janela de validade passou a
+> exigir **`validFrom < validUntil`** (não apenas ordenada): janela de duração
+> zero é recusada com `INVALID_TIMESTAMP`, a mesma invariante que a emissão
+> garante.
 
 Ordem das checagens:
 
@@ -354,7 +368,7 @@ Ordem das checagens:
    `<issuer>#<keyId>` (fragmento não vazio) e, se `expectedVerificationMethod`
    for passado, coincidir exatamente. Sem isto, um documento legítimo de A
    poderia se declarar emitido por B;
-4. janela de validade bem formada (`validFrom ≤ validUntil`);
+4. janela de validade bem formada (**não vazia**: `validFrom < validUntil`);
 5. `comprova:evidenceSetHash` reconferido a partir da própria credencial;
 6. proof Data Integrity `eddsa-jcs-2022` sobre o documento **cru** recebido
    (menos `proof`) — nunca sobre a versão normalizada pelo schema, para que a
