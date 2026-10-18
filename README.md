@@ -59,7 +59,7 @@ pnpm db:fence     # pgfence: gate de segurança de migrações
 pnpm seed:golden  # dataset dourado (8 classes de veredito)
 
 # Ingestores
-pnpm --filter @comprova/ingestor start -- receita:estabelecimentos <csv> [--limit N]
+pnpm --filter @comprova/ingestor start -- receita:estabelecimentos <csv> --snapshot YYYY-MM [--limit N]
 pnpm --filter @comprova/ingestor start -- receita:municipios <csv>
 pnpm --filter @comprova/ingestor start -- cnefe:uf <csv>
 pnpm --filter @comprova/ingestor start -- ceps:backfill --limit N

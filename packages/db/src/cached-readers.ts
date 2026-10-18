@@ -214,7 +214,16 @@ export const cacheKeys = {
     await cache.delPattern('shared:*')
   },
   invalidateAll: async (cache: CacheStore) => {
-    for (const pattern of ['reg:*', 'cep:*', 'cnefe:*', 'cnefeCoord:*', 'prof:*', 'others:*', 'shared:*']) {
+    for (const pattern of [
+      'reg:*',
+      'cep:*',
+      'cnefe:*',
+      'cnefeCoord:*',
+      'prof:*',
+      'others:*',
+      'shared:*',
+      'meta:*',
+    ]) {
       await cache.delPattern(pattern)
     }
   },
