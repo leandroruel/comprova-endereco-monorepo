@@ -87,8 +87,11 @@ Pré-requisito para o projeto `dashboard` (o download do Chromium não roda no
 `pnpm install`, por não estar entre os `onlyBuiltDependencies`):
 
 ```bash
-npx playwright install chromium   # uma vez por máquina; no CI é um passo do workflow
+npx playwright install chromium              # macOS/Windows
+npx playwright install --with-deps chromium  # Linux: traz também as libs do sistema (pede sudo)
 ```
+
+É uma vez por máquina; no CI é um passo do workflow, com o mesmo `--with-deps`.
 
 Os testes de componente não carregam a folha de estilo (Tailwind), então
 asserções de visibilidade valem para elementos com caixa própria — cor e
