@@ -1,5 +1,6 @@
 import {
   CredentialStatusDocumentSchema,
+  DidDocumentSchema,
   IssuerKeyDocumentSchema,
   WELL_KNOWN_ISSUER_PATH,
 } from '@comprova/credential'
@@ -57,6 +58,27 @@ export const registerIssuerRoutes = (instance: FastifyInstance, deps: IssuerRout
 
   registerKeyDocumentRoute('/issuers/:scope')
   registerKeyDocumentRoute(`/${WELL_KNOWN_ISSUER_PATH}/:scope`)
+
+  // DID Document do issuer (ADR-0028): `did:web:<host>:issuers:<escopo>`
+  // resolve, pelo método `did:web`, para `<issuer.id>/did.json`. Público, fora
+  // do `/v1`, sem API key — carrega só material público (a chave em
+  // `publicKeyMultibase` e o `alsoKnownAs` que liga o DID à URL HTTPS do issuer).
+  app.get(
+    '/issuers/:scope/did.json',
+    {
+      schema: {
+        params: IssuerScopeParams,
+        response: { 200: DidDocumentSchema, 404: ProblemSchema },
+      },
+    },
+    async (request, reply) => {
+      const document = await controller.didDocument(request.params.scope)
+      if (document === null) {
+        return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('issuer'))
+      }
+      return reply.send(document)
+    },
+  )
 
   // Status público da credencial: a URL assinada em `credentialStatus.id` é
   // `<issuer.id>/credentials/<credentialId>/status`, servida aqui fora do

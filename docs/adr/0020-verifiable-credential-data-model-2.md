@@ -146,6 +146,13 @@ no verifier (ADR-0019 §3). `api_key_id`/`user_id` continuam fora da credencial;
 > origem configurada e validada (`CREDENTIAL_ISSUER_ORIGIN`) — nenhum domínio é
 > presumido. `verificationMethod` continua `<issuer.id>#<keyId>`.
 
+> **Atualizado pelo [ADR-0028](0028-did-e-did-document-do-issuer.md):** o issuer
+> passou a ter um DID `did:web:<host>:issuers:<escopo>` derivado dessa URL e um
+> DID Document público com `verificationMethod`/`assertionMethod`. A credencial
+> continua carregando a URL HTTPS em `issuer` e `<issuer.id>#<keyId>` em
+> `proof.verificationMethod`; o DID Document liga as duas identidades por
+> `alsoKnownAs`.
+
 ### 4. `@context`, `type` e namespace
 
 ```json

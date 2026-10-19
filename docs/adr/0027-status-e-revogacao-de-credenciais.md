@@ -238,6 +238,11 @@ sourcing/hash-chain; registry genérico; múltiplos tipos de status; status list
 complexa; tabela genérica de `credential`; framework SSI; abstrações de VC
 futuras; reativação; expurgo automático do status.
 
+> **Atualizado pelo [ADR-0028](0028-did-e-did-document-do-issuer.md):** DID/DID
+> Document do issuer foram implementados em um passo separado. Status/revogação
+> não mudou: o valor do status continua fora do documento assinado e o DID
+> Document não carrega `credentialStatus`.
+
 ## Testes
 
 - `packages/credential/src/schema/status.schema.test.ts` — parsing estrito de

@@ -3,11 +3,17 @@ import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import { evidenceSetHashOfObservations, policyHashOf, SCORER_VERSION } from '@comprova/core'
 import {
+  DID_CONTEXT_URL,
   decodeEd25519PublicKeyMultibase,
+  didDocumentUrlOf,
+  didOfIssuer,
+  didVerificationMethodOf,
+  encodeEd25519PublicKeyMultibase,
   issuerIdOf,
   issuerScopeOf,
   localIssuer,
   makeHttpCredentialStatusResolver,
+  makeHttpDidResolver,
   makeHttpIssuerResolver,
   verificationMethodOf,
   verifyCredential,
@@ -1294,4 +1300,187 @@ describe('status e revogação de credenciais', () => {
     expect(res.statusCode).toBe(200)
     return res.json() as SecuredVerifiableCredential
   }
+})
+
+// ADR-0028 — DID/DID Document do issuer: o DID é derivado do `issuer.id`
+// (`did:web:<host>:issuers:<escopo>`), o documento é publicado em
+// `<issuer.id>/did.json` e o verificador resolve a chave por ele — sem banco,
+// chave privada nem API interna.
+describe('DID e DID Document do issuer', () => {
+  /** `fetch` que atravessa o roteador do Fastify (HTTP real, sem rede). */
+  const appFetch = (async (input: string | URL | Request): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : input.toString())
+    const res = await app.inject({ method: 'GET', url: `${url.pathname}${url.search}` })
+    return new Response(res.body, {
+      status: res.statusCode,
+      headers: { 'content-type': String(res.headers['content-type'] ?? 'application/json') },
+    })
+  }) as typeof fetch
+
+  const statusResolver = makeHttpCredentialStatusResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
+
+  const issue = async (apiKey = key.plaintext): Promise<SecuredVerifiableCredential> => {
+    const validationId = await newValidationAs(apiKey)
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as SecuredVerifiableCredential
+  }
+
+  const getDidDocument = (scope: string) => app.inject({ method: 'GET', url: `/issuers/${scope}/did.json` })
+
+  const jsonResponse = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+  const resolverFrom = (
+    handler: (url: string) => Response | Promise<Response>,
+  ): ReturnType<typeof makeHttpDidResolver> =>
+    makeHttpDidResolver({
+      trustedIssuerOrigins: [ISSUER_ORIGIN],
+      fetch: (async (input: string | URL | Request) =>
+        handler(input instanceof Request ? input.url : input.toString())) as typeof fetch,
+    })
+
+  it('publica o DID Document resolvível por did:web, ligado ao issuer e só com material público', async () => {
+    const scope = issuerScopeOf(tenantId)
+    const issuerId = issuerIdOf(ISSUER_ORIGIN, tenantId)
+    const did = didOfIssuer(issuerId)
+    expect(didDocumentUrlOf(did)).toBe(`${issuerId}/did.json`)
+
+    const res = await getDidDocument(scope)
+    expect(res.statusCode).toBe(200)
+    const document = res.json() as {
+      '@context': string[]
+      id: string
+      alsoKnownAs: string[]
+      verificationMethod: Array<{ id: string; type: string; controller: string; publicKeyMultibase: string }>
+      assertionMethod: string[]
+    }
+
+    expect(document['@context']).toContain(DID_CONTEXT_URL)
+    expect(document.id).toBe(did)
+    expect(document.alsoKnownAs).toEqual([issuerId])
+    expect(document.verificationMethod).toEqual([
+      {
+        id: didVerificationMethodOf(did, KEY_ID),
+        type: 'Multikey',
+        controller: did,
+        publicKeyMultibase: expect.stringMatching(/^z/),
+      },
+    ])
+    expect(document.assertionMethod).toEqual([didVerificationMethodOf(did, KEY_ID)])
+    expect(
+      decodeEd25519PublicKeyMultibase(document.verificationMethod[0]!.publicKeyMultibase).equals(
+        signing.publicKey,
+      ),
+    ).toBe(true)
+
+    // Só material público: nada de privada, tenant_id, doc_hmac nem o outro issuer.
+    expect(res.body).not.toContain('PRIVATE KEY')
+    expect(res.body).not.toContain(signing.privateKeyPkcs8Pem)
+    expect(res.body).not.toContain(tenantId)
+    expect(res.body).not.toContain('doc_hmac')
+    expect(res.body).not.toContain(issuerScopeOf(otherTenantId))
+
+    expect((await getDidDocument('a'.repeat(43))).statusCode).toBe(404)
+  })
+
+  it('isola o DID Document por issuer', async () => {
+    const docA = (await getDidDocument(issuerScopeOf(tenantId))).json()
+    const docB = (await getDidDocument(issuerScopeOf(otherTenantId))).json()
+
+    expect(docA.id).toBe(didOfIssuer(issuerIdOf(ISSUER_ORIGIN, tenantId)))
+    expect(docB.id).toBe(didOfIssuer(issuerIdOf(ISSUER_ORIGIN, otherTenantId)))
+    expect(docA.id).not.toBe(docB.id)
+    expect(docA.verificationMethod[0].publicKeyMultibase).not.toBe(
+      docB.verificationMethod[0].publicKeyMultibase,
+    )
+    expect(JSON.stringify(docA)).not.toContain(issuerScopeOf(otherTenantId))
+    expect(JSON.stringify(docB)).not.toContain(issuerScopeOf(tenantId))
+  })
+
+  it('resolve o DID Document via HTTP e verifica a credencial ponta a ponta (VALID)', async () => {
+    const credential = await issue()
+    expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
+
+    const requested: string[] = []
+    const resolver = resolverFrom((url) => {
+      requested.push(new URL(url).pathname)
+      return appFetch(url)
+    })
+
+    expect(
+      await verifyCredentialFromIssuer(credential, resolver, {
+        expectedIssuerId: credential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: true })
+    expect(requested).toEqual([`/issuers/${issuerScopeOf(tenantId)}/did.json`])
+  })
+
+  it('recusa credencial de A com issuer/verificationMethod de B (INVALID_SIGNATURE)', async () => {
+    const credentialA = await issue()
+    const credentialB = await issue(otherKey.plaintext)
+    const resolver = resolverFrom(() => appFetch(didDocumentUrlOf(didOfIssuer(credentialB.issuer))))
+
+    const tampered = transport(credentialA)
+    tampered.issuer = credentialB.issuer
+    tampered.proof.verificationMethod = credentialB.proof.verificationMethod
+
+    // A chave de B resolve, mas a assinatura é de A — nunca passa.
+    expect(await verifyCredentialFromIssuer(tampered, resolver)).toEqual({
+      valid: false,
+      reason: 'INVALID_SIGNATURE',
+    })
+  })
+
+  it('DID Document com chave diferente não verifica a credencial (INVALID_SIGNATURE)', async () => {
+    const credential = await issue()
+    const scope = issuerScopeOf(tenantId)
+    const resolver = resolverFrom(async (url) => {
+      if (new URL(url).pathname !== `/issuers/${scope}/did.json`) return appFetch(url)
+      const document = (await getDidDocument(scope)).json() as {
+        verificationMethod: Array<{ publicKeyMultibase: string }>
+      }
+      document.verificationMethod[0]!.publicKeyMultibase = encodeEd25519PublicKeyMultibase(
+        otherSigning.publicKey,
+      )
+      return jsonResponse(document)
+    })
+
+    expect(await verifyCredentialFromIssuer(credential, resolver, { statusResolver })).toEqual({
+      valid: false,
+      reason: 'INVALID_SIGNATURE',
+    })
+  })
+
+  it('DID Document adulterado (id, alsoKnownAs, assertionMethod, controller) não resolve', async () => {
+    const credential = await issue()
+    const original = (await getDidDocument(issuerScopeOf(tenantId))).json() as {
+      verificationMethod: Array<Record<string, string>>
+      [key: string]: unknown
+    }
+    const otherDid = didOfIssuer(issuerIdOf(ISSUER_ORIGIN, otherTenantId))
+
+    const variants = [
+      { ...original, id: otherDid },
+      { ...original, alsoKnownAs: [issuerIdOf(ISSUER_ORIGIN, otherTenantId)] },
+      { ...original, assertionMethod: [] },
+      { ...original, verificationMethod: [{ ...original.verificationMethod[0]!, controller: otherDid }] },
+    ]
+
+    for (const variant of variants) {
+      const resolver = resolverFrom(() => jsonResponse(variant))
+      expect(await verifyCredentialFromIssuer(credential, resolver, { statusResolver })).toEqual({
+        valid: false,
+        reason: 'VERIFICATION_METHOD_UNRESOLVED',
+      })
+    }
+  })
 })
