@@ -4,6 +4,48 @@ import * as t from '@comprova/db'
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 
+/**
+ * Colunas do CSV da malha de endereços do CNEFE (censo 2022, separado por `;`)
+ * que o parser usa. Índices 0-based do layout fixo do IBGE — se o layout
+ * mudar, mudam aqui e o teste de caracterização aponta.
+ */
+const COLUMN = {
+  /** Identificador único do endereço no CNEFE. */
+  cnefeId: 0,
+  /** Código numérico da UF (2 dígitos); a sigla vem de `UF_MAP`. */
+  uf: 1,
+  /** Código IBGE do município (7 dígitos). */
+  municipio: 2,
+  cep: 8,
+  tipoLogradouro: 10,
+  tituloLogradouro: 11,
+  nomeLogradouro: 12,
+  numero: 13,
+  /** Modificador do endereço (ex.: `S/N`), usado quando a coluna do número vem vazia. */
+  modificadorNumero: 14,
+  latitude: 25,
+  longitude: 26,
+  /** Espécie do endereço; `null` quando a coluna vem vazia. */
+  especie: 28,
+} as const
+
+/** Complemento ocupa 5 pares (tipo, valor) — colunas 15 a 24. */
+const COMPLEMENTO_PAIRS: ReadonlyArray<readonly [tipo: number, valor: number]> = [
+  [15, 16],
+  [17, 18],
+  [19, 20],
+  [21, 22],
+  [23, 24],
+]
+
+/** Linhas com menos colunas que isso estão truncadas/corrompidas. */
+const MIN_COLUMNS = 34
+const CENSUS_YEAR = 2022
+
+/** Marcador da primeira linha do CSV do CNEFE. */
+const HEADER_MARKER = 'COD_UNICO_ENDERECO'
+
+/** Código numérico da UF (IBGE) → sigla. */
 const UF_MAP: Readonly<Record<string, string>> = {
   '11': 'RO',
   '12': 'AC',
@@ -39,6 +81,9 @@ const digits = (raw: string): string | null => {
   return d.length > 0 ? d : null
 }
 
+/** Coluna do CSV já aparada; colunas ausentes viram string vazia. */
+const field = (columns: readonly string[], index: number): string => (columns[index] ?? '').trim()
+
 const compOf = (pairs: ReadonlyArray<readonly [string, string]>): string | null => {
   const parts = pairs.map(([name, val]) => `${name} ${val}`.trim()).filter((p) => p.length > 0)
   return parts.length > 0 ? normalizeText(parts.join(' ')) : null
@@ -59,56 +104,46 @@ export interface CnefeRow {
 
 export const parseCnefeLine = (line: string): CnefeRow | null => {
   const f = line.split(';')
-  if (f.length < 34) return null
+  if (f.length < MIN_COLUMNS) return null
 
-  const cnefeIdRaw = digits(f[0] ?? '')
+  const cnefeIdRaw = digits(field(f, COLUMN.cnefeId))
   if (cnefeIdRaw === null) return null
   const cnefeId = Number(cnefeIdRaw)
   if (!Number.isFinite(cnefeId)) return null
 
-  const ufCode = f[1]?.trim() ?? ''
-  const uf = UF_MAP[ufCode]
+  const uf = UF_MAP[field(f, COLUMN.uf)]
   if (uf === undefined) return null
 
-  const munRaw = digits(f[2] ?? '')
+  const munRaw = digits(field(f, COLUMN.municipio))
   if (munRaw === null || munRaw.length !== 7) return null
   const municipioIbge = Number(munRaw)
 
-  const cepRaw = digits(f[8] ?? '')
+  const cepRaw = digits(field(f, COLUMN.cep))
   const cep = cepRaw !== null && cepRaw.length === 8 ? cepRaw : null
 
-  const tipoLogr = (f[10] ?? '').trim()
-  const tituloLogr = (f[11] ?? '').trim()
-  const nomeLogr = (f[12] ?? '').trim()
-  const logradouroNorm = normalizeLogradouro(`${tipoLogr} ${tituloLogr}`.trim(), nomeLogr)
+  const logradouroNorm = normalizeLogradouro(
+    `${field(f, COLUMN.tipoLogradouro)} ${field(f, COLUMN.tituloLogradouro)}`.trim(),
+    field(f, COLUMN.nomeLogradouro),
+  )
 
-  const numEndereco = (f[13] ?? '').trim()
-  const modificador = (f[14] ?? '').trim()
+  // Sem número na coluna própria, o modificador carrega a referência (`S/N`, lote…).
+  const numeroRaw = field(f, COLUMN.numero)
+  const modificador = field(f, COLUMN.modificadorNumero)
   const numero =
-    numEndereco.length > 0
-      ? normalizeNumero(numEndereco)
-      : modificador.length > 0
-        ? normalizeNumero(modificador)
-        : null
+    numeroRaw !== '' ? normalizeNumero(numeroRaw) : modificador !== '' ? normalizeNumero(modificador) : null
 
-  const complementoNorm = compOf([
-    [(f[15] ?? '').trim(), (f[16] ?? '').trim()],
-    [(f[17] ?? '').trim(), (f[18] ?? '').trim()],
-    [(f[19] ?? '').trim(), (f[20] ?? '').trim()],
-    [(f[21] ?? '').trim(), (f[22] ?? '').trim()],
-    [(f[23] ?? '').trim(), (f[24] ?? '').trim()],
-  ])
+  const complementoNorm = compOf(COMPLEMENTO_PAIRS.map(([tipo, valor]) => [field(f, tipo), field(f, valor)]))
 
-  const lat = (f[25] ?? '').trim()
-  const lon = (f[26] ?? '').trim()
-  const latNum = Number(lat)
-  const lonNum = Number(lon)
+  // Sem coordenada (ou com `0,0`, que o CNEFE usa como "sem geometria") a linha
+  // não serve à busca por raio — descartada.
+  const latNum = Number(field(f, COLUMN.latitude))
+  const lonNum = Number(field(f, COLUMN.longitude))
   if (!Number.isFinite(latNum) || !Number.isFinite(lonNum) || latNum === 0 || lonNum === 0) {
     return null
   }
   const geom = `SRID=4326;POINT(${lonNum} ${latNum})`
 
-  const especieRaw = digits(f[28] ?? '')
+  const especieRaw = digits(field(f, COLUMN.especie))
   const especie = especieRaw !== null ? Number(especieRaw) : null
 
   return {
@@ -121,7 +156,7 @@ export const parseCnefeLine = (line: string): CnefeRow | null => {
     complementoNorm,
     especie,
     geom,
-    censusYear: 2022,
+    censusYear: CENSUS_YEAR,
   }
 }
 
@@ -131,6 +166,13 @@ export interface CnefeIngestStats {
   readonly elapsedMs: number
 }
 
+/**
+ * Consome o CSV do CNEFE linha a linha e grava em lotes de `batchSize`:
+ * a 1ª linha é o cabeçalho (validada e descartada), as demais são parseadas —
+ * linhas inválidas/sem geometria são contadas em `skipped` sem interromper o
+ * fluxo, e `limit` para após gravar `limit` linhas válidas. O `for await`
+ * fecha o stream ao terminar, inclusive quando o loop é interrompido.
+ */
 export const ingestCnefeCsv = async (
   db: Db,
   csvPath: string,
@@ -139,45 +181,35 @@ export const ingestCnefeCsv = async (
   const batchSize = options.batchSize ?? 2_000
   const started = Date.now()
 
-  const stream = createReadStream(csvPath, { encoding: 'utf-8' })
-  const rl = createInterface({ input: stream, crlfDelay: Infinity })
-  const lines = rl[Symbol.asyncIterator]()
+  const rl = createInterface({
+    input: createReadStream(csvPath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity,
+  })
 
-  const header = await lines.next()
-  if (header.done === true || !String(header.value).includes('COD_UNICO_ENDERECO')) {
-    throw new Error('CNEFE CSV missing expected header')
-  }
-
-  let count = 0
-  let skipped = 0
-  let batch: (CnefeRow & { readonly geomSql: string })[] = []
-
-  const flush = async (): Promise<void> => {
-    if (batch.length === 0) return
+  /** Grava um lote; duplicatas (`cnefe_id` já presente) são ignoradas. */
+  const insertBatch = async (rows: readonly CnefeRow[]): Promise<void> => {
+    if (rows.length === 0) return
+    // O `.values` do Drizzle pede array mutável; o lote é copiado na fronteira.
     await db
       .insert(t.refCnefeAddress)
-      .values(
-        batch.map((row) => ({
-          cnefeId: row.cnefeId,
-          uf: row.uf,
-          municipioIbge: row.municipioIbge,
-          cep: row.cep,
-          logradouroNorm: row.logradouroNorm,
-          numero: row.numero,
-          complementoNorm: row.complementoNorm,
-          especie: row.especie,
-          geom: row.geomSql,
-          censusYear: row.censusYear,
-        })),
-      )
+      .values([...rows])
       .onConflictDoNothing()
-    batch = []
   }
 
-  for (;;) {
-    const next = await lines.next()
-    if (next.done === true) break
-    const line = next.value
+  let ingested = 0
+  let skipped = 0
+  let pending: CnefeRow[] = []
+  let isFirstLine = true
+
+  for await (const line of rl) {
+    if (isFirstLine) {
+      isFirstLine = false
+      if (!line.includes(HEADER_MARKER)) {
+        throw new Error('CNEFE CSV missing expected header')
+      }
+      continue
+    }
+
     if (line.trim().length === 0) continue
 
     const row = parseCnefeLine(line)
@@ -186,15 +218,21 @@ export const ingestCnefeCsv = async (
       continue
     }
 
-    batch.push({ ...row, geomSql: row.geom })
-    if (batch.length >= batchSize) {
-      await flush()
+    pending.push(row)
+    ingested++
+    if (pending.length >= batchSize) {
+      await insertBatch(pending)
+      pending = []
     }
-    count++
-    if (options.limit !== undefined && count >= options.limit) break
+    // `limit` conta linhas ingeridas (não lidas): para depois de gravá-las.
+    if (options.limit !== undefined && ingested >= options.limit) break
   }
-  await flush()
-  await lines.return?.()
+  if (isFirstLine) {
+    // Nem o cabeçalho chegou: arquivo vazio.
+    throw new Error('CNEFE CSV missing expected header')
+  }
 
-  return { rows: count, skipped, elapsedMs: Date.now() - started }
+  await insertBatch(pending)
+
+  return { rows: ingested, skipped, elapsedMs: Date.now() - started }
 }
