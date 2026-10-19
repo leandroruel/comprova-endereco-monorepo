@@ -135,6 +135,8 @@ describe('didOfIssuer', () => {
   it('recusa o que não é um issuer do Comprova', () => {
     expect(() => didOfIssuer('http://issuer.test/issuers/a')).toThrow(/https/)
     expect(() => didOfIssuer(`${ISSUER_ORIGIN}/outro/${'a'.repeat(43)}`)).toThrow(/no Comprova issuer/)
+    expect(() => didOfIssuer(`${ISSUER_ORIGIN}/issuers/${'a'.repeat(42)}`)).toThrow(/no Comprova issuer/)
+    expect(() => didOfIssuer(`${ISSUER_ORIGIN}/issuers/a%3Fb`)).toThrow(/no Comprova issuer/)
     expect(() => didOfIssuer(`${issuer.id}?x=1`)).toThrow(/query or fragment/)
     expect(() => didOfIssuer(`${issuer.id}#key-1`)).toThrow(/query or fragment/)
     expect(() => didOfIssuer('not-a-url')).toThrow(/not a URL/)
@@ -159,6 +161,20 @@ describe('didDocumentUrlOf (resolução did:web)', () => {
     expect(() => didDocumentUrlOf('did:web:..')).toThrow(/not a valid domain/)
     expect(() => didDocumentUrlOf('did:web:issuer.test:issuers:a%2Fb')).toThrow(/not safe/)
     expect(() => didDocumentUrlOf('did:web:issuer.test:issuers:%ZZ')).toThrow(/percent-encoded/)
+  })
+
+  it('re-encoda segmentos decodificados para não criar query ou fragmento', () => {
+    // Sem o re-encode, `%3F` viraria `?` e o fetch apontaria outro recurso.
+    expect(didDocumentUrlOf('did:web:issuer.test:issuers:a%3Fb')).toBe(
+      'https://issuer.test/issuers/a%3Fb/did.json',
+    )
+    expect(didDocumentUrlOf('did:web:issuer.test:issuers:a%23b')).toBe(
+      'https://issuer.test/issuers/a%23b/did.json',
+    )
+    // `%` literal também é re-encodado, sem dupla decodificação.
+    expect(didDocumentUrlOf('did:web:issuer.test:issuers:a%2520b')).toBe(
+      'https://issuer.test/issuers/a%2520b/did.json',
+    )
   })
 })
 
@@ -223,6 +239,18 @@ describe('makeHttpDidResolver', () => {
     await expect(resolver(verificationMethodOf(issuer).replace('https:', 'http:'))).rejects.toThrow(/https/)
     await expect(resolver(`${issuer.id}?x=1`)).rejects.toThrow(/query/)
     await expect(resolver(`${issuer.id}#key-1?x=1`)).rejects.toThrow(/fragment/)
+    expect(called).toBe(false)
+  })
+
+  it('recusa escopo fora do formato do issuer antes de buscar', async () => {
+    let called = false
+    const resolver = resolverWith(() => {
+      called = true
+      return response(document)
+    })
+
+    await expect(resolver(`${ISSUER_ORIGIN}/issuers/a%3Fb#key-1`)).rejects.toThrow(/no Comprova issuer/)
+    await expect(resolver(`${ISSUER_ORIGIN}/issuers/curto#key-1`)).rejects.toThrow(/no Comprova issuer/)
     expect(called).toBe(false)
   })
 

@@ -34,6 +34,8 @@ export class DidError extends Error {
 const DID_PREFIX = `did:${DID_METHOD}:`
 /** Segmentos do path de um issuer do Comprova: `issuers/<escopo>`. */
 const ISSUER_PATH_SEGMENTS = 2
+/** Mesmo formato do escopo aceito pela rota pública (`issuerScopeOf`, 43 chars). */
+const ISSUER_SCOPE_PATTERN = /^[A-Za-z0-9_-]{43}$/
 /** Host de `did:web`: domínio (com porta opcional), sem `%`-encoding residual. */
 const DID_HOST_PATTERN = /^[a-z0-9.-]+(:\d+)?$/i
 
@@ -67,7 +69,12 @@ const issuerUrlParts = (issuerId: string): IssuerUrlParts => {
   }
   const segments = url.pathname.split('/').filter((segment) => segment !== '')
   const scope = segments[1]
-  if (segments.length !== ISSUER_PATH_SEGMENTS || segments[0] !== ISSUERS_PATH || scope === undefined) {
+  if (
+    segments.length !== ISSUER_PATH_SEGMENTS ||
+    segments[0] !== ISSUERS_PATH ||
+    scope === undefined ||
+    !ISSUER_SCOPE_PATTERN.test(scope)
+  ) {
     throw new DidError(`issuer id has no Comprova issuer mapping: ${issuerId}`)
   }
   return { origin: url.origin, host: url.host, scope }
@@ -115,7 +122,9 @@ export const didDocumentUrlOf = (did: string): string => {
     if (decoded === '' || decoded === '.' || decoded === '..' || /[/\\]/.test(decoded)) {
       throw new DidError(`did:${DID_METHOD} path segment is not safe: ${did}`)
     }
-    return decoded
+    // Re-encoda o valor DECODIFICADO: sem isto, `%3F`/`%23` virariam query ou
+    // fragmento da URL de resolução e o fetch apontaria outro recurso.
+    return encodeURIComponent(decoded)
   })
   if (pathSegments.length === 0) return `https://${host}/.well-known/did.json`
   return `https://${host}/${pathSegments.join('/')}/did.json`
