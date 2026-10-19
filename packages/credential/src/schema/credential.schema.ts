@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { HexSha256Schema } from './assertion.schema.js'
 import { DataIntegrityProofSchema } from './proof.schema.js'
+import { CredentialStatusSchema } from './status.schema.js'
 
 /**
  * Documento W3C (VC Data Model 2.0). Este arquivo concentra a FORMA do
@@ -17,6 +18,9 @@ import { DataIntegrityProofSchema } from './proof.schema.js'
  *
  * Terminologia W3C usada, sem invenção:
  *  - `@context`, `type`, `issuer`, `validFrom` (§4.6/§4.10), `validUntil`;
+ *  - `id` (§4.4) — URL pública e opaca da credencial;
+ *  - `credentialStatus` (§4.9) — apenas a URL/tipo do status; o valor
+ *    (`ACTIVE`/`REVOKED`) é obtido pelo verificador nessa URL (ADR-0027);
  *  - `credentialSubject` (§4.8);
  *  - `evidence` (§5.6) — cada evidência tem `id` (opcional) e `type`
  *    (obrigatório);
@@ -127,9 +131,21 @@ const ContextEntrySchema = z.union([z.string(), z.record(z.string(), z.unknown()
 export const VerifiableCredentialSchema = z.object({
   '@context': z.array(ContextEntrySchema).min(1),
   type: z.array(z.string()).min(1),
+  /**
+   * URL pública da credencial: `<issuer.id>/credentials/<credentialId>`.
+   * Opcional no schema por compatibilidade de LEITURA com documentos legados;
+   * o emissor sempre o escreve. O verificador com resolução exige o status
+   * mesmo quando o documento não o tem (fail closed, ADR-0027).
+   */
+  id: z.string().min(1).optional(),
   issuer: z.string().min(1),
   validFrom: z.iso.datetime(),
   validUntil: z.iso.datetime().optional(),
+  /**
+   * Ponteiro para o status público. O valor do status não está aqui — só a URL
+   * assinada e o tipo. Alterar a URL depois da assinatura invalida a prova.
+   */
+  credentialStatus: CredentialStatusSchema.optional(),
   credentialSubject: z.object({
     id: z.string().min(1),
     type: z.array(z.string()).min(1),

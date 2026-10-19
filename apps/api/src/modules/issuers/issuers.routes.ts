@@ -1,4 +1,8 @@
-import { IssuerKeyDocumentSchema, WELL_KNOWN_ISSUER_PATH } from '@comprova/credential'
+import {
+  CredentialStatusDocumentSchema,
+  IssuerKeyDocumentSchema,
+  WELL_KNOWN_ISSUER_PATH,
+} from '@comprova/credential'
 import { PROBLEM_CONTENT_TYPE, ProblemSchema, problems } from '@comprova/contracts'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
@@ -14,6 +18,15 @@ export type IssuerRoutesDeps = IssuerControllerDeps
  * arbitrário.
  */
 const IssuerScopeParams = z.object({ scope: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })
+
+/**
+ * Params do status público: o mesmo escopo do issuer e o `credential_id`
+ * opaco (43 chars base64url) que aparece em `credentialStatus.id`.
+ */
+const CredentialStatusParams = z.object({
+  scope: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  credentialId: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+})
 
 export const registerIssuerRoutes = (instance: FastifyInstance, deps: IssuerRoutesDeps): void => {
   const app = instance.withTypeProvider<ZodTypeProvider>()
@@ -44,4 +57,24 @@ export const registerIssuerRoutes = (instance: FastifyInstance, deps: IssuerRout
 
   registerKeyDocumentRoute('/issuers/:scope')
   registerKeyDocumentRoute(`/${WELL_KNOWN_ISSUER_PATH}/:scope`)
+
+  // Status público da credencial: a URL assinada em `credentialStatus.id` é
+  // `<issuer.id>/credentials/<credentialId>/status`, servida aqui fora do
+  // `/v1` (sem API key). Só ACTIVE/REVOKED; 404 para credencial desconhecida.
+  app.get(
+    '/issuers/:scope/credentials/:credentialId/status',
+    {
+      schema: {
+        params: CredentialStatusParams,
+        response: { 200: CredentialStatusDocumentSchema, 404: ProblemSchema },
+      },
+    },
+    async (request, reply) => {
+      const document = await controller.credentialStatus(request.params.scope, request.params.credentialId)
+      if (document === null) {
+        return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('credential'))
+      }
+      return reply.send(document)
+    },
+  )
 }

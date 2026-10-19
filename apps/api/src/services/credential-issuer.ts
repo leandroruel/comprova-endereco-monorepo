@@ -4,13 +4,16 @@ import { and, eq, withTenant } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import {
   buildCredential,
+  credentialIdOf,
   ed25519PublicKeyBytes,
+  issuerScopeOf,
   localIssuer,
   makeEd25519Signer,
   type AssertionSource,
   type SecuredVerifiableCredential,
 } from '@comprova/credential'
 import type { SigningKeyResolver } from './signing-keys.js'
+import { ensureActiveCredentialStatus } from './credential-status.js'
 
 /**
  * Fronteira de acesso ao PostgreSQL do builder de credencial (FASE 9). Carrega
@@ -307,5 +310,21 @@ export const issueCredential = async (
   }
 
   const issuer = localIssuer(deps.issuerOrigin, tenantId, signingKey.keyId)
-  return buildCredential(source, { issuer, signer: makeEd25519Signer(privateKey), now: deps.now })
+  // Usa o id canônico que veio do banco (o parâmetro de rota pode chegar em
+  // outra caixa; o Postgres compara uuid sem caixa). O id assinado e a linha de
+  // status têm de ser derivados do MESMO valor, senão reemitir criaria um
+  // segundo status para a mesma validation.
+  const credentialId = credentialIdOf(issuer.id, source.validation.id)
+  const credential = await buildCredential(source, {
+    issuer,
+    signer: makeEd25519Signer(privateKey),
+    now: deps.now,
+    credentialId,
+  })
+
+  // O status público é registrado ANTES de a credencial ser devolvida: uma
+  // credencial emitida mas sem linha ACTIVE seria inverificável (fail closed).
+  // Se o insert falhar, a emissão falha. Reemitir não reativa uma REVOKED.
+  await ensureActiveCredentialStatus(db, tenantId, issuerScopeOf(tenantId), credentialId)
+  return credential
 }

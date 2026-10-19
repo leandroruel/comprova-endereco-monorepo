@@ -4,8 +4,12 @@ import type { AssertionObservation, AssertionSource } from '../schema/assertion.
 import { buildCredential } from './credential.service.js'
 import { issuerIdOf, verificationMethodOf, localIssuer } from './issuer.service.js'
 import type { IssuerIdentity } from '../schema/issuer.schema.js'
+import { ASSERTION_METHOD } from '../schema/proof.schema.js'
+import { CREDENTIAL_STATUS_TYPE } from '../schema/status.schema.js'
 import { generateEd25519KeyPair, makeEd25519Signer } from './signer.service.js'
+import { credentialIdOf, credentialStatusUrlOf } from './status.service.js'
 import { VC_CONTEXT_URL, type SecuredVerifiableCredential } from '../schema/credential.schema.js'
+import { createDataIntegrityProof } from './proof.service.js'
 import { verifyCredential } from './verification.service.js'
 
 const ISSUER_ORIGIN = 'https://issuer.test'
@@ -113,6 +117,12 @@ describe('buildCredential + verifyCredential', () => {
     expect(credential.type).toEqual(['VerifiableCredential', 'comprova:AddressCredential'])
     expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, TENANT))
     expect(credential.issuer).toMatch(/^https:\/\/issuer\.test\/issuers\/[A-Za-z0-9_-]{43}$/)
+    const credentialId = credentialIdOf(issuer.id, VALIDATION_ID)
+    expect(credential.id).toBe(`${issuer.id}/credentials/${credentialId}`)
+    expect(credential.credentialStatus).toEqual({
+      id: credentialStatusUrlOf(issuer.id, credentialId),
+      type: CREDENTIAL_STATUS_TYPE,
+    })
     // `validFrom` é o início da validade do veredito: a conclusão da validation.
     expect(credential.validFrom).toBe('2026-01-01T00:00:01.000Z')
     expect(credential.validUntil).toBe('2026-01-31T00:00:00.000Z')
@@ -181,6 +191,8 @@ describe('buildCredential + verifyCredential', () => {
     }))
     const other = await buildCredential(source(withPointer), { issuer, signer, now: () => PROOF_CREATED_AT })
 
+    expect(other.id).toBe(withoutPointer.id)
+    expect(other.credentialStatus).toEqual(withoutPointer.credentialStatus)
     expect(other.proof.proofValue).toBe(withoutPointer.proof.proofValue)
   })
 
@@ -365,6 +377,82 @@ describe('adulteração da credencial', () => {
     })
     await expectInvalid((c) => {
       c['comprova:evidenceSetHash'] = 'b'.repeat(64)
+    })
+  })
+
+  it('detecta adulteração do `id` e do ponteiro de status como INVALID_SIGNATURE', async () => {
+    const cases: ReadonlyArray<(credential: SecuredVerifiableCredential) => void> = [
+      (c) => {
+        c.id = `${issuer.id}/credentials/${'f'.repeat(43)}`
+      },
+      (c) => {
+        c.credentialStatus!.id = `${issuer.id}/credentials/${'f'.repeat(43)}/status`
+      },
+    ]
+    for (const mutate of cases) {
+      const credential = await valid()
+      mutate(credential)
+      expect(verifyCredential(credential, { trusted })).toEqual({
+        valid: false,
+        reason: 'INVALID_SIGNATURE',
+      })
+    }
+
+    // O `type` é parte do schema: um tipo de status não suportado é recusado
+    // estruturalmente, antes mesmo da prova.
+    const credential = await valid()
+    ;(credential.credentialStatus as { type: string }).type = 'StatusList2021Entry'
+    expect(verifyCredential(credential, { trusted })).toEqual({
+      valid: false,
+      reason: 'MALFORMED_CREDENTIAL',
+    })
+  })
+
+  it('recusa um binding de status incoerente mesmo quando a prova foi refeita sobre ele', async () => {
+    // Mesmo assinado, `credentialStatus.id` tem de ser exatamente `<id>/status`.
+    // Sem essa checagem estrutural, um issuer (ou quem controlasse a chave)
+    // poderia apontar a credencial para o status de OUTRA credencial/tenant.
+    const credential = await valid()
+    const { proof, ...document } = credential
+    const mismatched: Record<string, unknown> = {
+      ...document,
+      credentialStatus: {
+        id: `${String(document.id)}/outro`,
+        type: CREDENTIAL_STATUS_TYPE,
+      },
+    }
+    const resigned = {
+      ...mismatched,
+      proof: await createDataIntegrityProof(mismatched, {
+        verificationMethod: proof.verificationMethod,
+        proofPurpose: ASSERTION_METHOD,
+        created: PROOF_CREATED_AT.toISOString(),
+        signer,
+      }),
+    } as SecuredVerifiableCredential
+
+    expect(verifyCredential(resigned, { trusted })).toEqual({
+      valid: false,
+      reason: 'MALFORMED_CREDENTIAL',
+    })
+
+    // E o `id` fora do issuer também é recusado estruturalmente.
+    const foreignId = {
+      ...document,
+      id: `https://other.test/issuers/${'a'.repeat(43)}/credentials/${'b'.repeat(43)}`,
+    }
+    const resignedForeign = {
+      ...foreignId,
+      proof: await createDataIntegrityProof(foreignId, {
+        verificationMethod: proof.verificationMethod,
+        proofPurpose: ASSERTION_METHOD,
+        created: PROOF_CREATED_AT.toISOString(),
+        signer,
+      }),
+    } as SecuredVerifiableCredential
+    expect(verifyCredential(resignedForeign, { trusted })).toEqual({
+      valid: false,
+      reason: 'MALFORMED_CREDENTIAL',
     })
   })
 
