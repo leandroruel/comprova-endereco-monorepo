@@ -76,6 +76,15 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   `{ "status": "ACTIVE" | "REVOKED" }`. O verificador independente precisa de um
   `statusResolver`; sem status resolvido ele falha fechado
   (`STATUS_UNAVAILABLE`), e `REVOKED` resulta em `STATUS_REVOKED`.
+- **DID/DID Document** (ADR-0028): o issuer tem um DID determinístico
+  `did:web:<host>:issuers:<escopo>`, derivado do `issuer.id` (sem `tenant_id`,
+  subject, documento ou `validation_id`). O DID Document é público em
+  `GET /issuers/:scope/did.json` e publica a mesma chave do issuer em
+  `verificationMethod`/`assertionMethod` (`Multikey`/`publicKeyMultibase`), com
+  `alsoKnownAs` ligando o DID à URL HTTPS que a credencial já carrega em
+  `issuer`. O verificador resolve essa chave por `makeHttpDidResolver`, sem
+  banco, chave privada nem API interna. O `issuer` e o
+  `proof.verificationMethod` da credencial **não mudaram**.
 
 ## Dashboard
 
@@ -102,6 +111,7 @@ Abre `http://localhost:5173`:
 | POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                         |
 | GET/DELETE      | `/v1/subjects/:id`                        | Relatório de acesso / eliminação LGPD             |
 | GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey)   |
+| GET             | `/issuers/:scope/did.json`                | DID Document público do issuer (`did:web`)        |
 | GET             | `/issuers/:scope/credentials/:id/status`  | Status público da credencial (`ACTIVE`/`REVOKED`) |
 | GET             | `/.well-known/comprova-issuer/:scope`     | Descoberta do documento público do issuer         |
 | GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                               |

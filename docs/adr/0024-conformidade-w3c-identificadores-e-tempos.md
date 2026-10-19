@@ -84,6 +84,12 @@ verificador (ADR-0019 §3): um terceiro verifica com a chave que já conhece, se
 resolução. Migrar para `did:web:<host>:issuers:<escopo>` no futuro troca a
 construção do `id`, não o resto do documento.
 
+> **Atualizado pelo [ADR-0028](0028-did-e-did-document-do-issuer.md):** o
+> `did:web:<host>:issuers:<escopo>` foi implementado como uma camada de
+> resolução **adicional**. O `issuer.id` da credencial continua sendo a URL
+> HTTPS; o DID é derivado deterministicamente dela e o DID Document declara a
+> URL em `alsoKnownAs`. Nenhuma credencial já emitida deixou de ser verificável.
+
 ### 3. `credentialSubject.id`: URL no namespace do issuer
 
 ```
@@ -332,9 +338,13 @@ recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
 - **Resolução de chave:** não há documento do issuer publicado em
   `GET <issuer.id>`. Um verificador externo precisa receber a chave pública
   (e o id do método) por outro canal. Sem isso, o `verificationMethod` é
-  verificável, mas não descobrível.
-- **DID / `did:web`:** não implementado; a forma do `id` é compatível com uma
-  migração futura.
+  verificável, mas não descobrível. (Implementado no
+  [ADR-0025](0025-emissao-http-e-chave-publica-do-issuer.md); o DID Document do
+  [ADR-0028](0028-did-e-did-document-do-issuer.md) é uma segunda porta de
+  resolução.)
+- **DID / `did:web`:** implementado no
+  [ADR-0028](0028-did-e-did-document-do-issuer.md) como camada adicional de
+  resolução, sem trocar o `issuer.id` da credencial.
 - **Revogação / status list:** não implementado. A credencial não carrega
   `credentialStatus`; expiração é do consumidor.
 - **`id` da credencial:** segue omitido (linkabilidade é decisão de produto).

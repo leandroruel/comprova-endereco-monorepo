@@ -1,9 +1,13 @@
 import {
   ISSUERS_PATH,
+  didDocumentOf,
+  didOfIssuer,
   ed25519PublicKeyFromBytes,
   issuerKeyDocumentOf,
   type CredentialStatusDocument,
+  type DidDocument,
   type IssuerKeyDocument,
+  type IssuerVerificationKey,
 } from '@comprova/credential'
 import { asc, eq, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -15,44 +19,72 @@ export interface IssuerControllerDeps {
   readonly issuerOrigin: string
 }
 
-export const makeIssuerController = (deps: IssuerControllerDeps) => ({
+export const makeIssuerController = (deps: IssuerControllerDeps) => {
   /**
-   * Documento de chave do issuer: reconstrói o `issuer.id` a partir da origem
-   * configurada e do escopo recebido e publica TODOS os métodos de verificação
-   * registrados para aquele issuer (FASE 14). O escopo é opaco (digest do
-   * tenant); nenhum identificador interno é exposto, e só a chave PÚBLICA sai
-   * daqui.
-   *
-   * `null` = não há chave registrada para o escopo pedido (o chamador responde
-   * 404). Uma credencial de outro issuer nunca é incluída: a seleção é pelo
-   * `issuer_scope`.
+   * Carrega as chaves PÚBLICAS publicadas para o escopo, ordenadas por `key_id`.
+   * Apenas `issuer_scope` filtra: uma chave de outro issuer nunca entra. Devolve
+   * `null` quando o escopo não tem chave (o chamador responde 404).
    */
-  keyDocument: async (scope: string): Promise<IssuerKeyDocument | null> => {
+  const publishedMethods = async (scope: string): Promise<IssuerVerificationKey[] | null> => {
     const rows = await deps.db
       .select({ keyId: t.issuerSigningKey.keyId, publicKey: t.issuerSigningKey.publicKey })
       .from(t.issuerSigningKey)
       .where(eq(t.issuerSigningKey.issuerScope, scope))
       .orderBy(asc(t.issuerSigningKey.keyId))
     if (rows.length === 0) return null
+    return rows.map((row) => ({ keyId: row.keyId, publicKey: ed25519PublicKeyFromBytes(row.publicKey) }))
+  }
 
-    return issuerKeyDocumentOf(
-      `${deps.issuerOrigin}/${ISSUERS_PATH}/${scope}`,
-      rows.map((row) => ({ keyId: row.keyId, publicKey: ed25519PublicKeyFromBytes(row.publicKey) })),
-    )
-  },
+  const issuerUrlOf = (scope: string): string => `${deps.issuerOrigin}/${ISSUERS_PATH}/${scope}`
 
-  /**
-   * Status público de uma credencial do issuer: `ACTIVE` ou `REVOKED`. A
-   * consulta é por (escopo do issuer, credential_id) e seleciona SOMENTE o
-   * status — nenhum tenant_id, subject, documento, evidence ou chave. `null` =
-   * credencial desconhecida para esse issuer (o chamador responde 404).
-   *
-   * A rota é pública por construção (não usa `app_tenant_id()`); a policy
-   * `public_status_read` só permite SELECT, e a escrita continua escopada por
-   * RLS no endpoint autenticado de revogação.
-   */
-  credentialStatus: async (scope: string, credentialId: string): Promise<CredentialStatusDocument | null> => {
-    const status = await loadPublicCredentialStatus(deps.db, scope, credentialId)
-    return status === null ? null : { status }
-  },
-})
+  return {
+    /**
+     * Documento de chave do issuer: reconstrói o `issuer.id` a partir da origem
+     * configurada e do escopo recebido e publica TODOS os métodos de verificação
+     * registrados para aquele issuer (FASE 14). O escopo é opaco (digest do
+     * tenant); nenhum identificador interno é exposto, e só a chave PÚBLICA sai
+     * daqui.
+     *
+     * `null` = não há chave registrada para o escopo pedido (o chamador responde
+     * 404). Uma credencial de outro issuer nunca é incluída: a seleção é pelo
+     * `issuer_scope`.
+     */
+    keyDocument: async (scope: string): Promise<IssuerKeyDocument | null> => {
+      const methods = await publishedMethods(scope)
+      if (methods === null) return null
+      return issuerKeyDocumentOf(issuerUrlOf(scope), methods)
+    },
+
+    /**
+     * DID Document do issuer (ADR-0028). O DID é derivado do `issuer.id`
+     * (`did:web:<host>:issuers:<escopo>`); o documento é servido em
+     * `<issuer.id>/did.json` (resolução `did:web`) e publica os MESMOS métodos
+     * públicos que `keyDocument`, com `alsoKnownAs` ligando o DID à URL HTTPS do
+     * issuer. `null` = escopo sem chave registrada (404).
+     */
+    didDocument: async (scope: string): Promise<DidDocument | null> => {
+      const methods = await publishedMethods(scope)
+      if (methods === null) return null
+      const issuerUrl = issuerUrlOf(scope)
+      return didDocumentOf(didOfIssuer(issuerUrl), issuerUrl, methods)
+    },
+
+    /**
+     * Status público de uma credencial do issuer: `ACTIVE` ou `REVOKED`. A
+     * consulta é por (escopo do issuer, credential_id) e seleciona SOMENTE o
+     * status — nenhum tenant_id, subject, documento, evidence ou chave. `null` =
+     * credencial desconhecida para esse issuer (o chamador responde 404).
+     *
+     * A rota é pública por construção (não usa `app_tenant_id()`); a policy
+     * `public_status_read` só permite SELECT, e a escrita continua escopada por
+     * RLS no endpoint autenticado de revogação.
+     */
+    credentialStatus: async (
+      scope: string,
+      credentialId: string,
+    ): Promise<CredentialStatusDocument | null> => {
+      const status = await loadPublicCredentialStatus(deps.db, scope, credentialId)
+      return status === null ? null : { status }
+    },
+  }
+}
