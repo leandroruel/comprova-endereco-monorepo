@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { Db } from '@comprova/db'
-import { ingestCnefeCsv, parseCnefeLine } from './cnefe.js'
+import { parseCnefeLine } from './cnefe.parser.js'
+import { ingestCnefeCsv } from './cnefe.service.js'
 
 /**
  * Caracterização do parser/ingestor do CNEFE: protege a refatoração do layout

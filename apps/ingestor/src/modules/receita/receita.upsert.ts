@@ -1,60 +1,69 @@
 import { sql } from '@comprova/db'
 import type { Db } from '@comprova/db'
+import type { EstabelecimentoInsertRow } from './receita.parser.js'
 
 export interface UpsertWithHistoryResult {
   readonly upserted: number
   readonly historyInserted: number
 }
 
+type SqlValue = string | number | null | undefined | Uint8Array | readonly string[]
+
+/** Literal SQL de um valor do lote (o `VALUES` é montado sem placeholders). */
+const renderValue = (value: SqlValue): string => {
+  if (value === null || value === undefined) return 'NULL'
+  if (typeof value === 'number') return String(value)
+  if (value instanceof Uint8Array) return `'\\x${Buffer.from(value).toString('hex')}'`
+  if (Array.isArray(value)) return `ARRAY[${value.map((code) => `'${code}'`).join(',')}]::char(7)[]`
+  return `'${String(value).replace(/'/g, "''")}'`
+}
+
+const renderRow = (row: EstabelecimentoInsertRow): string => {
+  const values: readonly SqlValue[] = [
+    row.cnpjBasico,
+    row.cnpjOrdem,
+    row.cnpjDv,
+    row.matrizFilial,
+    row.nomeFantasia,
+    row.situacaoCadastral,
+    row.dataSituacao,
+    row.motivoSituacao,
+    row.dataAbertura,
+    row.cnaePrincipal,
+    row.cnaesSecundarios,
+    row.tipoLogradouro,
+    row.logradouro,
+    row.numero,
+    row.complemento,
+    row.bairro,
+    row.cep,
+    row.uf,
+    row.municipioReceita,
+    row.municipioIbge,
+    row.paisCodigo,
+    row.cidadeExterior,
+    row.telefone,
+    row.emailDomain,
+    row.buildingKey,
+    row.unitKey,
+  ]
+  return `(${values.map(renderValue).join(',')})`
+}
+
+/**
+ * Insere/atualiza estabelecimentos em lote e registra no histórico os que
+ * mudaram. O `VALUES` é montado linha a linha e passado como `sql.raw` porque o
+ * volume do lote e a lista de colunas não cabem no builder; o histórico é
+ * gravado numa única CTE, antes do upsert.
+ */
 export const upsertEstabelecimentosWithHistory = async (
   db: Db,
-  batch: ReadonlyArray<Record<string, unknown>>,
+  batch: readonly EstabelecimentoInsertRow[],
   snapshotMonth: string,
 ): Promise<UpsertWithHistoryResult> => {
   if (batch.length === 0) return { upserted: 0, historyInserted: 0 }
 
-  const values = batch
-    .map((row) => {
-      const b = row as Record<string, string | number | null | Uint8Array | readonly string[] | undefined>
-      const vals = [
-        b['cnpjBasico'],
-        b['cnpjOrdem'],
-        b['cnpjDv'],
-        b['matrizFilial'],
-        b['nomeFantasia'],
-        b['situacaoCadastral'],
-        b['dataSituacao'],
-        b['motivoSituacao'],
-        b['dataAbertura'],
-        b['cnaePrincipal'],
-        b['cnaesSecundarios'],
-        b['tipoLogradouro'],
-        b['logradouro'],
-        b['numero'],
-        b['complemento'],
-        b['bairro'],
-        b['cep'],
-        b['uf'],
-        b['municipioReceita'],
-        b['municipioIbge'],
-        b['paisCodigo'],
-        b['cidadeExterior'],
-        b['telefone'],
-        b['emailDomain'],
-        b['buildingKey'],
-        b['unitKey'],
-      ]
-      return `(${vals
-        .map((v) => {
-          if (v === null || v === undefined) return 'NULL'
-          if (typeof v === 'number') return String(v)
-          if (v instanceof Uint8Array) return `'\\x${Buffer.from(v).toString('hex')}'`
-          if (Array.isArray(v)) return `ARRAY[${v.map((x) => `'${x}'`).join(',')}]::char(7)[]`
-          return `'${String(v).replace(/'/g, "''")}'`
-        })
-        .join(',')})`
-    })
-    .join(',')
+  const values = batch.map(renderRow).join(',')
 
   const result = (await db.execute(
     sql.raw(`
@@ -160,6 +169,6 @@ export const upsertEstabelecimentosWithHistory = async (
 
   return {
     upserted: result.length,
-    historyInserted: result.filter((r) => !r.is_insert).length,
+    historyInserted: result.filter((row) => !row.is_insert).length,
   }
 }

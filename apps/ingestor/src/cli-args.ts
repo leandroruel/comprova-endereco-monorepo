@@ -1,3 +1,17 @@
+/** Valor que segue `flag` em `args`, ou `undefined` quando a flag não aparece. */
+export const flagValue = (args: readonly string[], flag: string): string | undefined => {
+  const index = args.indexOf(flag)
+  return index >= 0 ? args[index + 1] : undefined
+}
+
+/** `flag` numérica; `undefined` quando ausente. Não valida o conteúdo (preserva o `Number` cru). */
+export const flagNumber = (args: readonly string[], flag: string): number | undefined => {
+  const raw = flagValue(args, flag)
+  return raw === undefined ? undefined : Number(raw)
+}
+
+export const hasFlag = (args: readonly string[], flag: string): boolean => args.includes(flag)
+
 const SNAPSHOT_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
 
 /**

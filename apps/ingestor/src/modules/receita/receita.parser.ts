@@ -1,59 +1,31 @@
 import { addressKeys, canonicalizeAddress, normalizeText } from '@comprova/core'
-import type { Db } from '@comprova/db'
-import * as t from '@comprova/db'
-import { createReadStream } from 'node:fs'
-import { createInterface } from 'node:readline'
-
-export const ESTABELECIMENTO_COLUMNS = [
-  'cnpj_basico',
-  'cnpj_ordem',
-  'cnpj_dv',
-  'matriz_filial',
-  'nome_fantasia',
-  'situacao_cadastral',
-  'data_situacao',
-  'motivo_situacao',
-  'nome_cidade_exterior',
-  'pais',
-  'data_inicio_atividade',
-  'cnae_fiscal_principal',
-  'cnae_fiscal_secundario',
-  'tipo_logradouro',
-  'logradouro',
-  'numero',
-  'complemento',
-  'bairro',
-  'cep',
-  'uf',
-  'municipio',
-  'ddd1',
-  'telefone1',
-  'ddd2',
-  'telefone2',
-  'situacao_especial',
-  'data_situacao_especial',
-  'email',
-] as const
+import type { EstabelecimentoRowValues } from './receita.schema.js'
 
 const unquote = (field: string): string => field.replace(/^"|"$/g, '')
 
-const parseLine = (line: string): readonly string[] => {
-  const fields: string[] = []
-  let current = ''
-  let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i] ?? ''
-    if (char === '"') {
-      inQuotes = !inQuotes
-    } else if (char === ';' && !inQuotes) {
-      fields.push(unquote(current))
-      current = ''
-    } else {
-      current += char
-    }
-  }
-  fields.push(unquote(current))
-  return fields
+interface LineState {
+  readonly fields: readonly string[]
+  readonly current: string
+  readonly inQuotes: boolean
+}
+
+/**
+ * Divide uma linha por `;` respeitando aspas: dentro de aspas o separador não
+ * conta, e cada campo perde as aspas externas. Expresso como redução sobre os
+ * caracteres — sem `let` nem índice mutável.
+ */
+export const parseLine = (line: string): readonly string[] => {
+  const state = [...line].reduce<LineState>(
+    (acc, char) => {
+      if (char === '"') return { ...acc, inQuotes: !acc.inQuotes }
+      if (char === ';' && !acc.inQuotes) {
+        return { fields: [...acc.fields, unquote(acc.current)], current: '', inQuotes: acc.inQuotes }
+      }
+      return { ...acc, current: acc.current + char }
+    },
+    { fields: [], current: '', inQuotes: false },
+  )
+  return [...state.fields, unquote(state.current)]
 }
 
 const toIsoDate = (raw: string): string | null => {
@@ -94,36 +66,6 @@ const nullIfEmpty = (value: string): string | null => {
     .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, '')
     .trim()
   return cleaned.length > 0 ? cleaned : null
-}
-
-export interface EstabelecimentoRowValues {
-  readonly cnpjBasico: string
-  readonly cnpjOrdem: string
-  readonly cnpjDv: string
-  readonly matrizFilial: number
-  readonly nomeFantasia: string | null
-  readonly situacaoCadastral: number
-  readonly dataSituacao: string | null
-  readonly motivoSituacao: number | null
-  readonly dataAbertura: string | null
-  readonly cnaePrincipal: string | null
-  readonly cnaesSecundarios: readonly string[] | null
-  readonly tipoLogradouro: string | null
-  readonly logradouro: string | null
-  readonly numero: string | null
-  readonly complemento: string | null
-  readonly bairro: string | null
-  readonly cep: string | null
-  readonly uf: string | null
-  readonly municipioReceita: number | null
-  readonly municipioIbge: number | null
-  readonly paisCodigo: number | null
-  readonly cidadeExterior: string | null
-  readonly telefone: string | null
-  readonly emailDomain: string | null
-  readonly buildingKey: Buffer | null
-  readonly unitKey: Buffer | null
-  readonly snapshotMonth: string
 }
 
 export const toEstabelecimentoValues = (
@@ -199,6 +141,7 @@ export const toEstabelecimentoValues = (
   }
 }
 
+/** Projeção para o `insert` do Drizzle: copia o array de CNAEs na fronteira. */
 export const toInsertRow = (values: EstabelecimentoRowValues) => ({
   cnpjBasico: values.cnpjBasico,
   cnpjOrdem: values.cnpjOrdem,
@@ -229,82 +172,18 @@ export const toInsertRow = (values: EstabelecimentoRowValues) => ({
   snapshotMonth: values.snapshotMonth,
 })
 
-export interface IngestStats {
-  readonly rows: number
-  readonly snapshotMonth: string
-  readonly elapsedMs: number
+export type EstabelecimentoInsertRow = ReturnType<typeof toInsertRow>
+
+export interface ReceitaMunicipioRow {
+  readonly codigoReceita: number
+  readonly nomeNorm: string
 }
 
-export const ingestReceitaEstabelecimentos = async (
-  db: Db,
-  csvPath: string,
-  snapshotMonth: string,
-  options: { readonly limit?: number; readonly batchSize?: number } = {},
-): Promise<IngestStats> => {
-  const batchSize = options.batchSize ?? 2_000
-  const started = Date.now()
-
-  const stream = createReadStream(csvPath, { encoding: 'latin1' })
-  const rl = createInterface({ input: stream, crlfDelay: Infinity })
-  const lines = rl[Symbol.asyncIterator]()
-
-  let count = 0
-  let batch: ReturnType<typeof toInsertRow>[] = []
-  const flush = async (): Promise<void> => {
-    if (batch.length === 0) return
-    const { upsertEstabelecimentosWithHistory } = await import('./estabelecimento-upsert.js')
-    await upsertEstabelecimentosWithHistory(
-      db,
-      batch as unknown as readonly Record<string, unknown>[],
-      snapshotMonth,
-    )
-    batch = []
-  }
-
-  for (;;) {
-    const next = await lines.next()
-    if (next.done === true) break
-    const line = next.value
-    if (line.trim().length === 0) continue
-    const values = toEstabelecimentoValues(parseLine(line), snapshotMonth)
-    if (values !== null) {
-      batch.push(toInsertRow(values))
-      if (batch.length >= batchSize) {
-        await flush()
-      }
-      count++
-      if (options.limit !== undefined && count >= options.limit) break
-    }
-  }
-  await flush()
-  await lines.return?.()
-  return { rows: count, snapshotMonth, elapsedMs: Date.now() - started }
-}
-
-export const ingestReceitaMunicipios = async (db: Db, csvPath: string): Promise<number> => {
-  const stream = createReadStream(csvPath, { encoding: 'latin1' })
-  const rl = createInterface({ input: stream, crlfDelay: Infinity })
-  const rows: { codigoReceita: number; nomeNorm: string }[] = []
-  for await (const line of rl) {
-    if (line.trim().length === 0) continue
-    const [codeRaw, nameRaw] = line.split(';').map(unquote)
-    const code = digitsOnly(codeRaw ?? '')
-    if (code === null || nameRaw === undefined) continue
-    rows.push({
-      codigoReceita: Number(code),
-      nomeNorm: normalizeText(nameRaw),
-    })
-  }
-  if (rows.length > 0) {
-    await db
-      .insert(t.refReceitaMunicipio)
-      .values(
-        rows.map((r) => ({
-          codigoReceita: r.codigoReceita,
-          nomeNorm: r.nomeNorm,
-        })),
-      )
-      .onConflictDoNothing()
-  }
-  return rows.length
+/** Linha do CSV de municípios (`codigo;nome`); `null` quando vazia ou sem código/nome. */
+export const parseMunicipioLine = (line: string): ReceitaMunicipioRow | null => {
+  if (line.trim().length === 0) return null
+  const [codeRaw, nameRaw] = line.split(';').map(unquote)
+  const code = digitsOnly(codeRaw ?? '')
+  if (code === null || nameRaw === undefined) return null
+  return { codigoReceita: Number(code), nomeNorm: normalizeText(nameRaw) }
 }
