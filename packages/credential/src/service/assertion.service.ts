@@ -1,27 +1,33 @@
+import { evidenceSetHash, type EvidenceSetEntry } from '@comprova/core'
 import type {
   AssertionObservation,
   AssertionPayload,
   AssertionSource,
   CredentialObservation,
-} from './assertion.js'
-import { ASSERTION_METHOD, createDataIntegrityProof } from './data-integrity.js'
-import { evidenceSetHashOfCredential } from './evidence.js'
-import { verificationMethodOf, type IssuerIdentity } from './issuer.js'
-import type { Signer } from './signer.js'
-import { deriveCredentialSubjectId } from './subject.js'
-import { toVerifiableCredential, type SecuredVerifiableCredential } from './vc.js'
+} from '../schema/assertion.schema.js'
+import { deriveCredentialSubjectId } from './subject.service.js'
 
-export interface BuildCredentialDeps {
-  readonly issuer: IssuerIdentity
-  readonly signer: Signer
-  /**
-   * Relógio da emissão. `proof.created` é o momento REAL em que a prova
-   * criptográfica é criada (Data Integrity 1.0 §2.1.1) — nunca um timestamp
-   * histórico da validation (ADR-0024 §4). Injetável para testes
-   * determinísticos; default: `() => new Date()`.
-   */
-  readonly now?: () => Date
-}
+/**
+ * Binding de evidência (FASE 5): converte uma observação da credencial no
+ * formato do `evidence_set_hash`. Usa `evidence_sha256` (durável) e NUNCA
+ * `evidence_id`/`s3_uri`, de modo que o conjunto continue verificável depois da
+ * retenção do material físico.
+ */
+export const observationEntry = (observation: CredentialObservation): EvidenceSetEntry => ({
+  id: observation.id,
+  checker: observation.checker,
+  checkerVersion: observation.checker_version,
+  stance: observation.stance,
+  strength: observation.strength,
+  confidence: observation.confidence,
+  source: observation.source,
+  observedAt: observation.observed_at,
+  evidenceSha256: observation.evidence_sha256,
+  detail: observation.detail,
+})
+
+export const evidenceSetHashOfCredential = (observations: readonly CredentialObservation[]): string =>
+  evidenceSetHash(observations.map(observationEntry))
 
 const byId = (a: { readonly id: string }, b: { readonly id: string }): number =>
   a.id < b.id ? -1 : a.id > b.id ? 1 : 0
@@ -54,8 +60,8 @@ const toCredentialObservation = (o: AssertionObservation): CredentialObservation
  * ordem devolvida pelo PostgreSQL.
  *
  * O `issuerId` (URL do issuer) entra em dois lugares do payload: como `issuer`
- * do documento e como namespace do `credentialSubject.id` (`subject.ts`). O
- * `proof.created` NÃO é derivado daqui: ele é o instante real da assinatura.
+ * do documento e como namespace do `credentialSubject.id` (`subject.service.ts`).
+ * O `proof.created` NÃO é derivado daqui: ele é o instante real da assinatura.
  */
 export const buildAssertion = (source: AssertionSource, issuerId: string): AssertionPayload => {
   const v = source.validation
@@ -154,31 +160,4 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
       expires_at: v.expiresAt.toISOString(),
     },
   }
-}
-
-/**
- * `AssertionSource → assertion interna → Verifiable Credential (W3C 2.0) →
- * Data Integrity proof (eddsa-jcs-2022)`. Puro (não acessa banco); o `signer` e
- * a identidade do issuer entram por dependência.
- *
- * O documento (sem `proof`) é determinístico em função da assertion. O proof
- * NÃO é: `created` é o instante real da assinatura. Duas emissões da mesma
- * validation produzem documentos iguais e provas diferentes — reaproveitar o
- * instante da primeira é uma decisão explícita de quem chama (`now`), não um
- * efeito de a camada "adivinhar" o tempo a partir da validation (ADR-0024 §4).
- */
-export const buildCredential = async (
-  source: AssertionSource,
-  deps: BuildCredentialDeps,
-): Promise<SecuredVerifiableCredential> => {
-  const credential = toVerifiableCredential(buildAssertion(source, deps.issuer.id))
-
-  const proof = await createDataIntegrityProof(credential, {
-    verificationMethod: verificationMethodOf(deps.issuer),
-    proofPurpose: ASSERTION_METHOD,
-    created: (deps.now ?? (() => new Date()))().toISOString(),
-    signer: deps.signer,
-  })
-
-  return { ...credential, proof }
 }

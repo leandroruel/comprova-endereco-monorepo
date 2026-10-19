@@ -5,7 +5,7 @@ import {
   decodeMultibaseBase58Btc,
   encodeMultibaseBase58Btc,
   MultibaseError,
-} from './multibase.js'
+} from './encoding.service.js'
 
 // `proofValue` do vetor normativo B.3 (W3C Data Integrity EdDSA Cryptosuites).
 const VECTOR_PROOF_VALUE =

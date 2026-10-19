@@ -7,7 +7,7 @@ import { z } from 'zod'
  * derivado do grafo persistido `validation → claim → claim_evidence → signal`.
  * A fonte de verdade continua sendo o banco; aqui só se congela o conteúdo
  * derivado (o material efetivamente assinado é o documento W3C mapeado a partir
- * dele em `vc.ts`, não este objeto).
+ * dele em `service/credential.service.ts`, não este objeto).
  *
  * Todas as propriedades do payload são obrigatórias (campos ausentes são
  * explicitamente `null`), para que a forma do objeto canonicalizado seja fixa e
@@ -15,7 +15,7 @@ import { z } from 'zod'
  *
  * Papel na arquitetura (ADR-0020): esta é a representação INTERNA da Comprova.
  * Ela NÃO é o documento W3C — a conversão para `VerifiableCredential` (VC Data
- * Model 2.0) é um mapping explícito em `vc.ts`. O domínio
+ * Model 2.0) é um mapping explícito em `service/credential.service.ts`. O domínio
  * (`validation → claim → claim_evidence → evidence`) continua sendo a única
  * fonte de verdade, e não é remodelado para acomodar a VC.
  */

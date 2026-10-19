@@ -6,7 +6,7 @@ import {
   localIssuer,
   parseIssuerOrigin,
   verificationMethodOf,
-} from './issuer.js'
+} from './issuer.service.js'
 
 const ORIGIN = 'https://issuer.test'
 const TENANT = '11111111-1111-4111-8111-111111111111'

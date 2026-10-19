@@ -6,10 +6,9 @@ import {
   type KeyObject,
 } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { createDataIntegrityProof, verifyDataIntegrityProof } from './data-integrity.js'
-import { canonicalize } from './jcs.js'
-import { decodeMultibaseBase58Btc, encodeMultibaseBase58Btc } from './multibase.js'
-import { generateEd25519KeyPair, makeEd25519Signer } from './signer.js'
+import { createDataIntegrityProof, verifyDataIntegrityProof } from './proof.service.js'
+import { canonicalize, decodeMultibaseBase58Btc, encodeMultibaseBase58Btc } from './encoding.service.js'
+import { generateEd25519KeyPair, makeEd25519Signer } from './signer.service.js'
 
 /**
  * Vetor normativo B.3 de W3C Data Integrity EdDSA Cryptosuites v1.0
