@@ -3,9 +3,9 @@ import type postgres from 'postgres'
 
 /**
  * Reprocessa `building_key`/`unit_key` de todos os estabelecimentos, página a
- * página, por keyset (`cnpj_basico > último`). Antes era um script com `for(;;)`
- * e acumuladores mutáveis; agora é recursivo e puro, com a montagem dos patches
- * separada da gravação.
+ * página, por keyset da identidade completa (`(cnpj_basico, cnpj_ordem, cnpj_dv)`).
+ * Antes era um script com `for(;;)` e acumuladores mutáveis; agora é recursivo e
+ * puro, com a montagem dos patches separada da gravação.
  */
 
 export interface EstabelecimentoKeyRow {
@@ -26,7 +26,7 @@ export interface KeyPatch {
   readonly basico: string
   readonly ordem: string
   readonly dv: string
-  /** Literal `\x…` para `bytea`, ou `''` quando a linha não tem endereço utilizável. */
+  /** Literal `\x…` para `bytea`, ou `''` (gravado como `NULL`) quando não há endereço. */
   readonly buildingKey: string
   readonly unitKey: string
 }
@@ -43,7 +43,7 @@ export interface RebuildKeysOptions {
 
 const byteaLiteral = (bytes: Buffer): string => `\\x${bytes.toString('hex')}`
 
-/** Chaves de uma linha; sem endereço nacional completo, ambas ficam vazias. */
+/** Chaves de uma linha; sem endereço nacional completo, ambas ficam vazias (gravadas como NULL). */
 export const keysForRow = (row: EstabelecimentoKeyRow): KeyPatch => {
   const identity = { basico: row.cnpj_basico, ordem: row.cnpj_ordem, dv: row.cnpj_dv }
   const hasAddress =
@@ -65,22 +65,28 @@ export const keysForRow = (row: EstabelecimentoKeyRow): KeyPatch => {
   return { ...identity, buildingKey: byteaLiteral(keys.buildingKey), unitKey: byteaLiteral(keys.unitKey) }
 }
 
+interface KeyCursor {
+  readonly basico: string
+  readonly ordem: string
+  readonly dv: string
+}
+
 const fetchKeyPage = async (
   sql: postgres.Sql,
-  after: string,
+  after: KeyCursor | null,
   batchSize: number,
 ): Promise<readonly EstabelecimentoKeyRow[]> => {
-  const rows = await (after === ''
+  const rows = await (after === null
     ? sql`SELECT cnpj_basico, cnpj_ordem, cnpj_dv, tipo_logradouro, logradouro,
              numero, complemento, bairro, cep, uf, pais_codigo
           FROM ref_receita_estabelecimento
-          ORDER BY cnpj_basico
+          ORDER BY cnpj_basico, cnpj_ordem, cnpj_dv
           LIMIT ${batchSize}`
     : sql`SELECT cnpj_basico, cnpj_ordem, cnpj_dv, tipo_logradouro, logradouro,
              numero, complemento, bairro, cep, uf, pais_codigo
           FROM ref_receita_estabelecimento
-          WHERE cnpj_basico > ${after}
-          ORDER BY cnpj_basico
+          WHERE (cnpj_basico, cnpj_ordem, cnpj_dv) > (${after.basico}, ${after.ordem}, ${after.dv})
+          ORDER BY cnpj_basico, cnpj_ordem, cnpj_dv
           LIMIT ${batchSize}`)
   return rows as unknown as readonly EstabelecimentoKeyRow[]
 }
@@ -90,7 +96,7 @@ const applyKeyPatches = async (sql: postgres.Sql, patches: readonly KeyPatch[]):
   const column = (pick: (patch: KeyPatch) => string) => sql.array(patches.map(pick))
   await sql`
     UPDATE ref_receita_estabelecimento e
-    SET building_key = t.bkey, unit_key = t.ukey
+    SET building_key = NULLIF(t.bkey, ''::bytea), unit_key = NULLIF(t.ukey, ''::bytea)
     FROM unnest(
       ${column((patch) => patch.basico)}::text[],
       ${column((patch) => patch.ordem)}::text[],
@@ -110,21 +116,22 @@ export const rebuildEstablishmentKeys = async (
   const batchSize = options.batchSize ?? 20_000
   const started = Date.now()
 
-  const step = async (processed: number, after: string): Promise<number> => {
+  const step = async (processed: number, after: KeyCursor | null): Promise<number> => {
     const rows = await fetchKeyPage(sql, after, batchSize)
     if (rows.length === 0) return processed
 
-    await applyKeyPatches(
-      sql,
-      rows.map(keysForRow).filter((patch) => patch.buildingKey !== ''),
-    )
+    // Todas as linhas viram patch, inclusive as sem endereço: `NULLIF` grava NULL
+    // e limpa chaves antigas de linhas que deixaram de ser elegíveis.
+    await applyKeyPatches(sql, rows.map(keysForRow))
 
     const total = processed + rows.length
     options.onProgress?.({ processed: total, elapsedMs: Date.now() - started })
 
-    const last = rows[rows.length - 1]?.cnpj_basico
-    return last === undefined || last === after ? total : step(total, last)
+    const last = rows.at(-1)
+    return last === undefined
+      ? total
+      : step(total, { basico: last.cnpj_basico, ordem: last.cnpj_ordem, dv: last.cnpj_dv })
   }
 
-  return step(0, '')
+  return step(0, null)
 }

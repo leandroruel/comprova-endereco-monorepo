@@ -1,13 +1,28 @@
-/** Valor que segue `flag` em `args`, ou `undefined` quando a flag não aparece. */
+/**
+ * Valor que segue `flag` em `args`, ou `undefined` quando a flag não aparece.
+ * Uma flag presente sem operando é erro — nunca tratada como ausente.
+ */
 export const flagValue = (args: readonly string[], flag: string): string | undefined => {
   const index = args.indexOf(flag)
-  return index >= 0 ? args[index + 1] : undefined
+  if (index < 0) return undefined
+  const value = args[index + 1]
+  if (value === undefined) throw new Error(`${flag} exige um valor`)
+  return value
 }
 
-/** `flag` numérica; `undefined` quando ausente. Não valida o conteúdo (preserva o `Number` cru). */
+/**
+ * `flag` numérica; `undefined` quando ausente. Uma flag presente sem operando,
+ * com valor não numérico, não positivo ou que seja outra flag (`--limit --report`)
+ * é rejeitada — o serviço nunca recebe `NaN`/negativo.
+ */
 export const flagNumber = (args: readonly string[], flag: string): number | undefined => {
   const raw = flagValue(args, flag)
-  return raw === undefined ? undefined : Number(raw)
+  if (raw === undefined) return undefined
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} inválido: "${raw}" (esperado número positivo)`)
+  }
+  return value
 }
 
 export const hasFlag = (args: readonly string[], flag: string): boolean => args.includes(flag)

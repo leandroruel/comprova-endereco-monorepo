@@ -43,6 +43,16 @@ describe('parseLine', () => {
   it('preserva campo vazio à direita', () => {
     expect(parseLine('a;')).toEqual(['a', ''])
   })
+
+  it('remove aspas em qualquer posição e tolera aspas não fechadas', () => {
+    expect(parseLine('a"b"c;d')).toEqual(['abc', 'd'])
+    expect(parseLine('"a;b')).toEqual(['a;b'])
+  })
+
+  it('preserva campos vazios no meio', () => {
+    expect(parseLine(';')).toEqual(['', ''])
+    expect(parseLine('a;;b')).toEqual(['a', '', 'b'])
+  })
 })
 
 describe('toEstabelecimentoValues', () => {

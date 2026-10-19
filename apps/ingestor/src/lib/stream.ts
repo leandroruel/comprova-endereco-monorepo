@@ -24,46 +24,56 @@ interface LineBatch<T> {
   readonly skipped: number
 }
 
-/** Lê até `n` linhas do iterador (recursivo; devolve um novo array a cada passo). */
+/**
+ * Lê até `n` linhas do iterador. Em vez de copiar o acumulador a cada linha
+ * (custo quadrático dentro do lote), pede as `n` leituras e materializa o lote
+ * uma única vez. Iteradores assíncronos (`readline`, async generators) atendem
+ * `next()` concorrentes na ordem em que foram pedidos, preservando a ordem.
+ */
 export const takeAsync = async <T>(iterator: AsyncIterator<T>, n: number): Promise<readonly T[]> => {
-  const read = async (acc: readonly T[]): Promise<readonly T[]> => {
-    if (acc.length >= n) return acc
-    const next = await iterator.next()
-    return next.done === true ? acc : read([...acc, next.value])
-  }
-  return read([])
+  const results = await Promise.all(Array.from({ length: n }, () => iterator.next()))
+  return results.flatMap((result) => (result.done === true ? [] : [result.value]))
 }
 
 /** Drena o iterador inteiro para um array. Para fontes pequenas (ex.: municípios). */
-export const collectAsync = async <T>(iterator: AsyncIterator<T>): Promise<readonly T[]> => {
-  const read = async (acc: readonly T[]): Promise<readonly T[]> => {
-    const next = await iterator.next()
-    return next.done === true ? acc : read([...acc, next.value])
-  }
-  return read([])
+export const collectAsync = async <T>(iterator: AsyncIterator<T>): Promise<readonly T[]> =>
+  Array.fromAsync({ [Symbol.asyncIterator]: () => iterator })
+
+/** Linha do lote já classificada; o `index` permite cortar descartes além do `limit`. */
+type ClassifiedLine<T> =
+  | { readonly kind: 'blank'; readonly index: number }
+  | { readonly kind: 'skipped'; readonly index: number }
+  | { readonly kind: 'value'; readonly index: number; readonly value: T }
+
+const isValueLine = <T>(
+  entry: ClassifiedLine<T>,
+): entry is Extract<ClassifiedLine<T>, { readonly kind: 'value' }> => entry.kind === 'value'
+
+const classifyLine = <T>(
+  line: string,
+  index: number,
+  parse: (line: string) => T | null,
+): ClassifiedLine<T> => {
+  if (line.trim().length === 0) return { kind: 'blank', index }
+  const value = parse(line)
+  return value === null ? { kind: 'skipped', index } : { kind: 'value', index, value }
 }
 
 /**
- * Classifica as linhas de um lote até esgotá-las ou atingir `budget` linhas
- * válidas — a partir daí para de consumir o lote, para que o corte por `limit`
- * não conte descartes de linhas que ficariam de fora.
+ * Classifica as linhas do lote com `map`/`filter`/`slice` (uma única passada por
+ * linha, sem copiar o acumulador) e conta os descartes **até** o corte por
+ * `limit`: descartes de linhas que ficariam de fora não entram em `skipped`.
  */
 const scanLines = <T>(
   lines: readonly string[],
   options: LineIngestOptions<T>,
   budget: number | undefined,
-  index: number,
-  acc: LineBatch<T>,
 ): LineBatch<T> => {
-  const line = lines[index]
-  if (line === undefined) return acc
-  if (budget !== undefined && acc.values.length >= budget) return acc
-  if (line.trim().length === 0) return scanLines(lines, options, budget, index + 1, acc)
-
-  const value = options.parse(line)
-  return value === null
-    ? scanLines(lines, options, budget, index + 1, { ...acc, skipped: acc.skipped + 1 })
-    : scanLines(lines, options, budget, index + 1, { ...acc, values: [...acc.values, value] })
+  const classified = lines.map((line, index) => classifyLine(line, index, options.parse))
+  const kept = classified.filter(isValueLine).slice(0, budget)
+  const cutoff = budget === undefined ? Number.POSITIVE_INFINITY : (kept.at(-1)?.index ?? -1)
+  const skipped = classified.filter((entry) => entry.kind === 'skipped' && entry.index <= cutoff).length
+  return { values: kept.map((entry) => entry.value), skipped }
 }
 
 export const ingestLineStream = async <T>(
@@ -77,7 +87,7 @@ export const ingestLineStream = async <T>(
     if (lines.length === 0) return stats
 
     const budget = options.limit === undefined ? undefined : options.limit - stats.ingested
-    const batch = scanLines(lines, options, budget, 0, { values: [], skipped: 0 })
+    const batch = scanLines(lines, options, budget)
     if (batch.values.length > 0) await options.write(batch.values)
 
     return step({

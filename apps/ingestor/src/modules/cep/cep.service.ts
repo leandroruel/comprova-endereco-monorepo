@@ -44,27 +44,23 @@ export const backfillCepsFromEstabelecimentos = async (
 
   const results = await mapSequential(missing, async (row) => {
     const record = await api.get(row.cep)
-    if (record === null) {
-      await db
-        .insert(t.refCep)
-        .values({ cep: row.cep, uf: '??', source: 'brasilapi-notfound' })
-        .onConflictDoNothing()
-      return false
-    }
-    await db
-      .insert(t.refCep)
-      .values({
-        cep: row.cep,
-        uf: record.uf,
-        municipioIbge: record.municipioIbge,
-        localidade: record.localidade,
-        bairro: record.bairro,
-        logradouroNorm: record.logradouroNorm,
-        source: 'brasilapi',
-      })
-      .onConflictDoNothing()
+    const insert =
+      record === null
+        ? db.insert(t.refCep).values({ cep: row.cep, uf: '??', source: 'brasilapi-notfound' })
+        : db.insert(t.refCep).values({
+            cep: row.cep,
+            uf: record.uf,
+            municipioIbge: record.municipioIbge,
+            localidade: record.localidade,
+            bairro: record.bairro,
+            logradouroNorm: record.logradouroNorm,
+            source: 'brasilapi',
+          })
+    await insert.onConflictDoNothing()
+    // A pausa vale para achados e não-achados: o que precisa ser contido é a taxa
+    // de chamadas ao provedor, não só as respostas com sucesso.
     if (sleepMs > 0) await sleep(sleepMs)
-    return true
+    return record !== null
   })
 
   const cepsFound = results.filter((found) => found).length

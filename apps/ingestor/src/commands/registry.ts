@@ -25,8 +25,22 @@ export const commandRegistry: Readonly<Record<string, CommandHandler>> = {
   'keys:rebuild': keysRebuild,
 }
 
+/** Argumentos esperados por comando, exibidos no help. Sem entrada = sem argumentos. */
+const USAGE: Readonly<Record<string, string>> = {
+  'receita:estabelecimentos': '<csv> --snapshot YYYY-MM [--limit N]',
+  'receita:municipios': '<csv>',
+  'cnefe:uf': '<csv> [--limit N]',
+  'ceps:backfill': '[--limit N]',
+  'policy:simulate': '<versao> [--report]',
+}
+
+/** O help é derivado do registro, então a lista nunca fica desatualizada. */
 const HELP_LINES = [
-  'comandos: fixtures | receita:estabelecimentos <csv> --snapshot YYYY-MM [--limit N] | policy:simulate <versao> [--report]',
+  'comandos:',
+  ...Object.keys(commandRegistry).map((name) => {
+    const usage = USAGE[name]
+    return usage === undefined ? `  ${name}` : `  ${name} ${usage}`
+  }),
   'gate adiada (Fase 1): ingestao completa do dump real + medicao de tempo',
 ]
 
@@ -36,7 +50,8 @@ export const printHelp = (context: IngestorContext): void => {
 
 export const dispatchCommand = async (context: IngestorContext, argv: readonly string[]): Promise<void> => {
   const [command = 'help', ...args] = argv
-  const handler = commandRegistry[command]
+  // `Object.hasOwn` evita casar com membros herdados (`constructor`, `__proto__`).
+  const handler = Object.hasOwn(commandRegistry, command) ? commandRegistry[command] : undefined
   if (handler === undefined) {
     printHelp(context)
     return
