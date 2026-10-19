@@ -87,6 +87,16 @@ const mismatchKey = await createApiKey(adminPool.db, mismatchTenantId, PEPPER, {
 })
 await createIssuerSigningKey(adminPool.db, mismatchTenantId, signing)
 
+// Tenant D: chave SUPERADA (`active = false`) mas com material privado
+// configurado — prova que é a seleção da chave ativa que barra a emissão, e não
+// a ausência de configuração.
+const supersededTenantId = await createTenant(adminPool.db, { name: 'credential-superseded' })
+const supersededKey = await createApiKey(adminPool.db, supersededTenantId, PEPPER, {
+  scopes: ['validate:read', 'validate:write'],
+})
+const supersededSigning = createTestCredentialSigningKey(KEY_ID)
+await createIssuerSigningKey(adminPool.db, supersededTenantId, supersededSigning, { active: false })
+
 const appPool = createDbPool(db.appUrl)
 const config: AppConfig = {
   DATABASE_URL: db.appUrl,
@@ -97,6 +107,7 @@ const config: AppConfig = {
     { tenantId, key: signing },
     { tenantId: otherTenantId, key: otherSigning },
     { tenantId: mismatchTenantId, key: mismatchSigning },
+    { tenantId: supersededTenantId, key: supersededSigning },
   ]),
   PORT: 3000,
   HOST: '127.0.0.1',
@@ -833,5 +844,61 @@ describe('chave de assinatura escopada por tenant', () => {
     expect(res.statusCode).toBe(409)
     expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
     expect(res.json().detail).toBe('SIGNING_KEY_MISMATCH')
+  })
+
+  it('chave superada (active=false) não assina credenciais novas, mesmo com material configurado', async () => {
+    // O material privado está em `CREDENTIAL_SIGNING_KEYS`; o que impede a
+    // emissão é a chave publicada não estar ATIVA. Sem esta distinção, uma
+    // rotação poderia continuar emitindo com a chave antiga.
+    const validationId = await newValidationAs(supersededKey.plaintext)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${supersededKey.plaintext}` },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
+    expect(res.json().detail).toBe('SIGNING_KEY_UNAVAILABLE')
+  })
+
+  it('chave ativa sem material privado configurado falha fechado (não existe fallback global)', async () => {
+    const unconfiguredTenant = await createTenant(adminPool.db, { name: 'credential-no-material' })
+    const unconfiguredKey = await createApiKey(adminPool.db, unconfiguredTenant, PEPPER, {
+      scopes: ['validate:read', 'validate:write'],
+    })
+    await createIssuerSigningKey(adminPool.db, unconfiguredTenant, createTestCredentialSigningKey(KEY_ID))
+    const validationId = await newValidationAs(unconfiguredKey.plaintext)
+
+    await expect(
+      issueCredential(appPool.db, unconfiguredTenant, validationId, {
+        issuerOrigin: ISSUER_ORIGIN,
+        signingKeys,
+      }),
+    ).rejects.toMatchObject({ failure: 'SIGNING_KEY_UNAVAILABLE' })
+  })
+
+  it('não aceita a credencial de um tenant trocando issuer e verificationMethod para os do outro', async () => {
+    const resolver = makeHttpIssuerResolver({ trustedIssuerOrigins: [ISSUER_ORIGIN], fetch: appFetch })
+    const credentialA = await credentialOf(key.plaintext)
+    const credentialB = await credentialOf(otherKey.plaintext)
+
+    // Estruturalmente coerente (o método pertence ao issuer declarado), mas a
+    // prova foi feita com a chave de A: o verificador resolve a chave publicada
+    // de B e recusa a assinatura. Não há caminho para "usar a chave do outro".
+    const tampered = transport(credentialA)
+    tampered.issuer = credentialB.issuer
+    tampered.proof.verificationMethod = credentialB.proof.verificationMethod
+
+    expect(await verifyCredentialFromIssuer(tampered, resolver)).toEqual({
+      valid: false,
+      reason: 'INVALID_SIGNATURE',
+    })
+    // Com a expectativa do consumidor, a troca é recusada antes da resolução.
+    expect(
+      await verifyCredentialFromIssuer(tampered, resolver, {
+        expectedIssuerId: credentialA.issuer,
+      }),
+    ).toEqual({ valid: false, reason: 'ISSUER_MISMATCH' })
   })
 })
