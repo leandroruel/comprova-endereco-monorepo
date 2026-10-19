@@ -1,7 +1,9 @@
 import { and, sql } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import * as t from '@comprova/db'
+import { mapSequential } from '@comprova/core'
 import { makeBrasilApiCep } from '@comprova/providers'
+import { rowCountOf } from '../../lib/db-result.js'
 
 export interface BackfillStats {
   readonly cepsProcessed: number
@@ -10,6 +12,16 @@ export interface BackfillStats {
   readonly elapsedMs: number
 }
 
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+
+/**
+ * Consulta na BrasilAPI os CEPs de estabelecimentos que ainda não estão em
+ * `ref_cep`, grava cada resultado e conta achados/perdidos. Processa em série
+ * (`mapSequential`) com uma pausa entre chamadas para não estourar o provedor.
+ */
 export const backfillCepsFromEstabelecimentos = async (
   db: Db,
   options: { readonly limit?: number; readonly batchSize?: number; readonly sleepMs?: number } = {},
@@ -30,47 +42,38 @@ export const backfillCepsFromEstabelecimentos = async (
     )
     .limit(limit)) as readonly { readonly cep: string }[]
 
-  let found = 0
-  let notFound = 0
-  await missing.reduce<Promise<void>>(async (acc, row) => {
-    await acc
+  const results = await mapSequential(missing, async (row) => {
     const record = await api.get(row.cep)
-    if (record === null) {
-      notFound++
-      await db
-        .insert(t.refCep)
-        .values({ cep: row.cep, uf: '??', source: 'brasilapi-notfound' })
-        .onConflictDoNothing()
-      return
-    }
-    found++
-    await db
-      .insert(t.refCep)
-      .values({
-        cep: row.cep,
-        uf: record.uf,
-        municipioIbge: record.municipioIbge,
-        localidade: record.localidade,
-        bairro: record.bairro,
-        logradouroNorm: record.logradouroNorm,
-        source: 'brasilapi',
-      })
-      .onConflictDoNothing()
-    if (sleepMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, sleepMs))
-    }
-  }, Promise.resolve())
+    const insert =
+      record === null
+        ? db.insert(t.refCep).values({ cep: row.cep, uf: '??', source: 'brasilapi-notfound' })
+        : db.insert(t.refCep).values({
+            cep: row.cep,
+            uf: record.uf,
+            municipioIbge: record.municipioIbge,
+            localidade: record.localidade,
+            bairro: record.bairro,
+            logradouroNorm: record.logradouroNorm,
+            source: 'brasilapi',
+          })
+    await insert.onConflictDoNothing()
+    // A pausa vale para achados e não-achados: o que precisa ser contido é a taxa
+    // de chamadas ao provedor, não só as respostas com sucesso.
+    if (sleepMs > 0) await sleep(sleepMs)
+    return record !== null
+  })
 
+  const cepsFound = results.filter((found) => found).length
   return {
     cepsProcessed: missing.length,
-    cepsFound: found,
-    cepsNotFound: notFound,
+    cepsFound,
+    cepsNotFound: results.length - cepsFound,
     elapsedMs: Date.now() - started,
   }
 }
 
 export const deriveMunicipioIbge = async (db: Db): Promise<number> => {
-  const result = (await db.execute(sql`
+  const result = await db.execute(sql`
     UPDATE ref_receita_estabelecimento e
     SET municipio_ibge = c.municipio_ibge
     FROM ref_cep c
@@ -78,13 +81,12 @@ export const deriveMunicipioIbge = async (db: Db): Promise<number> => {
       AND c.municipio_ibge IS NOT NULL
       AND e.municipio_ibge IS NULL
     RETURNING e.cnpj_basico
-  `)) as unknown as { rowCount?: number } | readonly unknown[]
-  if (Array.isArray(result)) return result.length
-  return Number((result as { rowCount?: number })?.rowCount ?? 0)
+  `)
+  return rowCountOf(result)
 }
 
 export const deriveMunicipioUf = async (db: Db): Promise<number> => {
-  const result = (await db.execute(sql`
+  const result = await db.execute(sql`
     UPDATE ref_receita_municipio m
     SET uf = sub.uf
     FROM (
@@ -95,7 +97,6 @@ export const deriveMunicipioUf = async (db: Db): Promise<number> => {
     WHERE m.codigo_receita = sub.municipio_receita
       AND m.uf IS NULL
     RETURNING m.codigo_receita
-  `)) as unknown as { rowCount?: number } | readonly unknown[]
-  if (Array.isArray(result)) return result.length
-  return Number((result as { rowCount?: number })?.rowCount ?? 0)
+  `)
+  return rowCountOf(result)
 }

@@ -11,10 +11,10 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
-import { simulatePolicy } from './policy-simulate.js'
+import { simulatePolicy } from './policy-simulate.service.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const repoRoot = path.resolve(here, '../..')
+const repoRoot = path.resolve(here, '../../..')
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })

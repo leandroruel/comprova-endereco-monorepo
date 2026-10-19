@@ -1,8 +1,10 @@
 import { sql } from '@comprova/db'
 import type { Db } from '@comprova/db'
+import { rowCountOf } from '../../lib/db-result.js'
 
+/** Recalcula `address_profile` a partir dos estabelecimentos ativos por endereço canônico. */
 export const recomputeAddressProfiles = async (db: Db): Promise<number> => {
-  const result = (await db.execute(sql`
+  const result = await db.execute(sql`
     WITH address_cnpj_stats AS (
       SELECT
         ca.address_id,
@@ -42,13 +44,13 @@ export const recomputeAddressProfiles = async (db: Db): Promise<number> => {
       opened_last_12m = EXCLUDED.opened_last_12m,
       computed_from_snapshot = EXCLUDED.computed_from_snapshot,
       computed_at = now()
-  `)) as unknown as { rowCount?: number } | readonly unknown[]
-  if (Array.isArray(result)) return result.length
-  return Number((result as { rowCount?: number })?.rowCount ?? 0)
+  `)
+  return rowCountOf(result)
 }
 
+/** Cria endereços canônicos para cada `building_key` ainda não registrado. */
 export const seedCanonicalAddresses = async (db: Db): Promise<number> => {
-  const result = (await db.execute(sql`
+  const result = await db.execute(sql`
     INSERT INTO canonical_address (
       address_id, building_key, country_code, uf, municipio_ibge, cep,
       logradouro_norm, numero, bairro_norm, first_seen_at
@@ -70,7 +72,6 @@ export const seedCanonicalAddresses = async (db: Db): Promise<number> => {
       AND NOT EXISTS (
         SELECT 1 FROM canonical_address ca WHERE ca.building_key = e.building_key
       )
-  `)) as unknown as { rowCount?: number } | readonly unknown[]
-  if (Array.isArray(result)) return result.length
-  return Number((result as { rowCount?: number })?.rowCount ?? 0)
+  `)
+  return rowCountOf(result)
 }
