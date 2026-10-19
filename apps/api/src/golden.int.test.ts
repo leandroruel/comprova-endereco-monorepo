@@ -1,6 +1,7 @@
 import {
   createApiKey,
   createTenant,
+  createTestCredentialSigningKey,
   startTestDb,
   startTestRedis,
   TEST_APP_DB_PASSWORD,
@@ -17,6 +18,7 @@ import { buildApp } from './app.js'
 import { loadPolicyFile } from './policy-loader.js'
 
 const PEPPER = 'test-pepper-123'
+const signing = createTestCredentialSigningKey()
 const differentialPolicy = loadPolicyFile('2026.11.1')
 
 const db = await startTestDb()
@@ -36,6 +38,8 @@ const app = await buildApp({
     REDIS_URL: testRedis.url,
     API_KEY_PEPPER: PEPPER,
     CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+    CREDENTIAL_SIGNING_KEY_ID: signing.keyId,
+    CREDENTIAL_SIGNING_PRIVATE_KEY: signing.privateKeyPkcs8Pem,
     PORT: 3000,
     HOST: '127.0.0.1',
     LOG_LEVEL: 'silent',

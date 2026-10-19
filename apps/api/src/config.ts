@@ -13,6 +13,18 @@ const EnvSchema = z.object({
    * normalizada por `parseIssuerOrigin`.
    */
   CREDENTIAL_ISSUER_ORIGIN: IssuerOriginSchema,
+  /**
+   * Identificador do fragmento da chave de assinatura publicado em
+   * `proof.verificationMethod` (`<issuer.id>#<keyId>`). Sem rotação nesta etapa.
+   */
+  CREDENTIAL_SIGNING_KEY_ID: z.string().min(1),
+  /**
+   * Chave privada Ed25519 em PKCS#8 PEM (formato do
+   * `openssl genpkey -algorithm ED25519`; nada proprietário). É lida no boot por
+   * `ed25519PrivateKeyFromPkcs8Pem` — inválida ou não-Ed25519, a API não sobe.
+   * Nunca é logada, devolvida nem incluída em documento público.
+   */
+  CREDENTIAL_SIGNING_PRIVATE_KEY: z.string().min(1),
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),

@@ -37,4 +37,9 @@ export const problems = {
   legalBasisRequired: internal(422, 'LEGAL_BASIS_REQUIRED', 'A legal basis is required for this request'),
   providerUnavailable: internal(503, 'PROVIDER_UNAVAILABLE', 'An external provider is unavailable'),
   unprocessableAddress: internal(422, 'UNPROCESSABLE_ADDRESS', 'Address could not be canonicalized'),
+  credentialNotIssuable: internal(
+    409,
+    'CREDENTIAL_NOT_ISSUABLE',
+    'Validation cannot be issued as a credential',
+  ),
 }

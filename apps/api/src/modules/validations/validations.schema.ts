@@ -1,4 +1,5 @@
 import { CreateValidationRequestSchema, ProblemSchema, ValidationDtoSchema } from '@comprova/contracts'
+import { SecuredVerifiableCredentialSchema } from '@comprova/credential'
 import { z } from 'zod'
 
 export const GetValidationParams = z.object({ id: z.uuid() })
@@ -13,3 +14,4 @@ export const ContestValidationResponse = z.object({
 })
 
 export { CreateValidationRequestSchema, ProblemSchema, ValidationDtoSchema }
+export { SecuredVerifiableCredentialSchema }

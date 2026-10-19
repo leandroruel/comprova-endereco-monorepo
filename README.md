@@ -53,6 +53,13 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   path/query/fragmento) e, enquanto não houver um domínio de produção
   confirmado, use uma origem reservada (`https://issuer.test`). O `tenant_id`
   interno **não** aparece na URL — o path do issuer leva um digest do tenant.
+- **`CREDENTIAL_SIGNING_KEY_ID`** e **`CREDENTIAL_SIGNING_PRIVATE_KEY`** assinam
+  a credencial (ADR-0025). O `keyId` é o fragmento publicado em
+  `proof.verificationMethod` (`<issuer.id>#<keyId>`); a privada é Ed25519 em
+  PKCS#8 PEM (`openssl genpkey -algorithm ED25519`). Só o material **público**
+  sai da API (`GET /issuers/:scope`, em `publicKeyMultibase`); a privada nunca é
+  logada, devolvida nem incluída em resposta, e configuração ausente ou inválida
+  derruba a API no boot.
 
 ## Dashboard
 
@@ -68,6 +75,7 @@ Abre `http://localhost:5173`:
 | --------------- | ----------------------------------------- | ----------------------------------------------- |
 | POST            | `/v1/validations`                         | Valida um CNPJ/CPF (fast/auto/deep)             |
 | GET             | `/v1/validations/:id`                     | Consulta resultado com ETag                     |
+| POST            | `/v1/validations/:id/credential`          | Emite a credencial verificável (JSON)           |
 | POST            | `/v1/validations/:id/contest`             | Contestação (art. 20 LGPD)                      |
 | GET             | `/v1/stats`                               | Stats por usuário (total, únicos, por veredito) |
 | POST            | `/v1/batches`                             | Cria lote (background)                          |
@@ -76,6 +84,7 @@ Abre `http://localhost:5173`:
 | GET             | `/v1/batches/:id/export?format=csv\|json` | Download                                        |
 | POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                       |
 | GET/DELETE      | `/v1/subjects/:id`                        | Relatório de acesso / eliminação LGPD           |
+| GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey) |
 | GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                             |
 | GET             | `/openapi.json`                           | OpenAPI 3.1                                     |
 

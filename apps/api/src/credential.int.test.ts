@@ -3,12 +3,16 @@ import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import { evidenceSetHashOfObservations, policyHashOf, SCORER_VERSION } from '@comprova/core'
 import {
+  decodeEd25519PublicKeyMultibase,
   generateEd25519KeyPair,
   issuerIdOf,
+  issuerScopeOf,
   localIssuer,
   makeEd25519Signer,
+  makeHttpIssuerResolver,
   verificationMethodOf,
   verifyCredential,
+  verifyCredentialFromIssuer,
   type SecuredVerifiableCredential,
 } from '@comprova/credential'
 import {
@@ -37,6 +41,14 @@ import { runFastPath } from './services/fastpath.js'
 
 const PEPPER = 'test-pepper-credential'
 const POLICY_VERSION = '2026.13.1'
+const ISSUER_ORIGIN = 'https://issuer.test'
+const KEY_ID = 'key-1'
+
+// Par de chaves efêmero do teste: a privada vira `CREDENTIAL_SIGNING_PRIVATE_KEY`
+// (PKCS#8 PEM) e a pública é o material confiável do verificador. Nenhuma chave
+// literal no repositório.
+const keyPair = generateEd25519KeyPair()
+const PRIVATE_KEY_PEM = keyPair.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -60,6 +72,8 @@ const config: AppConfig = {
   REDIS_URL: testRedis.url,
   API_KEY_PEPPER: PEPPER,
   CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+  CREDENTIAL_SIGNING_KEY_ID: KEY_ID,
+  CREDENTIAL_SIGNING_PRIVATE_KEY: PRIVATE_KEY_PEM,
   PORT: 3000,
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
@@ -133,9 +147,6 @@ const observationsOf = (claimId: string) =>
     .from(t.claimEvidence)
     .where(eq(t.claimEvidence.claimId, claimId))
 
-const keyPair = generateEd25519KeyPair()
-const ISSUER_ORIGIN = 'https://issuer.test'
-const KEY_ID = 'key-1'
 const issuer = localIssuer(ISSUER_ORIGIN, tenantId, KEY_ID)
 const signer = makeEd25519Signer(keyPair.privateKey)
 /** Método confiável declarado pelo consumidor (identidade + chave). */
@@ -510,5 +521,143 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     })
 
     await expect(issue(validationId)).rejects.toMatchObject({ failure: 'CLAIM_MISSING' })
+  })
+})
+
+// FASE 13 — porta HTTP de emissão + publicação do material público + verificação
+// com resolução de chave. O verificador só recebe a credencial e o resolver; o
+// resolver só fala HTTP com a origem confiável do issuer.
+describe('emissão HTTP e verificação com resolução de chave pública', () => {
+  const PRIVATE_KEY_MARKER = 'PRIVATE KEY'
+
+  /** `fetch` que atravessa o roteador do Fastify (HTTP de verdade, sem rede). */
+  const appFetch = (async (input: string | URL | Request): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : input.toString())
+    const res = await app.inject({ method: 'GET', url: `${url.pathname}${url.search}` })
+    return new Response(res.body, {
+      status: res.statusCode,
+      headers: { 'content-type': String(res.headers['content-type'] ?? 'application/json') },
+    })
+  }) as typeof fetch
+
+  const resolver = makeHttpIssuerResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
+
+  const postCredential = (validationId: string, apiKey = key.plaintext) =>
+    app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+
+  it('POST /v1/validations/:id/credential devolve a VC e o verificador independente valida', async () => {
+    const validationId = await newValidation()
+
+    const res = await postCredential(validationId)
+    expect(res.statusCode).toBe(200)
+
+    const credential = res.json() as SecuredVerifiableCredential
+    expect(credential.issuer).toBe(issuer.id)
+    expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
+    expect(credential.proof.verificationMethod).toBe(verificationMethodOf(issuer))
+
+    // O verificador NÃO acessa o banco: recebe só a credencial + o resolver.
+    const result = await verifyCredentialFromIssuer(credential, resolver, {
+      expectedIssuerId: issuer.id,
+    })
+    expect(result).toEqual({ valid: true })
+  })
+
+  it('publica apenas material público em GET /issuers/:scope', async () => {
+    const credential = (await postCredential(await newValidation())).json() as SecuredVerifiableCredential
+
+    const res = await app.inject({ method: 'GET', url: `/issuers/${issuerScopeOf(tenantId)}` })
+    expect(res.statusCode).toBe(200)
+    const document = res.json() as {
+      id: string
+      verificationMethod: Array<Record<string, string>>
+    }
+
+    expect(document.id).toBe(credential.issuer)
+    expect(document.verificationMethod).toEqual([
+      {
+        id: credential.proof.verificationMethod,
+        type: 'Multikey',
+        controller: credential.issuer,
+        publicKeyMultibase: expect.stringMatching(/^z[1-9A-HJ-NP-Za-km-z]+$/),
+      },
+    ])
+    expect(
+      decodeEd25519PublicKeyMultibase(document.verificationMethod[0]!.publicKeyMultibase!).equals(
+        keyPair.publicKey,
+      ),
+    ).toBe(true)
+
+    // Nenhum material privado nem identificador interno no documento público.
+    const json = JSON.stringify(document)
+    expect(json).not.toContain(PRIVATE_KEY_MARKER)
+    expect(json).not.toContain(PRIVATE_KEY_PEM)
+    expect(json).not.toContain(tenantId)
+    expect(json).not.toContain('doc_hmac')
+  })
+
+  it('recusa emissão sem autenticação', async () => {
+    const validationId = await newValidation()
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+    })
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('isola tenants: a credencial de um tenant não é emitida por outro', async () => {
+    const validationId = await newValidation()
+    const otherTenant = await createTenant(adminPool.db, { name: 'credential-http-other' })
+    const otherKey = await createApiKey(adminPool.db, otherTenant, PEPPER)
+
+    const res = await postCredential(validationId, otherKey.plaintext)
+    expect(res.statusCode).toBe(404)
+    expect(res.json().code).toBe('NOT_FOUND')
+  })
+
+  it('recusa validation não final com problem+json estável (409)', async () => {
+    const validationId = await newValidation()
+    await adminPool.db
+      .update(t.validation)
+      .set({ status: 'partial' })
+      .where(eq(t.validation.validationId, validationId))
+
+    const res = await postCredential(validationId)
+    expect(res.statusCode).toBe(409)
+    expect(res.headers['content-type']).toContain('application/problem+json')
+    expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
+    expect(res.json().detail).toBe('VALIDATION_NOT_FINAL')
+  })
+
+  it('recusa validation fora da janela de validade (409), sem estender o prazo', async () => {
+    const validationId = await newValidation()
+    const row = await validationRow(validationId)
+    await adminPool.db
+      .update(t.validation)
+      .set({ completedAt: row!.expiresAt })
+      .where(eq(t.validation.validationId, validationId))
+
+    const res = await postCredential(validationId)
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
+    expect(res.json().detail).toBe('VALIDITY_WINDOW_INVALID')
+
+    const after = await validationRow(validationId)
+    expect(after!.expiresAt!.getTime()).toBe(row!.expiresAt!.getTime())
+  })
+
+  it('a credencial transportada por HTTP é autocontida (nenhuma chave privada)', async () => {
+    const credential = await postCredential(await newValidation())
+    const json = credential.body
+    expect(json).not.toContain(PRIVATE_KEY_MARKER)
+    expect(json).not.toContain(PRIVATE_KEY_PEM)
+    expect(await verifyCredentialFromIssuer(JSON.parse(json), resolver)).toEqual({ valid: true })
   })
 })
