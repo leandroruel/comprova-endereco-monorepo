@@ -149,11 +149,17 @@ export const makeHttpIssuerResolver = (options: HttpIssuerResolverOptions): Veri
     }
     const documentUrl = `${url.origin}${url.pathname}`
 
-    const response = await doFetch(documentUrl).catch((error: unknown) => {
+    // `redirect: 'error'` impede que a allowlist seja contornada por um 3xx: o
+    // fetch precisa ir à origem confiável exata. A checagem de `redirected`
+    // cobre respostas que chegaram por redirecionamento com status 2xx.
+    const response = await doFetch(documentUrl, { redirect: 'error' }).catch((error: unknown) => {
       throw new VerificationMethodResolutionError(
         `failed to fetch the issuer key document: ${error instanceof Error ? error.message : String(error)}`,
       )
     })
+    if (response.redirected) {
+      throw new VerificationMethodResolutionError('issuer key document must not be reached by redirect')
+    }
     if (!response.ok) {
       throw new VerificationMethodResolutionError(
         `issuer key document request failed with status ${response.status}`,

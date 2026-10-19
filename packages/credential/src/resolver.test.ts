@@ -236,4 +236,25 @@ describe('makeHttpIssuerResolver', () => {
     const resolver = resolverWith(() => response(document))
     await expect(resolver(`http://issuer.test/issuers/${'a'.repeat(43)}#key-1`)).rejects.toThrow(/https/)
   })
+
+  it('recusa documento alcançado por redirect e instrui o fetch a não seguir 3xx', async () => {
+    // Resposta 2xx que chegou por redirecionamento: recusada mesmo sendo válida.
+    const redirected = (body: unknown): Response =>
+      ({ ok: true, status: 200, redirected: true, json: async () => body }) as Response
+    await expect(resolverWith(() => redirected(document))(verificationMethodOf(issuer))).rejects.toThrow(
+      /redirect/,
+    )
+
+    // E o fetch real é instruído a tratar 3xx como erro, para não contornar a allowlist.
+    let init: RequestInit | undefined
+    const resolver = makeHttpIssuerResolver({
+      trustedIssuerOrigins: [ISSUER_ORIGIN],
+      fetch: (async (_input: string | URL | Request, options?: RequestInit) => {
+        init = options
+        return response(document)
+      }) as typeof fetch,
+    })
+    await resolver(verificationMethodOf(issuer))
+    expect(init).toEqual({ redirect: 'error' })
+  })
 })
