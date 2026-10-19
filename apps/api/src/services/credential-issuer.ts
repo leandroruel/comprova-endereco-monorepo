@@ -1,13 +1,16 @@
+import { createPublicKey } from 'node:crypto'
 import * as t from '@comprova/db'
-import { eq, withTenant } from '@comprova/db'
+import { and, eq, withTenant } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import {
   buildCredential,
+  ed25519PublicKeyBytes,
   localIssuer,
+  makeEd25519Signer,
   type AssertionSource,
   type SecuredVerifiableCredential,
-  type Signer,
 } from '@comprova/credential'
+import type { SigningKeyResolver } from './signing-keys.js'
 
 /**
  * Fronteira de acesso ao PostgreSQL do builder de credencial (FASE 9). Carrega
@@ -33,6 +36,8 @@ export type CredentialIssuanceFailure =
   | 'CLAIM_MISSING'
   | 'SUBJECT_MISSING'
   | 'EVIDENCE_MISSING'
+  | 'SIGNING_KEY_UNAVAILABLE'
+  | 'SIGNING_KEY_MISMATCH'
 
 export class CredentialIssuanceError extends Error {
   readonly failure: CredentialIssuanceFailure
@@ -210,6 +215,33 @@ export const loadAssertionSource = async (
     }
   })
 
+/** Chave de assinatura ativa do tenant, como persistida (só material público). */
+export interface ActiveSigningKey {
+  readonly keyId: string
+  /** 32 bytes crus da chave pública Ed25519 publicada para este `key_id`. */
+  readonly publicKey: Buffer
+}
+
+/**
+ * Lê a chave de assinatura ATIVA do tenant (FASE 14). A leitura é escopada por
+ * RLS (`withTenant`), então um tenant nunca enxerga a chave de outro. O índice
+ * parcial único `issuer_signing_key_active_uq` garante que exista no máximo uma
+ * ativa por tenant — a seleção é determinística, sem "qual das ativas?".
+ *
+ * Devolver `null` (nenhuma chave ativa) NÃO é um erro aqui: a decisão de falhar
+ * fechado é do chamador (`issueCredential`), para que o motivo fique explícito.
+ */
+export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<ActiveSigningKey | null> =>
+  withTenant(db, tenantId, async (tx) => {
+    const rows = await tx
+      .select({ keyId: t.issuerSigningKey.keyId, publicKey: t.issuerSigningKey.publicKey })
+      .from(t.issuerSigningKey)
+      .where(and(eq(t.issuerSigningKey.tenantId, tenantId), eq(t.issuerSigningKey.active, true)))
+      .limit(1)
+    const row = rows[0]
+    return row === undefined ? null : { keyId: row.keyId, publicKey: row.publicKey }
+  })
+
 export interface IssueCredentialDeps {
   /**
    * Origem HTTPS controlada pelo projeto (`CREDENTIAL_ISSUER_ORIGIN`). O `id` do
@@ -217,9 +249,12 @@ export interface IssueCredentialDeps {
    * existe caminho para atribuir a assertion de um tenant ao issuer de outro.
    */
   readonly issuerOrigin: string
-  /** Chave usada para assinar (fragmento do `proof.verificationMethod`). */
-  readonly keyId: string
-  readonly signer: Signer
+  /**
+   * Material privado de assinatura por (`tenant_id`, `key_id`), resolvido da
+   * configuração no boot. NÃO existe chave global de fallback: tenant sem
+   * material configurado falha fechado (`SIGNING_KEY_UNAVAILABLE`).
+   */
+  readonly signingKeys: SigningKeyResolver
   /**
    * Relógio da emissão (`proof.created` = momento real da prova). Injetável para
    * testes; default: o relógio do sistema.
@@ -230,7 +265,15 @@ export interface IssueCredentialDeps {
 /** Dependências de assinatura do issuer já resolvidas no boot (sem relógio). */
 export type CredentialIssuerDeps = Omit<IssueCredentialDeps, 'now'>
 
-/** `validation_id → carrega o grafo → payload → canonicalização → assinatura → credencial`. */
+/**
+ * `validation_id → carrega o grafo → resolve a chave do tenant → payload →
+ * canonicalização → assinatura → credencial`.
+ *
+ * A chave sai do par (tenant, `key_id` ativo no banco), nunca de uma global: a
+ * privada vem da configuração, e a pública publicada (`issuer_signing_key`) tem
+ * de CORRESPONDER a ela — senão a credencial nasceria assinada por uma chave que
+ * o verificador não resolve (`SIGNING_KEY_MISMATCH`).
+ */
 export const issueCredential = async (
   db: Db,
   tenantId: string,
@@ -239,8 +282,30 @@ export const issueCredential = async (
 ): Promise<SecuredVerifiableCredential> => {
   // O issuer é derivado do MESMO tenant que escopa a leitura (RLS): uma
   // validation de outro tenant nem é encontrada (VALIDATION_NOT_FOUND).
-  const issuer = localIssuer(deps.issuerOrigin, tenantId, deps.keyId)
-
   const source = await loadAssertionSource(db, tenantId, validationId)
-  return buildCredential(source, { issuer, signer: deps.signer, now: deps.now })
+
+  const signingKey = await loadActiveSigningKey(db, tenantId)
+  if (signingKey === null) {
+    throw new CredentialIssuanceError(
+      'SIGNING_KEY_UNAVAILABLE',
+      `tenant ${tenantId} has no active signing key; refusing to emit a credential it cannot sign`,
+    )
+  }
+  const privateKey = deps.signingKeys(tenantId, signingKey.keyId)
+  if (privateKey === null) {
+    throw new CredentialIssuanceError(
+      'SIGNING_KEY_UNAVAILABLE',
+      `no signing material configured for tenant ${tenantId} key ${signingKey.keyId}`,
+    )
+  }
+  const derivedPublicKey = createPublicKey(privateKey)
+  if (!ed25519PublicKeyBytes(derivedPublicKey).equals(signingKey.publicKey)) {
+    throw new CredentialIssuanceError(
+      'SIGNING_KEY_MISMATCH',
+      `configured signing material for tenant ${tenantId} key ${signingKey.keyId} does not match the published public key`,
+    )
+  }
+
+  const issuer = localIssuer(deps.issuerOrigin, tenantId, signingKey.keyId)
+  return buildCredential(source, { issuer, signer: makeEd25519Signer(privateKey), now: deps.now })
 }

@@ -85,7 +85,7 @@ const staticResolver =
     return { id: method.id, publicKey: decodeEd25519PublicKeyMultibase(method.publicKeyMultibase) }
   }
 
-const document = issuerKeyDocumentOf(issuer, keyPair.publicKey)
+const document = issuerKeyDocumentOf(issuer.id, [{ keyId: issuer.keyId, publicKey: keyPair.publicKey }])
 
 describe('publicKeyMultibase', () => {
   it('faz round-trip da chave pública Ed25519 e liga a chave ao KeyObject', () => {
@@ -148,7 +148,7 @@ describe('verifyCredentialFromIssuer', () => {
 
   it('classifica método inexistente como VERIFICATION_METHOD_UNRESOLVED', async () => {
     const credential = await emit()
-    const emptyDocument = issuerKeyDocumentOf(localIssuer(ISSUER_ORIGIN, TENANT, 'key-2'), keyPair.publicKey)
+    const emptyDocument = issuerKeyDocumentOf(issuer.id, [{ keyId: 'key-2', publicKey: keyPair.publicKey }])
     expect(await verifyCredentialFromIssuer(credential, staticResolver(emptyDocument))).toEqual({
       valid: false,
       reason: 'VERIFICATION_METHOD_UNRESOLVED',

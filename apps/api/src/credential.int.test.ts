@@ -4,11 +4,9 @@ import * as t from '@comprova/db'
 import { evidenceSetHashOfObservations, policyHashOf, SCORER_VERSION } from '@comprova/core'
 import {
   decodeEd25519PublicKeyMultibase,
-  generateEd25519KeyPair,
   issuerIdOf,
   issuerScopeOf,
   localIssuer,
-  makeEd25519Signer,
   makeHttpIssuerResolver,
   verificationMethodOf,
   verifyCredential,
@@ -17,9 +15,12 @@ import {
 } from '@comprova/credential'
 import {
   createApiKey,
+  createIssuerSigningKey,
   createSubject,
   createTenant,
+  createTestCredentialSigningKey,
   seedGoldenDataset,
+  signingKeysConfig,
   startTestDb,
   startTestRedis,
   TEST_APP_DB_PASSWORD,
@@ -34,6 +35,7 @@ import { buildApp, buildFastPathDeps } from './app.js'
 import type { AppConfig } from './config.js'
 import { CredentialIssuanceError, issueCredential } from './services/credential-issuer.js'
 import { runFastPath } from './services/fastpath.js'
+import { makeSigningKeyResolver } from './services/signing-keys.js'
 
 // FASE 12 — ponta a ponta: validation persistida → credential builder → credencial
 // assinada → JSON transportável → verifier independente → VALID. Também cobre a
@@ -44,11 +46,15 @@ const POLICY_VERSION = '2026.13.1'
 const ISSUER_ORIGIN = 'https://issuer.test'
 const KEY_ID = 'key-1'
 
-// Par de chaves efêmero do teste: a privada vira `CREDENTIAL_SIGNING_PRIVATE_KEY`
-// (PKCS#8 PEM) e a pública é o material confiável do verificador. Nenhuma chave
-// literal no repositório.
-const keyPair = generateEd25519KeyPair()
-const PRIVATE_KEY_PEM = keyPair.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
+// Chave de assinatura efêmera do teste: a privada entra em
+// `CREDENTIAL_SIGNING_KEYS` (PKCS#8 PEM) e a pública é registrada em
+// `issuer_signing_key` (material público). Nenhuma chave literal no repositório.
+const signing = createTestCredentialSigningKey(KEY_ID)
+// Tenant B: MESMO `key_id`, chave própria — prova que o namespace é o issuer.
+const otherSigning = createTestCredentialSigningKey(KEY_ID)
+// Tenant C: a chave PUBLICADA não corresponde ao material privado configurado —
+// prova o guard de coerência (SIGNING_KEY_MISMATCH).
+const mismatchSigning = createTestCredentialSigningKey(KEY_ID)
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -65,6 +71,21 @@ const tenantId = await createTenant(adminPool.db, { name: 'credential-tenant' })
 const key = await createApiKey(adminPool.db, tenantId, PEPPER, {
   scopes: ['validate:read', 'validate:write'],
 })
+await createIssuerSigningKey(adminPool.db, tenantId, signing)
+
+// Tenant B: issuer próprio, chave própria (mesmo `key_id`).
+const otherTenantId = await createTenant(adminPool.db, { name: 'credential-tenant-b' })
+const otherKey = await createApiKey(adminPool.db, otherTenantId, PEPPER, {
+  scopes: ['validate:read', 'validate:write'],
+})
+await createIssuerSigningKey(adminPool.db, otherTenantId, otherSigning)
+
+// Tenant C: publica a chave de A, mas tem material privado diferente em config.
+const mismatchTenantId = await createTenant(adminPool.db, { name: 'credential-tenant-mismatch' })
+const mismatchKey = await createApiKey(adminPool.db, mismatchTenantId, PEPPER, {
+  scopes: ['validate:read', 'validate:write'],
+})
+await createIssuerSigningKey(adminPool.db, mismatchTenantId, signing)
 
 const appPool = createDbPool(db.appUrl)
 const config: AppConfig = {
@@ -72,8 +93,11 @@ const config: AppConfig = {
   REDIS_URL: testRedis.url,
   API_KEY_PEPPER: PEPPER,
   CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
-  CREDENTIAL_SIGNING_KEY_ID: KEY_ID,
-  CREDENTIAL_SIGNING_PRIVATE_KEY: PRIVATE_KEY_PEM,
+  CREDENTIAL_SIGNING_KEYS: signingKeysConfig([
+    { tenantId, key: signing },
+    { tenantId: otherTenantId, key: otherSigning },
+    { tenantId: mismatchTenantId, key: mismatchSigning },
+  ]),
   PORT: 3000,
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
@@ -102,13 +126,11 @@ afterAll(async () => {
   await db.stop()
 })
 
-const authJson = { authorization: `Bearer ${key.plaintext}`, 'content-type': 'application/json' }
-
-const postCnpj = () =>
+const postCnpj = (apiKey = key.plaintext) =>
   app.inject({
     method: 'POST',
     url: '/v1/validations',
-    headers: authJson,
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     payload: {
       document: { type: 'CNPJ', value: '12345678000195' },
       address: null,
@@ -148,26 +170,27 @@ const observationsOf = (claimId: string) =>
     .where(eq(t.claimEvidence.claimId, claimId))
 
 const issuer = localIssuer(ISSUER_ORIGIN, tenantId, KEY_ID)
-const signer = makeEd25519Signer(keyPair.privateKey)
+const signingKeys = makeSigningKeyResolver(config.CREDENTIAL_SIGNING_KEYS)
 /** Método confiável declarado pelo consumidor (identidade + chave). */
-const trusted = { id: verificationMethodOf(issuer), publicKey: keyPair.publicKey }
+const trusted = { id: verificationMethodOf(issuer), publicKey: signing.publicKey }
 
 const issue = (validationId: string, now?: () => Date): Promise<SecuredVerifiableCredential> =>
   issueCredential(appPool.db, tenantId, validationId, {
     issuerOrigin: ISSUER_ORIGIN,
-    keyId: KEY_ID,
-    signer,
+    signingKeys,
     now,
   })
 
 const transport = (credential: SecuredVerifiableCredential): SecuredVerifiableCredential =>
   JSON.parse(JSON.stringify(credential)) as SecuredVerifiableCredential
 
-const newValidation = async (): Promise<string> => {
-  const res = await postCnpj()
+const newValidationAs = async (apiKey: string): Promise<string> => {
+  const res = await postCnpj(apiKey)
   expect(res.statusCode).toBe(200)
   return res.json().validation_id as string
 }
+
+const newValidation = (): Promise<string> => newValidationAs(key.plaintext)
 
 describe('emissão e verificação independente', () => {
   it('transforma uma validation concluída em credencial verificável como JSON puro', async () => {
@@ -417,8 +440,7 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     const validationId = await newValidation()
     const credential = await issueCredential(appPool.db, tenantId, validationId, {
       issuerOrigin: ISSUER_ORIGIN,
-      keyId: KEY_ID,
-      signer,
+      signingKeys,
     })
 
     expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
@@ -591,14 +613,14 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     ])
     expect(
       decodeEd25519PublicKeyMultibase(document.verificationMethod[0]!.publicKeyMultibase!).equals(
-        keyPair.publicKey,
+        signing.publicKey,
       ),
     ).toBe(true)
 
     // Nenhum material privado nem identificador interno no documento público.
     const json = JSON.stringify(document)
     expect(json).not.toContain(PRIVATE_KEY_MARKER)
-    expect(json).not.toContain(PRIVATE_KEY_PEM)
+    expect(json).not.toContain(signing.privateKeyPkcs8Pem)
     expect(json).not.toContain(tenantId)
     expect(json).not.toContain('doc_hmac')
   })
@@ -657,7 +679,159 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     const credential = await postCredential(await newValidation())
     const json = credential.body
     expect(json).not.toContain(PRIVATE_KEY_MARKER)
-    expect(json).not.toContain(PRIVATE_KEY_PEM)
+    expect(json).not.toContain(signing.privateKeyPkcs8Pem)
     expect(await verifyCredentialFromIssuer(JSON.parse(json), resolver)).toEqual({ valid: true })
+  })
+})
+
+// FASE 14 — identidade criptográfica por tenant: cada tenant assina com a SUA
+// chave, o issuer (não o `key_id`) é o namespace, e a chave pública é resolvida
+// pelo `issuer.id` publicado.
+describe('chave de assinatura escopada por tenant', () => {
+  /** `fetch` que atravessa o roteador do Fastify (HTTP real, sem rede). */
+  const appFetch = (async (input: string | URL | Request): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : input.toString())
+    const res = await app.inject({ method: 'GET', url: `${url.pathname}${url.search}` })
+    return new Response(res.body, {
+      status: res.statusCode,
+      headers: { 'content-type': String(res.headers['content-type'] ?? 'application/json') },
+    })
+  }) as typeof fetch
+
+  const credentialOf = async (apiKey: string): Promise<SecuredVerifiableCredential> => {
+    const validationId = await newValidationAs(apiKey)
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as SecuredVerifiableCredential
+  }
+
+  it('duas tenants emitem com chaves diferentes (mesmo key_id) e a chave de uma não valida a credencial da outra', async () => {
+    const credentialA = await credentialOf(key.plaintext)
+    const credentialB = await credentialOf(otherKey.plaintext)
+
+    // Issuers distintos com o MESMO `key_id` ('key-1'): o namespace é o issuer.
+    expect(credentialA.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
+    expect(credentialB.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, otherTenantId))
+    expect(credentialA.issuer).not.toBe(credentialB.issuer)
+    expect(credentialA.proof.verificationMethod).toBe(`${credentialA.issuer}#${KEY_ID}`)
+    expect(credentialB.proof.verificationMethod).toBe(`${credentialB.issuer}#${KEY_ID}`)
+
+    // Cada credencial valida com a SUA chave pública...
+    expect(
+      verifyCredential(credentialA, {
+        trusted: { id: credentialA.proof.verificationMethod, publicKey: signing.publicKey },
+        expectedIssuerId: credentialA.issuer,
+      }),
+    ).toEqual({ valid: true })
+    expect(
+      verifyCredential(credentialB, {
+        trusted: { id: credentialB.proof.verificationMethod, publicKey: otherSigning.publicKey },
+        expectedIssuerId: credentialB.issuer,
+      }),
+    ).toEqual({ valid: true })
+
+    // ...e NÃO com a chave pública da outra (assinatura inválida).
+    expect(
+      verifyCredential(credentialA, {
+        trusted: { id: credentialA.proof.verificationMethod, publicKey: otherSigning.publicKey },
+        expectedIssuerId: credentialA.issuer,
+      }),
+    ).toEqual({ valid: false, reason: 'INVALID_SIGNATURE' })
+    expect(
+      verifyCredential(credentialB, {
+        trusted: { id: credentialB.proof.verificationMethod, publicKey: signing.publicKey },
+        expectedIssuerId: credentialB.issuer,
+      }),
+    ).toEqual({ valid: false, reason: 'INVALID_SIGNATURE' })
+  })
+
+  it('o verificador remoto resolve a chave pelo issuer e recusa a chave do outro', async () => {
+    const resolver = makeHttpIssuerResolver({ trustedIssuerOrigins: [ISSUER_ORIGIN], fetch: appFetch })
+    const credentialA = await credentialOf(key.plaintext)
+    const credentialB = await credentialOf(otherKey.plaintext)
+
+    expect(
+      await verifyCredentialFromIssuer(credentialA, resolver, { expectedIssuerId: credentialA.issuer }),
+    ).toEqual({ valid: true })
+    expect(
+      await verifyCredentialFromIssuer(credentialB, resolver, { expectedIssuerId: credentialB.issuer }),
+    ).toEqual({ valid: true })
+
+    // Trocar o verificationMethod para o issuer do outro (mantendo a assinatura)
+    // é recusado ANTES de resolver: o método não pertence ao issuer declarado.
+    const tampered = transport(credentialA)
+    tampered.proof.verificationMethod = credentialB.proof.verificationMethod
+    expect(await verifyCredentialFromIssuer(tampered, resolver)).toEqual({
+      valid: false,
+      reason: 'VERIFICATION_METHOD_MISMATCH',
+    })
+  })
+
+  it('GET /issuers/:scope publica só a chave do issuer pedido (e 404 para escopo sem chave)', async () => {
+    const documentOf = async (tenant: string) => {
+      const res = await app.inject({ method: 'GET', url: `/issuers/${issuerScopeOf(tenant)}` })
+      expect(res.statusCode).toBe(200)
+      return res.json() as {
+        id: string
+        verificationMethod: Array<{ id: string; publicKeyMultibase: string }>
+      }
+    }
+
+    const docA = await documentOf(tenantId)
+    const docB = await documentOf(otherTenantId)
+
+    expect(docA.id).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
+    expect(docB.id).toBe(issuerIdOf(ISSUER_ORIGIN, otherTenantId))
+    expect(docA.verificationMethod).toHaveLength(1)
+    expect(docB.verificationMethod).toHaveLength(1)
+    expect(
+      decodeEd25519PublicKeyMultibase(docA.verificationMethod[0]!.publicKeyMultibase).equals(
+        signing.publicKey,
+      ),
+    ).toBe(true)
+    expect(
+      decodeEd25519PublicKeyMultibase(docB.verificationMethod[0]!.publicKeyMultibase).equals(
+        otherSigning.publicKey,
+      ),
+    ).toBe(true)
+    // O documento de A não contém a chave (nem o escopo) do issuer B.
+    expect(JSON.stringify(docA)).not.toContain(issuerScopeOf(otherTenantId))
+
+    const missing = await app.inject({ method: 'GET', url: `/issuers/${'a'.repeat(43)}` })
+    expect(missing.statusCode).toBe(404)
+  })
+
+  it('tenant sem chave registrada não emite (409), sem cair em chave global', async () => {
+    const bareTenant = await createTenant(adminPool.db, { name: 'credential-no-key' })
+    const bareKey = await createApiKey(adminPool.db, bareTenant, PEPPER, {
+      scopes: ['validate:read', 'validate:write'],
+    })
+    const validationId = await newValidationAs(bareKey.plaintext)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${bareKey.plaintext}` },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
+    expect(res.json().detail).toBe('SIGNING_KEY_UNAVAILABLE')
+  })
+
+  it('material privado incompatível com a chave publicada não emite (409 SIGNING_KEY_MISMATCH)', async () => {
+    const validationId = await newValidationAs(mismatchKey.plaintext)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${mismatchKey.plaintext}` },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
+    expect(res.json().detail).toBe('SIGNING_KEY_MISMATCH')
   })
 })

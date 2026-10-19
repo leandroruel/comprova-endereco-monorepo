@@ -105,6 +105,45 @@ export const apiKey = pgTable(
   ],
 )
 
+/**
+ * Chave de assinatura do issuer de um tenant (FASE 14). Cada tenant tem a sua,
+ * de modo que o comprometimento de uma chave não atinge os demais issuers.
+ *
+ * A tabela guarda SOMENTE material público: a chave pública crua (32 bytes) e os
+ * metadados do método. A chave privada nunca é persistida — ela vive em
+ * configuração/segredo externo e é associada aqui por (`tenant_id`, `key_id`)
+ * (ADR-0026). A coluna `issuer_scope` é o digest opaco do tenant que aparece na
+ * URL do issuer; é o que permite ao endpoint público resolver a chave pelo
+ * `issuer.id` sem reverter o digest.
+ *
+ * `active = false` marca a chave superada (rotação futura): ela deixa de assinar
+ * credenciais novas, mas continua publicada para verificar as antigas.
+ */
+export const issuerSigningKey = pgTable(
+  'issuer_signing_key',
+  {
+    issuerSigningKeyId: uuid('issuer_signing_key_id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.tenantId),
+    issuerScope: text('issuer_scope').notNull(),
+    keyId: text('key_id').notNull(),
+    algorithm: text('algorithm').notNull(),
+    publicKey: bytea('public_key').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('issuer_signing_key_tenant_key_uq').on(t.tenantId, t.keyId),
+    // No máximo uma chave ATIVA por tenant: a seleção da chave de emissão é
+    // determinística (sem "qual das ativas?").
+    uniqueIndex('issuer_signing_key_active_uq')
+      .on(t.tenantId)
+      .where(sql`active`),
+    index('issuer_signing_key_scope_idx').on(t.issuerScope),
+  ],
+)
+
 export const legalBasis = pgTable('legal_basis', {
   code: text('code').primaryKey(),
   description: text('description').notNull(),
@@ -657,6 +696,7 @@ export const batchItem = pgTable(
 export const schema = {
   tenant,
   apiKey,
+  issuerSigningKey,
   legalBasis,
   refReceitaEstabelecimento,
   refReceitaEmpresa,

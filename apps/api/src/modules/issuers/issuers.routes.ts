@@ -1,5 +1,5 @@
 import { IssuerKeyDocumentSchema } from '@comprova/credential'
-import { ProblemSchema } from '@comprova/contracts'
+import { PROBLEM_CONTENT_TYPE, ProblemSchema, problems } from '@comprova/contracts'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -27,6 +27,12 @@ export const registerIssuerRoutes = (instance: FastifyInstance, deps: IssuerRout
         response: { 200: IssuerKeyDocumentSchema, 404: ProblemSchema },
       },
     },
-    async (request) => controller.keyDocument(request.params.scope),
+    async (request, reply) => {
+      const document = await controller.keyDocument(request.params.scope)
+      if (document === null) {
+        return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('issuer'))
+      }
+      return reply.send(document)
+    },
   )
 }

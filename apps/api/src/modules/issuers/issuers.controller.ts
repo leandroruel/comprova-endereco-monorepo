@@ -1,25 +1,41 @@
-import type { KeyObject } from 'node:crypto'
-import { ISSUERS_PATH, issuerKeyDocumentOf, type IssuerKeyDocument } from '@comprova/credential'
+import {
+  ISSUERS_PATH,
+  ed25519PublicKeyFromBytes,
+  issuerKeyDocumentOf,
+  type IssuerKeyDocument,
+} from '@comprova/credential'
+import { asc, eq, type Db } from '@comprova/db'
+import * as t from '@comprova/db'
 
 export interface IssuerControllerDeps {
+  readonly db: Db
   /** Origem HTTPS configurada (`CREDENTIAL_ISSUER_ORIGIN`). */
   readonly issuerOrigin: string
-  /** Fragmento da chave (`CREDENTIAL_SIGNING_KEY_ID`). */
-  readonly keyId: string
-  /** Somente a chave PÚBLICA entra no documento; a privada nunca sai do boot. */
-  readonly publicKey: KeyObject
 }
 
 export const makeIssuerController = (deps: IssuerControllerDeps) => ({
   /**
    * Documento de chave do issuer: reconstrói o `issuer.id` a partir da origem
-   * configurada e do escopo recebido e publica o método de verificação. O escopo
-   * é opaco (digest do tenant) e a chave é a mesma para toda a origem nesta
-   * etapa; nenhum identificador interno é exposto.
+   * configurada e do escopo recebido e publica TODOS os métodos de verificação
+   * registrados para aquele issuer (FASE 14). O escopo é opaco (digest do
+   * tenant); nenhum identificador interno é exposto, e só a chave PÚBLICA sai
+   * daqui.
+   *
+   * `null` = não há chave registrada para o escopo pedido (o chamador responde
+   * 404). Uma credencial de outro issuer nunca é incluída: a seleção é pelo
+   * `issuer_scope`.
    */
-  keyDocument: (scope: string): IssuerKeyDocument =>
-    issuerKeyDocumentOf(
-      { id: `${deps.issuerOrigin}/${ISSUERS_PATH}/${scope}`, keyId: deps.keyId },
-      deps.publicKey,
-    ),
+  keyDocument: async (scope: string): Promise<IssuerKeyDocument | null> => {
+    const rows = await deps.db
+      .select({ keyId: t.issuerSigningKey.keyId, publicKey: t.issuerSigningKey.publicKey })
+      .from(t.issuerSigningKey)
+      .where(eq(t.issuerSigningKey.issuerScope, scope))
+      .orderBy(asc(t.issuerSigningKey.keyId))
+    if (rows.length === 0) return null
+
+    return issuerKeyDocumentOf(
+      `${deps.issuerOrigin}/${ISSUERS_PATH}/${scope}`,
+      rows.map((row) => ({ keyId: row.keyId, publicKey: ed25519PublicKeyFromBytes(row.publicKey) })),
+    )
+  },
 })

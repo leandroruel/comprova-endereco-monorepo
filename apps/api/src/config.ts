@@ -14,17 +14,16 @@ const EnvSchema = z.object({
    */
   CREDENTIAL_ISSUER_ORIGIN: IssuerOriginSchema,
   /**
-   * Identificador do fragmento da chave de assinatura publicado em
-   * `proof.verificationMethod` (`<issuer.id>#<keyId>`). Sem rotação nesta etapa.
+   * Material de assinatura por tenant (FASE 14). JSON: lista de
+   * `{ "tenant_id": <uuid>, "key_id": <fragmento>, "private_key_pem": <PKCS#8 PEM Ed25519> }`.
+   *
+   * A chave PRIVADA fica aqui (configuração/segredo externo) e é associada à
+   * chave publicada no banco por (`tenant_id`, `key_id`) — nunca é persistida
+   * (ADR-0026). É parseada no boot por `makeSigningKeyResolver`: JSON inválido,
+   * PEM inválida ou não-Ed25519 derrubam a API antes de aceitar tráfego. Vazio =
+   * nenhum tenant provisionado; a emissão daquele tenant falha fechado.
    */
-  CREDENTIAL_SIGNING_KEY_ID: z.string().min(1),
-  /**
-   * Chave privada Ed25519 em PKCS#8 PEM (formato do
-   * `openssl genpkey -algorithm ED25519`; nada proprietário). É lida no boot por
-   * `ed25519PrivateKeyFromPkcs8Pem` — inválida ou não-Ed25519, a API não sobe.
-   * Nunca é logada, devolvida nem incluída em documento público.
-   */
-  CREDENTIAL_SIGNING_PRIVATE_KEY: z.string().min(1),
+  CREDENTIAL_SIGNING_KEYS: z.string().default('[]'),
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),

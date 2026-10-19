@@ -2,7 +2,6 @@ import type { KeyObject } from 'node:crypto'
 import { z } from 'zod'
 import { verificationMethodOf, type IssuerIdentity } from './issuer.js'
 import { encodeEd25519PublicKeyMultibase } from './public-key.js'
-
 /**
  * Documento público de chave do issuer (FASE 13): o recurso que torna a
  * `proof.verificationMethod` resolvível por um terceiro — sem banco, sem
@@ -37,19 +36,32 @@ export const IssuerKeyDocumentSchema = z.object({
 export type IssuerVerificationMethod = z.infer<typeof IssuerVerificationMethodSchema>
 export type IssuerKeyDocument = z.infer<typeof IssuerKeyDocumentSchema>
 
+/** Chave pública associada ao fragmento que a identifica no issuer. */
+export interface IssuerVerificationKey {
+  readonly keyId: string
+  readonly publicKey: KeyObject
+}
+
 /**
- * Materializa o documento do issuer a partir da identidade e da chave pública.
- * Puro: não lê banco nem ambiente. O documento lista somente o método atual
- * (não há rotação de chave nesta etapa).
+ * Materializa o documento do issuer a partir do `issuer.id` e das chaves
+ * públicas publicadas naquele issuer. Puro: não lê banco nem ambiente.
+ *
+ * Lista TODAS as chaves fornecidas — o que permite coexistência de rotação
+ * (a credencial antiga aponta `#key-1`, a nova `#key-2`, ambas resolvíveis no
+ * mesmo documento). Enquanto não há rotação, a lista tem um único método.
  */
-export const issuerKeyDocumentOf = (issuer: IssuerIdentity, publicKey: KeyObject): IssuerKeyDocument => ({
-  id: issuer.id,
-  verificationMethod: [
-    {
-      id: verificationMethodOf(issuer),
+export const issuerKeyDocumentOf = (
+  issuerId: string,
+  methods: readonly IssuerVerificationKey[],
+): IssuerKeyDocument => ({
+  id: issuerId,
+  verificationMethod: methods.map(({ keyId, publicKey }) => {
+    const identity: IssuerIdentity = { id: issuerId, keyId }
+    return {
+      id: verificationMethodOf(identity),
       type: MULTIKEY_TYPE,
-      controller: issuer.id,
+      controller: issuerId,
       publicKeyMultibase: encodeEd25519PublicKeyMultibase(publicKey),
-    },
-  ],
+    }
+  }),
 })
