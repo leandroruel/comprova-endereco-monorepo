@@ -1,4 +1,4 @@
-import { IssuerKeyDocumentSchema } from '@comprova/credential'
+import { IssuerKeyDocumentSchema, WELL_KNOWN_ISSUER_PATH } from '@comprova/credential'
 import { PROBLEM_CONTENT_TYPE, ProblemSchema, problems } from '@comprova/contracts'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
@@ -19,20 +19,29 @@ export const registerIssuerRoutes = (instance: FastifyInstance, deps: IssuerRout
   const app = instance.withTypeProvider<ZodTypeProvider>()
   const controller = makeIssuerController(deps)
 
-  app.get(
-    '/issuers/:scope',
-    {
-      schema: {
-        params: IssuerScopeParams,
-        response: { 200: IssuerKeyDocumentSchema, 404: ProblemSchema },
+  // O mesmo documento é servido em dois caminhos: `/issuers/:scope` é a
+  // localização canônica e `/.well-known/comprova-issuer/:scope` é a porta de
+  // descoberta (RFC 8615). Registrar as duas rotas com o mesmo handler evita
+  // duplicar consulta, isolamento por escopo e serialização.
+  const registerKeyDocumentRoute = (path: string): void => {
+    app.get(
+      path,
+      {
+        schema: {
+          params: IssuerScopeParams,
+          response: { 200: IssuerKeyDocumentSchema, 404: ProblemSchema },
+        },
       },
-    },
-    async (request, reply) => {
-      const document = await controller.keyDocument(request.params.scope)
-      if (document === null) {
-        return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('issuer'))
-      }
-      return reply.send(document)
-    },
-  )
+      async (request, reply) => {
+        const document = await controller.keyDocument(request.params.scope)
+        if (document === null) {
+          return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('issuer'))
+        }
+        return reply.send(document)
+      },
+    )
+  }
+
+  registerKeyDocumentRoute('/issuers/:scope')
+  registerKeyDocumentRoute(`/${WELL_KNOWN_ISSUER_PATH}/:scope`)
 }

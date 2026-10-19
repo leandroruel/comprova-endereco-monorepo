@@ -112,14 +112,40 @@ CREDENTIAL_SIGNING_PRIVATE_KEY = <PKCS#8 PEM Ed25519> (novo)
   **todas** as chaves daquele issuer (coexistência de rotação) e responde **404**
   quando não há chave registrada para o escopo. O formato JSON não muda.
 
+### 3.1 Descoberta: `GET /.well-known/comprova-issuer/:scope`
+
+O mesmo documento público também é servido, sem autenticação, em
+`GET /.well-known/comprova-issuer/<escopo>` (fora do `/v1`). É a **porta de
+descoberta** para um verificador externo: a partir de
+`issuer.id = <origem>/issuers/<escopo>`, ele troca o path interno pelo caminho
+bem-conhecido da RFC 8615 e obtém os métodos de verificação públicos, sem
+precisar conhecer `/issuers/:scope`.
+
+- **Não é um documento novo.** As duas rotas usam o mesmo controller, a mesma
+  consulta por `issuer_scope`, o mesmo schema e a mesma serialização. O `id`
+  continua sendo `<origem>/issuers/<escopo>` (não a URL bem-conhecida), então o
+  verificador confirma que descobriu o issuer certo; um documento cujo `id` é a
+  própria URL de descoberta é recusado.
+- **Resolver opcional:** `makeHttpIssuerResolver({ ..., discover: true })` busca
+  `/.well-known/comprova-issuer/<escopo>` em vez de `<issuer.id>`. O default
+  (`discover: false`) continua buscando o endpoint atual, e a allowlist de
+  origem, HTTPS, ausência de query/redirect e as checagens de
+  `id`/`controller`/método são as mesmas. A URL de descoberta é derivada da
+  origem já autorizada, então a allowlist não é ampliada.
+- **DID continua fora de escopo:** sem `did:`, `did:web`, DID Document,
+  resolução DID, rotação automática, revogação, status list, wallet/VP,
+  selective disclosure, KMS/HSM, TSA ou blockchain. A descoberta é apenas um
+  alias público do documento de chave já existente.
+
 ### 4. Resolver: dependência explícita com allowlist
 
 ```ts
 type VerificationMethodResolver = (vm: string) => Promise<{ id: string; publicKey: KeyObject }>
 ```
 
-- `makeHttpIssuerResolver({ trustedIssuerOrigins, fetch? })` busca
-  `GET <issuer.id>` e devolve a chave do método pedido. Ele:
+- `makeHttpIssuerResolver({ trustedIssuerOrigins, fetch?, discover? })` busca
+  `GET <issuer.id>` (ou `GET /.well-known/comprova-issuer/<escopo>` quando
+  `discover: true`) e devolve a chave do método pedido. Ele:
   - exige HTTPS e só busca **origens na allowlist** (`trustedIssuerOrigins`);
   - recusa documento cujo `id` não é o issuer pedido, que não lista o método,
     ou cujo `controller` não é o issuer;
@@ -156,7 +182,7 @@ confiável resolvido. Falhas = as de `verifyCredential` mais
 - **Novas exportações** em `@comprova/credential`:
   `issuerKeyDocumentOf`/`IssuerKeyDocumentSchema`, `encode/decodeEd25519PublicKeyMultibase`,
   `ed25519PrivateKeyFromPkcs8Pem`, `makeHttpIssuerResolver`,
-  `verifyCredentialFromIssuer`.
+  `verifyCredentialFromIssuer`, `WELL_KNOWN_ISSUER_PATH`/`wellKnownIssuerUrlOf`.
 - **Nenhuma migração, schema, worker, pipeline, scoring, checker, policy,
   `building_key`/`unit_key` ou retenção alterados.** Nenhuma credencial é
   persistida.
@@ -170,17 +196,25 @@ credenciais; event sourcing. Nenhuma tabela nova.
 
 ## Testes
 
-- `packages/credential/src/resolver.test.ts`: round-trip de
+- `packages/credential/src/service/issuer.service.test.ts`: `parseIssuerOrigin`,
+  `issuerIdOf` (determinismo/isolamento), `localIssuer`/`verificationMethodOf`
+  (identidade estável na rotação) e mapeamento de `wellKnownIssuerUrlOf`
+  (incluindo recusa de URL sem o formato de issuer, query/fragmento e não-HTTPS).
+- `packages/credential/src/service/verification.service.test.ts`: round-trip de
   `publicKeyMultibase`; documento do issuer; `verifyCredentialFromIssuer` válido;
-  adulteração da carga → `INVALID_SIGNATURE`; chave errada →
-  `INVALID_SIGNATURE`; método inexistente → `VERIFICATION_METHOD_UNRESOLVED`;
-  `verificationMethod` incompatível com o issuer rejeitado **antes** de chamar o
-  resolver; malformada; issuer esperado divergente; e o resolver HTTP
-  (allowlist, HTTPS, `id` divergente, HTTP não-ok, documento malformado).
+  adulteração da carga →
+  `INVALID_SIGNATURE`; chave errada → `INVALID_SIGNATURE`; método inexistente →
+  `VERIFICATION_METHOD_UNRESOLVED`; `verificationMethod` incompatível com o
+  issuer rejeitado **antes** de chamar o resolver; malformada; issuer esperado
+  divergente; e o resolver HTTP (allowlist, HTTPS, `id` divergente, HTTP não-ok,
+  documento malformado, redirect) **incluindo `discover: true`** (well-known
+  usado, `id` do issuer preservado, URL sem mapeamento e método ausente).
 - `apps/api/src/credential.int.test.ts`: `POST /v1/validations/:id/credential`
   devolve a VC e `verifyCredentialFromIssuer` valida via resolver HTTP apoiado no
   roteador do Fastify; `GET /issuers/:scope` publica só a chave pública
   (a `publicKeyMultibase` reconstrói o `KeyObject` do par); sem chave privada nem
   identificadores internos; 401 sem auth; tenant isolation (404); não-final e
   janela inválida (409, `CREDENTIAL_NOT_ISSUABLE`, `expires_at` intacto); o JSON
-  transportado é autocontido.
+  transportado é autocontido; `GET /.well-known/comprova-issuer/:scope`
+  devolve o mesmo documento, 404 para escopo sem chave, só material público,
+  verificação ponta a ponta com `discover: true` e isolamento entre tenants.

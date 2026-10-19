@@ -816,6 +816,99 @@ describe('chave de assinatura escopada por tenant', () => {
     expect(missing.statusCode).toBe(404)
   })
 
+  it('GET /.well-known/comprova-issuer/:scope descobre o MESMO documento público', async () => {
+    const scope = issuerScopeOf(tenantId)
+    const wellKnown = await app.inject({
+      method: 'GET',
+      url: `/.well-known/comprova-issuer/${scope}`,
+    })
+    const canonical = await app.inject({ method: 'GET', url: `/issuers/${scope}` })
+
+    expect(canonical.statusCode).toBe(200)
+    expect(wellKnown.statusCode).toBe(200)
+    expect(wellKnown.json()).toEqual(canonical.json())
+
+    const document = wellKnown.json() as {
+      id: string
+      verificationMethod: Array<Record<string, string>>
+    }
+    expect(document.id).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
+    expect(document.verificationMethod).toHaveLength(1)
+    expect(Object.keys(document).sort()).toEqual(['id', 'verificationMethod'])
+    expect(Object.keys(document.verificationMethod[0]!).sort()).toEqual([
+      'controller',
+      'id',
+      'publicKeyMultibase',
+      'type',
+    ])
+
+    // Só material público: nada de PEM/privada, tenant_id, API key, segredo de
+    // configuração ou a chave (nem o escopo) do outro issuer.
+    expect(wellKnown.body).not.toContain('PRIVATE KEY')
+    expect(wellKnown.body).not.toContain(signing.privateKeyPkcs8Pem)
+    expect(wellKnown.body).not.toContain(tenantId)
+    expect(wellKnown.body).not.toContain(issuerScopeOf(otherTenantId))
+    expect(wellKnown.body).not.toContain('api_key')
+    expect(wellKnown.body).not.toContain('CREDENTIAL_SIGNING_KEYS')
+
+    const missing = await app.inject({
+      method: 'GET',
+      url: `/.well-known/comprova-issuer/${'a'.repeat(43)}`,
+    })
+    expect(missing.statusCode).toBe(404)
+  })
+
+  it('descoberta + resolução da chave + verificação funciona ponta a ponta', async () => {
+    const requested: string[] = []
+    const discoveryFetch = (async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      requested.push(url.pathname)
+      return appFetch(input)
+    }) as typeof fetch
+    const resolver = makeHttpIssuerResolver({
+      trustedIssuerOrigins: [ISSUER_ORIGIN],
+      fetch: discoveryFetch,
+      discover: true,
+    })
+
+    const credentialA = await credentialOf(key.plaintext)
+    expect(
+      await verifyCredentialFromIssuer(credentialA, resolver, { expectedIssuerId: credentialA.issuer }),
+    ).toEqual({ valid: true })
+    expect(requested).toEqual([`/.well-known/comprova-issuer/${issuerScopeOf(tenantId)}`])
+
+    // Cada credencial descobre e resolve a chave do SEU issuer.
+    requested.length = 0
+    const credentialB = await credentialOf(otherKey.plaintext)
+    expect(
+      await verifyCredentialFromIssuer(credentialB, resolver, { expectedIssuerId: credentialB.issuer }),
+    ).toEqual({ valid: true })
+    expect(requested).toEqual([`/.well-known/comprova-issuer/${issuerScopeOf(otherTenantId)}`])
+  })
+
+  it('descoberta não aceita método de outro issuer (recusa antes de buscar)', async () => {
+    let fetched = false
+    const resolver = makeHttpIssuerResolver({
+      trustedIssuerOrigins: [ISSUER_ORIGIN],
+      discover: true,
+      fetch: (async () => {
+        fetched = true
+        throw new Error('should not fetch')
+      }) as typeof fetch,
+    })
+
+    const credentialA = await credentialOf(key.plaintext)
+    const credentialB = await credentialOf(otherKey.plaintext)
+    const tampered = transport(credentialA)
+    tampered.proof.verificationMethod = credentialB.proof.verificationMethod
+
+    expect(await verifyCredentialFromIssuer(tampered, resolver)).toEqual({
+      valid: false,
+      reason: 'VERIFICATION_METHOD_MISMATCH',
+    })
+    expect(fetched).toBe(false)
+  })
+
   it('tenant sem chave registrada não emite (409), sem cair em chave global', async () => {
     const bareTenant = await createTenant(adminPool.db, { name: 'credential-no-key' })
     const bareKey = await createApiKey(adminPool.db, bareTenant, PEPPER, {

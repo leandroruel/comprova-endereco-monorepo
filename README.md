@@ -62,7 +62,8 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   `SIGNING_KEY_UNAVAILABLE`) — não existe chave global de reserva. O `key_id` é
   o fragmento publicado em `proof.verificationMethod` (`<issuer.id>#<keyId>`) e
   pode se repetir entre tenants (o namespace é o issuer). Só o material
-  **público** sai da API (`GET /issuers/:scope`, em `publicKeyMultibase`); a
+  **público** sai da API (`GET /issuers/:scope` e a porta de descoberta
+  `GET /.well-known/comprova-issuer/:scope`, em `publicKeyMultibase`); a
   privada nunca é persistida, logada nem devolvida. A chave pública publicada
   tem de **corresponder** ao material configurado, senão a emissão falha com
   `SIGNING_KEY_MISMATCH`. (Limitação operacional deste passo: sem KMS/HSM, o
@@ -92,6 +93,7 @@ Abre `http://localhost:5173`:
 | POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                       |
 | GET/DELETE      | `/v1/subjects/:id`                        | Relatório de acesso / eliminação LGPD           |
 | GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey) |
+| GET             | `/.well-known/comprova-issuer/:scope`     | Descoberta do documento público do issuer       |
 | GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                             |
 | GET             | `/openapi.json`                           | OpenAPI 3.1                                     |
 
