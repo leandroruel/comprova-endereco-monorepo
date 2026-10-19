@@ -1,9 +1,16 @@
 import { createHash, verify as ed25519Verify, type KeyObject } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { z } from 'zod'
-import { canonicalize } from './jcs.js'
-import { decodeMultibaseBase58Btc, encodeMultibaseBase58Btc } from './multibase.js'
-import type { Signer } from './signer.js'
+import {
+  DATA_INTEGRITY_PROOF_TYPE,
+  DataIntegrityProofSchema,
+  EDDSA_JCS_2022,
+  UnsignedDataIntegrityProofSchema,
+  type DataIntegrityProof,
+  type DataIntegrityVerificationResult,
+  type UnsignedDataIntegrityProof,
+} from '../schema/proof.schema.js'
+import { canonicalize, decodeMultibaseBase58Btc, encodeMultibaseBase58Btc } from './encoding.service.js'
+import type { Signer } from './signer.service.js'
 
 /**
  * Data Integrity proof com a cryptosuite `eddsa-jcs-2022`
@@ -24,33 +31,6 @@ import type { Signer } from './signer.js'
  * (§2.1.1) — a camada de credencial o recebe de um relógio injetável, e nunca o
  * deriva de um timestamp histórico da assertion (ADR-0024 §4).
  */
-export const DATA_INTEGRITY_PROOF_TYPE = 'DataIntegrityProof'
-export const EDDSA_JCS_2022 = 'eddsa-jcs-2022'
-export const ASSERTION_METHOD = 'assertionMethod'
-
-/**
- * Campos do proof reconhecidos pela Comprova. As opções do proof estão ABERTAS
- * (`looseObject`): a Data Integrity permite propriedades adicionais no proof
- * (`expires`, `domain`, `challenge`, `nonce`, `previousProof`, …), elas fazem
- * parte do material assinado e NÃO podem ser descartadas na verificação.
- */
-const PROOF_FIELDS = {
-  type: z.string().min(1),
-  cryptosuite: z.string().min(1),
-  created: z.iso.datetime().optional(),
-  verificationMethod: z.string().min(1),
-  proofPurpose: z.string().min(1),
-  '@context': z.unknown().optional(),
-} as const
-
-export const UnsignedDataIntegrityProofSchema = z.looseObject(PROOF_FIELDS)
-export const DataIntegrityProofSchema = z.looseObject({
-  ...PROOF_FIELDS,
-  proofValue: z.string().min(1),
-})
-
-export type DataIntegrityProof = z.infer<typeof DataIntegrityProofSchema>
-export type UnsignedDataIntegrityProof = z.infer<typeof UnsignedDataIntegrityProofSchema>
 
 export interface CreateDataIntegrityProofOptions {
   readonly verificationMethod: string
@@ -65,17 +45,6 @@ export class DataIntegrityError extends Error {
     this.name = 'DataIntegrityError'
   }
 }
-
-export type DataIntegrityFailure =
-  | 'MALFORMED_PROOF'
-  | 'UNSUPPORTED_CRYPTOSUITE'
-  | 'PROOF_CONTEXT_MISMATCH'
-  | 'PROOF_PURPOSE_MISMATCH'
-  | 'INVALID_PROOF_VALUE'
-  | 'INVALID_SIGNATURE'
-
-export type DataIntegrityVerificationResult =
-  { readonly valid: true } | { readonly valid: false; readonly reason: DataIntegrityFailure }
 
 const sha256 = (text: string): Buffer => createHash('sha256').update(text, 'utf8').digest()
 

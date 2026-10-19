@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalize, JcsError } from './jcs.js'
+import { canonicalize, JcsError } from './encoding.service.js'
 
 // Vetores do RFC 8785 (JSON Canonicalization Scheme).
 describe('canonicalize (RFC 8785 / JCS)', () => {

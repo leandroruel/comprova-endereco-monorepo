@@ -1,17 +1,23 @@
 import { evidenceSetHashOfObservations } from '@comprova/core'
 import { describe, expect, it } from 'vitest'
-import type { AssertionObservation, AssertionSource } from './assertion.js'
-import { buildCredential } from './credential.js'
-import { issuerIdOf, localIssuer, verificationMethodOf } from './issuer.js'
-import { issuerKeyDocumentOf, type IssuerKeyDocument } from './issuer-key.js'
-import { decodeEd25519PublicKeyMultibase, encodeEd25519PublicKeyMultibase } from './public-key.js'
+import type { AssertionObservation, AssertionSource } from '../schema/assertion.schema.js'
+import type { SecuredVerifiableCredential } from '../schema/credential.schema.js'
+import type { IssuerKeyDocument } from '../schema/issuer.schema.js'
+import { buildCredential } from './credential.service.js'
+import {
+  decodeEd25519PublicKeyMultibase,
+  encodeEd25519PublicKeyMultibase,
+  issuerIdOf,
+  issuerKeyDocumentOf,
+  localIssuer,
+  verificationMethodOf,
+} from './issuer.service.js'
 import {
   makeHttpIssuerResolver,
   verifyCredentialFromIssuer,
   type VerificationMethodResolver,
-} from './resolver.js'
-import { generateEd25519KeyPair, makeEd25519Signer } from './signer.js'
-import type { SecuredVerifiableCredential } from './vc.js'
+} from './verification.service.js'
+import { generateEd25519KeyPair, makeEd25519Signer } from './signer.service.js'
 
 const ISSUER_ORIGIN = 'https://issuer.test'
 const TENANT = '11111111-1111-4111-8111-111111111111'

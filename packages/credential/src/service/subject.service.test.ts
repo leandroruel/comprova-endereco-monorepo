@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { issuerIdOf } from './issuer.js'
-import { deriveCredentialSubjectId, subjectDigestOf } from './subject.js'
+import { issuerIdOf } from './issuer.service.js'
+import { deriveCredentialSubjectId, subjectDigestOf } from './subject.service.js'
 
 const ORIGIN = 'https://issuer.test'
 const OTHER_ORIGIN = 'https://outro.test'

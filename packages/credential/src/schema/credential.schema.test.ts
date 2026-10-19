@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import type { AssertionPayload } from './assertion.js'
-import { issuerIdOf } from './issuer.js'
+import type { AssertionPayload } from './assertion.schema.js'
+import { issuerIdOf } from '../service/issuer.service.js'
+import { observationOfEvidence, toVerifiableCredential } from '../service/credential.service.js'
 import {
   COMPROVA_CONTEXT_URL,
   COMPROVA_CREDENTIAL_TYPE,
   COMPROVA_EVIDENCE_TYPE,
-  observationOfEvidence,
   SecuredVerifiableCredentialSchema,
-  toVerifiableCredential,
   urnUuidOf,
   uuidOfUrn,
   VC_CONTEXT_URL,
   VerifiableCredentialSchema,
-} from './vc.js'
+} from './credential.schema.js'
 
 const ISSUER_ORIGIN = 'https://issuer.test'
 const TENANT = '11111111-1111-4111-8111-111111111111'

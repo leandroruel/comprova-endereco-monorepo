@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { SUBJECTS_PATH } from './issuer.js'
+import { SUBJECTS_PATH } from './issuer.service.js'
 
 /** Entrada da derivação do pseudônimo: o que identifica o subject dentro do tenant. */
 export interface SubjectPseudonymInput {
