@@ -11,6 +11,7 @@ import {
   issuerKeyDocumentOf,
   localIssuer,
   verificationMethodOf,
+  wellKnownIssuerUrlOf,
 } from './issuer.service.js'
 import {
   makeHttpIssuerResolver,
@@ -197,9 +198,13 @@ describe('makeHttpIssuerResolver', () => {
   const response = (body: unknown, status = 200): Response =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
-  const resolverWith = (handler: (url: string) => Response | Promise<Response>): VerificationMethodResolver =>
+  const resolverWith = (
+    handler: (url: string) => Response | Promise<Response>,
+    options: { readonly discover?: boolean } = {},
+  ): VerificationMethodResolver =>
     makeHttpIssuerResolver({
       trustedIssuerOrigins: [ISSUER_ORIGIN],
+      ...options,
       fetch: (async (input: string | URL | Request) =>
         handler(input instanceof Request ? input.url : input.toString())) as typeof fetch,
     })
@@ -211,6 +216,37 @@ describe('makeHttpIssuerResolver', () => {
     })
     const credential = await emit()
     expect(await verifyCredentialFromIssuer(credential, resolver)).toEqual({ valid: true })
+  })
+
+  it('descobre o documento pelo well-known e mantém o id do issuer', async () => {
+    const discoveryUrl = wellKnownIssuerUrlOf(issuer.id)
+    const resolver = resolverWith(
+      (url) => {
+        expect(url).toBe(discoveryUrl)
+        return response(document)
+      },
+      { discover: true },
+    )
+    const credential = await emit()
+    expect(await verifyCredentialFromIssuer(credential, resolver)).toEqual({ valid: true })
+  })
+
+  it('recusa descoberta cujo documento id é a URL bem-conhecida (não o issuer)', async () => {
+    const discoveryUrl = wellKnownIssuerUrlOf(issuer.id)
+    const resolver = resolverWith(() => response({ ...document, id: discoveryUrl }), { discover: true })
+    await expect(resolver(verificationMethodOf(issuer))).rejects.toThrow(/id does not match/)
+  })
+
+  it('recusa descoberta quando a URL do issuer não tem mapeamento bem-conhecido', async () => {
+    const resolver = resolverWith(() => response(document), { discover: true })
+    await expect(resolver(`${ISSUER_ORIGIN}/outro/${'a'.repeat(43)}#key-1`)).rejects.toThrow(
+      /no well-known discovery mapping/,
+    )
+  })
+
+  it('recusa método inexistente no documento descoberto', async () => {
+    const resolver = resolverWith(() => response(document), { discover: true })
+    await expect(resolver(`${issuer.id}#outra`)).rejects.toThrow(/not found/)
   })
 
   it('não busca origem fora da allowlist', async () => {

@@ -9,7 +9,7 @@ import { ASSERTION_METHOD, type DataIntegrityFailure } from '../schema/proof.sch
 import { verifyDataIntegrityProof } from './proof.service.js'
 import { evidenceSetHashOfCredential } from './assertion.service.js'
 import { observationOfEvidence } from './credential.service.js'
-import { decodeEd25519PublicKeyMultibase, parseIssuerOrigin } from './issuer.service.js'
+import { decodeEd25519PublicKeyMultibase, parseIssuerOrigin, wellKnownIssuerUrlOf } from './issuer.service.js'
 
 /**
  * Verificação independente da credencial (FASE 11/13).
@@ -267,6 +267,14 @@ export interface HttpIssuerResolverOptions {
    * são buscados: é o que impede a credencial de apontar para uma URL arbitrária.
    */
   readonly trustedIssuerOrigins: readonly string[]
+  /**
+   * Quando `true`, descobre o documento pelo endpoint bem-conhecido
+   * `/.well-known/comprova-issuer/<escopo>` em vez de buscar diretamente a URL
+   * do issuer. O documento devolvido continua tendo de declarar `id` igual à
+   * URL do issuer; a allowlist e a ausência de redirect/query valem para a
+   * mesma origem. Default: `false` (comportamento anterior, compatível).
+   */
+  readonly discover?: boolean
   /** Injetável para testes; default: `fetch` global. */
   readonly fetch?: typeof globalThis.fetch
 }
@@ -279,9 +287,26 @@ const urlOf = (value: string): URL => {
   }
 }
 
+const issuerDocumentUrlOf = (issuerUrl: string, discover: boolean): string => {
+  if (!discover) return issuerUrl
+  try {
+    return wellKnownIssuerUrlOf(issuerUrl)
+  } catch (error) {
+    throw new VerificationMethodResolutionError(
+      `issuer URL has no well-known discovery mapping: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+  }
+}
+
 /**
- * Resolver HTTP concreto (FASE 13): busca `GET <issuer.id>` (o documento de
- * chave do issuer) e devolve a chave do método pedido.
+ * Resolver HTTP concreto (FASE 13): busca o documento de chave do issuer e
+ * devolve a chave do método pedido.
+ *
+ * Por padrão busca `GET <issuer.id>`; com `discover: true`, busca o MESMO
+ * documento em `GET <origem>/.well-known/comprova-issuer/<escopo>` (descoberta
+ * padronizada, sem DID).
  *
  * Ele só busca origens declaradas confiáveis (`trustedIssuerOrigins`) e exige
  * HTTPS; um documento cujo `id` não corresponde ao issuer pedido, que não lista
@@ -303,7 +328,10 @@ export const makeHttpIssuerResolver = (options: HttpIssuerResolverOptions): Veri
     if (!trustedOrigins.has(url.origin)) {
       throw new VerificationMethodResolutionError(`issuer origin is not trusted: ${url.origin}`)
     }
-    const documentUrl = `${url.origin}${url.pathname}`
+    // `issuerUrl` é a identidade que o documento precisa declarar; a URL de
+    // fetch pode ser a porta de descoberta, mas nunca muda o issuer esperado.
+    const issuerUrl = `${url.origin}${url.pathname}`
+    const documentUrl = issuerDocumentUrlOf(issuerUrl, options.discover === true)
 
     // `redirect: 'error'` impede que a allowlist seja contornada por um 3xx: o
     // fetch precisa ir à origem confiável exata. A checagem de `redirected`
@@ -328,7 +356,7 @@ export const makeHttpIssuerResolver = (options: HttpIssuerResolverOptions): Veri
     }
     // O tipo é usado apenas para documentar a forma validada pelo schema.
     const document = parsed.data
-    if (document.id !== documentUrl) {
+    if (document.id !== issuerUrl) {
       throw new VerificationMethodResolutionError(
         'issuer key document id does not match the requested issuer',
       )

@@ -30,6 +30,12 @@ export class IssuerIdentityError extends Error {
 export const ISSUERS_PATH = 'issuers'
 /** Segmento de namespace dos subjects dentro do issuer (ver `subject.service.ts`). */
 export const SUBJECTS_PATH = 'subjects'
+/**
+ * Prefixo público de descoberta do issuer (RFC 8615). O documento servido
+ * aqui é o MESMO de `<origem>/issuers/<escopo>`; o caminho bem-conhecido evita
+ * que um verificador externo precise conhecer o path interno da API.
+ */
+export const WELL_KNOWN_ISSUER_PATH = '.well-known/comprova-issuer'
 
 /** Domínio de separação do escopo do issuer (evita colisão com outros hashes). */
 const ISSUER_SCOPE_DOMAIN = 'comprova:issuer:v1'
@@ -100,6 +106,37 @@ export const issuerScopeOf = (tenantId: string): string =>
  */
 export const issuerIdOf = (origin: string, tenantId: string): string =>
   `${parseIssuerOrigin(origin)}/${ISSUERS_PATH}/${issuerScopeOf(tenantId)}`
+
+/**
+ * URL de descoberta de um issuer:
+ * `<origem>/.well-known/comprova-issuer/<escopo>` a partir de
+ * `<origem>/issuers/<escopo>`.
+ *
+ * É um mapeamento puro de URL: não busca nada e não escolhe em quem confiar.
+ * O `id` do documento devolvido continua sendo a URL do issuer, não esta URL —
+ * é isso que permite ao verificador confirmar que descobriu o issuer certo.
+ * Qualquer URL que não seja um issuer do Comprova é recusada.
+ */
+export const wellKnownIssuerUrlOf = (issuerId: string | URL): string => {
+  let url: URL
+  try {
+    url = typeof issuerId === 'string' ? new URL(issuerId) : issuerId
+  } catch {
+    throw new IssuerIdentityError(`issuer id is not a URL: ${String(issuerId)}`)
+  }
+  if (url.protocol !== 'https:') {
+    throw new IssuerIdentityError(`issuer id must be https: ${url.href}`)
+  }
+  if (url.search !== '' || url.hash !== '') {
+    throw new IssuerIdentityError(`issuer id must not carry query or fragment: ${url.href}`)
+  }
+  const segments = url.pathname.split('/').filter((segment) => segment !== '')
+  const scope = segments[segments.length - 1]
+  if (segments.length !== 2 || segments[0] !== ISSUERS_PATH || scope === undefined) {
+    throw new IssuerIdentityError(`issuer id has no well-known discovery mapping: ${url.href}`)
+  }
+  return `${url.origin}/${WELL_KNOWN_ISSUER_PATH}/${scope}`
+}
 
 /**
  * O `keyId` vira fragmento de URL (`#<keyId>`): precisa existir e ser

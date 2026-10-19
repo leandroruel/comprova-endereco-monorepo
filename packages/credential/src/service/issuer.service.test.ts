@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   ISSUERS_PATH,
+  WELL_KNOWN_ISSUER_PATH,
   issuerIdOf,
   issuerScopeOf,
   localIssuer,
   parseIssuerOrigin,
   verificationMethodOf,
+  wellKnownIssuerUrlOf,
 } from './issuer.service.js'
 
 const ORIGIN = 'https://issuer.test'
@@ -57,6 +59,31 @@ describe('issuerIdOf', () => {
   it('valida a origem em vez de aceitar qualquer string', () => {
     expect(() => issuerIdOf('http://issuer.test', TENANT)).toThrow(/https/)
     expect(() => issuerIdOf('https://issuer.test/api', TENANT)).toThrow(/bare origin/)
+  })
+})
+
+describe('wellKnownIssuerUrlOf', () => {
+  it('mapeia o issuer para o caminho bem-conhecido, preservando origem e escopo', () => {
+    const url = wellKnownIssuerUrlOf(issuerIdOf(ORIGIN, TENANT))
+
+    expect(url).toBe(`${ORIGIN}/${WELL_KNOWN_ISSUER_PATH}/${issuerScopeOf(TENANT)}`)
+    expect(url).toContain('/.well-known/comprova-issuer/')
+    expect(url).not.toContain(TENANT)
+  })
+
+  it('aceita URL e normaliza a barra final', () => {
+    expect(wellKnownIssuerUrlOf(new URL(`${issuerIdOf(ORIGIN, TENANT)}/`))).toBe(
+      `${ORIGIN}/${WELL_KNOWN_ISSUER_PATH}/${issuerScopeOf(TENANT)}`,
+    )
+  })
+
+  it('recusa URL que não é issuer do Comprova, query, fragmento e não-https', () => {
+    expect(() => wellKnownIssuerUrlOf(`${ORIGIN}/outro/${'a'.repeat(43)}`)).toThrow(/no well-known/)
+    expect(() => wellKnownIssuerUrlOf(`${ORIGIN}/issuers/a/b`)).toThrow(/no well-known/)
+    expect(() => wellKnownIssuerUrlOf(`${issuerIdOf(ORIGIN, TENANT)}?x=1`)).toThrow(/query or fragment/)
+    expect(() => wellKnownIssuerUrlOf(`${issuerIdOf(ORIGIN, TENANT)}#key-1`)).toThrow(/query or fragment/)
+    expect(() => wellKnownIssuerUrlOf(`http://issuer.test/issuers/${'a'.repeat(43)}`)).toThrow(/https/)
+    expect(() => wellKnownIssuerUrlOf('not-a-url')).toThrow(/not a URL/)
   })
 })
 
