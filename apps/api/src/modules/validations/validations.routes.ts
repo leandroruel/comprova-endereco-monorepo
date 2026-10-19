@@ -10,6 +10,7 @@ import {
   GetValidationParams,
   NotModifiedResponse,
   ProblemSchema,
+  SecuredVerifiableCredentialSchema,
   ValidationDtoSchema,
 } from './validations.schema.js'
 
@@ -74,5 +75,20 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
         deps.fastPath.docHmacKey,
         reply,
       ),
+  )
+
+  app.post(
+    '/validations/:id/credential',
+    {
+      schema: {
+        params: GetValidationParams,
+        response: {
+          200: SecuredVerifiableCredentialSchema,
+          404: ProblemSchema,
+          409: ProblemSchema,
+        },
+      },
+    },
+    async (request, reply) => controller.credential(request.tenant, request.params.id, reply),
   )
 }

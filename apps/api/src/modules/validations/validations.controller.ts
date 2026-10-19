@@ -11,6 +11,11 @@ import {
   type FastPathResult,
 } from '../../services/fastpath.js'
 import { startDeepWorkflow, type DeepTriggerDeps } from '../../services/deep-trigger.js'
+import {
+  CredentialIssuanceError,
+  issueCredential,
+  type CredentialIssuerDeps,
+} from '../../services/credential-issuer.js'
 import { contestValidation, getValidationDetails, setWorkflowId } from './validations.service.js'
 
 export interface ValidationControllerDeps {
@@ -18,6 +23,8 @@ export interface ValidationControllerDeps {
   readonly fastPath: FastPathDeps
   readonly deepTrigger: DeepTriggerDeps
   readonly vlmEnabled: boolean
+  /** Assinatura/identidade do issuer resolvidas no boot (`app.ts`). */
+  readonly credentialIssuer: CredentialIssuerDeps
 }
 
 const summaryOf = (explanation: { summary?: string } | null): string | null => {
@@ -288,5 +295,30 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('validation'))
     }
     return reply.send({ contested: true, validation_id: validationId })
+  },
+
+  /**
+   * Emite a credencial verificável da validation. Toda a regra de negócio
+   * (elegibilidade, bindings, subject, evidence set, assinatura) continua em
+   * `issueCredential`/`@comprova/credential`: aqui só se escopa pelo tenant e se
+   * traduz a falha de emissão no `problem+json` estável da API.
+   */
+  credential: async (
+    tenant: { readonly tenantId: string } | undefined,
+    validationId: string,
+    reply: FastifyReply,
+  ) => {
+    if (tenant === undefined) throw new Error('tenant context missing')
+    try {
+      const credential = await issueCredential(deps.db, tenant.tenantId, validationId, deps.credentialIssuer)
+      return reply.send(credential)
+    } catch (error) {
+      if (!(error instanceof CredentialIssuanceError)) throw error
+      const problem =
+        error.failure === 'VALIDATION_NOT_FOUND'
+          ? problems.notFound('validation')
+          : problems.credentialNotIssuable(error.failure)
+      return reply.code(problem.status).type(PROBLEM_CONTENT_TYPE).send(problem)
+    }
   },
 })

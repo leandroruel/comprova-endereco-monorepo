@@ -227,6 +227,9 @@ export interface IssueCredentialDeps {
   readonly now?: () => Date
 }
 
+/** Dependências de assinatura do issuer já resolvidas no boot (sem relógio). */
+export type CredentialIssuerDeps = Omit<IssueCredentialDeps, 'now'>
+
 /** `validation_id → carrega o grafo → payload → canonicalização → assinatura → credencial`. */
 export const issueCredential = async (
   db: Db,

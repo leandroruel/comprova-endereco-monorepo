@@ -1,6 +1,7 @@
 import {
   createApiKey,
   createTenant,
+  createTestCredentialSigningKey,
   seedGoldenDataset,
   startTestDb,
   startTestRedis,
@@ -19,6 +20,7 @@ import { appendFileSync } from 'node:fs'
 import { afterAll, describe, expect, it } from 'vitest'
 
 const PEPPER = 'test-pepper-123'
+const signing = createTestCredentialSigningKey()
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })
@@ -36,6 +38,8 @@ const app = await buildApp({
     REDIS_URL: testRedis.url,
     API_KEY_PEPPER: PEPPER,
     CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+    CREDENTIAL_SIGNING_KEY_ID: signing.keyId,
+    CREDENTIAL_SIGNING_PRIVATE_KEY: signing.privateKeyPkcs8Pem,
     PORT: 3000,
     HOST: '127.0.0.1',
     LOG_LEVEL: 'silent',
@@ -228,6 +232,8 @@ describe('batch', () => {
       REDIS_URL: testRedis.url,
       API_KEY_PEPPER: PEPPER,
       CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+      CREDENTIAL_SIGNING_KEY_ID: signing.keyId,
+      CREDENTIAL_SIGNING_PRIVATE_KEY: signing.privateKeyPkcs8Pem,
       PORT: 3000,
       HOST: '127.0.0.1',
       LOG_LEVEL: 'silent',

@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createPublicKey } from 'node:crypto'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import { makeT0Checkers } from '@comprova/checkers'
 import { systemClock } from '@comprova/core'
+import { makeEd25519Signer, ed25519PrivateKeyFromPkcs8Pem } from '@comprova/credential'
 import { type Logger, type Metrics } from '@comprova/observability'
 import {
   makeCepReader,
@@ -34,6 +35,7 @@ import { makeRedisCache, makeCachedReaders, makeApiKeyHasher } from '@comprova/d
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
 import { registerBatchRoutes } from './modules/batches/batches.routes.js'
+import { registerIssuerRoutes } from './modules/issuers/issuers.routes.js'
 import { registerMetaRoutes } from './modules/meta/meta.routes.js'
 import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
@@ -152,6 +154,16 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const authenticate = makeAuthenticate(deps.db, hasher)
   const rateLimit = makeRateLimiter(deps.redis)
 
+  // Chave de assinatura resolvida no boot: configuração ausente/inválida derruba
+  // a API antes de aceitar tráfego (falha fechado). A privada fica em memória; só
+  // a pública é publicada.
+  const signingKey = ed25519PrivateKeyFromPkcs8Pem(deps.config.CREDENTIAL_SIGNING_PRIVATE_KEY)
+  const credentialIssuer = {
+    issuerOrigin: deps.config.CREDENTIAL_ISSUER_ORIGIN,
+    keyId: deps.config.CREDENTIAL_SIGNING_KEY_ID,
+    signer: makeEd25519Signer(signingKey),
+  }
+
   const cache = makeRedisCache(deps.redis, deps.logger)
   const fastPath = buildFastPathDeps(deps.db, deps.config, cache)
   const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
@@ -176,6 +188,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         fastPath,
         deepTrigger,
         vlmEnabled: deps.config.VLM_ENABLED,
+        credentialIssuer,
       })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
       registerBatchRoutes(v1, { db: deps.db })
@@ -188,6 +201,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   app.get('/openapi.json', async () => app.swagger())
 
+  registerIssuerRoutes(app, {
+    issuerOrigin: deps.config.CREDENTIAL_ISSUER_ORIGIN,
+    keyId: deps.config.CREDENTIAL_SIGNING_KEY_ID,
+    publicKey: createPublicKey(signingKey),
+  })
   registerHealthRoutes(app, { db: deps.db, redis: deps.redis })
   registerMetricsRoute(app, deps.metrics)
 

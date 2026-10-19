@@ -5,6 +5,7 @@ import {
   createApiKey,
   createSubject,
   createTenant,
+  createTestCredentialSigningKey,
   seedGoldenDataset,
   startTestDb,
   startTestRedis,
@@ -28,6 +29,7 @@ import { batchTick } from './services/batch-processor.js'
 //  - estabilidade dos bindings em replay.
 
 const PEPPER = 'test-pepper-verifiability'
+const signing = createTestCredentialSigningKey()
 const POLICY_VERSION = '2026.13.1'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -52,6 +54,8 @@ const config: AppConfig = {
   REDIS_URL: testRedis.url,
   API_KEY_PEPPER: PEPPER,
   CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+  CREDENTIAL_SIGNING_KEY_ID: signing.keyId,
+  CREDENTIAL_SIGNING_PRIVATE_KEY: signing.privateKeyPkcs8Pem,
   PORT: 3000,
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
