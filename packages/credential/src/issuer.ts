@@ -102,12 +102,26 @@ export const issuerIdOf = (origin: string, tenantId: string): string =>
  * utilizável como fragmento (sem espaço, `#` ou `?`), senão o
  * `verificationMethod` não é uma URL válida.
  */
-const assertKeyId = (keyId: string): string => {
+export const assertKeyId = (keyId: string): string => {
   if (keyId.trim() === '' || /[\s#?]/.test(keyId)) {
     throw new IssuerIdentityError(`issuer keyId is not a URL fragment: ${JSON.stringify(keyId)}`)
   }
   return keyId
 }
+
+/**
+ * Mesma validação de `assertKeyId`, para a configuração da aplicação (a mensagem
+ * de erro do assert é preservada no relatório do zod). Rejeitar aqui evita que
+ * um `key_id` inválido só falhe na hora de montar o `verificationMethod`.
+ */
+export const KeyIdSchema = z.string().transform((value, ctx) => {
+  try {
+    return assertKeyId(value)
+  } catch (error) {
+    ctx.addIssue({ code: 'custom', message: error instanceof Error ? error.message : String(error) })
+    return z.NEVER
+  }
+})
 
 export const localIssuer = (origin: string, tenantId: string, keyId: string): IssuerIdentity => ({
   id: issuerIdOf(origin, tenantId),

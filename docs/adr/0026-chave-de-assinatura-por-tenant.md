@@ -74,12 +74,24 @@ CREDENTIAL_SIGNING_KEYS = [
 ```
 
 `makeSigningKeyResolver` (`apps/api`) lê esse JSON no boot: JSON inválido, PEM
-inválida ou chave não-Ed25519 **derrubam a API** (falha fechado). **Não existe
-chave global de reserva:** um tenant sem entrada (ou sem chave registrada no
-banco) não emite.
+inválida ou chave não-Ed25519 **derrubam a API** (falha fechado). O `tenant_id`
+é normalizado para minúsculas (o escopo é o digest do **texto**, não do `uuid`
+canônico do Postgres) e o `key_id` passa pela mesma validação de fragmento de URL
+usada por `localIssuer`; configuração inválida não sobe. **Não existe chave
+global de reserva:** um tenant sem entrada (ou sem chave registrada no banco) não
+emite.
 
 `pnpm db:provision-key` publica a chave pública derivada de cada entrada em
-`issuer_signing_key` (`onConflictDoUpdate` por `tenant_id`+`key_id`).
+`issuer_signing_key`, com duas invariantes:
+
+- **Nunca sobrescreve uma chave publicada.** Se o par (`tenant_id`, `key_id`) já
+  existe com a mesma chave pública, é idempotente; se a chave pública mudou, o
+  comando **falha** e exige um `key_id` novo — sobrescrever invalidaria as
+  credenciais antigas, que resolvem a pública por esse par.
+- **Preserva a chave ativa.** A primeira chave de um tenant só é ativada se ele
+  ainda não tiver nenhuma ativa (incluindo as inseridas na mesma execução);
+  chaves adicionais entram inativas — assim o índice parcial único não colide e
+  quem assina não muda sem um passo administrativo explícito.
 
 ### 3. Fronteira: `@comprova/credential` continua pura
 
@@ -165,3 +177,7 @@ da aplicação.
   (`SIGNING_KEY_MISMATCH`).
 - `apps/worker/.../deep-enrich.int.test.ts` — emissão direta com a chave do
   tenant continua verificável.
+- `apps/api/src/services/provision-signing-keys.int.test.ts` — provisionamento
+  repetível: primeira chave ativa, repetição idempotente, recusa de sobrescrita
+  (mesmo `key_id`, material novo) e chave adicional entrando inativa sem
+  colidir no índice parcial único nem trocar quem assina.

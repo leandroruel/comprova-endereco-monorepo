@@ -3,6 +3,7 @@ import {
   createTenant,
   createTestCredentialSigningKey,
   seedGoldenDataset,
+  signingKeysConfig,
   startTestDb,
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
@@ -48,9 +49,7 @@ const tenant = await createTenant(adminPool.db, { name: 'deep-tenant' })
 // em memória; só a chave pública é registrada em `issuer_signing_key`.
 const signing = createTestCredentialSigningKey('key-1')
 await createIssuerSigningKey(adminPool.db, tenant, signing)
-const signingKeys = makeSigningKeyResolver(
-  JSON.stringify([{ tenant_id: tenant, key_id: signing.keyId, private_key_pem: signing.privateKeyPkcs8Pem }]),
-)
+const signingKeys = makeSigningKeyResolver(signingKeysConfig([{ tenantId: tenant, key: signing }]))
 const issuer = localIssuer(ISSUER_ORIGIN, tenant, signing.keyId)
 const trusted = { id: verificationMethodOf(issuer), publicKey: signing.publicKey }
 

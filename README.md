@@ -106,7 +106,7 @@ pnpm lint         # eslint
 pnpm format       # prettier
 pnpm db:migrate   # aplica migrações SQL
 pnpm db:seed      # tenant dev + imprime a API key
-pnpm db:provision-key # publica as chaves de `CREDENTIAL_SIGNING_KEYS` em issuer_signing_key
+pnpm db:provision-key # publica as chaves de `CREDENTIAL_SIGNING_KEYS` (idempotente; nunca sobrescreve)
 pnpm db:fence     # pgfence: gate de segurança de migrações
 pnpm seed:golden  # dataset dourado (8 classes de veredito)
 

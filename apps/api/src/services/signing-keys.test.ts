@@ -30,6 +30,21 @@ describe('makeSigningKeyResolver', () => {
     expect(resolve(TENANT, 'key-1')).toBeNull()
   })
 
+  it('normaliza o tenant_id para minúsculas (o escopo é o digest do texto)', () => {
+    const mixed = 'AaAaAaAa-BbBb-4CcC-8DdD-EeEeEeEeEeEe'
+    const resolve = makeSigningKeyResolver(entry(mixed, 'key-1', ed25519Pem()))
+
+    expect(resolve(mixed.toLowerCase(), 'key-1')).not.toBeNull()
+  })
+
+  it('recusa key_id que não serve como fragmento de URL', () => {
+    for (const invalid of ['key 1', 'key#1', 'key?1', '   ']) {
+      expect(() => makeSigningKeyResolver(entry(TENANT, invalid, ed25519Pem()))).toThrow(
+        SigningKeyConfigError,
+      )
+    }
+  })
+
   it('recusa JSON inválido, entrada duplicada e chave não-Ed25519', () => {
     expect(() => makeSigningKeyResolver('nope')).toThrow(SigningKeyConfigError)
 

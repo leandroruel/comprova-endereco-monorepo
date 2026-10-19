@@ -1,5 +1,5 @@
 import type { KeyObject } from 'node:crypto'
-import { ed25519PrivateKeyFromPkcs8Pem } from '@comprova/credential'
+import { KeyIdSchema, ed25519PrivateKeyFromPkcs8Pem } from '@comprova/credential'
 import { z } from 'zod'
 
 /**
@@ -23,8 +23,14 @@ export class SigningKeyConfigError extends Error {
 }
 
 const SigningKeyEntrySchema = z.object({
-  tenant_id: z.uuid(),
-  key_id: z.string().min(1),
+  /**
+   * Normalizado para minúsculas: `issuerScopeOf` é um digest do **texto** do
+   * `tenant_id`, então `ABC…` e `abc…` gerariam escopos diferentes embora o
+   * Postgres trate o `uuid` como o mesmo. Sem isso, uma config em maiúsculas
+   * publicaria a chave num escopo e o app consultaria outro.
+   */
+  tenant_id: z.uuid().transform((value) => value.toLowerCase()),
+  key_id: KeyIdSchema,
   /** PKCS#8 PEM Ed25519 (o mesmo formato que `openssl genpkey -algorithm ED25519`). */
   private_key_pem: z.string().min(1),
 })
