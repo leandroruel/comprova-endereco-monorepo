@@ -53,13 +53,20 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   path/query/fragmento) e, enquanto não houver um domínio de produção
   confirmado, use uma origem reservada (`https://issuer.test`). O `tenant_id`
   interno **não** aparece na URL — o path do issuer leva um digest do tenant.
-- **`CREDENTIAL_SIGNING_KEY_ID`** e **`CREDENTIAL_SIGNING_PRIVATE_KEY`** assinam
-  a credencial (ADR-0025). O `keyId` é o fragmento publicado em
-  `proof.verificationMethod` (`<issuer.id>#<keyId>`); a privada é Ed25519 em
-  PKCS#8 PEM (`openssl genpkey -algorithm ED25519`). Só o material **público**
-  sai da API (`GET /issuers/:scope`, em `publicKeyMultibase`); a privada nunca é
-  logada, devolvida nem incluída em resposta, e configuração ausente ou inválida
-  derruba a API no boot.
+- **`CREDENTIAL_SIGNING_KEYS`** assina a credencial **por tenant** (ADR-0026).
+  É um JSON — lista de `{"tenant_id", "key_id", "private_key_pem"}` — lido no
+  boot: JSON inválido, PEM inválida ou chave não-Ed25519 **derrubam a API**
+  (falha fechado). Cada tenant assina com a sua própria chave; um tenant sem
+  entrada na configuração (ou sem chave registrada em `issuer_signing_key`)
+  **não** emite (`409 CREDENTIAL_NOT_ISSUABLE`, detalhe
+  `SIGNING_KEY_UNAVAILABLE`) — não existe chave global de reserva. O `key_id` é
+  o fragmento publicado em `proof.verificationMethod` (`<issuer.id>#<keyId>`) e
+  pode se repetir entre tenants (o namespace é o issuer). Só o material
+  **público** sai da API (`GET /issuers/:scope`, em `publicKeyMultibase`); a
+  privada nunca é persistida, logada nem devolvida. A chave pública publicada
+  tem de **corresponder** ao material configurado, senão a emissão falha com
+  `SIGNING_KEY_MISMATCH`. (Limitação operacional deste passo: sem KMS/HSM, o
+  material privado vive em configuração/segredo externo.)
 
 ## Dashboard
 
@@ -99,6 +106,7 @@ pnpm lint         # eslint
 pnpm format       # prettier
 pnpm db:migrate   # aplica migrações SQL
 pnpm db:seed      # tenant dev + imprime a API key
+pnpm db:provision-key # publica as chaves de `CREDENTIAL_SIGNING_KEYS` (idempotente; nunca sobrescreve)
 pnpm db:fence     # pgfence: gate de segurança de migrações
 pnpm seed:golden  # dataset dourado (8 classes de veredito)
 

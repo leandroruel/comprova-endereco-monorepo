@@ -1,4 +1,12 @@
-import { createTenant, seedGoldenDataset, startTestDb, TEST_APP_DB_PASSWORD } from '@comprova/testing'
+import {
+  createIssuerSigningKey,
+  createTenant,
+  createTestCredentialSigningKey,
+  seedGoldenDataset,
+  signingKeysConfig,
+  startTestDb,
+  TEST_APP_DB_PASSWORD,
+} from '@comprova/testing'
 import {
   createDbPool,
   eq,
@@ -12,13 +20,7 @@ import {
 } from '@comprova/db'
 import * as t from '@comprova/db'
 import { loadPolicy, policyHashOf, systemClock, type Clock, type PartnerGraphReader } from '@comprova/core'
-import {
-  generateEd25519KeyPair,
-  localIssuer,
-  makeEd25519Signer,
-  verificationMethodOf,
-  verifyCredential,
-} from '@comprova/credential'
+import { localIssuer, verificationMethodOf, verifyCredential } from '@comprova/credential'
 import { makePartnerGraph, makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
@@ -29,6 +31,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { deepEnrich } from './deep-enrich.service.js'
 import { runFastPath } from '../../../../api/src/services/fastpath.js'
 import { issueCredential } from '../../../../api/src/services/credential-issuer.js'
+import { makeSigningKeyResolver } from '../../../../api/src/services/signing-keys.js'
 
 /** Origem de teste (TLD reservado), como no resto da suíte. */
 const ISSUER_ORIGIN = 'https://issuer.test'
@@ -41,6 +44,14 @@ await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD 
 const adminPool = createDbPool(db.adminUrl)
 await seedGoldenDataset(adminPool.db)
 const tenant = await createTenant(adminPool.db, { name: 'deep-tenant' })
+
+// Chave de assinatura do tenant (FASE 14): o material privado vive no resolver
+// em memória; só a chave pública é registrada em `issuer_signing_key`.
+const signing = createTestCredentialSigningKey('key-1')
+await createIssuerSigningKey(adminPool.db, tenant, signing)
+const signingKeys = makeSigningKeyResolver(signingKeysConfig([{ tenantId: tenant, key: signing }]))
+const issuer = localIssuer(ISSUER_ORIGIN, tenant, signing.keyId)
+const trusted = { id: verificationMethodOf(issuer), publicKey: signing.publicKey }
 
 const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.11.1.yaml'), 'utf8')
 const policy = loadPolicy(policyYaml)
@@ -522,23 +533,16 @@ describe('deepEnrich (activity core)', () => {
       expect(after!.completedAt!.getTime()).toBeGreaterThan(after!.createdAt!.getTime())
 
       // A credencial daí derivada usa o instante de conclusão como `validFrom`.
-      const keyPair = generateEd25519KeyPair()
-      const issuer = localIssuer(ISSUER_ORIGIN, tenant, 'key-1')
       const credential = await issueCredential(adminPool.db, tenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        keyId: 'key-1',
-        signer: makeEd25519Signer(keyPair.privateKey),
+        signingKeys,
       })
 
       expect(credential.validFrom).toBe(T1.toISOString())
       expect(credential.validFrom).not.toBe(T0.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
       expect(credential.validUntil).toBe(after?.expiresAt?.toISOString())
-      expect(
-        verifyCredential(credential, {
-          trusted: { id: verificationMethodOf(issuer), publicKey: keyPair.publicKey },
-        }),
-      ).toEqual({ valid: true })
+      expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
     })
 
     it('replay do mesmo resultado terminal preserva o `completed_at` original', async () => {
@@ -568,20 +572,13 @@ describe('deepEnrich (activity core)', () => {
 
       // A credencial emitida depois do replay continua ancorada na conclusão
       // original — e continua verificável.
-      const keyPair = generateEd25519KeyPair()
-      const issuer = localIssuer(ISSUER_ORIGIN, tenant, 'key-1')
       const credential = await issueCredential(adminPool.db, tenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        keyId: 'key-1',
-        signer: makeEd25519Signer(keyPair.privateKey),
+        signingKeys,
       })
       expect(credential.validFrom).toBe(T1.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
-      expect(
-        verifyCredential(credential, {
-          trusted: { id: verificationMethodOf(issuer), publicKey: keyPair.publicKey },
-        }),
-      ).toEqual({ valid: true })
+      expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
     })
 
     it('reexecução com evidências novas é uma NOVA conclusão: grava novo instante', async () => {

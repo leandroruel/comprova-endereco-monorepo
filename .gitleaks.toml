@@ -1,15 +1,31 @@
-# A constante `SECRET_KEY_MULTIBASE` em `data-integrity.test.ts` é a chave
-# privada do VETOR DE TESTE NORMATIVO B.3 da W3C (eddsa-jcs-2022), publicada na
-# própria especificação:
-#   https://www.w3.org/TR/vc-di-eddsa/#b-3-representation-eddsa-jcs-2022
-# Não é um segredo: existe apenas para provar interoperabilidade byte a byte.
-# O detector genérico a sinaliza por causa do nome da constante.
+# Allowlist de falsos positivos do detector genérico.
+#
+# Atenção: no gitleaks as condições de um `[allowlist]` são **OR**. Um `paths`
+# sozinho libera o arquivo inteiro; por isso a entrada nova abaixo é só um regex
+# de linha (nada de `paths` para o teste do worker).
+#
+# Não desabilita a detecção de segredos no restante do repositório: os dois
+# regexes abaixo só casam texto exato de teste que não pode ser um segredo.
 
 [extend]
 useDefault = true
 
+# `SECRET_KEY_MULTIBASE` em `data-integrity.test.ts` é a chave privada do VETOR
+# DE TESTE NORMATIVO B.3 da W3C (eddsa-jcs-2022), publicada na própria
+# especificação:
+#   https://www.w3.org/TR/vc-di-eddsa/#b-3-representation-eddsa-jcs-2022
+# Não é um segredo: existe apenas para provar interoperabilidade byte a byte.
+#
+# O regex de `private_key_pem` cobre uma REFERÊNCIA a variável no teste do
+# worker (commit f8a421b), não um literal de chave: o detector genérico casa o
+# nome do campo com o identificador de alta entropia. O teste já passou a montar
+# o JSON pelo helper `signingKeysConfig`, então esse texto só existe no
+# histórico do PR e a entrada pode sair após o merge.
 [allowlist]
-description = "vetor de teste público da W3C (eddsa-jcs-2022)"
+description = "vetor de teste público da W3C (eddsa-jcs-2022) e referência a variável no teste do worker"
 paths = ['''packages/credential/src/data-integrity\.test\.ts$''']
 regexTarget = "line"
-regexes = ['''SECRET_KEY_MULTIBASE''']
+regexes = [
+  '''SECRET_KEY_MULTIBASE''',
+  '''private_key_pem:\s*signing\.privateKeyPkcs8Pem''',
+]

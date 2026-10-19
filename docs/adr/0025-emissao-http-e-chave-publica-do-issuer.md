@@ -55,6 +55,12 @@ scoring/checkers/policy/T0-T2/retenção.
 
 ### 2. Chave de assinatura: configuração explícita, falha no boot
 
+> **Superado pelo [ADR-0026](0026-chave-de-assinatura-por-tenant.md).** Esta
+> chave era **global** (uma só para todos os issuers). O ADR-0026 a substitui por
+> chave **por tenant** (`CREDENTIAL_SIGNING_KEYS`) e por um registro público em
+> `issuer_signing_key`; o princípio de "configuração explícita, falha no boot"
+> continua. O histórico abaixo fica como registro.
+
 ```
 CREDENTIAL_ISSUER_ORIGIN     = <origem HTTPS>      (já existia, ADR-0024)
 CREDENTIAL_SIGNING_KEY_ID    = <fragmento>          (novo)
@@ -101,6 +107,10 @@ CREDENTIAL_SIGNING_PRIVATE_KEY = <PKCS#8 PEM Ed25519> (novo)
 - **Nenhuma tabela `issuer`/`verification_method`:** o documento é derivado da
   configuração (chave + origem). O escopo é um digest unidirecional do tenant;
   não há como (nem necessidade de) reverter escopo → tenant.
+- **Atualizado pelo [ADR-0026](0026-chave-de-assinatura-por-tenant.md):** o
+  documento passa a ser lido de `issuer_signing_key` por `issuer_scope`, lista
+  **todas** as chaves daquele issuer (coexistência de rotação) e responde **404**
+  quando não há chave registrada para o escopo. O formato JSON não muda.
 
 ### 4. Resolver: dependência explícita com allowlist
 

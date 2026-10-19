@@ -542,6 +542,9 @@ importers:
       '@comprova/core':
         specifier: workspace:*
         version: link:../core
+      '@comprova/credential':
+        specifier: workspace:*
+        version: link:../credential
       '@comprova/db':
         specifier: workspace:*
         version: link:../db
