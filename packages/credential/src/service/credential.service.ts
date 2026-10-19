@@ -15,10 +15,12 @@ import {
 } from '../schema/credential.schema.js'
 import type { IssuerIdentity } from '../schema/issuer.schema.js'
 import { ASSERTION_METHOD } from '../schema/proof.schema.js'
+import { CREDENTIAL_STATUS_TYPE } from '../schema/status.schema.js'
 import { buildAssertion } from './assertion.service.js'
 import { verificationMethodOf } from './issuer.service.js'
 import { createDataIntegrityProof } from './proof.service.js'
 import type { Signer } from './signer.service.js'
+import { credentialIdOf, credentialStatusUrlOf, credentialUrlOf } from './status.service.js'
 
 /**
  * Mapping do modelo interno da Comprova (`AssertionPayload`) para o documento
@@ -35,6 +37,13 @@ import type { Signer } from './signer.service.js'
 export interface BuildCredentialDeps {
   readonly issuer: IssuerIdentity
   readonly signer: Signer
+  /**
+   * Identificador público já calculado pelo chamador. Quando omitido, é
+   * derivado deterministicamente de `issuer.id + validation.id` (ADR-0027).
+   * Passá-lo explicitamente garante que a linha de status criada pela API use
+   * EXATAMENTE o mesmo id que entrou no documento assinado.
+   */
+  readonly credentialId?: string
   /**
    * Relógio da emissão. `proof.created` é o momento REAL em que a prova
    * criptográfica é criada (Data Integrity 1.0 §2.1.1) — nunca um timestamp
@@ -104,12 +113,20 @@ const validFromOf = (timestamps: AssertionPayload['timestamps']): string => time
  * o VC é JSON-LD e um valor `null` não tem significado. A forma continua
  * determinística porque presença/ausência é função da assertion.
  */
-export const toVerifiableCredential = (assertion: AssertionPayload): VerifiableCredential => ({
+export const toVerifiableCredential = (
+  assertion: AssertionPayload,
+  credentialId: string,
+): VerifiableCredential => ({
   '@context': context(),
   type: [VERIFIABLE_CREDENTIAL_TYPE, COMPROVA_CREDENTIAL_TYPE],
+  id: credentialUrlOf(assertion.issuer.id, credentialId),
   issuer: assertion.issuer.id,
   validFrom: validFromOf(assertion.timestamps),
   validUntil: assertion.timestamps.expires_at,
+  credentialStatus: {
+    id: credentialStatusUrlOf(assertion.issuer.id, credentialId),
+    type: CREDENTIAL_STATUS_TYPE,
+  },
   credentialSubject: {
     id: assertion.subject.id,
     type: [COMPROVA_SUBJECT_TYPE],
@@ -175,7 +192,8 @@ export const buildCredential = async (
   source: AssertionSource,
   deps: BuildCredentialDeps,
 ): Promise<SecuredVerifiableCredential> => {
-  const credential = toVerifiableCredential(buildAssertion(source, deps.issuer.id))
+  const credentialId = deps.credentialId ?? credentialIdOf(deps.issuer.id, source.validation.id)
+  const credential = toVerifiableCredential(buildAssertion(source, deps.issuer.id), credentialId)
 
   const proof = await createDataIntegrityProof(credential, {
     verificationMethod: verificationMethodOf(deps.issuer),

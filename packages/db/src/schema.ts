@@ -144,6 +144,21 @@ export const issuerSigningKey = pgTable(
   ],
 )
 
+export const credentialStatus = pgTable(
+  'credential_status',
+  {
+    credentialId: text('credential_id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.tenantId),
+    issuerScope: text('issuer_scope').notNull(),
+    status: text('status').$type<'ACTIVE' | 'REVOKED'>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('credential_status_scope_idx').on(t.issuerScope)],
+)
+
 export const legalBasis = pgTable('legal_basis', {
   code: text('code').primaryKey(),
   description: text('description').notNull(),
@@ -697,6 +712,7 @@ export const schema = {
   tenant,
   apiKey,
   issuerSigningKey,
+  credentialStatus,
   legalBasis,
   refReceitaEstabelecimento,
   refReceitaEmpresa,
@@ -728,6 +744,7 @@ export const schema = {
 
 export type Tenant = typeof tenant.$inferSelect
 export type ApiKey = typeof apiKey.$inferSelect
+export type CredentialStatus = typeof credentialStatus.$inferSelect
 export type Subject = typeof subject.$inferSelect
 export type Validation = typeof validation.$inferSelect
 export type Signal = typeof signal.$inferSelect

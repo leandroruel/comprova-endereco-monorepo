@@ -7,6 +7,7 @@ import {
   issuerIdOf,
   issuerScopeOf,
   localIssuer,
+  makeHttpCredentialStatusResolver,
   makeHttpIssuerResolver,
   verificationMethodOf,
   verifyCredential,
@@ -577,6 +578,10 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     trustedIssuerOrigins: [ISSUER_ORIGIN],
     fetch: appFetch,
   })
+  const statusResolver = makeHttpCredentialStatusResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
 
   const postCredential = (validationId: string, apiKey = key.plaintext) =>
     app.inject({
@@ -599,6 +604,7 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     // O verificador NÃO acessa o banco: recebe só a credencial + o resolver.
     const result = await verifyCredentialFromIssuer(credential, resolver, {
       expectedIssuerId: issuer.id,
+      statusResolver,
     })
     expect(result).toEqual({ valid: true })
   })
@@ -691,7 +697,9 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     const json = credential.body
     expect(json).not.toContain(PRIVATE_KEY_MARKER)
     expect(json).not.toContain(signing.privateKeyPkcs8Pem)
-    expect(await verifyCredentialFromIssuer(JSON.parse(json), resolver)).toEqual({ valid: true })
+    expect(await verifyCredentialFromIssuer(JSON.parse(json), resolver, { statusResolver })).toEqual({
+      valid: true,
+    })
   })
 })
 
@@ -708,6 +716,11 @@ describe('chave de assinatura escopada por tenant', () => {
       headers: { 'content-type': String(res.headers['content-type'] ?? 'application/json') },
     })
   }) as typeof fetch
+
+  const statusResolver = makeHttpCredentialStatusResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
 
   const credentialOf = async (apiKey: string): Promise<SecuredVerifiableCredential> => {
     const validationId = await newValidationAs(apiKey)
@@ -766,10 +779,16 @@ describe('chave de assinatura escopada por tenant', () => {
     const credentialB = await credentialOf(otherKey.plaintext)
 
     expect(
-      await verifyCredentialFromIssuer(credentialA, resolver, { expectedIssuerId: credentialA.issuer }),
+      await verifyCredentialFromIssuer(credentialA, resolver, {
+        expectedIssuerId: credentialA.issuer,
+        statusResolver,
+      }),
     ).toEqual({ valid: true })
     expect(
-      await verifyCredentialFromIssuer(credentialB, resolver, { expectedIssuerId: credentialB.issuer }),
+      await verifyCredentialFromIssuer(credentialB, resolver, {
+        expectedIssuerId: credentialB.issuer,
+        statusResolver,
+      }),
     ).toEqual({ valid: true })
 
     // Trocar o verificationMethod para o issuer do outro (mantendo a assinatura)
@@ -873,7 +892,10 @@ describe('chave de assinatura escopada por tenant', () => {
 
     const credentialA = await credentialOf(key.plaintext)
     expect(
-      await verifyCredentialFromIssuer(credentialA, resolver, { expectedIssuerId: credentialA.issuer }),
+      await verifyCredentialFromIssuer(credentialA, resolver, {
+        expectedIssuerId: credentialA.issuer,
+        statusResolver,
+      }),
     ).toEqual({ valid: true })
     expect(requested).toEqual([`/.well-known/comprova-issuer/${issuerScopeOf(tenantId)}`])
 
@@ -881,7 +903,10 @@ describe('chave de assinatura escopada por tenant', () => {
     requested.length = 0
     const credentialB = await credentialOf(otherKey.plaintext)
     expect(
-      await verifyCredentialFromIssuer(credentialB, resolver, { expectedIssuerId: credentialB.issuer }),
+      await verifyCredentialFromIssuer(credentialB, resolver, {
+        expectedIssuerId: credentialB.issuer,
+        statusResolver,
+      }),
     ).toEqual({ valid: true })
     expect(requested).toEqual([`/.well-known/comprova-issuer/${issuerScopeOf(otherTenantId)}`])
   })
@@ -994,4 +1019,279 @@ describe('chave de assinatura escopada por tenant', () => {
       }),
     ).toEqual({ valid: false, reason: 'ISSUER_MISMATCH' })
   })
+})
+
+// ADR-0027 — status/revogação: o veredito assinado continua íntegro e o status
+// público é consultado à parte. A revogação é monotônica e escopada ao tenant.
+describe('status e revogação de credenciais', () => {
+  const appFetch = (async (input: string | URL | Request): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : input.toString())
+    const res = await app.inject({ method: 'GET', url: `${url.pathname}${url.search}` })
+    return new Response(res.body, {
+      status: res.statusCode,
+      headers: { 'content-type': String(res.headers['content-type'] ?? 'application/json') },
+    })
+  }) as typeof fetch
+
+  const issuerResolver = makeHttpIssuerResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
+  const statusResolver = makeHttpCredentialStatusResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
+
+  const issueViaHttp = async (apiKey = key.plaintext): Promise<SecuredVerifiableCredential> => {
+    const validationId = await newValidationAs(apiKey)
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as SecuredVerifiableCredential
+  }
+
+  const credentialIdOfCredential = (credential: SecuredVerifiableCredential): string => {
+    const id = credential.id
+    if (id === undefined) throw new Error('credential id missing')
+    return id.slice(id.lastIndexOf('/') + 1)
+  }
+
+  const statusUrlOf = (credential: SecuredVerifiableCredential): string => {
+    const status = credential.credentialStatus
+    if (status === undefined) throw new Error('credentialStatus missing')
+    return new URL(status.id).pathname
+  }
+
+  const getStatus = (credential: SecuredVerifiableCredential) =>
+    app.inject({ method: 'GET', url: statusUrlOf(credential) })
+
+  const revoke = (credential: SecuredVerifiableCredential, apiKey = key.plaintext) =>
+    app.inject({
+      method: 'POST',
+      url: `/v1/credentials/${credentialIdOfCredential(credential)}/revoke`,
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+
+  const verify = (credential: SecuredVerifiableCredential) =>
+    verifyCredentialFromIssuer(credential, issuerResolver, {
+      expectedIssuerId: credential.issuer,
+      statusResolver,
+    })
+
+  it('a emissão registra ACTIVE e publica só `{ status }` sem autenticação', async () => {
+    const credential = await issueViaHttp()
+    const credentialId = credentialIdOfCredential(credential)
+
+    const rows = await adminPool.db
+      .select()
+      .from(t.credentialStatus)
+      .where(eq(t.credentialStatus.credentialId, credentialId))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ tenantId, status: 'ACTIVE', revokedAt: null })
+
+    const res = await getStatus(credential)
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toBe(JSON.stringify({ status: 'ACTIVE' }))
+    for (const internal of [tenantId, credentialId, 'doc_hmac', 'validation_id', 'subject', 'evidence']) {
+      expect(res.body).not.toContain(internal)
+    }
+    expect(await verify(credential)).toEqual({ valid: true })
+  })
+
+  it('revoga de forma monotônica, idempotente e sem reativar na reemissão', async () => {
+    const validationId = await newValidation()
+    const credential = await issueViaHttpFromValidation(validationId)
+    expect(await verify(credential)).toEqual({ valid: true })
+
+    const first = await revoke(credential)
+    expect(first.statusCode).toBe(200)
+    expect(first.json()).toEqual({ status: 'REVOKED' })
+
+    const second = await revoke(credential)
+    expect(second.statusCode).toBe(200)
+    expect(second.json()).toEqual({ status: 'REVOKED' })
+
+    expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
+    // A credencial assinada continua íntegra; o status é que a recusa.
+    expect(await verify(credential)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+    expect(verifyCredential(credential, { trusted }).valid).toBe(true)
+
+    // Reemitir a MESMA validation reusa o credential_id e NÃO reativa.
+    const reissued = await issueViaHttpFromValidation(validationId)
+    expect(reissued.id).toBe(credential.id)
+    expect(reissued.credentialStatus).toEqual(credential.credentialStatus)
+    expect((await getStatus(reissued)).json()).toEqual({ status: 'REVOKED' })
+    expect(await verify(reissued)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+
+    // Não existe rota de reativação.
+    const reactivate = await app.inject({
+      method: 'POST',
+      url: `/v1/credentials/${credentialIdOfCredential(credential)}/reactivate`,
+      headers: { authorization: `Bearer ${key.plaintext}` },
+    })
+    expect(reactivate.statusCode).toBe(404)
+    expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
+  })
+
+  it('isola tenants: B não revoga a credencial de A nem reativa a sua', async () => {
+    const credentialA = await issueViaHttp()
+    const credentialB = await issueViaHttp(otherKey.plaintext)
+    expect(credentialA.id).not.toBe(credentialB.id)
+    expect(credentialA.credentialStatus!.id).not.toBe(credentialB.credentialStatus!.id)
+
+    expect((await revoke(credentialB, otherKey.plaintext)).json()).toEqual({ status: 'REVOKED' })
+    expect((await getStatus(credentialA)).json()).toEqual({ status: 'ACTIVE' })
+
+    // A tentativa de B sobre A é indistinguível de inexistente.
+    const cross = await revoke(credentialA, otherKey.plaintext)
+    expect(cross.statusCode).toBe(404)
+    expect(cross.json().code).toBe('NOT_FOUND')
+    expect((await getStatus(credentialA)).json()).toEqual({ status: 'ACTIVE' })
+    expect(await verify(credentialA)).toEqual({ valid: true })
+
+    // E A também não revoga B.
+    expect((await revoke(credentialB)).statusCode).toBe(404)
+  })
+
+  it('credencial desconhecida: status 404 e revogação 404, sem vazar existência', async () => {
+    const missingId = 'z'.repeat(43)
+    const status = await app.inject({
+      method: 'GET',
+      url: `/issuers/${issuerScopeOf(tenantId)}/credentials/${missingId}/status`,
+    })
+    expect(status.statusCode).toBe(404)
+
+    const revokeMissing = await app.inject({
+      method: 'POST',
+      url: `/v1/credentials/${missingId}/revoke`,
+      headers: { authorization: `Bearer ${key.plaintext}` },
+    })
+    expect(revokeMissing.statusCode).toBe(404)
+    expect(revokeMissing.json().code).toBe('NOT_FOUND')
+  })
+
+  it('exige autenticação para revogar', async () => {
+    const credential = await issueViaHttp()
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/credentials/${credentialIdOfCredential(credential)}/revoke`,
+    })
+    expect(res.statusCode).toBe(401)
+    expect((await getStatus(credential)).json()).toEqual({ status: 'ACTIVE' })
+  })
+
+  it('o status sobrevive à retenção do material de evidência', async () => {
+    const validationId = await newValidation()
+    const claimId = await claimIdOf(validationId)
+    const credential = await issueViaHttpFromValidation(validationId)
+    expect((await revoke(credential)).statusCode).toBe(200)
+
+    const evidenceIds = await adminPool.db
+      .select({ evidenceId: t.claimEvidence.evidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, claimId))
+    await adminPool.db
+      .update(t.claimEvidence)
+      .set({ evidenceId: null })
+      .where(eq(t.claimEvidence.claimId, claimId))
+    for (const row of evidenceIds) {
+      if (row.evidenceId !== null) {
+        await adminPool.db.delete(t.evidence).where(eq(t.evidence.evidenceId, row.evidenceId))
+      }
+    }
+
+    expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
+    expect(await verify(credential)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+  })
+
+  it('o banco recusa reativar uma linha REVOKED (defesa em profundidade)', async () => {
+    const credential = await issueViaHttp()
+    const credentialId = credentialIdOfCredential(credential)
+    expect((await revoke(credential)).statusCode).toBe(200)
+
+    // `ACTIVE` + `revoked_at = NULL` é consistente pelo CHECK; a única barreira
+    // que recusa a transição é o trigger de monotonicidade.
+    await expect(
+      adminPool.db
+        .update(t.credentialStatus)
+        .set({ status: 'ACTIVE', revokedAt: null })
+        .where(eq(t.credentialStatus.credentialId, credentialId)),
+    ).rejects.toThrow()
+    expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
+  })
+
+  it('o app não pode apagar o status (sem DELETE; a revogação é monotônica)', async () => {
+    const credential = await issueViaHttp()
+    const credentialId = credentialIdOfCredential(credential)
+
+    await expect(
+      appPool.db.delete(t.credentialStatus).where(eq(t.credentialStatus.credentialId, credentialId)),
+    ).rejects.toThrow()
+
+    const rows = await adminPool.db
+      .select()
+      .from(t.credentialStatus)
+      .where(eq(t.credentialStatus.credentialId, credentialId))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.status).toBe('ACTIVE')
+  })
+
+  it('revogações concorrentes convergem para REVOKED sem erro', async () => {
+    const credential = await issueViaHttp()
+    const responses = await Promise.all([revoke(credential), revoke(credential), revoke(credential)])
+    for (const res of responses) {
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ status: 'REVOKED' })
+    }
+    expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
+    expect(await verify(credential)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+  })
+
+  it('não emite credencial sem registrar ACTIVE (falha fechada)', async () => {
+    // A emissão só devolve depois do INSERT; se o identificador calculado não
+    // casar com a linha, o verificador não acharia o status. Aqui provamos o
+    // contrato mínimo: toda credencial emitida tem exatamente uma linha.
+    const credential = await issueViaHttp()
+    const credentialId = credentialIdOfCredential(credential)
+    const rows = await adminPool.db
+      .select()
+      .from(t.credentialStatus)
+      .where(eq(t.credentialStatus.credentialId, credentialId))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.status).toBe('ACTIVE')
+  })
+
+  it('deriva o id do `validation_id` canônico do banco (caixa alta não duplica o status)', async () => {
+    const validationId = await newValidation()
+    const canonical = await issueViaHttpFromValidation(validationId)
+
+    const upperRes = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId.toUpperCase()}/credential`,
+      headers: { authorization: `Bearer ${key.plaintext}` },
+    })
+    expect(upperRes.statusCode).toBe(200)
+    const upper = upperRes.json() as SecuredVerifiableCredential
+    expect(upper.id).toBe(canonical.id)
+    expect(upper.credentialStatus).toEqual(canonical.credentialStatus)
+
+    const rows = await adminPool.db
+      .select()
+      .from(t.credentialStatus)
+      .where(eq(t.credentialStatus.credentialId, credentialIdOfCredential(canonical)))
+    expect(rows).toHaveLength(1)
+  })
+
+  async function issueViaHttpFromValidation(validationId: string): Promise<SecuredVerifiableCredential> {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${key.plaintext}` },
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as SecuredVerifiableCredential
+  }
 })

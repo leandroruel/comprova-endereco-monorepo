@@ -3,13 +3,16 @@ import {
   SecuredVerifiableCredentialSchema,
   VC_CONTEXT_URL,
   VERIFIABLE_CREDENTIAL_TYPE,
+  type SecuredVerifiableCredential,
 } from '../schema/credential.schema.js'
 import { IssuerKeyDocumentSchema } from '../schema/issuer.schema.js'
 import { ASSERTION_METHOD, type DataIntegrityFailure } from '../schema/proof.schema.js'
+import { CREDENTIALS_PATH, CREDENTIAL_STATUS_PATH } from '../schema/status.schema.js'
 import { verifyDataIntegrityProof } from './proof.service.js'
 import { evidenceSetHashOfCredential } from './assertion.service.js'
 import { observationOfEvidence } from './credential.service.js'
 import { decodeEd25519PublicKeyMultibase, parseIssuerOrigin, wellKnownIssuerUrlOf } from './issuer.service.js'
+import { CREDENTIAL_ID_PATTERN, type CredentialStatusResolver } from './status.service.js'
 
 /**
  * Verificação independente da credencial (FASE 11/13).
@@ -81,6 +84,29 @@ const timestampOf = (value: string): number | null => {
 }
 
 /**
+ * O `id` da credencial é `<issuer>/credentials/<credentialId>`; o status é
+ * `<id>/status`. A checagem é estrutural (não busca nada): ela impede que uma
+ * credencial assinada aponte o status para outro issuer/tenant. Um documento
+ * legado sem `id`/`credentialStatus` continua verificável criptograficamente;
+ * quem exige status é `verifyCredentialFromIssuer` (fail closed).
+ */
+const credentialIdFromUrl = (issuer: string, credentialUrl: string): string | null => {
+  const prefix = `${issuer}/${CREDENTIALS_PATH}/`
+  if (!credentialUrl.startsWith(prefix)) return null
+  const credentialId = credentialUrl.slice(prefix.length)
+  return CREDENTIAL_ID_PATTERN.test(credentialId) ? credentialId : null
+}
+
+const isCredentialStatusBindingValid = (secured: SecuredVerifiableCredential): boolean => {
+  if (secured.id !== undefined && credentialIdFromUrl(secured.issuer, secured.id) === null) {
+    return false
+  }
+  if (secured.credentialStatus === undefined) return true
+  if (secured.id === undefined) return false
+  return secured.credentialStatus.id === `${secured.id}/${CREDENTIAL_STATUS_PATH}`
+}
+
+/**
  * Verificador independente (FASE 11). Recebe apenas a credencial (JSON já
  * parseado) e o método de verificação confiável. NÃO acessa PostgreSQL, Redis,
  * Temporal, S3 nem a API: a integridade e a assinatura são verificadas só com o
@@ -98,13 +124,17 @@ const timestampOf = (value: string): number | null => {
  *     credencial — nunca do material físico);
  *  7. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
  *     recebido, sem o `proof`), com a chave pública confiável, exigindo
- *     `proofPurpose: assertionMethod`.
+ *     `proofPurpose: assertionMethod`;
+ *  8. o binding estrutural do status: `id` pertence ao issuer e
+ *     `credentialStatus.id` é exatamente `<id>/status` (ADR-0027).
  *
- * Escopo: este verificador cobre integridade criptográfica e o vínculo entre a
- * chave confiável e a identidade declarada. Ele NÃO decide validade temporal da
- * credencial (expirada é política do consumidor), NEM status/revogação, NEM se
- * o issuer é uma entidade legítima — essas são responsabilidades distintas, e
- * misturá-las é o que a API de `trusted` evita (ADR-0024 §6).
+ * Escopo: este verificador cobre integridade criptográfica, o vínculo entre a
+ * chave confiável e a identidade declarada e o binding do ponteiro de status.
+ * Ele NÃO resolve o status (`ACTIVE`/`REVOKED`) — isso exige rede e é feito por
+ * `verifyCredentialFromIssuer` com um `CredentialStatusResolver`. Ele também
+ * NÃO decide validade temporal da credencial (expirada é política do consumidor)
+ * nem se o issuer é uma entidade legítima — essas são responsabilidades
+ * distintas, e misturá-las é o que a API de `trusted` evita (ADR-0024 §6).
  */
 export const verifyCredential = (
   credential: unknown,
@@ -167,6 +197,14 @@ export const verifyCredential = (
   })
   if (!proof.valid) return { valid: false, reason: proofFailure(proof.reason) }
 
+  // A prova é verificada ANTES do binding: adulterar `id`/`credentialStatus.id`
+  // depois da assinatura falha como INVALID_SIGNATURE (o material está coberto
+  // pela prova). Um documento assinado assim, mas estruturalmente incoerente,
+  // falha como MALFORMED_CREDENTIAL — nunca é aceito.
+  if (!isCredentialStatusBindingValid(secured)) {
+    return { valid: false, reason: 'MALFORMED_CREDENTIAL' }
+  }
+
   return { valid: true }
 }
 
@@ -191,9 +229,12 @@ export class VerificationMethodResolutionError extends Error {
 
 /**
  * Falha de verificação com resolução: as mesmas razões de `verifyCredential`
- * mais `VERIFICATION_METHOD_UNRESOLVED` (o método não pôde ser resolvido).
+ * mais `VERIFICATION_METHOD_UNRESOLVED` (o método não pôde ser resolvido),
+ * `STATUS_REVOKED` (o status público é REVOKED) e `STATUS_UNAVAILABLE`
+ * (status ausente, desconhecido, HTTP/rede com erro ou resolver não fornecido).
  */
-export type IssuerVerificationFailure = CredentialVerificationFailure | 'VERIFICATION_METHOD_UNRESOLVED'
+export type IssuerVerificationFailure =
+  CredentialVerificationFailure | 'VERIFICATION_METHOD_UNRESOLVED' | 'STATUS_REVOKED' | 'STATUS_UNAVAILABLE'
 
 export type IssuerVerificationResult =
   { readonly valid: true } | { readonly valid: false; readonly reason: IssuerVerificationFailure }
@@ -201,6 +242,14 @@ export type IssuerVerificationResult =
 export interface VerifyFromIssuerOptions {
   /** Issuer esperado pelo consumidor. Quando informado, precisa ser o `issuer` da credencial. */
   readonly expectedIssuerId?: string
+  /**
+   * Resolvedor do status público. A verificação é FAIL CLOSED: sem este
+   * resolver — ou se ele lançar/retornar algo que não seja ACTIVE/REVOKED —,
+   * uma credencial com `credentialStatus` é recusada como
+   * `STATUS_UNAVAILABLE`. O status é resolvido só DEPOIS da assinatura e do
+   * binding estrutural, então uma credencial adulterada nunca faz uma busca.
+   */
+  readonly statusResolver?: CredentialStatusResolver
 }
 
 const issuerAndMethodOf = (
@@ -217,11 +266,17 @@ const issuerAndMethodOf = (
   return { issuer, verificationMethod }
 }
 
+/** URL de status declarada no documento já validado (ou `null` se ausente). */
+const credentialStatusUrlOfCredential = (credential: unknown): string | null => {
+  const parsed = SecuredVerifiableCredentialSchema.safeParse(credential)
+  return parsed.success ? (parsed.data.credentialStatus?.id ?? null) : null
+}
+
 /**
- * Verificação independente com resolução de chave: valida a forma mínima da
- * credencial, amarra o `verificationMethod` ao `issuer` declarado, resolve o
- * material público pelo resolver injetado e delega a verificação criptográfica
- * a `verifyCredential`.
+ * Verificação independente com resolução de chave e de status: valida a forma
+ * mínima da credencial, amarra o `verificationMethod` ao `issuer` declarado,
+ * resolve o material público pelo resolver injetado, delega a verificação
+ * criptográfica a `verifyCredential` e, por fim, resolve o status público.
  *
  * Segurança do resolver (§7): a chave resolvida só vale para o método EXATO que
  * a credencial declara (`resolved.id === verificationMethod`) e esse método tem
@@ -229,6 +284,12 @@ const issuerAndMethodOf = (
  * injetada — e `makeHttpIssuerResolver` acrescenta a allowlist de origens —,
  * então uma credencial não consegue escolher uma chave arbitrária controlada por
  * um atacante.
+ *
+ * Status (ADR-0027): a resolução acontece só DEPOIS de a assinatura e o binding
+ * `credentialStatus.id == <id>/status` serem validados. `ACTIVE` → válida;
+ * `REVOKED` → `STATUS_REVOKED`; status ausente, resolver ausente, erro HTTP/rede
+ * ou valor desconhecido → `STATUS_UNAVAILABLE` (fail closed). O valor do status
+ * nunca é inferido como ACTIVE.
  */
 export const verifyCredentialFromIssuer = async (
   credential: unknown,
@@ -255,10 +316,28 @@ export const verifyCredentialFromIssuer = async (
     return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
   }
 
-  return verifyCredential(credential, {
+  const verified = verifyCredential(credential, {
     trusted: { id: resolved.id, publicKey: resolved.publicKey },
     expectedIssuerId: issuer,
   })
+  if (!verified.valid) return verified
+
+  // Fail closed: a credencial emitida pela API sempre carrega `credentialStatus`,
+  // e o consumidor precisa fornecer um resolver. Ausência/erro nunca vira ACTIVE.
+  const statusUrl = credentialStatusUrlOfCredential(credential)
+  if (statusUrl === null || options.statusResolver === undefined) {
+    return { valid: false, reason: 'STATUS_UNAVAILABLE' }
+  }
+
+  let status: string
+  try {
+    status = await options.statusResolver(statusUrl)
+  } catch {
+    return { valid: false, reason: 'STATUS_UNAVAILABLE' }
+  }
+  if (status === 'REVOKED') return { valid: false, reason: 'STATUS_REVOKED' }
+  if (status === 'ACTIVE') return { valid: true }
+  return { valid: false, reason: 'STATUS_UNAVAILABLE' }
 }
 
 export interface HttpIssuerResolverOptions {

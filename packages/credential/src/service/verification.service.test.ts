@@ -18,6 +18,11 @@ import {
   verifyCredentialFromIssuer,
   type VerificationMethodResolver,
 } from './verification.service.js'
+import {
+  credentialStatusUrlOf,
+  makeHttpCredentialStatusResolver,
+  type CredentialStatusResolver,
+} from './status.service.js'
 import { generateEd25519KeyPair, makeEd25519Signer } from './signer.service.js'
 
 const ISSUER_ORIGIN = 'https://issuer.test'
@@ -92,6 +97,9 @@ const staticResolver =
     return { id: method.id, publicKey: decodeEd25519PublicKeyMultibase(method.publicKeyMultibase) }
   }
 
+/** Resolver de status ACTIVE, sem rede. */
+const activeStatus = async (): Promise<'ACTIVE'> => 'ACTIVE'
+
 const document = issuerKeyDocumentOf(issuer.id, [{ keyId: issuer.keyId, publicKey: keyPair.publicKey }])
 
 describe('publicKeyMultibase', () => {
@@ -127,6 +135,7 @@ describe('verifyCredentialFromIssuer', () => {
     expect(
       await verifyCredentialFromIssuer(credential, staticResolver(document), {
         expectedIssuerId: issuer.id,
+        statusResolver: activeStatus,
       }),
     ).toEqual({ valid: true })
   })
@@ -194,6 +203,183 @@ describe('verifyCredentialFromIssuer', () => {
   })
 })
 
+describe('verifyCredentialFromIssuer + status', () => {
+  it('ACTIVE valida a credencial revogável', async () => {
+    expect(
+      await verifyCredentialFromIssuer(await emit(), staticResolver(document), {
+        statusResolver: activeStatus,
+      }),
+    ).toEqual({ valid: true })
+  })
+
+  it('REVOKED recusa com STATUS_REVOKED (sem misturar com validade temporal)', async () => {
+    const credential = await emit()
+    // O veredito e a janela temporal não são o que muda aqui: só o status
+    // público. O resultado é de status, não de expiração.
+    expect(credential.validFrom).toBe('2026-01-01T00:00:01.000Z')
+    expect(credential.validUntil).toBe('2026-01-31T00:00:00.000Z')
+
+    expect(
+      await verifyCredentialFromIssuer(credential, staticResolver(document), {
+        statusResolver: async () => 'REVOKED',
+      }),
+    ).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+  })
+
+  it('falha fechado quando não há resolver de status', async () => {
+    expect(await verifyCredentialFromIssuer(await emit(), staticResolver(document))).toEqual({
+      valid: false,
+      reason: 'STATUS_UNAVAILABLE',
+    })
+  })
+
+  it('falha fechado quando o resolver lança ou devolve um valor desconhecido', async () => {
+    const credential = await emit()
+    expect(
+      await verifyCredentialFromIssuer(credential, staticResolver(document), {
+        statusResolver: async () => {
+          throw new Error('network down')
+        },
+      }),
+    ).toEqual({ valid: false, reason: 'STATUS_UNAVAILABLE' })
+
+    expect(
+      await verifyCredentialFromIssuer(credential, staticResolver(document), {
+        statusResolver: (async () => 'UNKNOWN') as unknown as CredentialStatusResolver,
+      }),
+    ).toEqual({ valid: false, reason: 'STATUS_UNAVAILABLE' })
+  })
+
+  it('resolve o status só DEPOIS de validar a assinatura e o binding', async () => {
+    const credential = await emit()
+    credential['comprova:result']['comprova:verdict'] = 'NOT_FOUND'
+
+    let calls = 0
+    const result = await verifyCredentialFromIssuer(credential, staticResolver(document), {
+      statusResolver: async () => {
+        calls += 1
+        return 'ACTIVE'
+      },
+    })
+    expect(result).toEqual({ valid: false, reason: 'INVALID_SIGNATURE' })
+    expect(calls).toBe(0)
+  })
+
+  it('não aceita uma URL de status trocada sem refazer a assinatura', async () => {
+    const credential = await emit()
+    credential.credentialStatus!.id = credentialStatusUrlOf(issuer.id, 'f'.repeat(43))
+
+    let calls = 0
+    expect(
+      await verifyCredentialFromIssuer(credential, staticResolver(document), {
+        statusResolver: async () => {
+          calls += 1
+          return 'ACTIVE'
+        },
+      }),
+    ).toEqual({ valid: false, reason: 'INVALID_SIGNATURE' })
+    expect(calls).toBe(0)
+  })
+
+  it('depende só de material público: método resolvido + URL assinada de status', async () => {
+    const urls: string[] = []
+    expect(
+      await verifyCredentialFromIssuer(await emit(), staticResolver(document), {
+        statusResolver: async (url) => {
+          urls.push(url)
+          return 'ACTIVE'
+        },
+      }),
+    ).toEqual({ valid: true })
+    expect(urls).toHaveLength(1)
+    expect(urls[0]).toMatch(
+      /^https:\/\/issuer\.test\/issuers\/[A-Za-z0-9_-]{43}\/credentials\/[A-Za-z0-9_-]{43}\/status$/,
+    )
+  })
+})
+
+describe('makeHttpCredentialStatusResolver', () => {
+  const response = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+  const credentialId = 'a'.repeat(43)
+  const statusUrl = credentialStatusUrlOf(issuer.id, credentialId)
+
+  const resolverWith = (
+    handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+    trustedIssuerOrigins: readonly string[] = [ISSUER_ORIGIN],
+  ) =>
+    makeHttpCredentialStatusResolver({
+      trustedIssuerOrigins,
+      fetch: (async (input: string | URL | Request, init?: RequestInit) =>
+        handler(input instanceof Request ? input.url : input.toString(), init)) as typeof fetch,
+    })
+
+  it('busca exatamente a URL assinada e aceita ACTIVE e REVOKED', async () => {
+    for (const status of ['ACTIVE', 'REVOKED'] as const) {
+      let seen: string | undefined
+      const resolver = resolverWith((url) => {
+        seen = url
+        return response({ status })
+      })
+      expect(await resolver(statusUrl)).toBe(status)
+      expect(seen).toBe(statusUrl)
+    }
+  })
+
+  it('recusa http, origem fora da allowlist, credenciais, query/fragmento e path fora do contrato', async () => {
+    let called = false
+    const resolver = resolverWith(() => {
+      called = true
+      return response({ status: 'ACTIVE' })
+    })
+
+    await expect(resolver(statusUrl.replace('https:', 'http:'))).rejects.toThrow(/https/)
+    await expect(
+      resolver(credentialStatusUrlOf(`${'https://evil.test'}/issuers/${'b'.repeat(43)}`, credentialId)),
+    ).rejects.toThrow(/not trusted/)
+    await expect(resolver(`https://user:pass@issuer.test${new URL(statusUrl).pathname}`)).rejects.toThrow(
+      /credentials/,
+    )
+    await expect(resolver(`${statusUrl}?x=1`)).rejects.toThrow(/query or fragment/)
+    await expect(resolver(`${statusUrl}#x`)).rejects.toThrow(/query or fragment/)
+    await expect(
+      resolver(`${ISSUER_ORIGIN}/issuers/${'b'.repeat(43)}/${credentialId}/status`),
+    ).rejects.toThrow(/not an issuer status endpoint/)
+    await expect(
+      resolver(statusUrl.replace(`/${credentialId}/status`, `/${'a'.repeat(42)}/status`)),
+    ).rejects.toThrow(/not an issuer status endpoint/)
+    await expect(resolver(statusUrl.replace('/status', ''))).rejects.toThrow(/not an issuer status endpoint/)
+
+    expect(called).toBe(false)
+  })
+
+  it('recusa HTTP não-ok, JSON inválido, status desconhecido e campos extras', async () => {
+    await expect(resolverWith(() => response({}, 500))(statusUrl)).rejects.toThrow(/status 500/)
+    await expect(resolverWith(() => response({ status: 'UNKNOWN' }))(statusUrl)).rejects.toThrow(/malformed/)
+    await expect(resolverWith(() => response({ status: 'ACTIVE', extra: true }))(statusUrl)).rejects.toThrow(
+      /malformed/,
+    )
+    await expect(resolverWith(() => new Response('not json', { status: 200 }))(statusUrl)).rejects.toThrow(
+      /malformed/,
+    )
+  })
+
+  it('recusa resposta alcançada por redirect e instrui o fetch a não seguir 3xx', async () => {
+    const redirected = (body: unknown): Response =>
+      ({ ok: true, status: 200, redirected: true, json: async () => body }) as Response
+    await expect(resolverWith(() => redirected({ status: 'ACTIVE' }))(statusUrl)).rejects.toThrow(/redirect/)
+
+    let init: RequestInit | undefined
+    const resolver = resolverWith((_url, options) => {
+      init = options
+      return response({ status: 'ACTIVE' })
+    })
+    await resolver(statusUrl)
+    expect(init).toEqual({ redirect: 'error' })
+  })
+})
+
 describe('makeHttpIssuerResolver', () => {
   const response = (body: unknown, status = 200): Response =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -215,7 +401,9 @@ describe('makeHttpIssuerResolver', () => {
       return response(document)
     })
     const credential = await emit()
-    expect(await verifyCredentialFromIssuer(credential, resolver)).toEqual({ valid: true })
+    expect(await verifyCredentialFromIssuer(credential, resolver, { statusResolver: activeStatus })).toEqual({
+      valid: true,
+    })
   })
 
   it('descobre o documento pelo well-known e mantém o id do issuer', async () => {
@@ -228,7 +416,9 @@ describe('makeHttpIssuerResolver', () => {
       { discover: true },
     )
     const credential = await emit()
-    expect(await verifyCredentialFromIssuer(credential, resolver)).toEqual({ valid: true })
+    expect(await verifyCredentialFromIssuer(credential, resolver, { statusResolver: activeStatus })).toEqual({
+      valid: true,
+    })
   })
 
   it('recusa descoberta cujo documento id é a URL bem-conhecida (não o issuer)', async () => {

@@ -2,10 +2,12 @@ import {
   ISSUERS_PATH,
   ed25519PublicKeyFromBytes,
   issuerKeyDocumentOf,
+  type CredentialStatusDocument,
   type IssuerKeyDocument,
 } from '@comprova/credential'
 import { asc, eq, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
+import { loadPublicCredentialStatus } from '../../services/credential-status.js'
 
 export interface IssuerControllerDeps {
   readonly db: Db
@@ -37,5 +39,20 @@ export const makeIssuerController = (deps: IssuerControllerDeps) => ({
       `${deps.issuerOrigin}/${ISSUERS_PATH}/${scope}`,
       rows.map((row) => ({ keyId: row.keyId, publicKey: ed25519PublicKeyFromBytes(row.publicKey) })),
     )
+  },
+
+  /**
+   * Status público de uma credencial do issuer: `ACTIVE` ou `REVOKED`. A
+   * consulta é por (escopo do issuer, credential_id) e seleciona SOMENTE o
+   * status — nenhum tenant_id, subject, documento, evidence ou chave. `null` =
+   * credencial desconhecida para esse issuer (o chamador responde 404).
+   *
+   * A rota é pública por construção (não usa `app_tenant_id()`); a policy
+   * `public_status_read` só permite SELECT, e a escrita continua escopada por
+   * RLS no endpoint autenticado de revogação.
+   */
+  credentialStatus: async (scope: string, credentialId: string): Promise<CredentialStatusDocument | null> => {
+    const status = await loadPublicCredentialStatus(deps.db, scope, credentialId)
+    return status === null ? null : { status }
   },
 })

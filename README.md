@@ -68,6 +68,14 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   tem de **corresponder** ao material configurado, senão a emissão falha com
   `SIGNING_KEY_MISMATCH`. (Limitação operacional deste passo: sem KMS/HSM, o
   material privado vive em configuração/segredo externo.)
+- **Status/revogação** (ADR-0027): a credencial carrega `id` e
+  `credentialStatus.id` assinados, mas o valor (`ACTIVE`/`REVOKED`) fica em uma
+  linha por `credential_id` (tabela `credential_status`, isolada por RLS). O
+  `POST /v1/credentials/:credentialId/revoke` é autenticado e monotônico; o
+  `GET /issuers/:scope/credentials/:credentialId/status` é público e devolve só
+  `{ "status": "ACTIVE" | "REVOKED" }`. O verificador independente precisa de um
+  `statusResolver`; sem status resolvido ele falha fechado
+  (`STATUS_UNAVAILABLE`), e `REVOKED` resulta em `STATUS_REVOKED`.
 
 ## Dashboard
 
@@ -79,23 +87,25 @@ Abre `http://localhost:5173`:
 
 ## Endpoints da API
 
-| Método          | Path                                      | Descrição                                       |
-| --------------- | ----------------------------------------- | ----------------------------------------------- |
-| POST            | `/v1/validations`                         | Valida um CNPJ/CPF (fast/auto/deep)             |
-| GET             | `/v1/validations/:id`                     | Consulta resultado com ETag                     |
-| POST            | `/v1/validations/:id/credential`          | Emite a credencial verificável (JSON)           |
-| POST            | `/v1/validations/:id/contest`             | Contestação (art. 20 LGPD)                      |
-| GET             | `/v1/stats`                               | Stats por usuário (total, únicos, por veredito) |
-| POST            | `/v1/batches`                             | Cria lote (background)                          |
-| GET             | `/v1/batches`                             | Lista lotes do usuário                          |
-| GET             | `/v1/batches/:id`                         | Detalhes do lote                                |
-| GET             | `/v1/batches/:id/export?format=csv\|json` | Download                                        |
-| POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                       |
-| GET/DELETE      | `/v1/subjects/:id`                        | Relatório de acesso / eliminação LGPD           |
-| GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey) |
-| GET             | `/.well-known/comprova-issuer/:scope`     | Descoberta do documento público do issuer       |
-| GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                             |
-| GET             | `/openapi.json`                           | OpenAPI 3.1                                     |
+| Método          | Path                                      | Descrição                                         |
+| --------------- | ----------------------------------------- | ------------------------------------------------- |
+| POST            | `/v1/validations`                         | Valida um CNPJ/CPF (fast/auto/deep)               |
+| GET             | `/v1/validations/:id`                     | Consulta resultado com ETag                       |
+| POST            | `/v1/validations/:id/credential`          | Emite a credencial verificável (JSON)             |
+| POST            | `/v1/credentials/:credentialId/revoke`    | Revoga a credencial (idempotente, monotônico)     |
+| POST            | `/v1/validations/:id/contest`             | Contestação (art. 20 LGPD)                        |
+| GET             | `/v1/stats`                               | Stats por usuário (total, únicos, por veredito)   |
+| POST            | `/v1/batches`                             | Cria lote (background)                            |
+| GET             | `/v1/batches`                             | Lista lotes do usuário                            |
+| GET             | `/v1/batches/:id`                         | Detalhes do lote                                  |
+| GET             | `/v1/batches/:id/export?format=csv\|json` | Download                                          |
+| POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                         |
+| GET/DELETE      | `/v1/subjects/:id`                        | Relatório de acesso / eliminação LGPD             |
+| GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey)   |
+| GET             | `/issuers/:scope/credentials/:id/status`  | Status público da credencial (`ACTIVE`/`REVOKED`) |
+| GET             | `/.well-known/comprova-issuer/:scope`     | Descoberta do documento público do issuer         |
+| GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                               |
+| GET             | `/openapi.json`                           | OpenAPI 3.1                                       |
 
 ## Comandos
 

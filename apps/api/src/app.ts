@@ -34,6 +34,7 @@ import { makeRedisCache, makeCachedReaders, makeApiKeyHasher } from '@comprova/d
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
 import { registerBatchRoutes } from './modules/batches/batches.routes.js'
+import { registerCredentialRoutes } from './modules/credentials/credentials.routes.js'
 import { registerIssuerRoutes } from './modules/issuers/issuers.routes.js'
 import { registerMetaRoutes } from './modules/meta/meta.routes.js'
 import { registerStatsRoutes } from './modules/stats/stats.routes.js'
@@ -190,6 +191,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         vlmEnabled: deps.config.VLM_ENABLED,
         credentialIssuer,
       })
+      registerCredentialRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
       registerBatchRoutes(v1, { db: deps.db })
       registerStatsRoutes(v1, { db: deps.db })
