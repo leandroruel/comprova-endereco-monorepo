@@ -213,25 +213,32 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
      *   lido aqui, depois de todos os verificadores (T1/T2), dos cálculos e do
      *   resultado final.
      *
-     * A comparação usa veredito + hash do conjunto de evidências + `policy_hash`
-     * + `scorer_version` (valores exatos); `score`/`confidence` ficam de fora
-     * porque são colunas `real` (float4) e a comparação de float não é
-     * confiável. Sem os dois últimos, uma policy nova que reordenasse/alterasse
-     * a conclusão sobre as MESMAS evidências seria tratada como replay e
-     * manteria um `completed_at` (e um `validFrom`) que já não corresponde à
-     * conclusão vigente.
+     * A comparação usa veredito + hash do conjunto de evidências + policy/scorer
+     * da ÚLTIMA AVALIAÇÃO (`last_evaluated_*`, com fallback para o binding
+     * imutável em linhas legadas); `score`/`confidence` ficam de fora porque são
+     * colunas `real` (float4) e a comparação de float não é confiável. Sem os
+     * dois últimos, uma policy nova que reordenasse/alterasse a conclusão sobre
+     * as MESMAS evidências seria tratada como replay e manteria um
+     * `completed_at` (e um `validFrom`) que já não corresponde à conclusão
+     * vigente. Comparar só o binding imutável faria o contrário: toda reexecução
+     * sob a policy nova pareceria uma conclusão nova.
      */
     const previous = state.validation
+    const previousOutcome = {
+      ...previous,
+      policyHash: previous.lastEvaluatedPolicyHash ?? previous.policyHash,
+      scorerVersion: previous.lastEvaluatedScorerVersion ?? previous.scorerVersion,
+    }
     const completedAt =
       // Replay do mesmo resultado terminal: preserva o `completed_at` original.
-      previous.status === 'completed' &&
-      previous.completedAt !== null &&
+      previousOutcome.status === 'completed' &&
+      previousOutcome.completedAt !== null &&
       !stillPartial &&
-      decision.verdict === previous.verdict &&
-      evidenceSetHash === previous.evidenceSetHash &&
-      previous.policyHash === deps.policyHash &&
-      previous.scorerVersion === SCORER_VERSION
-        ? previous.completedAt
+      decision.verdict === previousOutcome.verdict &&
+      evidenceSetHash === previousOutcome.evidenceSetHash &&
+      previousOutcome.policyHash === deps.policyHash &&
+      previousOutcome.scorerVersion === SCORER_VERSION
+        ? previousOutcome.completedAt
         : deps.clock.now()
 
     await updateValidationOutcome(tx, {
@@ -241,6 +248,8 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       score,
       confidence: decision.confidence,
       evidenceSetHash,
+      policyHash: deps.policyHash,
+      scorerVersion: SCORER_VERSION,
       explanation: {
         summary: decision.explanation,
         code: explanationDetail.code,
@@ -254,7 +263,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
     // resultado NÃO é persistido — não existe janela com credencial ACTIVE
     // apontando para uma conclusão que já mudou.
     if (
-      outcomeSupersedesCredentials(previous, {
+      outcomeSupersedesCredentials(previousOutcome, {
         stillPartial,
         verdict: decision.verdict,
         evidenceSetHash,

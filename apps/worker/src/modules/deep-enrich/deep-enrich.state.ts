@@ -17,6 +17,8 @@ type ValidationRow = Pick<
   | 'addressId'
   | 'policyHash'
   | 'scorerVersion'
+  | 'lastEvaluatedPolicyHash'
+  | 'lastEvaluatedScorerVersion'
 >
 
 type SubjectRow = { readonly docType: DocKind }

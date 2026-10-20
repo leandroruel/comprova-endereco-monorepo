@@ -487,6 +487,11 @@ export const validation = pgTable(
     // V-5/§8/§9: binding de policy, scorer e conjunto de evidências.
     policyHash: text('policy_hash'),
     scorerVersion: text('scorer_version'),
+    // A3/C1: policy/scorer da ÚLTIMA avaliação do deep path. Mutáveis de
+    // propósito; `policyHash`/`scorerVersion` acima são o binding imutável da
+    // assertion e continuam sendo o que a credencial declara.
+    lastEvaluatedPolicyHash: text('last_evaluated_policy_hash'),
+    lastEvaluatedScorerVersion: text('last_evaluated_scorer_version'),
     evidenceSetHash: text('evidence_set_hash'),
     idempotencyKey: text('idempotency_key'),
     workflowId: text('workflow_id'),

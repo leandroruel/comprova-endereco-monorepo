@@ -241,6 +241,13 @@ export interface ValidationOutcomeWrite {
   readonly score: number
   readonly confidence: number
   readonly evidenceSetHash: string
+  /**
+   * Policy/scorer efetivamente usados nesta execução. Vão para
+   * `last_evaluated_*`, não para o binding imutável `policy_hash`/
+   * `scorer_version` (A3/C1).
+   */
+  readonly policyHash: string
+  readonly scorerVersion: string
   readonly explanation: {
     readonly summary: string
     readonly code: string
@@ -266,6 +273,8 @@ export const updateValidationOutcome = async (tx: DbTx, write: ValidationOutcome
       score: Math.tanh(write.score),
       confidence: write.confidence,
       evidenceSetHash: write.evidenceSetHash,
+      lastEvaluatedPolicyHash: write.policyHash,
+      lastEvaluatedScorerVersion: write.scorerVersion,
       explanation: {
         summary: write.explanation.summary,
         code: write.explanation.code,

@@ -711,6 +711,64 @@ describe('deepEnrich (activity core)', () => {
       expect(stillSuperseded?.status).toBe('REVOKED')
       expect(stillSuperseded?.revocationReason).toBe('superseded')
       expect(stillSuperseded?.revokedAt?.toISOString()).toBe(superseded?.revokedAt?.toISOString())
+      // E o replay idêntico sob a policy nova preserva a conclusão que já
+      // refletia essa policy (não é uma terceira conclusão).
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T2.toISOString())
+    })
+
+    it('policy nova sem credencial antiga: replay idêntico não revoga a credencial emitida depois', async () => {
+      const validationId = await createQueued('fase24-policy-no-old-credential', '12345678000195')
+
+      // Conclusão sob a policy original, mas SEM emitir credencial ainda.
+      const first = await deepEnrich(
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: advancingClock() },
+        { tenantId: tenant, validationId },
+      )
+      expect(first.status).toBe('completed')
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T1.toISOString())
+
+      // Primeira reavaliação sob a policy nova: nova conclusão, sem nada a
+      // revogar porque não havia credencial.
+      const T2 = new Date('2026-06-01T00:22:00.000Z')
+      const changedPolicyHash = 'e'.repeat(64)
+      await deepEnrich(
+        {
+          db: adminPool.db,
+          t1Checkers: t1WithFakes,
+          policy,
+          policyHash: changedPolicyHash,
+          clock: { now: () => T2 },
+        },
+        { tenantId: tenant, validationId },
+      )
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T2.toISOString())
+
+      // A credencial é emitida DEPOIS da mudança de policy. Ela é a primeira
+      // emissão desta validation e fica ACTIVE.
+      await issueCredential(adminPool.db, tenant, validationId, {
+        issuerOrigin: ISSUER_ORIGIN,
+        signingKeys,
+      })
+      expect((await statusOf(validationId))?.status).toBe('ACTIVE')
+
+      // Replay IDÊNTICO sob a mesma policy nova: não é uma conclusão nova e não
+      // pode revogar a credencial recém-emitida.
+      const T3 = new Date('2026-06-01T00:32:00.000Z')
+      await deepEnrich(
+        {
+          db: adminPool.db,
+          t1Checkers: t1WithFakes,
+          policy,
+          policyHash: changedPolicyHash,
+          clock: { now: () => T3 },
+        },
+        { tenantId: tenant, validationId },
+      )
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T2.toISOString())
+      const status = await statusOf(validationId)
+      expect(status?.status).toBe('ACTIVE')
+      expect(status?.revokedAt).toBeNull()
+      expect(status?.revocationReason).toBeNull()
     })
 
     it('reexecução com evidências novas é uma NOVA conclusão: grava novo instante', async () => {
