@@ -563,23 +563,41 @@ describe('adulteração da credencial', () => {
     })
   })
 
-  it('recusa janela de validade vazia ou invertida (`validFrom` >= `validUntil`)', async () => {
+  it('recusa janela invertida e aceita `validFrom == validUntil` (VC 2.0 §4.9)', async () => {
     const credential = await valid()
     const validUntil = credential.validUntil!
 
     // A checagem da janela vem ANTES da assinatura: um documento com bytes
-    // coerentes, mas janela incoerente, é recusado pela janela — a proteção não
+    // coerentes, mas janela invertida, é recusado pela janela — a proteção não
     // depende de a assinatura quebrar.
-    expect(verifyCredentialIntegrity({ ...credential, validFrom: validUntil }, { trusted })).toMatchObject({
-      valid: false,
-      reason: 'INVALID_TIMESTAMP',
-    })
     expect(
       verifyCredentialIntegrity(
         { ...credential, validFrom: new Date(Date.parse(validUntil) + 1).toISOString() },
         { trusted },
       ),
     ).toMatchObject({ valid: false, reason: 'INVALID_TIMESTAMP' })
+
+    // Igualdade é permitida pela especificação. Mutar sem reassinar cai na
+    // assinatura (a janela já passou); reassinado, o documento é aceito.
+    const equalWindow = await valid()
+    equalWindow.validFrom = equalWindow.validUntil!
+    expect(verifyCredentialIntegrity(equalWindow, { trusted })).toMatchObject({
+      valid: false,
+      reason: 'INVALID_SIGNATURE',
+    })
+
+    const proof = equalWindow.proof
+    const unsecured = { ...equalWindow } as Record<string, unknown>
+    delete unsecured['proof']
+    equalWindow.proof = await createDataIntegrityProof(unsecured, {
+      verificationMethod: proof.verificationMethod,
+      proofPurpose: ASSERTION_METHOD,
+      created: PROOF_CREATED_AT.toISOString(),
+      signer,
+    })
+    expect(verifyCredentialIntegrity(equalWindow, { trusted })).toMatchObject({
+      valid: true,
+    })
   })
 
   it('detecta incoerência entre o conjunto de evidências e o evidence_set_hash', async () => {

@@ -152,8 +152,8 @@ const isCredentialStatusBindingValid = (secured: SecuredVerifiableCredential): b
  *  4. coerência estrutural `verificationMethod ↔ issuer` declarado (§5.9) e
  *     vínculo com o método confiável: o `verificationMethod` precisa ser
  *     EXATAMENTE `options.trusted.id` (§4);
- *  5. a janela de validade (`validFrom` < `validUntil`, não vazia) e, quando
- *     `now` é informado, o instante contra a janela;
+ *  5. a janela de validade (`validFrom <= validUntil`, conforme a VC 2.0 §4.9)
+ *     e, quando `now` é informado, o instante contra a janela;
  *  6. o binding do conjunto de evidências (recomputado a partir da própria
  *     credencial — nunca do material físico);
  *  7. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
@@ -226,10 +226,12 @@ export const verifyCredentialIntegrity = (
   if (validFrom === null || (secured.validUntil !== undefined && validUntil === null)) {
     return { valid: false, reason: 'INVALID_TIMESTAMP', checked: checksOf('not_checked') }
   }
-  // Janela NÃO vazia: `validFrom < validUntil`, a mesma garantia que a emissão
-  // impõe (`buildAssertion`). A igualdade será tratada na revisão da VC 2.0
-  // §4.9 (item A4).
-  if (validUntil !== null && validFrom >= validUntil) {
+  // Coerência da janela: a VC 2.0 §4.9 exige `validFrom <= validUntil`. O
+  // verificador aceita a IGUALDADE para não recusar credenciais de terceiros
+  // estruturalmente válidas. O EMISSOR continua estrito (`validFrom <
+  // validUntil`): uma credencial de duração zero não afirma nada útil e não é
+  // produzida por esta biblioteca.
+  if (validUntil !== null && validFrom > validUntil) {
     return { valid: false, reason: 'INVALID_TIMESTAMP', checked: checksOf('not_checked') }
   }
 
