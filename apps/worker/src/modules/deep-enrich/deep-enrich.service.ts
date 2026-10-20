@@ -6,6 +6,7 @@ import {
   evaluateClaim,
   evidenceSetHashOfObservations,
   observationFromSignal,
+  SCORER_VERSION,
   weightedScore,
   type Checker,
   type ClaimType,
@@ -33,6 +34,12 @@ export interface DeepEnrichDeps {
   readonly t1Checkers: readonly Checker[]
   readonly t2Checkers?: readonly Checker[]
   readonly policy: Policy
+  /**
+   * Digest do CONTEÚDO efetivo da policy carregada (`policyHashOf`). Comparar
+   * só o veredito e o conjunto de evidências não detecta uma mudança de policy
+   * que preserve as evidências, mas mude a conclusão. A3/ADR-0030.
+   */
+  readonly policyHash: string
   readonly clock: Clock
   readonly signalCache?: SignalCacheReader
 }
@@ -152,19 +159,24 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
      *
      * - `partial` não conclui: `updateValidationOutcome` mantém `completed_at`
      *   NULL (e uma conclusão anterior fica retraída junto com o status);
-     * - replay que REPRODUZ o resultado terminal persistido (mesmo veredito sobre
-     *   o mesmo conjunto de evidências) PRESERVA o `completed_at` original:
-     *   reexecutar o worker não é reconcluir, e mover o instante mudaria o
-     *   `validFrom` de credenciais emitidas depois, sem conclusão nova;
-     * - resultado terminal NOVO (veredito ou evidências diferentes — a primeira
-     *   conclusão de uma validação `queued`/`partial`, ou um registro legado
-     *   concluído sem timestamp) grava o instante real, lido aqui, depois de
-     *   todos os verificadores (T1/T2), dos cálculos e do resultado final.
+     * - replay que REPRODUZ o resultado terminal persistido (mesmo veredito,
+     *   mesmo conjunto de evidências, mesma policy e mesmo scorer) PRESERVA o
+     *   `completed_at` original: reexecutar o worker não é reconcluir, e mover o
+     *   instante mudaria o `validFrom` de credenciais emitidas depois, sem
+     *   conclusão nova;
+     * - resultado terminal NOVO (veredito, evidências, policy ou scorer
+     *   diferentes — a primeira conclusão de uma validação `queued`/`partial`,
+     *   ou um registro legado concluído sem timestamp) grava o instante real,
+     *   lido aqui, depois de todos os verificadores (T1/T2), dos cálculos e do
+     *   resultado final.
      *
-     * A comparação usa veredito + hash do conjunto de evidências (valores exatos);
-     * `score`/`confidence` ficam de fora porque são colunas `real` (float4) e a
-     * comparação de float não é confiável — são funções determinísticas do
-     * conjunto de evidências e da policy, que o hash já amarra.
+     * A comparação usa veredito + hash do conjunto de evidências + `policy_hash`
+     * + `scorer_version` (valores exatos); `score`/`confidence` ficam de fora
+     * porque são colunas `real` (float4) e a comparação de float não é
+     * confiável. Sem os dois últimos, uma policy nova que reordenasse/alterasse
+     * a conclusão sobre as MESMAS evidências seria tratada como replay e
+     * manteria um `completed_at` (e um `validFrom`) que já não corresponde à
+     * conclusão vigente.
      */
     const previous = state.validation
     const completedAt =
@@ -173,7 +185,9 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       previous.completedAt !== null &&
       !stillPartial &&
       decision.verdict === previous.verdict &&
-      evidenceSetHash === previous.evidenceSetHash
+      evidenceSetHash === previous.evidenceSetHash &&
+      previous.policyHash === deps.policyHash &&
+      previous.scorerVersion === SCORER_VERSION
         ? previous.completedAt
         : deps.clock.now()
 

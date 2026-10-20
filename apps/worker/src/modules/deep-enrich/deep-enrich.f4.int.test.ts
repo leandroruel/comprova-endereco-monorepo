@@ -32,6 +32,7 @@ const tenant = await createTenant(adminPool.db, { name: 'f4-tenant' })
 
 const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.12.1.yaml'), 'utf8')
 const policy = loadPolicy(policyYaml)
+const policyHash = policyHashOf(policyYaml)
 
 const contabilidadeKey = addressKeys(
   canonicalizeAddress({
@@ -108,7 +109,7 @@ describe('partner_graph (F4)', () => {
     })
 
     const deep = await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId, maxTier: 0 },
     )
 

@@ -8,7 +8,15 @@ import type { PriorSignalRow } from './deep-enrich.signals.js'
 
 type ValidationRow = Pick<
   typeof t.validation.$inferSelect,
-  'status' | 'verdict' | 'evidenceSetHash' | 'completedAt' | 'deepContext' | 'subjectId' | 'addressId'
+  | 'status'
+  | 'verdict'
+  | 'evidenceSetHash'
+  | 'completedAt'
+  | 'deepContext'
+  | 'subjectId'
+  | 'addressId'
+  | 'policyHash'
+  | 'scorerVersion'
 >
 
 type SubjectRow = { readonly docType: DocKind }

@@ -1,5 +1,5 @@
 import { FACADE_PROMPT, makeStreetViewVlm, makeT1Checkers, type EvidenceWriter } from '@comprova/checkers'
-import { loadPolicy, type Checker, type Policy, type SignalCacheReader } from '@comprova/core'
+import { loadPolicy, policyHashOf, type Checker, type Policy, type SignalCacheReader } from '@comprova/core'
 import {
   createDbPool,
   makeCnefeCoordReader,
@@ -25,6 +25,7 @@ import { makeEvidenceWriter } from './modules/evidence/evidence.service.js'
 export interface WorkerContext {
   readonly pool: DbPool
   readonly policy: Policy
+  readonly policyHash: string
   readonly t1Checkers: readonly Checker[]
   readonly t2Checkers: readonly Checker[]
   readonly evidenceWriter: EvidenceWriter
@@ -63,9 +64,11 @@ export const buildT2Checkers = (env: WorkerEnv, evidenceWriter: EvidenceWriter):
 }
 
 export const buildWorkerContext = (env: WorkerEnv): WorkerContext => {
-  const policy = loadPolicy(
-    readFileSync(path.join(env.repoRoot, 'policies', `${env.policyVersion}.yaml`), 'utf8'),
+  const policyYaml = readFileSync(
+    path.join(env.repoRoot, 'policies', `${env.policyVersion}.yaml`),
+    'utf8',
   )
+  const policy = loadPolicy(policyYaml)
   const pool = createDbPool(env.databaseUrl)
   const t1Checkers = makeT1Checkers({
     geocoder: makeNominatimGeocoder(env.nominatimUrl !== undefined ? { baseUrl: env.nominatimUrl } : {}),
@@ -79,6 +82,7 @@ export const buildWorkerContext = (env: WorkerEnv): WorkerContext => {
   return {
     pool,
     policy,
+    policyHash: policyHashOf(policyYaml),
     t1Checkers,
     t2Checkers: buildT2Checkers(env, evidenceWriter),
     evidenceWriter,
