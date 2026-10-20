@@ -1493,23 +1493,56 @@ describe('DID e DID Document do issuer', () => {
     expect(JSON.stringify(docB)).not.toContain(issuerScopeOf(tenantId))
   })
 
-  it('resolve o DID Document via HTTP e verifica a credencial ponta a ponta (VALID)', async () => {
+  it('resolve o DID Document via HTTP, extrai a chave e verifica a credencial ponta a ponta (VALID)', async () => {
     const credential = await issue()
+    const scope = issuerScopeOf(tenantId)
     expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
 
+    // Coerência de identidade: o DID é DERIVADO do issuer HTTPS, o documento
+    // declara o mesmo issuer em `alsoKnownAs` e o método da credencial
+    // (`<issuer>#<keyId>`) aponta para o método DID (`<did>#<keyId>`).
+    const did = didOfIssuer(credential.issuer)
+    const document = (await getDidDocument(scope)).json() as {
+      id: string
+      alsoKnownAs: string[]
+      verificationMethod: Array<{
+        id: string
+        controller: string
+        publicKeyMultibase: string
+      }>
+    }
+    expect(document.id).toBe(did)
+    expect(document.alsoKnownAs).toEqual([credential.issuer])
+    expect(credential.proof.verificationMethod).toBe(`${credential.issuer}#${KEY_ID}`)
+    const methodId = didVerificationMethodOf(did, KEY_ID)
+    const method = document.verificationMethod.find((entry) => entry.id === methodId)
+    expect(method).toBeDefined()
+    expect(method?.controller).toBe(did)
+
+    // A chave extraída do DID Document verifica a assinatura emitida pela rota
+    // real. O `id` confiável continua sendo o HTTPS da credencial: o DID é uma
+    // forma de DESCOBRIR a chave, não um segundo `issuer`.
+    const publicKey = decodeEd25519PublicKeyMultibase(method!.publicKeyMultibase)
+    expect(
+      verifyCredentialIntegrity(credential, {
+        trusted: { id: credential.proof.verificationMethod, publicKey },
+        expectedIssuerId: credential.issuer,
+      }),
+    ).toMatchObject({ valid: true })
+
+    // O mesmo caminho, agora com a resolução DID completa.
     const requested: string[] = []
     const resolver = resolverFrom((url) => {
       requested.push(new URL(url).pathname)
       return appFetch(url)
     })
-
     expect(
       await verifyCredentialFromIssuer(credential, resolver, {
         expectedIssuerId: credential.issuer,
         statusResolver,
       }),
     ).toMatchObject({ valid: true })
-    expect(requested).toEqual([`/issuers/${issuerScopeOf(tenantId)}/did.json`])
+    expect(requested).toEqual([`/issuers/${scope}/did.json`])
   })
 
   it('recusa credencial de A com issuer/verificationMethod de B (INVALID_SIGNATURE)', async () => {
