@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, type KeyObject } from 'node:crypto'
+import { isIP } from 'node:net'
 import { z } from 'zod'
 import {
   MULTIKEY_TYPE,
@@ -85,6 +86,45 @@ export const IssuerOriginSchema = z.string().transform((value, ctx) => {
     return z.NEVER
   }
 })
+
+/** TLDs reservados por RFC 2606/RFC 6761 e sufixos usados só localmente. */
+const RESERVED_ISSUER_HOST_SUFFIXES = ['.test', '.example', '.invalid', '.localhost', '.local'] as const
+
+const isReservedIssuerHost = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().replace(/\.$/, '')
+  return (
+    host === 'localhost' ||
+    RESERVED_ISSUER_HOST_SUFFIXES.some(
+      (suffix) => host === suffix.slice(1) || host.endsWith(suffix),
+    )
+  )
+}
+
+/**
+ * Política de origem do issuer em PRODUÇÃO (ADR-0030). `parseIssuerOrigin` só
+ * exige HTTPS porque a biblioteca não conhece o ambiente; o boot da API sabe se
+ * está em produção e não pode aceitar uma origem que nunca resolveria
+ * publicamente (ou que é um IP literal).
+ *
+ * Fora de produção a origem reservada continua válida — é o valor de `dev` e
+ * dos testes. Em produção, `https://issuer.test`, `localhost`, `.local`,
+ * `.example`, `.invalid` e endereços IP são recusados.
+ */
+export const assertProductionIssuerOrigin = (value: string): string => {
+  const origin = parseIssuerOrigin(value)
+  const hostname = new URL(origin).hostname.replace(/^\[|\]$/g, '')
+  if (isIP(hostname) !== 0) {
+    throw new IssuerIdentityError(
+      `issuer origin must use a public DNS name in production (IP literal is not allowed): ${value}`,
+    )
+  }
+  if (isReservedIssuerHost(hostname)) {
+    throw new IssuerIdentityError(
+      `issuer origin must use a public DNS name in production (reserved host is not allowed): ${value}`,
+    )
+  }
+  return origin
+}
 
 /**
  * Escopo opaco do tenant: `base64url(sha256(domínio | tenant_id))`.
