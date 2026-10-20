@@ -1,5 +1,5 @@
 import { createLogger, createMetrics } from '@comprova/observability'
-import { createDbPool, eq, runMigrations } from '@comprova/db'
+import { and, createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import { evidenceSetHashOfObservations, policyHashOf, SCORER_VERSION } from '@comprova/core'
 import {
@@ -104,6 +104,44 @@ const supersededKey = await createApiKey(adminPool.db, supersededTenantId, PEPPE
 const supersededSigning = createTestCredentialSigningKey(KEY_ID)
 await createIssuerSigningKey(adminPool.db, supersededTenantId, supersededSigning, { active: false })
 
+// Tenant E: revogação da chave ativa (ADR-0029). Isolado dos demais porque a
+// revogação é irreversível: o tenant fica sem chave confiável depois do teste.
+const lifecycleTenantId = await createTenant(adminPool.db, { name: 'credential-lifecycle' })
+const lifecycleKey = await createApiKey(adminPool.db, lifecycleTenantId, PEPPER, {
+  scopes: ['validate:read', 'validate:write'],
+})
+const lifecycleSigning = createTestCredentialSigningKey('lifecycle-key')
+await createIssuerSigningKey(adminPool.db, lifecycleTenantId, lifecycleSigning)
+
+// Tenant F: expiração AGENDADA (revoked_at no futuro). A chave continua
+// publicada/ativa até o instante — não é o mesmo que `active = false`.
+const scheduledTenantId = await createTenant(adminPool.db, { name: 'credential-scheduled-key' })
+const scheduledKey = await createApiKey(adminPool.db, scheduledTenantId, PEPPER, {
+  scopes: ['validate:read', 'validate:write'],
+})
+const scheduledSigning = createTestCredentialSigningKey('scheduled-key')
+await createIssuerSigningKey(adminPool.db, scheduledTenantId, scheduledSigning)
+
+// Tenant G: rotação (`active = false`) SEM revogação. A chave antiga continua
+// publicada; a nova é que assina. Revogar a antiga depois a remove.
+const rotationTenantId = await createTenant(adminPool.db, { name: 'credential-rotation' })
+const rotationKey = await createApiKey(adminPool.db, rotationTenantId, PEPPER, {
+  scopes: ['validate:read', 'validate:write'],
+})
+const rotationOldSigning = createTestCredentialSigningKey('key-old')
+const rotationNewSigning = createTestCredentialSigningKey('key-new')
+await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationOldSigning)
+await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationNewSigning, { active: false })
+
+// Tenant H: API key SOMENTE-LEITURA. Revogar é escrita; a rota deve recusar
+// mesmo com uma chave de API válida (403), sem revelar se o key_id existe.
+const readOnlyTenantId = await createTenant(adminPool.db, { name: 'credential-readonly-key' })
+const readOnlyKey = await createApiKey(adminPool.db, readOnlyTenantId, PEPPER, {
+  scopes: ['validate:read'],
+})
+const readOnlySigning = createTestCredentialSigningKey('readonly-key')
+await createIssuerSigningKey(adminPool.db, readOnlyTenantId, readOnlySigning)
+
 const appPool = createDbPool(db.appUrl)
 const config: AppConfig = {
   DATABASE_URL: db.appUrl,
@@ -115,6 +153,11 @@ const config: AppConfig = {
     { tenantId: otherTenantId, key: otherSigning },
     { tenantId: mismatchTenantId, key: mismatchSigning },
     { tenantId: supersededTenantId, key: supersededSigning },
+    { tenantId: lifecycleTenantId, key: lifecycleSigning },
+    { tenantId: scheduledTenantId, key: scheduledSigning },
+    { tenantId: rotationTenantId, key: rotationOldSigning },
+    { tenantId: rotationTenantId, key: rotationNewSigning },
+    { tenantId: readOnlyTenantId, key: readOnlySigning },
   ]),
   PORT: 3000,
   HOST: '127.0.0.1',
@@ -1482,5 +1525,244 @@ describe('DID e DID Document do issuer', () => {
         reason: 'VERIFICATION_METHOD_UNRESOLVED',
       })
     }
+  })
+})
+
+// ADR-0029 — `active = false` é ROTAÇÃO (a chave continua publicada para o
+// passado); `revoked_at` é o hard stop, inclusive para credenciais já emitidas.
+// A revogação remove a chave dos documentos públicos e o verificador falha
+// fechado, sem "ignorar" o método desconhecido.
+describe('revogação e expiração da chave de assinatura', () => {
+  const appFetch = (async (input: string | URL | Request): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : input.toString())
+    const res = await app.inject({ method: 'GET', url: `${url.pathname}${url.search}` })
+    return new Response(res.body, {
+      status: res.statusCode,
+      headers: { 'content-type': String(res.headers['content-type'] ?? 'application/json') },
+    })
+  }) as typeof fetch
+
+  const resolver = makeHttpIssuerResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
+  const statusResolver = makeHttpCredentialStatusResolver({
+    trustedIssuerOrigins: [ISSUER_ORIGIN],
+    fetch: appFetch,
+  })
+
+  const issueAs = async (apiKey: string): Promise<SecuredVerifiableCredential> => {
+    const validationId = await newValidationAs(apiKey)
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as SecuredVerifiableCredential
+  }
+
+  const revoke = (apiKey: string, keyId: string, effectiveAt?: string) =>
+    app.inject({
+      method: 'POST',
+      url:
+        `/v1/signing-keys/${encodeURIComponent(keyId)}/revoke` +
+        (effectiveAt === undefined ? '' : `?effective_at=${encodeURIComponent(effectiveAt)}`),
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+
+  const documentOf = (tenant: string) =>
+    app.inject({ method: 'GET', url: `/issuers/${issuerScopeOf(tenant)}` })
+  const didDocumentOf = (tenant: string) =>
+    app.inject({ method: 'GET', url: `/issuers/${issuerScopeOf(tenant)}/did.json` })
+
+  const methodOf = (tenant: string, keyId: string) =>
+    verificationMethodOf(localIssuer(ISSUER_ORIGIN, tenant, keyId))
+  const didMethodOf = (tenant: string, keyId: string) =>
+    didVerificationMethodOf(didOfIssuer(issuerIdOf(ISSUER_ORIGIN, tenant)), keyId)
+
+  it('exige validate:write: API key somente-leitura recebe 403 e não revoga', async () => {
+    const res = await revoke(readOnlyKey.plaintext, readOnlySigning.keyId)
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('FORBIDDEN')
+    // A chave continua publicada: o 403 não chegou ao serviço de revogação.
+    expect((await documentOf(readOnlyTenantId)).statusCode).toBe(200)
+  })
+
+  it('revoga a chave ativa: sai dos documentos públicos e a credencial anterior falha fechado', async () => {
+    const credential = await issueAs(lifecycleKey.plaintext)
+
+    // Antes: publicada e verificável.
+    expect((await documentOf(lifecycleTenantId)).statusCode).toBe(200)
+    expect(
+      await verifyCredentialFromIssuer(credential, resolver, {
+        expectedIssuerId: credential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: true })
+
+    const res = await revoke(lifecycleKey.plaintext, lifecycleSigning.keyId)
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { key_id: string; revoked_at: string }
+    expect(body.key_id).toBe(lifecycleSigning.keyId)
+    expect(Number.isNaN(Date.parse(body.revoked_at))).toBe(false)
+
+    // Depois: sem chave confiável, os dois documentos públicos somem (404) e o
+    // verificador não resolve o método — fail closed.
+    expect((await documentOf(lifecycleTenantId)).statusCode).toBe(404)
+    expect((await didDocumentOf(lifecycleTenantId)).statusCode).toBe(404)
+    expect(
+      await verifyCredentialFromIssuer(credential, resolver, {
+        expectedIssuerId: credential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
+
+    // A emissão nova também falha: a chave ativa foi revogada.
+    const validationId = await newValidationAs(lifecycleKey.plaintext)
+    const issuance = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${lifecycleKey.plaintext}` },
+    })
+    expect(issuance.statusCode).toBe(409)
+    expect(issuance.json().detail).toBe('SIGNING_KEY_UNAVAILABLE')
+
+    // Idempotente/monotônica: repetir devolve o MESMO instante e não reativa.
+    const again = await revoke(lifecycleKey.plaintext, lifecycleSigning.keyId)
+    expect(again.statusCode).toBe(200)
+    expect(again.json()).toEqual(body)
+    expect((await documentOf(lifecycleTenantId)).statusCode).toBe(404)
+  })
+
+  it('isola tenants, não vaza existência e exige autenticação', async () => {
+    // A chave de outro tenant é indistinguível de uma inexistente: 404.
+    for (const keyId of [KEY_ID, 'missing-key']) {
+      const res = await revoke(lifecycleKey.plaintext, keyId)
+      expect(res.statusCode).toBe(404)
+      expect(res.json().code).toBe('NOT_FOUND')
+    }
+    // A chave de A continua publicada/ativa: a tentativa de B não a tocou.
+    const docA = await documentOf(tenantId)
+    expect(docA.statusCode).toBe(200)
+    expect(docA.json().verificationMethod).toHaveLength(1)
+
+    const unauth = await app.inject({
+      method: 'POST',
+      url: `/v1/signing-keys/${KEY_ID}/revoke`,
+    })
+    expect(unauth.statusCode).toBe(401)
+  })
+
+  it('agenda a expiração sem derrubar a chave antes do instante', async () => {
+    const credential = await issueAs(scheduledKey.plaintext)
+    const future = new Date(Date.now() + 3_600_000).toISOString()
+
+    const res = await revoke(scheduledKey.plaintext, scheduledSigning.keyId, future)
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ key_id: scheduledSigning.keyId, revoked_at: future })
+
+    // Ainda publicada, ativa e verificável até o instante agendado.
+    const doc = await documentOf(scheduledTenantId)
+    expect(doc.statusCode).toBe(200)
+    expect(doc.json().verificationMethod).toHaveLength(1)
+    expect(
+      await verifyCredentialFromIssuer(credential, resolver, {
+        expectedIssuerId: credential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: true })
+    const renewed = await issueAs(scheduledKey.plaintext)
+    expect(renewed.proof.verificationMethod).toBe(methodOf(scheduledTenantId, scheduledSigning.keyId))
+
+    // Adiar não reescreve o instante já registrado.
+    const later = new Date(Date.now() + 7_200_000).toISOString()
+    const again = await revoke(scheduledKey.plaintext, scheduledSigning.keyId, later)
+    expect(again.statusCode).toBe(200)
+    expect(again.json()).toEqual({ key_id: scheduledSigning.keyId, revoked_at: future })
+
+    // Antecipar é permitido: uma chave comprometida com expiração agendada
+    // pode ser revogada agora. A confiança só encolhe.
+    const emergency = await revoke(scheduledKey.plaintext, scheduledSigning.keyId)
+    expect(emergency.statusCode).toBe(200)
+    const emergencyBody = emergency.json() as { key_id: string; revoked_at: string }
+    expect(emergencyBody.key_id).toBe(scheduledSigning.keyId)
+    expect(Date.parse(emergencyBody.revoked_at)).toBeLessThan(Date.parse(future))
+
+    expect((await documentOf(scheduledTenantId)).statusCode).toBe(404)
+    expect(
+      await verifyCredentialFromIssuer(credential, resolver, {
+        expectedIssuerId: credential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
+  })
+
+  it('rotação (active=false) continua publicada; revogar remove só a chave revogada', async () => {
+    const oldCredential = await issueAs(rotationKey.plaintext)
+    expect(oldCredential.proof.verificationMethod).toBe(methodOf(rotationTenantId, rotationOldSigning.keyId))
+
+    // Rotação: a antiga deixa de assinar, a nova passa a assinar. Nenhuma é
+    // revogada; a antiga continua publicada para verificar o passado.
+    await adminPool.db
+      .update(t.issuerSigningKey)
+      .set({ active: false })
+      .where(
+        and(
+          eq(t.issuerSigningKey.tenantId, rotationTenantId),
+          eq(t.issuerSigningKey.keyId, rotationOldSigning.keyId),
+        ),
+      )
+    await adminPool.db
+      .update(t.issuerSigningKey)
+      .set({ active: true })
+      .where(
+        and(
+          eq(t.issuerSigningKey.tenantId, rotationTenantId),
+          eq(t.issuerSigningKey.keyId, rotationNewSigning.keyId),
+        ),
+      )
+
+    const rotated = await documentOf(rotationTenantId)
+    expect(rotated.statusCode).toBe(200)
+    expect(rotated.json().verificationMethod.map((method: { id: string }) => method.id)).toEqual([
+      methodOf(rotationTenantId, rotationNewSigning.keyId),
+      methodOf(rotationTenantId, rotationOldSigning.keyId),
+    ])
+    expect(
+      await verifyCredentialFromIssuer(oldCredential, resolver, {
+        expectedIssuerId: oldCredential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: true })
+
+    const newCredential = await issueAs(rotationKey.plaintext)
+    expect(newCredential.proof.verificationMethod).toBe(methodOf(rotationTenantId, rotationNewSigning.keyId))
+
+    // Revogar a ANTIGA remove só ela dos documentos públicos. A nova continua
+    // publicada e as credenciais antigas assinadas pela revogada falham fechado.
+    const res = await revoke(rotationKey.plaintext, rotationOldSigning.keyId)
+    expect(res.statusCode).toBe(200)
+    const after = await documentOf(rotationTenantId)
+    expect(after.statusCode).toBe(200)
+    expect(after.json().verificationMethod.map((method: { id: string }) => method.id)).toEqual([
+      methodOf(rotationTenantId, rotationNewSigning.keyId),
+    ])
+    expect(
+      await verifyCredentialFromIssuer(oldCredential, resolver, {
+        expectedIssuerId: oldCredential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
+    expect(
+      await verifyCredentialFromIssuer(newCredential, resolver, {
+        expectedIssuerId: newCredential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: true })
+
+    const did = await didDocumentOf(rotationTenantId)
+    expect(did.statusCode).toBe(200)
+    expect(did.json().assertionMethod).toEqual([didMethodOf(rotationTenantId, rotationNewSigning.keyId)])
   })
 })

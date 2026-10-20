@@ -29,6 +29,8 @@ export const createTestCredentialSigningKey = (keyId = 'key-1'): TestCredentialS
 export interface CreateIssuerSigningKeyOptions {
   /** `false` marca a chave como superada (não assina credenciais novas). */
   readonly active?: boolean
+  /** Instante de revogação/expiração (ADR-0029); `null`/ausente = confiável. */
+  readonly revokedAt?: Date | null
 }
 
 /**
@@ -51,6 +53,7 @@ export const createIssuerSigningKey = async (
     algorithm: 'Ed25519',
     publicKey: ed25519PublicKeyBytes(key.publicKey),
     active: opts.active ?? true,
+    revokedAt: opts.revokedAt ?? null,
   })
   return issuerSigningKeyId
 }

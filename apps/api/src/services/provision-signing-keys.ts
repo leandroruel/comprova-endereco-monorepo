@@ -1,9 +1,10 @@
 import { createPublicKey, randomUUID } from 'node:crypto'
 import { ed25519PublicKeyBytes, issuerScopeOf } from '@comprova/credential'
-import { and, eq, type Db } from '@comprova/db'
+import { and, eq, isNotNull, lte, sql, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import type { SigningKeyEntry } from './signing-keys.js'
+import { signingKeyTrustedCondition } from './signing-key-lifecycle.js'
 
 /**
  * Publicação da chave pública do issuer em `issuer_signing_key` (FASE 14),
@@ -21,10 +22,15 @@ import type { SigningKeyEntry } from './signing-keys.js'
  * 2. **Preservar a chave ativa.** O índice parcial único
  *    (`issuer_signing_key_active_uq`) permite no máximo uma chave ativa por
  *    tenant. A primeira chave de um tenant vira ativa **só se** ele ainda não
- *    tiver nenhuma ativa — inclusive uma inserida nesta mesma execução — e
- *    qualquer chave adicional entra inativa. Assim, adicionar um `key_id` novo
- *    não colide no índice nem troca a chave que assina. Ativar a nova chave é um
- *    passo administrativo (rotação), fora do escopo deste passo.
+ *    tiver nenhuma ativa **e confiável** — inclusive uma inserida nesta mesma
+ *    execução — e qualquer chave adicional entra inativa. Assim, adicionar um
+ *    `key_id` novo não colide no índice nem troca a chave que assina. Ativar a
+ *    nova chave é um passo administrativo (rotação), fora do escopo deste passo.
+ *
+ * `revoked_at` (ADR-0029) é um eixo separado: uma chave ativa revogada/vencida
+ * não conta como ativa para a decisão acima. Provisionar um `key_id` novo
+ * depois da revogação da única chave ativa faz a nova chave nascer ativa; uma
+ * chave já publicada nunca é "desrevogada" nem reativada por este comando.
  */
 export class SigningKeyProvisioningError extends Error {
   constructor(message: string) {
@@ -46,14 +52,15 @@ export const provisionSigningKeys = async (
   entries: readonly SigningKeyEntry[],
   logger: Logger,
 ): Promise<readonly ProvisioningOutcome[]> => {
-  // Estado inicial: quem já tem chave ativa. Atualizado ao longo da execução
-  // para que a primeira chave de cada tenant seja ativada e as demais não.
+  // Estado inicial: quem já tem chave ativa E confiável. Atualizado ao longo da
+  // execução para que a primeira chave de cada tenant seja ativada e as demais
+  // não. Uma chave ativa revogada/vencida não entra no conjunto (ADR-0029).
   const tenantsWithActiveKey = new Set(
     (
       await db
         .select({ tenantId: t.issuerSigningKey.tenantId })
         .from(t.issuerSigningKey)
-        .where(eq(t.issuerSigningKey.active, true))
+        .where(and(eq(t.issuerSigningKey.active, true), signingKeyTrustedCondition()))
     ).map((row) => row.tenantId),
   )
 
@@ -91,6 +98,24 @@ export const provisionSigningKeys = async (
     }
 
     const active = !tenantsWithActiveKey.has(entry.tenantId)
+    if (active) {
+      // Uma chave ativa revogada/vencida ainda ocupa o índice parcial único
+      // (`... WHERE active`). Desativá-la é seguro: ela já não é confiável e
+      // continua no histórico com o `revoked_at` intacto; o trigger permite
+      // alterar `active`, mas não reescrever a revogação. Sem esta limpeza, a
+      // inserção de uma nova chave ativa colidiria com a revogada.
+      await db
+        .update(t.issuerSigningKey)
+        .set({ active: false })
+        .where(
+          and(
+            eq(t.issuerSigningKey.tenantId, entry.tenantId),
+            eq(t.issuerSigningKey.active, true),
+            isNotNull(t.issuerSigningKey.revokedAt),
+            lte(t.issuerSigningKey.revokedAt, sql`now()`),
+          ),
+        )
+    }
     await db.insert(t.issuerSigningKey).values({
       issuerSigningKeyId: randomUUID(),
       tenantId: entry.tenantId,
