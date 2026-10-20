@@ -670,6 +670,37 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     expect(result).toMatchObject({ valid: true })
   })
 
+  it('reemitir a mesma validation devolve bytes idênticos e mantém um único status', async () => {
+    const validationId = await newValidation()
+    const firstAt = new Date('2026-03-01T12:00:00.000Z')
+    const later = new Date('2026-04-01T12:00:00.000Z')
+
+    const first = await issue(validationId, () => firstAt)
+    const second = await issue(validationId, () => later)
+
+    // `proof.created` é o da PRIMEIRA emissão; a assinatura Ed25519/JCS é
+    // determinística, então o JSON inteiro é idêntico.
+    expect(first.proof.created).toBe(firstAt.toISOString())
+    expect(second.proof.created).toBe(firstAt.toISOString())
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+
+    const issuance = await adminPool.db
+      .select({
+        credentialId: t.credentialIssuance.credentialId,
+        issuedAt: t.credentialIssuance.issuedAt,
+      })
+      .from(t.credentialIssuance)
+      .where(eq(t.credentialIssuance.validationId, validationId))
+    expect(issuance).toHaveLength(1)
+    expect(issuance[0]?.issuedAt.toISOString()).toBe(firstAt.toISOString())
+
+    const statuses = await adminPool.db
+      .select({ credentialId: t.credentialStatus.credentialId })
+      .from(t.credentialStatus)
+      .where(eq(t.credentialStatus.credentialId, issuance[0]!.credentialId))
+    expect(statuses).toHaveLength(1)
+  })
+
   it('publica apenas material público em GET /issuers/:scope', async () => {
     const credential = (await postCredential(await newValidation())).json() as SecuredVerifiableCredential
 

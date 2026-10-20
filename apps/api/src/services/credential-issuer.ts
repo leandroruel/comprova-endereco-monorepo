@@ -14,7 +14,7 @@ import {
   type SecuredVerifiableCredential,
 } from '@comprova/credential'
 import type { SigningKeyResolver } from './signing-keys.js'
-import { ensureActiveCredentialStatus } from './credential-status.js'
+import { ensureFirstCredentialIssuance } from './credential-status.js'
 import { signingKeyTrustedCondition } from './signing-key-lifecycle.js'
 
 /**
@@ -370,16 +370,27 @@ export const issueCredential = async (
   // status têm de ser derivados do MESMO valor, senão reemitir criaria um
   // segundo status para a mesma validation.
   const credentialId = credentialIdOf(issuer.id, credentialSource.validation.id)
-  const credential = await buildCredential(credentialSource, {
+  const issuerScope = issuerScopeOf(tenantId)
+
+  // B2: o instante da PRIMEIRA prova é persistido na mesma transação do status.
+  // Em reemissão, `issued_at` original é reutilizado como `proof.created`, de
+  // modo que o documento assinado é byte a byte o mesmo (mesma issuer/key/
+  // policy). Reemitir não reativa uma credencial REVOKED.
+  const issuedAt = await ensureFirstCredentialIssuance(
+    db,
+    tenantId,
+    issuerScope,
+    credentialSource.validation.id,
+    credentialId,
+    deps.now ?? (() => new Date()),
+  )
+
+  // A credencial só é devolvida depois que a primeira emissão e o status ACTIVE
+  // estão persistidos: se o insert falhar, a emissão falha (fail closed).
+  return buildCredential(credentialSource, {
     issuer,
     signer: makeEd25519Signer(privateKey),
-    now: deps.now,
+    now: () => issuedAt,
     credentialId,
   })
-
-  // O status público é registrado ANTES de a credencial ser devolvida: uma
-  // credencial emitida mas sem linha ACTIVE seria inverificável (fail closed).
-  // Se o insert falhar, a emissão falha. Reemitir não reativa uma REVOKED.
-  await ensureActiveCredentialStatus(db, tenantId, issuerScopeOf(tenantId), credentialId)
-  return credential
 }

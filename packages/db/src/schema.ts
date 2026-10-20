@@ -166,6 +166,35 @@ export const credentialStatus = pgTable(
   (t) => [index('credential_status_scope_idx').on(t.issuerScope)],
 )
 
+/**
+ * Primeira emissão por validation (ADR-0030/B2). A credencial continua NÃO
+ * persistida: guardamos só o instante da primeira prova (`issued_at`) e o
+ * ponteiro público de status (`credential_id`, o mesmo de
+ * `credential_status`). Reemitir a mesma validation reassina com
+ * `proof.created = issued_at`, produzindo bytes idênticos enquanto issuer/key/
+ * policy não mudarem.
+ */
+export const credentialIssuance = pgTable(
+  'credential_issuance',
+  {
+    validationId: uuid('validation_id').primaryKey(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.tenantId),
+    issuerScope: text('issuer_scope').notNull(),
+    // "Índice de status": no modelo atual não há StatusList numérica. O
+    // `credential_id` é o ponteiro público que aparece em
+    // `credentialStatus.id` e resolve `credential_status`.
+    credentialId: text('credential_id').notNull(),
+    issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('credential_issuance_credential_uq').on(t.credentialId),
+    index('credential_issuance_tenant_idx').on(t.tenantId),
+  ],
+)
+
 export const legalBasis = pgTable('legal_basis', {
   code: text('code').primaryKey(),
   description: text('description').notNull(),
@@ -720,6 +749,7 @@ export const schema = {
   apiKey,
   issuerSigningKey,
   credentialStatus,
+  credentialIssuance,
   legalBasis,
   refReceitaEstabelecimento,
   refReceitaEmpresa,
@@ -752,6 +782,7 @@ export const schema = {
 export type Tenant = typeof tenant.$inferSelect
 export type ApiKey = typeof apiKey.$inferSelect
 export type CredentialStatus = typeof credentialStatus.$inferSelect
+export type CredentialIssuance = typeof credentialIssuance.$inferSelect
 export type Subject = typeof subject.$inferSelect
 export type Validation = typeof validation.$inferSelect
 export type Signal = typeof signal.$inferSelect
