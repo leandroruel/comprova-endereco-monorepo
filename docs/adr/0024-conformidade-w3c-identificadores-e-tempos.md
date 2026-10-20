@@ -378,8 +378,8 @@ recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
 Revisão de conformidade W3C VC 2.0 sobre o estado do PR #5. As correções foram
 feitas em commits pequenos, um por item, com testes: `82af9d4` (A1), `b919ade`
 (A2), `27c5aa3` (A3), `4bb729a` (A4), `e8e7740` (B1), `24d1cd9` (B2), `1146c68`
-(C1) e `f1d043b` (C2). Quando esta seção divergir de um trecho anterior, **esta
-seção prevalece**.
+(C1), `f1d043b` (C2) e `a3357b1` (revisão A3/C1: última policy avaliada).
+Quando esta seção divergir de um trecho anterior, **esta seção prevalece**.
 
 ### A1 — origem do issuer em produção
 
@@ -446,16 +446,23 @@ conclusão**, com novo `completed_at` (e, por C1, revogação da credencial anti
 O teste de integração usa um `policyHash` diferente mantendo veredito e
 evidências iguais e prova que o instante muda.
 
-**Limitação conhecida (decisão pendente):** `validation.policy_hash` e
-`validation.scorer_version` são imutáveis por trigger (migração 0028), porque
-identificam a policy sob a qual a assertion nasceu. O worker, porém, carrega a
-policy do deploy atual. Se essa policy mudar, o replay detecta a divergência e
-gera novo `completed_at`, mas a linha mantém o binding antigo; a credencial nova
-continua declarando a policy original. Não se alterou o guard nesta revisão.
-As opções — (a) reavaliar sempre com a policy persistida na validation, (b)
-permitir rebinding apenas junto de uma nova conclusão, ou (c) criar uma nova
-validation/assertion — exigem ADR própria. Até lá, trocar a policy de um worker
-que reprocessa validações antigas é uma operação de risco conhecido.
+**Binding imutável vs última avaliação (migração 0036).** `validation.policy_hash`
+e `validation.scorer_version` continuam imutáveis por trigger (migração 0028),
+porque identificam a policy sob a qual a assertion nasceu — e é isso que a
+credencial declara. Comparar o replay só por eles, porém, faria toda reexecução
+sob uma policy nova parecer uma conclusão nova: o `completed_at` avançaria de
+novo e uma credencial emitida depois da mudança seria revogada por um replay
+idêntico. Para separar as duas responsabilidades, a `validation` ganhou
+`last_evaluated_policy_hash`/`last_evaluated_scorer_version` (migração
+`0036_validation_last_evaluated_binding.sql`), atualizados pelo deep path. A
+comparação usa o último valor, com fallback para o binding em linhas legadas.
+Assim, a primeira execução sob a policy B grava novo `completed_at`; as
+reexecuções idênticas sob B preservam esse instante e **não** revogam a
+credencial emitida depois. O binding declarado na credencial continua sendo o
+original (policy A). Se o produto exigir que uma credencial nova declare a
+policy B, isso é uma nova validation/assertion (ou um rebinding explícito),
+decisão separada desta correção. Teste de integração cobre exatamente a
+sequência “policy nova, sem credencial antiga, emissão depois, replay idêntico”.
 
 ### A4 — `validFrom == validUntil`
 
@@ -534,8 +541,11 @@ Se a revogação falhar, a nova conclusão também não é persistida.
   registra `manual` (rota autenticada) ou `superseded` (deep path). A coluna não
   é exposta no endpoint público.
 - A revogação só casa linhas `ACTIVE`; replay idêntico não revoga e reexecuções
-  não reescrevem `revoked_at` nem o motivo. Testes cobrem replay idêntico,
-  mudança de policy e regressão para `partial`.
+  não reescrevem `revoked_at` nem o motivo. O replay usa
+  `last_evaluated_policy_hash`/`last_evaluated_scorer_version` (A3), então uma
+  segunda execução sob a policy nova não revoga de novo. Testes cobrem replay
+  idêntico, mudança de policy (com e sem credencial antiga) e regressão para
+  `partial`.
 
 ### C2 — identidade issuer/DID ponta a ponta
 
@@ -580,7 +590,7 @@ DID é uma porta de descoberta, não um segundo emissor.
 - `pnpm typecheck`
 - `pnpm lint`
 - `pnpm test` (unidade + integração; Docker disponível)
-- `pnpm db:fence` para as migrações `0034`/`0035`
+- `pnpm db:fence` para as migrações `0034`/`0035`/`0036`
 - Testes de integração relevantes: `apps/api/src/credential.int.test.ts`,
   `apps/worker/src/modules/deep-enrich/deep-enrich.int.test.ts` e
   `apps/worker/src/deep-path.e2e.test.ts`.

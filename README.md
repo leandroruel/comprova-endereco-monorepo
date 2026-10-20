@@ -87,7 +87,9 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
 - **Credenciais superadas** (ADR-0024, C1): quando o deep path muda veredito,
   evidências, policy ou scorer, ou regride a validation concluída para
   `partial`, a credencial já emitida é revogada como `superseded` na mesma
-  transação. Replay idêntico não revoga; a coluna de motivo não é pública.
+  transação. Replay idêntico não revoga, inclusive sob uma policy nova (a
+  comparação usa a última policy avaliada, não o binding imutável da assertion);
+  a coluna de motivo não é pública.
 - **Verificação** (ADR-0024, A2): `verifyCredentialIntegrity` (antigo
   `verifyCredential`) devolve `checked` com integridade, tempo e status. Aceita
   `now` e usa `[validFrom, validUntil)`; sem `now`, declara que o tempo não foi
