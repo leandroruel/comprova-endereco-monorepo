@@ -398,7 +398,9 @@ describe('emissão e verificação independente', () => {
     expect(credential['comprova:result']['comprova:completedAt']).toBe(finishedAt.toISOString())
     // `validFrom` NÃO antecede a conclusão real da análise.
     expect(Date.parse(credential.validFrom)).toBeGreaterThan(row!.createdAt!.getTime())
-    expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: issuer.id })).toMatchObject({ valid: true })
+    expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: issuer.id })).toMatchObject({
+      valid: true,
+    })
   })
 
   it('deriva o issuer do tenant escopado e da origem configurada (não existe issuer avulso)', async () => {
@@ -551,9 +553,7 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     const evidenceHorizonOf = async (validationId: string): Promise<Date> => {
       const claimId = await claimIdOf(validationId)
       const observations = await observationsOf(claimId)
-      return new Date(
-        Math.min(...observations.map((o) => o.observedAt.getTime() + o.ttlSeconds * 1000)),
-      )
+      return new Date(Math.min(...observations.map((o) => o.observedAt.getTime() + o.ttlSeconds * 1000)))
     }
 
     // Conclusão 1 ms antes do horizonte das evidências: a policy (30 dias) não
@@ -569,7 +569,9 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     expect(credential.validUntil).toBe(evidenceHorizon.toISOString())
     expect(credential.validUntil).not.toBe(edgeRow!.expiresAt!.toISOString())
     expect(Date.parse(credential.validFrom)).toBeLessThan(Date.parse(credential.validUntil!))
-    expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: issuer.id })).toMatchObject({ valid: true })
+    expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: issuer.id })).toMatchObject({
+      valid: true,
+    })
 
     // `completed_at == validUntil` (janela vazia) e `completed_at > validUntil`
     // (invertida): recusa explícita — e `expires_at` (retenção) não é alterado.
@@ -589,7 +591,6 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
       const after = await validationRow(validationId)
       expect(after!.expiresAt!.getTime(), label).toBe(row!.expiresAt!.getTime())
     }
-
   })
 
   it('recusa validation sem claim', async () => {

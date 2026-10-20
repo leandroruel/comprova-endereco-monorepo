@@ -4,7 +4,7 @@ SET idle_in_transaction_session_timeout = '30s';
 SET application_name = 'comprova-migrations';
 
 -- =====================================================================
--- FASE 24/C1: motivo auditável da revogação (ADR-0030)
+-- FASE 24/C1: motivo auditável da revogação (ADR-0024, Revisão pós-PR #5)
 -- =====================================================================
 -- `credential_status` já guarda ACTIVE/REVOKED e `revoked_at`. O deep path
 -- passa a revogar credenciais superadas quando produz uma conclusão nova

@@ -345,7 +345,9 @@ describe('makeHttpDidResolver', () => {
     // Verificação independente: a chave resolvida confere com o método confiável.
     const resolved = await resolverWith(() => response(otherDocument))(verificationMethodOf(otherIssuer))
     expect(
-      verifyCredentialIntegrity(otherCredential, { trusted: { id: resolved.id, publicKey: resolved.publicKey } }),
+      verifyCredentialIntegrity(otherCredential, {
+        trusted: { id: resolved.id, publicKey: resolved.publicKey },
+      }),
     ).toMatchObject({ valid: true })
   })
 

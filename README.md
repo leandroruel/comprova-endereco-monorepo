@@ -52,7 +52,9 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   conhece domínio nenhum: o valor é validado no boot (HTTPS, sem
   path/query/fragmento) e, enquanto não houver um domínio de produção
   confirmado, use uma origem reservada (`https://issuer.test`). O `tenant_id`
-  interno **não** aparece na URL — o path do issuer leva um digest do tenant.
+  interno **não** aparece na URL — o path do issuer leva um digest do tenant. Em
+  produção (`NODE_ENV=production`), o boot recusa TLDs reservados (`.test`,
+  `.example`, `.invalid`, `.localhost`, `.local`), `localhost` e IP literal.
 - **`CREDENTIAL_SIGNING_KEYS`** assina a credencial **por tenant** (ADR-0026).
   É um JSON — lista de `{"tenant_id", "key_id", "private_key_pem"}` — lido no
   boot: JSON inválido, PEM inválida ou chave não-Ed25519 **derrubam a API**
@@ -70,6 +72,26 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   material privado vive em configuração/segredo externo.) Uma chave com
   `revoked_at` (ADR-0029) sai dos documentos públicos e deixa de ser aceita; o
   `active = false` continua sendo apenas rotação.
+- **Validade da credencial** (ADR-0024, revisão pós-PR #5): `validFrom` é o
+  `completed_at` real e `validUntil` é
+  `min(completed_at + policy.credential_ttl_seconds, observed_at + ttl_seconds)`.
+  `credential_ttl_seconds` é opcional na policy (default **30 dias**) e não
+  altera policies já publicadas; o TTL de cada evidência limita a credencial. A
+  janela vazia/invertida falha com `VALIDITY_WINDOW_INVALID`. `expires_at`
+  continua sendo o horizonte de **retenção**, não o `validUntil`.
+- **Reemissão determinística** (ADR-0024, B2): a primeira emissão por validation
+  é registrada em `credential_issuance` (`issued_at` + `credential_id` público,
+  sem o documento assinado). Reemitir reassina com `proof.created = issued_at` e
+  devolve bytes idênticos enquanto issuer/chave/policy não mudarem; o status
+  `ACTIVE`/`REVOKED` continua em uma única linha e não é reativado.
+- **Credenciais superadas** (ADR-0024, C1): quando o deep path muda veredito,
+  evidências, policy ou scorer, ou regride a validation concluída para
+  `partial`, a credencial já emitida é revogada como `superseded` na mesma
+  transação. Replay idêntico não revoga; a coluna de motivo não é pública.
+- **Verificação** (ADR-0024, A2): `verifyCredentialIntegrity` (antigo
+  `verifyCredential`) devolve `checked` com integridade, tempo e status. Aceita
+  `now` e usa `[validFrom, validUntil)`; sem `now`, declara que o tempo não foi
+  checado. Revogação **não** é consultada aqui — use o `statusResolver`.
 - **Status/revogação** (ADR-0027): a credencial carrega `id` e
   `credentialStatus.id` assinados, mas o valor (`ACTIVE`/`REVOKED`) fica em uma
   linha por `credential_id` (tabela `credential_status`, isolada por RLS). O

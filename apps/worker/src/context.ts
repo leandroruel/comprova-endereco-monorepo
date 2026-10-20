@@ -64,10 +64,7 @@ export const buildT2Checkers = (env: WorkerEnv, evidenceWriter: EvidenceWriter):
 }
 
 export const buildWorkerContext = (env: WorkerEnv): WorkerContext => {
-  const policyYaml = readFileSync(
-    path.join(env.repoRoot, 'policies', `${env.policyVersion}.yaml`),
-    'utf8',
-  )
+  const policyYaml = readFileSync(path.join(env.repoRoot, 'policies', `${env.policyVersion}.yaml`), 'utf8')
   const policy = loadPolicy(policyYaml)
   const pool = createDbPool(env.databaseUrl)
   const t1Checkers = makeT1Checkers({

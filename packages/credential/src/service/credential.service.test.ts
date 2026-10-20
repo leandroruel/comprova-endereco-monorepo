@@ -283,10 +283,11 @@ describe('tempo: `proof.created` e `validFrom`', () => {
 
   it('usa `validUntil` da credencial, não `expires_at` de retenção', async () => {
     const validUntil = new Date('2026-01-15T00:00:00.000Z')
-    const credential = await buildCredential(
-      source(twoObservations(), { validUntil }),
-      { issuer, signer, now: clock },
-    )
+    const credential = await buildCredential(source(twoObservations(), { validUntil }), {
+      issuer,
+      signer,
+      now: clock,
+    })
     expect(credential.validUntil).toBe(validUntil.toISOString())
     expect(credential.validUntil).not.toBe(source(twoObservations()).validation.expiresAt.toISOString())
   })
@@ -496,7 +497,9 @@ describe('adulteração da credencial', () => {
     })
 
     const credential = await valid()
-    expect(verifyCredentialIntegrity({ ...credential, '@context': ['https://example.org'] }, { trusted })).toMatchObject({
+    expect(
+      verifyCredentialIntegrity({ ...credential, '@context': ['https://example.org'] }, { trusted }),
+    ).toMatchObject({
       valid: false,
       reason: 'UNSUPPORTED_CREDENTIAL',
     })
@@ -513,7 +516,9 @@ describe('adulteração da credencial', () => {
     ).toMatchObject({ valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' })
 
     const otherKey = generateEd25519KeyPair()
-    expect(verifyCredentialIntegrity(credential, { trusted: { ...trusted, publicKey: otherKey.publicKey } })).toMatchObject({
+    expect(
+      verifyCredentialIntegrity(credential, { trusted: { ...trusted, publicKey: otherKey.publicKey } }),
+    ).toMatchObject({
       valid: false,
       reason: 'INVALID_SIGNATURE',
     })

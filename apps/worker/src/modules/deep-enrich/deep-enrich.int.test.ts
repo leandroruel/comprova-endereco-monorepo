@@ -710,9 +710,7 @@ describe('deepEnrich (activity core)', () => {
       const stillSuperseded = await statusOf(validationId)
       expect(stillSuperseded?.status).toBe('REVOKED')
       expect(stillSuperseded?.revocationReason).toBe('superseded')
-      expect(stillSuperseded?.revokedAt?.toISOString()).toBe(
-        superseded?.revokedAt?.toISOString(),
-      )
+      expect(stillSuperseded?.revokedAt?.toISOString()).toBe(superseded?.revokedAt?.toISOString())
     })
 
     it('reexecução com evidências novas é uma NOVA conclusão: grava novo instante', async () => {

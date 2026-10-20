@@ -39,9 +39,7 @@ describe('credentialValidUntilOf', () => {
 
   it('policy sem o campo usa o default de 30 dias', () => {
     const validUntil = credentialValidUntilOf(
-      source(completedAt, [
-        { observedAt: completedAt, ttlSeconds: DEFAULT_CREDENTIAL_TTL_SECONDS },
-      ]),
+      source(completedAt, [{ observedAt: completedAt, ttlSeconds: DEFAULT_CREDENTIAL_TTL_SECONDS }]),
     )
     expect(validUntil.toISOString()).toBe('2026-01-31T00:00:00.000Z')
   })

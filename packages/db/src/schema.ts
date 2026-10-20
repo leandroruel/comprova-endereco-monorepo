@@ -170,9 +170,9 @@ export const credentialStatus = pgTable(
 )
 
 /**
- * Primeira emissão por validation (ADR-0030/B2). A credencial continua NÃO
- * persistida: guardamos só o instante da primeira prova (`issued_at`) e o
- * ponteiro público de status (`credential_id`, o mesmo de
+ * Primeira emissão por validation (ADR-0024, Revisão pós-PR #5/B2). A
+ * credencial continua NÃO persistida: guardamos só o instante da primeira prova
+ * (`issued_at`) e o ponteiro público de status (`credential_id`, o mesmo de
  * `credential_status`). Reemitir a mesma validation reassina com
  * `proof.created = issued_at`, produzindo bytes idênticos enquanto issuer/key/
  * policy não mudarem.

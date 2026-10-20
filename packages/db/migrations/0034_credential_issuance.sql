@@ -4,7 +4,8 @@ SET idle_in_transaction_session_timeout = '30s';
 SET application_name = 'comprova-migrations';
 
 -- =====================================================================
--- FASE 24/B2: primeira emissão determinística por validation (ADR-0030)
+-- FASE 24/B2: primeira emissão determinística por validation
+-- (ADR-0024, Revisão pós-PR #5)
 -- =====================================================================
 -- A credencial NÃO é persistida. Para que reemitir a mesma validation devolva
 -- o MESMO documento assinado, guardamos apenas:

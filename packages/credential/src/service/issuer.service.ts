@@ -94,17 +94,15 @@ const isReservedIssuerHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase().replace(/\.$/, '')
   return (
     host === 'localhost' ||
-    RESERVED_ISSUER_HOST_SUFFIXES.some(
-      (suffix) => host === suffix.slice(1) || host.endsWith(suffix),
-    )
+    RESERVED_ISSUER_HOST_SUFFIXES.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))
   )
 }
 
 /**
- * Política de origem do issuer em PRODUÇÃO (ADR-0030). `parseIssuerOrigin` só
- * exige HTTPS porque a biblioteca não conhece o ambiente; o boot da API sabe se
- * está em produção e não pode aceitar uma origem que nunca resolveria
- * publicamente (ou que é um IP literal).
+ * Política de origem do issuer em PRODUÇÃO (ADR-0024, Revisão pós-PR #5).
+ * `parseIssuerOrigin` só exige HTTPS porque a biblioteca não conhece o ambiente;
+ * o boot da API sabe se está em produção e não pode aceitar uma origem que nunca
+ * resolveria publicamente (ou que é um IP literal).
  *
  * Fora de produção a origem reservada continua válida — é o valor de `dev` e
  * dos testes. Em produção, `https://issuer.test`, `localhost`, `.local`,

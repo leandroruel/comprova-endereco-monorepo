@@ -35,12 +35,8 @@ describe('outcomeSupersedesCredentials (C1)', () => {
 
   it('mudança de veredito, evidências, policy ou scorer revoga', () => {
     expect(outcomeSupersedesCredentials(previous(), next({ verdict: 'NOT_FOUND' }))).toBe(true)
-    expect(
-      outcomeSupersedesCredentials(previous(), next({ evidenceSetHash: 'c'.repeat(64) })),
-    ).toBe(true)
-    expect(outcomeSupersedesCredentials(previous(), next({ policyHash: 'd'.repeat(64) }))).toBe(
-      true,
-    )
+    expect(outcomeSupersedesCredentials(previous(), next({ evidenceSetHash: 'c'.repeat(64) }))).toBe(true)
+    expect(outcomeSupersedesCredentials(previous(), next({ policyHash: 'd'.repeat(64) }))).toBe(true)
     expect(outcomeSupersedesCredentials(previous(), next({ scorerVersion: '2' }))).toBe(true)
   })
 

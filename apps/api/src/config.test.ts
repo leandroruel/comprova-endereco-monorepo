@@ -35,9 +35,9 @@ describe('loadConfig — origem do issuer', () => {
     ['loopback IPv4', 'https://127.0.0.1'],
     ['IPv6', 'https://[::1]'],
   ])('em produção recusa %s com mensagem clara', (_label, origin) => {
-    expect(() =>
-      loadConfig(baseEnv({ NODE_ENV: 'production', CREDENTIAL_ISSUER_ORIGIN: origin })),
-    ).toThrow(/CREDENTIAL_ISSUER_ORIGIN: issuer origin must use a public DNS name in production/)
+    expect(() => loadConfig(baseEnv({ NODE_ENV: 'production', CREDENTIAL_ISSUER_ORIGIN: origin }))).toThrow(
+      /CREDENTIAL_ISSUER_ORIGIN: issuer origin must use a public DNS name in production/,
+    )
   })
 
   it('continua exigindo HTTPS em qualquer ambiente', () => {

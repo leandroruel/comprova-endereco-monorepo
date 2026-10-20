@@ -279,7 +279,8 @@ export const updateValidationOutcome = async (tx: DbTx, write: ValidationOutcome
 
 /**
  * Revoga, na MESMA transação da nova conclusão, as credenciais já emitidas
- * desta validation (C1/ADR-0030). O vínculo é `credential_issuance.validation_id`
+ * desta validation (C1/ADR-0024, Revisão pós-PR #5). O vínculo é
+ * `credential_issuance.validation_id`
  * → `credential_id`; sem emissão, é no-op. Idempotente: só casa ACTIVE, então
  * reexecuções não reescrevem `revoked_at` nem o motivo.
  *

@@ -38,7 +38,8 @@ export interface DeepEnrichDeps {
   /**
    * Digest do CONTEÚDO efetivo da policy carregada (`policyHashOf`). Comparar
    * só o veredito e o conjunto de evidências não detecta uma mudança de policy
-   * que preserve as evidências, mas mude a conclusão. A3/ADR-0030.
+   * que preserve as evidências, mas mude a conclusão.
+   * A3/ADR-0024, Revisão pós-PR #5.
    */
   readonly policyHash: string
   readonly clock: Clock
@@ -72,10 +73,10 @@ export interface NextCredentialOutcome {
 }
 
 /**
- * C1/ADR-0030: uma credencial já emitida deixa de representar a conclusão
- * vigente quando o deep path produz OUTRA conclusão — veredito, conjunto de
- * evidências, policy ou scorer diferentes — ou quando a validation deixa de ser
- * terminal (`partial`). Replay idêntico NÃO revoga.
+ * C1/ADR-0024, Revisão pós-PR #5: uma credencial já emitida deixa de
+ * representar a conclusão vigente quando o deep path produz OUTRA conclusão —
+ * veredito, conjunto de evidências, policy ou scorer diferentes — ou quando a
+ * validation deixa de ser terminal (`partial`). Replay idêntico NÃO revoga.
  *
  * `previous.status === 'completed'` é o portão: só existe credencial emitível
  * (e, portanto, possivelmente emitida) depois de uma conclusão. Se não havia
