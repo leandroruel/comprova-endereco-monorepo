@@ -29,15 +29,17 @@ export interface RevokedSigningKey {
  * usada pela condição de confiança, sem janela de skew entre processos. A
  * operação é:
  *
- * - **monotônica**: só casa `revoked_at IS NULL`; uma chave já revogada nunca
- *   tem o instante reescrito nem volta a ser confiável;
- * - **idempotente**: repetir devolve o instante já registrado;
+ * - **monotônica no sentido de confiança**: um `revoked_at` futuro pode ser
+ *   antecipado (revogação de emergência), mas nunca adiado nem desfeito. Um
+ *   pedido com instante mais cedo que o registrado o substitui; um pedido com
+ *   instante igual ou mais tarde devolve o já registrado;
+ * - **idempotente**: repetir devolve o instante efetivo;
  * - **escopada por RLS**: a chave de outro tenant é indistinguível de uma
  *   inexistente (`null` → 404), sem vazar a existência.
  *
  * O `UPDATE` usa a mesma serialização por row lock do status de credencial; o
  * trigger `issuer_signing_key_guard` (migration 0033) é a barreira final contra
- * reescrita do instante ou da identidade da chave.
+ * adiar/desfazer a revogação ou reescrever a identidade da chave.
  */
 export const revokeSigningKey = async (
   db: Db,
@@ -46,14 +48,19 @@ export const revokeSigningKey = async (
   effectiveAt: Date | undefined,
 ): Promise<RevokedSigningKey | null> =>
   withTenant(db, tenantId, async (tx) => {
+    const target = effectiveAt ?? sql`now()`
+    // Na comparação crua o Drizzle não conhece o tipo da coluna e não converte
+    // `Date`; o ISO-8601 é aceito pelo timestamptz. No `SET`, a coluna tipada
+    // faz a conversão.
+    const boundary = effectiveAt === undefined ? sql`now()` : effectiveAt.toISOString()
     const updated = await tx
       .update(t.issuerSigningKey)
-      .set({ revokedAt: effectiveAt ?? sql`now()` })
+      .set({ revokedAt: target })
       .where(
         and(
           eq(t.issuerSigningKey.tenantId, tenantId),
           eq(t.issuerSigningKey.keyId, keyId),
-          isNull(t.issuerSigningKey.revokedAt),
+          or(isNull(t.issuerSigningKey.revokedAt), sql`${t.issuerSigningKey.revokedAt} > ${boundary}`),
         ),
       )
       .returning({ keyId: t.issuerSigningKey.keyId, revokedAt: t.issuerSigningKey.revokedAt })

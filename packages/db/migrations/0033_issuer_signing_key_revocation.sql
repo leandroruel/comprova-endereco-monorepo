@@ -56,7 +56,11 @@ BEGIN
     RAISE EXCEPTION 'issuer_signing_key: identidade é imutável';
   END IF;
 
-  IF OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
+  -- Monotonicidade = a confiança só pode ENCOLHER. Um `revoked_at` futuro pode
+  -- ser antecipado (revogação de emergência de uma expiração agendada), mas
+  -- nunca adiado nem desfeito (NULL): ambos estenderiam a confiança.
+  IF OLD.revoked_at IS NOT NULL
+     AND (NEW.revoked_at IS NULL OR NEW.revoked_at > OLD.revoked_at) THEN
     RAISE EXCEPTION 'issuer_signing_key: revogação é monotônica';
   END IF;
 

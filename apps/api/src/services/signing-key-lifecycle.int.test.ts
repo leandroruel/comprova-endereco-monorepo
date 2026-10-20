@@ -65,12 +65,13 @@ describe('revokeSigningKey', () => {
     expect(await loadActiveSigningKey(appPool.db, tenantId)).toBeNull()
     expect((await rowOf(tenantId, 'key-1'))!.revokedAt).toEqual(revoked!.revokedAt)
 
-    // Repetir (inclusive com outro instante) NÃO reescreve a revogação.
+    // Repetir com instante mais TARDE não adia a revogação: devolve o já
+    // registrado (a confiança só pode encolher).
     const again = await revokeSigningKey(appPool.db, tenantId, 'key-1', new Date(Date.now() + 60_000))
     expect(again).toEqual(revoked)
   })
 
-  it('agendamento futuro mantém a chave ativa; revoked_at no passado já não é confiável', async () => {
+  it('agendamento futuro mantém a chave ativa; antecipar revoga; revoked_at no passado não é confiável', async () => {
     const scheduledTenant = await createTenant(adminPool.db, { name: 'lifecycle-scheduled' })
     await createIssuerSigningKey(adminPool.db, scheduledTenant, createTestCredentialSigningKey('key-1'))
     const future = new Date(Date.now() + 3_600_000)
@@ -80,6 +81,22 @@ describe('revokeSigningKey', () => {
     })
     // O instante ainda não chegou: publicada/ativa continua sendo selecionada.
     expect(await loadActiveSigningKey(appPool.db, scheduledTenant)).not.toBeNull()
+
+    // Antecipar a expiração é seguro (a confiança encolhe): uma chave
+    // comprometida com expiração agendada pode ser revogada agora.
+    const earlier = new Date(Date.now() + 60_000)
+    expect(await revokeSigningKey(appPool.db, scheduledTenant, 'key-1', earlier)).toEqual({
+      keyId: 'key-1',
+      revokedAt: earlier,
+    })
+    expect(await loadActiveSigningKey(appPool.db, scheduledTenant)).not.toBeNull()
+
+    const immediate = await revokeSigningKey(appPool.db, scheduledTenant, 'key-1', undefined)
+    expect(immediate!.revokedAt.getTime()).toBeLessThanOrEqual(Date.now())
+    expect(await loadActiveSigningKey(appPool.db, scheduledTenant)).toBeNull()
+
+    // Depois de antecipado, um pedido posterior não reabre a confiança.
+    expect(await revokeSigningKey(appPool.db, scheduledTenant, 'key-1', future)).toEqual(immediate)
 
     // Uma chave já vencida (revoked_at no passado) é excluída mesmo que a linha
     // tenha sido publicada como ativa.
@@ -126,7 +143,7 @@ describe('revokeSigningKey', () => {
     expect((await rowOf(tenantId, 'key-1'))!.keyId).toBe('key-1')
   })
 
-  it('o trigger impede reescrever a revogação e a identidade, mas permite rotação (active)', async () => {
+  it('o trigger só permite encolher a revogação e protege a identidade; rotação (active) é permitida', async () => {
     const tenantId = await createTenant(adminPool.db, { name: 'lifecycle-trigger' })
     await createIssuerSigningKey(adminPool.db, tenantId, createTestCredentialSigningKey('key-1'))
     const revoked = await revokeSigningKey(appPool.db, tenantId, 'key-1', undefined)
@@ -137,7 +154,13 @@ describe('revokeSigningKey', () => {
         .set(values)
         .where(and(eq(t.issuerSigningKey.tenantId, tenantId), eq(t.issuerSigningKey.keyId, 'key-1')))
 
-    expect(await rejectionOf(update({ revokedAt: new Date(Date.now() + 60_000) }))).toMatch(
+    // Antecipar é permitido (a confiança encolhe).
+    const earlier = new Date(revoked!.revokedAt.getTime() - 60_000)
+    await update({ revokedAt: earlier })
+    expect((await rowOf(tenantId, 'key-1'))!.revokedAt).toEqual(earlier)
+
+    // Adiar ou desfazer NÃO é permitido (a confiança cresceria).
+    expect(await rejectionOf(update({ revokedAt: new Date(earlier.getTime() + 30_000) }))).toMatch(
       /revogação é monotônica/,
     )
     expect(await rejectionOf(update({ revokedAt: null }))).toMatch(/revogação é monotônica/)
@@ -147,6 +170,6 @@ describe('revokeSigningKey', () => {
     await update({ active: false })
     const row = await rowOf(tenantId, 'key-1')
     expect(row!.active).toBe(false)
-    expect(row!.revokedAt).toEqual(revoked!.revokedAt)
+    expect(row!.revokedAt).toEqual(earlier)
   })
 })

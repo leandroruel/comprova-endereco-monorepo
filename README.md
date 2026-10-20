@@ -93,9 +93,10 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   revogada/vencida não aparece em `GET /issuers/:scope` nem no DID Document, e
   o verificador falha fechado (`VERIFICATION_METHOD_UNRESOLVED`). O
   `POST /v1/signing-keys/:keyId/revoke` é autenticado, escopado por tenant,
-  idempotente e monotônico; `?effective_at=<ISO-8601>` agenda a expiração. Não
-  há reativação: uma chave apenas rotacionada (`active = false`) continua
-  publicada.
+  exige `validate:write`, é idempotente e só permite encolher a confiança;
+  `?effective_at=<ISO-8601>` agenda a expiração, e uma chamada sem o parâmetro
+  antecipa a revogação (nunca a adia). Não há reativação: uma chave apenas
+  rotacionada (`active = false`) continua publicada.
 
 ## Dashboard
 

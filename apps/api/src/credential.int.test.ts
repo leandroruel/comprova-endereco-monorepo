@@ -133,6 +133,15 @@ const rotationNewSigning = createTestCredentialSigningKey('key-new')
 await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationOldSigning)
 await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationNewSigning, { active: false })
 
+// Tenant H: API key SOMENTE-LEITURA. Revogar é escrita; a rota deve recusar
+// mesmo com uma chave de API válida (403), sem revelar se o key_id existe.
+const readOnlyTenantId = await createTenant(adminPool.db, { name: 'credential-readonly-key' })
+const readOnlyKey = await createApiKey(adminPool.db, readOnlyTenantId, PEPPER, {
+  scopes: ['validate:read'],
+})
+const readOnlySigning = createTestCredentialSigningKey('readonly-key')
+await createIssuerSigningKey(adminPool.db, readOnlyTenantId, readOnlySigning)
+
 const appPool = createDbPool(db.appUrl)
 const config: AppConfig = {
   DATABASE_URL: db.appUrl,
@@ -148,6 +157,7 @@ const config: AppConfig = {
     { tenantId: scheduledTenantId, key: scheduledSigning },
     { tenantId: rotationTenantId, key: rotationOldSigning },
     { tenantId: rotationTenantId, key: rotationNewSigning },
+    { tenantId: readOnlyTenantId, key: readOnlySigning },
   ]),
   PORT: 3000,
   HOST: '127.0.0.1',
@@ -1571,6 +1581,14 @@ describe('revogação e expiração da chave de assinatura', () => {
   const didMethodOf = (tenant: string, keyId: string) =>
     didVerificationMethodOf(didOfIssuer(issuerIdOf(ISSUER_ORIGIN, tenant)), keyId)
 
+  it('exige validate:write: API key somente-leitura recebe 403 e não revoga', async () => {
+    const res = await revoke(readOnlyKey.plaintext, readOnlySigning.keyId)
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('FORBIDDEN')
+    // A chave continua publicada: o 403 não chegou ao serviço de revogação.
+    expect((await documentOf(readOnlyTenantId)).statusCode).toBe(200)
+  })
+
   it('revoga a chave ativa: sai dos documentos públicos e a credencial anterior falha fechado', async () => {
     const credential = await issueAs(lifecycleKey.plaintext)
 
@@ -1657,11 +1675,27 @@ describe('revogação e expiração da chave de assinatura', () => {
     const renewed = await issueAs(scheduledKey.plaintext)
     expect(renewed.proof.verificationMethod).toBe(methodOf(scheduledTenantId, scheduledSigning.keyId))
 
-    // Reagendar não reescreve o instante já registrado.
+    // Adiar não reescreve o instante já registrado.
     const later = new Date(Date.now() + 7_200_000).toISOString()
     const again = await revoke(scheduledKey.plaintext, scheduledSigning.keyId, later)
     expect(again.statusCode).toBe(200)
     expect(again.json()).toEqual({ key_id: scheduledSigning.keyId, revoked_at: future })
+
+    // Antecipar é permitido: uma chave comprometida com expiração agendada
+    // pode ser revogada agora. A confiança só encolhe.
+    const emergency = await revoke(scheduledKey.plaintext, scheduledSigning.keyId)
+    expect(emergency.statusCode).toBe(200)
+    const emergencyBody = emergency.json() as { key_id: string; revoked_at: string }
+    expect(emergencyBody.key_id).toBe(scheduledSigning.keyId)
+    expect(Date.parse(emergencyBody.revoked_at)).toBeLessThan(Date.parse(future))
+
+    expect((await documentOf(scheduledTenantId)).statusCode).toBe(404)
+    expect(
+      await verifyCredentialFromIssuer(credential, resolver, {
+        expectedIssuerId: credential.issuer,
+        statusResolver,
+      }),
+    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
   })
 
   it('rotação (active=false) continua publicada; revogar remove só a chave revogada', async () => {

@@ -116,9 +116,19 @@ Authorization: Bearer <api key do tenant>
 - A rota é autenticada e o tenant vem da API key, exatamente como
   `POST /v1/credentials/:credentialId/revoke` (ADR-0027). A consulta é escopada
   por RLS: a chave de outro tenant é indistinguível de uma inexistente.
-- A operação é **idempotente e monotônica**: o `UPDATE` só casa
-  `revoked_at IS NULL`; repetir devolve o instante já registrado, mesmo que o
-  corpo/query peça outro. Não há rota de reativação.
+- A rota exige o escopo **`validate:write`**: revogar é uma operação de
+  escrita. Uma API key somente-leitura recebe `403 FORBIDDEN`, sem revelar se o
+  `key_id` existe.
+- A operação é **idempotente e monotônica no sentido de confiança**: a
+  confiança só pode encolher. O `UPDATE` casa `revoked_at IS NULL` **ou**
+  `revoked_at` mais tarde que o instante pedido; portanto:
+  - um pedido com instante **mais cedo** (ou sem `effective_at`, usando
+    `now()`) **antecipa** uma expiração agendada — é o caminho de emergência
+    para uma chave comprometida;
+  - um pedido com instante **igual ou mais tarde** devolve o instante já
+    registrado e não o adia;
+  - um `revoked_at` já efetivo nunca é reescrito para depois nem para `NULL`.
+    Não há rota de reativação.
 - O app recebe apenas `UPDATE (revoked_at)` (grant por coluna). Ele não pode
   reescrever a chave pública, o `key_id`, a identidade da linha nem `active`.
   A provisão/rotação continua sendo operação de admin/owner.
@@ -132,8 +142,9 @@ Authorization: Bearer <api key do tenant>
 - O trigger `issuer_signing_key_guard` (BEFORE UPDATE) recusa:
   - alteração de `issuer_signing_key_id`, `tenant_id`, `issuer_scope`,
     `key_id`, `algorithm`, `public_key` ou `created_at`;
-  - alteração de um `revoked_at` que já não é NULL, inclusive tentativa de
-    "desrevogar" (`NULL`).
+  - adiamento de um `revoked_at` que já não é NULL (instante mais tarde) e
+    tentativa de "desrevogar" (`NULL`); **antecipar** um instante futuro é
+    permitido, porque reduz a confiança.
 - `active` continua alterável (rotação); o trigger não o protege porque ele não
   é um eixo de confiança, apenas de seleção de assinatura.
 
@@ -178,16 +189,19 @@ cache de decisão de confiança; mudança do formato da VC.
 ## Testes
 
 - `apps/api/src/services/signing-key-lifecycle.int.test.ts` — revogação com o
-  relógio do banco, idempotência/monotonicidade, expiração futura vs. passada,
-  isolamento por RLS, grant por coluna e trigger (identidade imutável,
-  `revoked_at` monotônico, `active` ainda alterável).
+  relógio do banco, idempotência/monotonicidade, antecipação de expiração
+  agendada, expiração futura vs. passada, isolamento por RLS, grant por coluna
+  e trigger (identidade imutável, revogação só encolhe, `active` ainda
+  alterável).
 - `apps/api/src/services/provision-signing-keys.int.test.ts` — chave ativa
   revogada/vencida libera o índice para a próxima nascer ativa; expiração futura
   ainda preserva a próxima como inativa.
-- `apps/api/src/credential.int.test.ts` — endpoint autenticado, idempotência,
-  isolamento entre tenants, 404 para chave desconhecida/de outro tenant, omissão
+- `apps/api/src/credential.int.test.ts` — endpoint autenticado, exigência de
+  `validate:write` (403 para chave somente-leitura), idempotência, isolamento
+  entre tenants, 404 para chave desconhecida/de outro tenant, omissão
   nos documentos `/issuers/:scope` e `/did.json`, falha fechada na verificação
   (`VERIFICATION_METHOD_UNRESOLVED`) e na emissão (`SIGNING_KEY_UNAVAILABLE`),
-  expiração agendada e a distinção rotação vs. revogação.
+  expiração agendada, antecipação de emergência e a distinção rotação vs.
+  revogação.
 - `packages/credential/src/schema/issuer.schema.test.ts` — forma da resposta
   `{ key_id, revoked_at }`.
