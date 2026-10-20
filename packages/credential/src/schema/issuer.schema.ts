@@ -33,6 +33,23 @@ export const IssuerKeyDocumentSchema = z.object({
 export type IssuerVerificationMethod = z.infer<typeof IssuerVerificationMethodSchema>
 export type IssuerKeyDocument = z.infer<typeof IssuerKeyDocumentSchema>
 
+/**
+ * Resposta da revogação/expiração de uma chave de assinatura (ADR-0029).
+ *
+ * `revoked_at` é o instante a partir do qual a chave deixou de ser confiável.
+ * Um valor no futuro representa uma expiração agendada; um valor no passado,
+ * uma revogação (inclusive imediata). A operação é idempotente e monotônica:
+ * repetir a revogação devolve o mesmo instante.
+ */
+export const IssuerSigningKeyRevocationSchema = z
+  .object({
+    key_id: z.string().min(1),
+    revoked_at: z.iso.datetime(),
+  })
+  .strict()
+
+export type IssuerSigningKeyRevocation = z.infer<typeof IssuerSigningKeyRevocationSchema>
+
 /** Chave pública associada ao fragmento que a identifica no issuer. */
 export interface IssuerVerificationKey {
   readonly keyId: string

@@ -7,6 +7,10 @@ Aceito (2026-10-19). Dá sequência ao
 emissão HTTP, o documento público do issuer e o verificador com resolução de
 chave, mas deixou **uma única chave global** assinando todos os issuers.
 
+**Atualizado pelo [ADR-0029](0029-revogacao-e-expiracao-de-chave-de-assinatura.md):**
+`revoked_at` adiciona o hard stop de revogação/expiração, separado de `active`
+(que continua sendo rotação).
+
 ## Contexto
 
 Depois do ADR-0025, cada tenant já tem o seu próprio `issuer.id`
@@ -43,7 +47,8 @@ Migration `0031_issuer_signing_key.sql`:
 | `key_id`                | fragmento do `verificationMethod`                            |
 | `algorithm`             | `Ed25519`                                                    |
 | `public_key`            | chave pública crua (32 bytes) — **nunca a privada**          |
-| `active`                | `false` = chave superada (rotação futura)                    |
+| `active`                | `false` = chave superada (rotação)                           |
+| `revoked_at`            | ADR-0029: hard stop; `NULL` = confiável, futuro = expiração  |
 | `created_at`            | —                                                            |
 
 Restrições: `UNIQUE (tenant_id, key_id)` (o `key_id` é único **dentro** do
@@ -58,8 +63,9 @@ RLS ligada (`ENABLE`+`FORCE`), com:
   `GET /issuers/:scope` precisa lê-la **sem** contexto de tenant. Nada
   confidencial é exposto; a chave privada nunca entra aqui.
 
-A aplicação só **lê** (`GRANT SELECT`); a provisão é operação de admin/seed,
-como a criação de `api_key`.
+A aplicação **lê** a chave e pode apenas atualizar `revoked_at` (grant por
+coluna; ADR-0029). A provisão é operação de admin/seed, como a criação de
+`api_key`.
 
 ### 2. Onde vive a chave privada
 
@@ -123,10 +129,12 @@ O identificador completo continua `issuer.id + "#" + key_id`
 globalmente: o namespace é o issuer, então `key-1` pode repetir entre tenants.
 
 O `GET /issuers/:scope` (inalterado no formato) agora lista **todas** as chaves
-registradas para aquele `issuer_scope` (não só a ativa), o que permite a
-coexistência de rotação: uma credencial antiga aponta `#key-1`, uma nova
-`#key-2`, e ambas resolvem no mesmo documento. **Rotação automática não está
-implementada** — o processo administrativo é apenas deixado possível (`active`).
+registradas e **não revogadas/vencidas** para aquele `issuer_scope` (não só a
+ativa), o que permite a coexistência de rotação: uma credencial antiga aponta
+`#key-1`, uma nova `#key-2`, e ambas resolvem no mesmo documento. **Rotação
+automática não está implementada** — o processo administrativo é apenas deixado
+possível (`active`). Revogar/expirar é um eixo separado (`revoked_at`), definido
+no ADR-0029.
 
 ## Compatibilidade e impacto
 
@@ -146,11 +154,13 @@ implementada** — o processo administrativo é apenas deixado possível (`activ
 
 ## Itens deliberadamente NÃO implementados
 
-DID / `did:web` / DID Document; JWKS genérico; rotação automática de chave /
-administração de chaves; KMS/HSM/secret manager; criptografia caseira para
-segredo; wallet, VP, selective disclosure, SD-JWT, BBS+; TSA/RFC 3161;
-revogação/status list; blockchain/Merkle; registry/banco de credenciais; event
-sourcing; nova representação paralela da assertion.
+DID / `did:web` / DID Document (feito no ADR-0028); JWKS genérico; rotação
+automática de chave / administração de chaves; KMS/HSM/secret manager;
+criptografia caseira para segredo; wallet, VP, selective disclosure, SD-JWT,
+BBS+; TSA/RFC 3161; revogação/status list de credenciais em massa;
+blockchain/Merkle; registry/banco de credenciais; event sourcing; nova
+representação paralela da assertion. Revogação/expiração de **chave** foi feita
+no ADR-0029.
 
 ## Limitação operacional declarada
 
@@ -181,3 +191,8 @@ da aplicação.
   repetível: primeira chave ativa, repetição idempotente, recusa de sobrescrita
   (mesmo `key_id`, material novo) e chave adicional entrando inativa sem
   colidir no índice parcial único nem trocar quem assina.
+- `apps/api/src/services/signing-key-lifecycle.int.test.ts` — ADR-0029:
+  revogação/expiração, idempotência, RLS, grant por coluna e trigger.
+- `apps/api/src/credential.int.test.ts` — ADR-0029: chave revogada/vencida
+  ausente dos documentos públicos e falha fechada na verificação e na emissão;
+  rotação (`active = false`) continua publicada.

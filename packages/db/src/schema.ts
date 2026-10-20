@@ -130,7 +130,14 @@ export const issuerSigningKey = pgTable(
     keyId: text('key_id').notNull(),
     algorithm: text('algorithm').notNull(),
     publicKey: bytea('public_key').notNull(),
+    // `active = false` é ROTAÇÃO: a chave deixa de assinar credenciais novas,
+    // mas continua publicada para verificar as antigas. Não é revogação.
     active: boolean('active').notNull().default(true),
+    // `revoked_at` é o hard stop (ADR-0029): NULL = confiável; passado =
+    // revogada/expirada; futuro = expiração agendada. A chave sai dos
+    // documentos públicos a partir desse instante e o verificador falha
+    // fechado. A revogação é monotônica (trigger na migration 0033).
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

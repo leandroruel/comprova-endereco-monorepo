@@ -242,6 +242,11 @@ futuras; reativação; expurgo automático do status.
 > Document do issuer foram implementados em um passo separado. Status/revogação
 > não mudou: o valor do status continua fora do documento assinado e o DID
 > Document não carrega `credentialStatus`.
+>
+> **Atualizado pelo [ADR-0029](0029-revogacao-e-expiracao-de-chave-de-assinatura.md):**
+> revogação/expiração da **chave de assinatura** é um eixo separado. Ela remove
+> o método dos documentos públicos e invalida a verificação, mas **não** altera
+> o status da credencial (`ACTIVE`/`REVOKED`), que continua no ADR-0027.
 
 ## Testes
 

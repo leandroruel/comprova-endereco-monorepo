@@ -1,6 +1,6 @@
 import { ed25519PublicKeyBytes, issuerScopeOf } from '@comprova/credential'
 import * as t from '@comprova/db'
-import { createDbPool, eq, runMigrations } from '@comprova/db'
+import { and, createDbPool, eq, runMigrations } from '@comprova/db'
 import { createLogger } from '@comprova/observability'
 import {
   createTenant,
@@ -123,6 +123,58 @@ describe('provisionSigningKeys', () => {
     const active = (await rowsOf(tenantId)).filter((row) => row.active)
     expect(active).toHaveLength(1)
     expect(active[0]!.keyId).toBe('key-1')
+  })
+
+  it('uma chave ativa revogada/vencida libera o índice para a próxima nascer ativa', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'provision-revoked-active' })
+    await provisionSigningKeys(
+      adminPool.db,
+      entriesOf(tenantId, [createTestCredentialSigningKey('key-1')]),
+      logger,
+    )
+    // Revogação/expiração já efetiva: `active` continua true (o eixo de rotação
+    // não é reescrito), mas a chave não é mais confiável.
+    await adminPool.db
+      .update(t.issuerSigningKey)
+      .set({ revokedAt: new Date(Date.now() - 60_000) })
+      .where(and(eq(t.issuerSigningKey.tenantId, tenantId), eq(t.issuerSigningKey.keyId, 'key-1')))
+
+    const outcomes = await provisionSigningKeys(
+      adminPool.db,
+      entriesOf(tenantId, [createTestCredentialSigningKey('key-2')]),
+      logger,
+    )
+    expect(outcomes).toEqual([{ tenantId, keyId: 'key-2', status: 'published', active: true }])
+
+    const rows = await rowsOf(tenantId)
+    const oldKey = rows.find((row) => row.keyId === 'key-1')!
+    const newKey = rows.find((row) => row.keyId === 'key-2')!
+    // A antiga é desativada (libera o índice parcial único), mas mantém a
+    // revogação e a chave pública intactas no histórico.
+    expect(oldKey.active).toBe(false)
+    expect(oldKey.revokedAt).not.toBeNull()
+    expect(newKey.active).toBe(true)
+    expect(newKey.revokedAt).toBeNull()
+  })
+
+  it('chave ativa com expiração futura ainda preserva a próxima chave como inativa', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'provision-scheduled-active' })
+    await provisionSigningKeys(
+      adminPool.db,
+      entriesOf(tenantId, [createTestCredentialSigningKey('key-1')]),
+      logger,
+    )
+    await adminPool.db
+      .update(t.issuerSigningKey)
+      .set({ revokedAt: new Date(Date.now() + 3_600_000) })
+      .where(and(eq(t.issuerSigningKey.tenantId, tenantId), eq(t.issuerSigningKey.keyId, 'key-1')))
+
+    const outcomes = await provisionSigningKeys(
+      adminPool.db,
+      entriesOf(tenantId, [createTestCredentialSigningKey('key-2')]),
+      logger,
+    )
+    expect(outcomes).toEqual([{ tenantId, keyId: 'key-2', status: 'published', active: false }])
   })
 
   it('publica chaves de tenants diferentes independentemente (mesmo key_id, escopos distintos)', async () => {

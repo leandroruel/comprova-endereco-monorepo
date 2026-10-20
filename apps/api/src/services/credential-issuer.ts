@@ -14,6 +14,7 @@ import {
 } from '@comprova/credential'
 import type { SigningKeyResolver } from './signing-keys.js'
 import { ensureActiveCredentialStatus } from './credential-status.js'
+import { signingKeyTrustedCondition } from './signing-key-lifecycle.js'
 
 /**
  * Fronteira de acesso ao PostgreSQL do builder de credencial (FASE 9). Carrega
@@ -226,20 +227,33 @@ export interface ActiveSigningKey {
 }
 
 /**
- * Lê a chave de assinatura ATIVA do tenant (FASE 14). A leitura é escopada por
- * RLS (`withTenant`), então um tenant nunca enxerga a chave de outro. O índice
- * parcial único `issuer_signing_key_active_uq` garante que exista no máximo uma
- * ativa por tenant — a seleção é determinística, sem "qual das ativas?".
+ * Lê a chave de assinatura ATIVA e CONFIÁVEL do tenant (FASE 14 + ADR-0029). A
+ * leitura é escopada por RLS (`withTenant`), então um tenant nunca enxerga a
+ * chave de outro. O índice parcial único `issuer_signing_key_active_uq` garante
+ * que exista no máximo uma ativa por tenant — a seleção é determinística, sem
+ * "qual das ativas?".
  *
- * Devolver `null` (nenhuma chave ativa) NÃO é um erro aqui: a decisão de falhar
- * fechado é do chamador (`issueCredential`), para que o motivo fique explícito.
+ * `revoked_at` é um eixo separado de `active`: uma chave pode continuar ativa
+ * para rotação e ter sido revogada/vencida. Nesse caso ela não é selecionada, e
+ * a emissão falha fechado. Uma chave apenas rotacionada (`active = false`) já
+ * não era selecionada e continua publicada para verificar o passado.
+ *
+ * Devolver `null` (nenhuma chave ativa/confiável) NÃO é um erro aqui: a decisão
+ * de falhar fechado é do chamador (`issueCredential`), para que o motivo fique
+ * explícito.
  */
 export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<ActiveSigningKey | null> =>
   withTenant(db, tenantId, async (tx) => {
     const rows = await tx
       .select({ keyId: t.issuerSigningKey.keyId, publicKey: t.issuerSigningKey.publicKey })
       .from(t.issuerSigningKey)
-      .where(and(eq(t.issuerSigningKey.tenantId, tenantId), eq(t.issuerSigningKey.active, true)))
+      .where(
+        and(
+          eq(t.issuerSigningKey.tenantId, tenantId),
+          eq(t.issuerSigningKey.active, true),
+          signingKeyTrustedCondition(),
+        ),
+      )
       .limit(1)
     const row = rows[0]
     return row === undefined ? null : { keyId: row.keyId, publicKey: row.publicKey }

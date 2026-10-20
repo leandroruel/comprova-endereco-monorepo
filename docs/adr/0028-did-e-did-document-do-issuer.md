@@ -10,6 +10,11 @@ a ter uma identidade **resolvível** (`did:web`) e um DID Document que publica a
 chave usada na assinatura. Não é uma segunda arquitetura de identidade: é uma
 camada de resolução sobre o `issuer.id` e o `issuer_signing_key` que já existem.
 
+**Atualizado pelo [ADR-0029](0029-revogacao-e-expiracao-de-chave-de-assinatura.md):**
+chaves revogadas/vencidas deixam de ser publicadas no DID Document, e o
+verificador falha fechado. A limitação de revogação registrada abaixo foi
+fechada.
+
 ## Contexto
 
 Até aqui o issuer era identificado por uma URL HTTPS
@@ -91,13 +96,12 @@ Forma mínima, sem inventar termos W3C:
   que o issuer já publica** (ADR-0024/0025); nenhum formato novo de chave.
 - `controller` é o DID, não a URL HTTPS.
 - `verificationMethod` e `assertionMethod` listam **todas** as chaves publicadas
-  para o escopo, preservando a rotação: a credencial antiga aponta `#key-1`, a
-  nova `#key-2`, ambas resolvíveis. Uma chave `active = false` continua
-  publicada para verificar o que assinou enquanto estava ativa; ela apenas não
-  assina credenciais novas (ADR-0026). **Limitação herdada:** a rotação não
-  revoga a chave antiga — ela segue autorizada a `assertionMethod`, exatamente
-  como já acontecia no documento de chave existente. Revogar/expirar chave é um
-  passo futuro, fora deste ADR.
+  e **confiáveis** para o escopo, preservando a rotação: a credencial antiga
+  aponta `#key-1`, a nova `#key-2`, ambas resolvíveis. Uma chave `active = false`
+  continua publicada para verificar o que assinou enquanto estava ativa; ela
+  apenas não assina credenciais novas (ADR-0026). A chave com `revoked_at` no
+  passado (ou no futuro, a partir do instante) **não** é publicada e o
+  verificador falha fechado (ADR-0029).
 - O documento é extensível (não é `.strict()`), mas os membros acima e a
   coerência entre eles são obrigatórios na resolução.
 
@@ -139,7 +143,7 @@ GET /issuers/:scope/did.json
 ```
 
 - fora de `/v1`, **sem API key**;
-- `200` com o DID Document; `404` para escopo sem chave registrada;
+- `200` com o DID Document; `404` para escopo sem chave registrada/confiável;
 - só material público (chave em `publicKeyMultibase`, `alsoKnownAs`);
 - nenhum `tenant_id`, subject, documento, `doc_hmac`, validation ou chave
   privada.
@@ -225,7 +229,8 @@ O DID Document **não** carrega `credentialStatus`, `ACTIVE`/`REVOKED`, status
 list, expiração nem revogação. Essas responsabilidades continuam no ADR-0027 e
 no fluxo `verifyCredentialFromIssuer` (`statusResolver`). O DID resolve **quem
 assinou e com qual chave**; o status responde **se o veredito ainda vale**. São
-eixos separados.
+eixos separados. A revogação/expiração da **chave** é tratada no ADR-0029 e se
+manifesta pela ausência do método no documento.
 
 ## Itens deliberadamente NÃO implementados
 
@@ -248,4 +253,5 @@ o DID.
 - `apps/api/src/credential.int.test.ts` — endpoint público `/did.json`, só
   material público, isolamento entre tenants, fluxo
   credencial → DID → DID Document → chave → `VALID`, e os casos negativos
-  (issuer/método de outro tenant, chave diferente, documento adulterado).
+  (issuer/método de outro tenant, chave diferente, documento adulterado) e
+  omissão de chave revogada/vencida (ADR-0029).

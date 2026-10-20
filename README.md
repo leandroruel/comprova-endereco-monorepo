@@ -67,7 +67,9 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   privada nunca é persistida, logada nem devolvida. A chave pública publicada
   tem de **corresponder** ao material configurado, senão a emissão falha com
   `SIGNING_KEY_MISMATCH`. (Limitação operacional deste passo: sem KMS/HSM, o
-  material privado vive em configuração/segredo externo.)
+  material privado vive em configuração/segredo externo.) Uma chave com
+  `revoked_at` (ADR-0029) sai dos documentos públicos e deixa de ser aceita; o
+  `active = false` continua sendo apenas rotação.
 - **Status/revogação** (ADR-0027): a credencial carrega `id` e
   `credentialStatus.id` assinados, mas o valor (`ACTIVE`/`REVOKED`) fica em uma
   linha por `credential_id` (tabela `credential_status`, isolada por RLS). O
@@ -85,6 +87,15 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   `issuer`. O verificador resolve essa chave por `makeHttpDidResolver`, sem
   banco, chave privada nem API interna. O `issuer` e o
   `proof.verificationMethod` da credencial **não mudaram**.
+- **Revogação/expiração de chave** (ADR-0029): `issuer_signing_key.revoked_at`
+  é o hard stop, separado de `active`. Um instante passado revoga (inclusive
+  credenciais já emitidas); um instante futuro agenda a expiração. A chave
+  revogada/vencida não aparece em `GET /issuers/:scope` nem no DID Document, e
+  o verificador falha fechado (`VERIFICATION_METHOD_UNRESOLVED`). O
+  `POST /v1/signing-keys/:keyId/revoke` é autenticado, escopado por tenant,
+  idempotente e monotônico; `?effective_at=<ISO-8601>` agenda a expiração. Não
+  há reativação: uma chave apenas rotacionada (`active = false`) continua
+  publicada.
 
 ## Dashboard
 
@@ -102,6 +113,7 @@ Abre `http://localhost:5173`:
 | GET             | `/v1/validations/:id`                     | Consulta resultado com ETag                       |
 | POST            | `/v1/validations/:id/credential`          | Emite a credencial verificável (JSON)             |
 | POST            | `/v1/credentials/:credentialId/revoke`    | Revoga a credencial (idempotente, monotônico)     |
+| POST            | `/v1/signing-keys/:keyId/revoke`          | Revoga/agenda a expiração da chave do tenant      |
 | POST            | `/v1/validations/:id/contest`             | Contestação (art. 20 LGPD)                        |
 | GET             | `/v1/stats`                               | Stats por usuário (total, únicos, por veredito)   |
 | POST            | `/v1/batches`                             | Cria lote (background)                            |
