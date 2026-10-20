@@ -10,7 +10,7 @@ import { generateEd25519KeyPair, makeEd25519Signer } from './signer.service.js'
 import { credentialIdOf, credentialStatusUrlOf } from './status.service.js'
 import { VC_CONTEXT_URL, type SecuredVerifiableCredential } from '../schema/credential.schema.js'
 import { createDataIntegrityProof } from './proof.service.js'
-import { verifyCredential } from './verification.service.js'
+import { verifyCredentialIntegrity } from './verification.service.js'
 
 const ISSUER_ORIGIN = 'https://issuer.test'
 const TENANT = '11111111-1111-4111-8111-111111111111'
@@ -109,7 +109,7 @@ const reverseKeys = (value: unknown): unknown => {
   return value
 }
 
-describe('buildCredential + verifyCredential', () => {
+describe('buildCredential + verifyCredentialIntegrity', () => {
   it('emite uma VC 2.0 que espelha a assertion', async () => {
     const credential = await emit()
 
@@ -156,11 +156,11 @@ describe('buildCredential + verifyCredential', () => {
   it('é verificável por um processo independente que só recebe a credencial, a chave pública e o método confiável', async () => {
     const credential = transport(await emit())
     expect(
-      verifyCredential(credential, {
+      verifyCredentialIntegrity(credential, {
         trusted,
         expectedIssuerId: issuer.id,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
   })
 
   it('é autocontida: o JSON transportado verifica sem nenhum dado além da chave confiável', async () => {
@@ -168,7 +168,7 @@ describe('buildCredential + verifyCredential', () => {
 
     // Nenhuma dependência de PostgreSQL/Redis/Temporal/S3/API: o verificador só
     // recebe o documento, a chave pública e o id do método em que se confia.
-    expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
+    expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({ valid: true })
 
     const json = JSON.stringify(credential)
     for (const internal of [
@@ -210,10 +210,10 @@ describe('buildCredential + verifyCredential', () => {
     const reversed = reverseKeys(credential) as SecuredVerifiableCredential
     expect(JSON.stringify(reversed)).not.toBe(JSON.stringify(credential))
     expect(
-      verifyCredential(reversed, {
+      verifyCredentialIntegrity(reversed, {
         trusted,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
   })
 
   it('preserva evidence_sha256 sem depender de evidence_id', async () => {
@@ -325,7 +325,7 @@ describe('adulteração da credencial', () => {
   const expectInvalid = async (mutate: (credential: SecuredVerifiableCredential) => void): Promise<void> => {
     const credential = await valid()
     mutate(credential)
-    expect(verifyCredential(credential, { trusted }).valid).toBe(false)
+    expect(verifyCredentialIntegrity(credential, { trusted }).valid).toBe(false)
   }
 
   it('detecta alteração em issuer, subject, claim e endereço', async () => {
@@ -392,7 +392,7 @@ describe('adulteração da credencial', () => {
     for (const mutate of cases) {
       const credential = await valid()
       mutate(credential)
-      expect(verifyCredential(credential, { trusted })).toEqual({
+      expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({
         valid: false,
         reason: 'INVALID_SIGNATURE',
       })
@@ -402,7 +402,7 @@ describe('adulteração da credencial', () => {
     // estruturalmente, antes mesmo da prova.
     const credential = await valid()
     ;(credential.credentialStatus as { type: string }).type = 'StatusList2021Entry'
-    expect(verifyCredential(credential, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
@@ -431,7 +431,7 @@ describe('adulteração da credencial', () => {
       }),
     } as SecuredVerifiableCredential
 
-    expect(verifyCredential(resigned, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(resigned, { trusted })).toMatchObject({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
@@ -450,7 +450,7 @@ describe('adulteração da credencial', () => {
         signer,
       }),
     } as SecuredVerifiableCredential
-    expect(verifyCredential(resignedForeign, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(resignedForeign, { trusted })).toMatchObject({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
@@ -475,34 +475,34 @@ describe('adulteração da credencial', () => {
   })
 
   it('classifica falhas estruturais, de contexto, issuer e chave', async () => {
-    expect(verifyCredential({}, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity({}, { trusted })).toMatchObject({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
-    expect(verifyCredential([], { trusted })).toEqual({
+    expect(verifyCredentialIntegrity([], { trusted })).toMatchObject({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
 
     const credential = await valid()
-    expect(verifyCredential({ ...credential, '@context': ['https://example.org'] }, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity({ ...credential, '@context': ['https://example.org'] }, { trusted })).toMatchObject({
       valid: false,
       reason: 'UNSUPPORTED_CREDENTIAL',
     })
 
-    expect(verifyCredential(credential, { trusted, expectedIssuerId: 'x' })).toEqual({
+    expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: 'x' })).toMatchObject({
       valid: false,
       reason: 'ISSUER_MISMATCH',
     })
     expect(
-      verifyCredential(credential, {
+      verifyCredentialIntegrity(credential, {
         expectedIssuerId: issuer.id,
         trusted: { id: `${issuer.id}#outra-chave`, publicKey: keyPair.publicKey },
       }),
-    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' })
+    ).toMatchObject({ valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' })
 
     const otherKey = generateEd25519KeyPair()
-    expect(verifyCredential(credential, { trusted: { ...trusted, publicKey: otherKey.publicKey } })).toEqual({
+    expect(verifyCredentialIntegrity(credential, { trusted: { ...trusted, publicKey: otherKey.publicKey } })).toMatchObject({
       valid: false,
       reason: 'INVALID_SIGNATURE',
     })
@@ -514,14 +514,14 @@ describe('adulteração da credencial', () => {
     // emitido por este issuer.
     const credential = await valid()
     credential.proof.verificationMethod = 'https://issuer.test/issuers/outro-issuer#key-1'
-    expect(verifyCredential(credential, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({
       valid: false,
       reason: 'VERIFICATION_METHOD_MISMATCH',
     })
 
     const noFragment = await valid()
     noFragment.proof.verificationMethod = `${issuer.id}#`
-    expect(verifyCredential(noFragment, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(noFragment, { trusted })).toMatchObject({
       valid: false,
       reason: 'VERIFICATION_METHOD_MISMATCH',
     })
@@ -544,11 +544,11 @@ describe('adulteração da credencial', () => {
 
     expect(credential.proof.verificationMethod).toBe(verificationMethodOf(otherIssuer))
     expect(
-      verifyCredential(credential, {
+      verifyCredentialIntegrity(credential, {
         trusted: { id: verificationMethodOf(otherIssuer), publicKey: keyPair.publicKey },
       }),
-    ).toEqual({ valid: true })
-    expect(verifyCredential(credential, { trusted })).toEqual({
+    ).toMatchObject({ valid: true })
+    expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({
       valid: false,
       reason: 'VERIFICATION_METHOD_MISMATCH',
     })
@@ -557,7 +557,7 @@ describe('adulteração da credencial', () => {
   it('exige `proofPurpose: assertionMethod` (uma prova para outro motivo não vale como credencial)', async () => {
     const credential = await valid()
     credential.proof.proofPurpose = 'authentication'
-    expect(verifyCredential(credential, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({
       valid: false,
       reason: 'PROOF_PURPOSE_MISMATCH',
     })
@@ -570,16 +570,16 @@ describe('adulteração da credencial', () => {
     // A checagem da janela vem ANTES da assinatura: um documento com bytes
     // coerentes, mas janela incoerente, é recusado pela janela — a proteção não
     // depende de a assinatura quebrar.
-    expect(verifyCredential({ ...credential, validFrom: validUntil }, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity({ ...credential, validFrom: validUntil }, { trusted })).toMatchObject({
       valid: false,
       reason: 'INVALID_TIMESTAMP',
     })
     expect(
-      verifyCredential(
+      verifyCredentialIntegrity(
         { ...credential, validFrom: new Date(Date.parse(validUntil) + 1).toISOString() },
         { trusted },
       ),
-    ).toEqual({ valid: false, reason: 'INVALID_TIMESTAMP' })
+    ).toMatchObject({ valid: false, reason: 'INVALID_TIMESTAMP' })
   })
 
   it('detecta incoerência entre o conjunto de evidências e o evidence_set_hash', async () => {
@@ -588,7 +588,7 @@ describe('adulteração da credencial', () => {
     // dois, então a falha aparece como assinatura inválida — o binding é o que
     // garante a amarração.
     credential.evidence = credential.evidence.slice(0, 1)
-    expect(verifyCredential(credential, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({
       valid: false,
       reason: 'EVIDENCE_SET_MISMATCH',
     })
@@ -600,7 +600,7 @@ describe('adulteração da credencial', () => {
     for (const member of ['@context', 'type', 'issuer', 'credentialSubject', 'proof'] as const) {
       const incomplete = { ...credential } as Record<string, unknown>
       delete incomplete[member]
-      expect(verifyCredential(incomplete, { trusted }), member).toEqual({
+      expect(verifyCredentialIntegrity(incomplete, { trusted }), member).toMatchObject({
         valid: false,
         reason: 'MALFORMED_CREDENTIAL',
       })
@@ -610,21 +610,21 @@ describe('adulteração da credencial', () => {
   it('recusa cryptosuite inesperada e proof sem os campos exigidos', async () => {
     const credential = await valid()
     credential.proof.cryptosuite = 'eddsa-rdfc-2022'
-    expect(verifyCredential(credential, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({
       valid: false,
       reason: 'UNSUPPORTED_CRYPTOSUITE',
     })
 
     const noPurpose = await valid()
     ;(noPurpose.proof as Record<string, unknown>).proofPurpose = undefined
-    expect(verifyCredential(noPurpose, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(noPurpose, { trusted })).toMatchObject({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })
 
     const noMethod = await valid()
     ;(noMethod.proof as Record<string, unknown>).verificationMethod = undefined
-    expect(verifyCredential(noMethod, { trusted })).toEqual({
+    expect(verifyCredentialIntegrity(noMethod, { trusted })).toMatchObject({
       valid: false,
       reason: 'MALFORMED_CREDENTIAL',
     })

@@ -12,7 +12,7 @@ ou da assinatura é alterado aqui.
 ## Contexto
 
 A camada `@comprova/credential` já produz uma VC 2.0 assinada
-(`eddsa-jcs-2022`) a partir de uma `validation` concluída, e `verifyCredential`
+(`eddsa-jcs-2022`) a partir de uma `validation` concluída, e `verifyCredentialIntegrity`
 verifica a credencial sem banco. Faltava o mínimo para um terceiro usar isso:
 
 1. uma porta HTTP que devolva a credencial de uma `validation`;
@@ -163,13 +163,13 @@ await verifyCredentialFromIssuer(credential, resolver, { expectedIssuerId? })
 
 Ordem: forma mínima → **`verificationMethod` pertence ao `issuer` declarado**
 (`<issuer>#<fragmento>`) → `expectedIssuerId` (se informado) → resolve → exige
-`resolved.id === verificationMethod` → delega a `verifyCredential` com o método
-confiável resolvido. Falhas = as de `verifyCredential` mais
+`resolved.id === verificationMethod` → delega a `verifyCredentialIntegrity` com o método
+confiável resolvido. Falhas = as de `verifyCredentialIntegrity` mais
 `VERIFICATION_METHOD_UNRESOLVED`.
 
 - O vínculo estrutural é checado **antes** de resolver: a credencial não escolhe
   de quem buscar a chave.
-- `verifyCredential` continua puro e inalterado; a rede fica só no resolver
+- `verifyCredentialIntegrity` continua puro e inalterado; a rede fica só no resolver
   injetado. O pacote segue utilizável fora da API.
 
 ## Compatibilidade e impacto

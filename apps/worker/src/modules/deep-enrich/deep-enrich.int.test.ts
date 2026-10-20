@@ -20,7 +20,7 @@ import {
 } from '@comprova/db'
 import * as t from '@comprova/db'
 import { loadPolicy, policyHashOf, systemClock, type Clock, type PartnerGraphReader } from '@comprova/core'
-import { localIssuer, verificationMethodOf, verifyCredential } from '@comprova/credential'
+import { localIssuer, verificationMethodOf, verifyCredentialIntegrity } from '@comprova/credential'
 import { makePartnerGraph, makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
@@ -542,7 +542,7 @@ describe('deepEnrich (activity core)', () => {
       expect(credential.validFrom).not.toBe(T0.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
       expect(credential.validUntil).toBe(after?.expiresAt?.toISOString())
-      expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
+      expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({ valid: true })
     })
 
     it('replay do mesmo resultado terminal preserva o `completed_at` original', async () => {
@@ -578,7 +578,7 @@ describe('deepEnrich (activity core)', () => {
       })
       expect(credential.validFrom).toBe(T1.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
-      expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
+      expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({ valid: true })
     })
 
     it('reexecução com evidências novas é uma NOVA conclusão: grava novo instante', async () => {

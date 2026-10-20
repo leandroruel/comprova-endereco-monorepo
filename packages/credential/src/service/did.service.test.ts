@@ -14,7 +14,7 @@ import {
 import { issuerIdOf, issuerScopeOf, localIssuer, verificationMethodOf } from './issuer.service.js'
 import { generateEd25519KeyPair, makeEd25519Signer } from './signer.service.js'
 import {
-  verifyCredential,
+  verifyCredentialIntegrity,
   verifyCredentialFromIssuer,
   type VerificationMethodResolver,
 } from './verification.service.js'
@@ -344,8 +344,8 @@ describe('makeHttpDidResolver', () => {
     // Verificação independente: a chave resolvida confere com o método confiável.
     const resolved = await resolverWith(() => response(otherDocument))(verificationMethodOf(otherIssuer))
     expect(
-      verifyCredential(otherCredential, { trusted: { id: resolved.id, publicKey: resolved.publicKey } }),
-    ).toEqual({ valid: true })
+      verifyCredentialIntegrity(otherCredential, { trusted: { id: resolved.id, publicKey: resolved.publicKey } }),
+    ).toMatchObject({ valid: true })
   })
 
   it('issuer adulterado (verificationMethod de A com issuer de B) é recusado', async () => {

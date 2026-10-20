@@ -213,7 +213,7 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
 ### 6. Verificador: a chave confiável carrega a identidade do método (obrigatória)
 
 ```ts
-verifyCredential(credential, {
+verifyCredentialIntegrity(credential, {
   trusted: { id: '<issuer>#<keyId>', publicKey },  // obrigatório
   expectedIssuerId?,                               // expectativa do consumidor
 })
@@ -234,7 +234,7 @@ recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
 - Com a checagem estrutural **mais** a exigência de igualdade, aceitar implica
   `issuer` declarado = issuer do método confiável, sem precisar de resolução.
 - **Responsabilidades explícitas e separadas:** (a) integridade criptográfica +
-  vínculo com a identidade declarada → `verifyCredential`; (b) confiança na chave
+  vínculo com a identidade declarada → `verifyCredentialIntegrity`; (b) confiança na chave
   do issuer → o consumidor, ao escolher `trusted`; (c) validade temporal da
   credencial → política de quem consome (o verificador só valida a **coerência** da
   janela: bem ordenada e não vazia — `validFrom < validUntil`, a mesma invariante

@@ -206,7 +206,7 @@ export interface HttpDidResolverOptions {
  *  7. localiza o `verificationMethod` (controller == DID) e decodifica a chave.
  *
  * Devolve o id ORIGINAL do método (`<issuer.id>#<keyId>`, HTTPS), de modo que o
- * binding exato de `verifyCredential` continue valendo. O verificador segue sem
+ * binding exato de `verifyCredentialIntegrity` continue valendo. O verificador segue sem
  * banco, Redis, S3, Temporal ou chave privada.
  */
 export const makeHttpDidResolver = (options: HttpDidResolverOptions): VerificationMethodResolver => {

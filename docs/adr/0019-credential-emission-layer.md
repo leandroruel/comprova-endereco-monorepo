@@ -120,7 +120,7 @@ silenciosamente para estado não final.
 
 ### 9. Verifier independente
 
-`verifyCredential(credential, { publicKey, expectedIssuerId?, expectedKeyId? })`
+`verifyCredentialIntegrity(credential, { publicKey, expectedIssuerId?, expectedKeyId? })`
 recebe a credencial como JSON e a chave pública e verifica, sem acessar
 PostgreSQL/Redis/Temporal/S3/API: formato, issuer, `key_id`, timestamps,
 integridade do conjunto (`evidence_set_hash`) e assinatura. Falhas são

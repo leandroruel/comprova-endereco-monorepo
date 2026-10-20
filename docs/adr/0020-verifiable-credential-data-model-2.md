@@ -352,13 +352,13 @@ foi alterado para preenchê-lo).
 
 ### 9. Verifier independente
 
-`verifyCredential(credential, { publicKey, expectedIssuerId?, expectedVerificationMethod? })`
+`verifyCredentialIntegrity(credential, { publicKey, expectedIssuerId?, expectedVerificationMethod? })`
 recebe apenas o JSON da credencial e a chave pública. Não acessa
 PostgreSQL/Redis/Temporal/S3/API.
 
 > **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
 > §6:** a API passou a ser
-> `verifyCredential(credential, { trusted: { id, publicKey }, expectedIssuerId? })`.
+> `verifyCredentialIntegrity(credential, { trusted: { id, publicKey }, expectedIssuerId? })`.
 > O `id` do método confiável é **obrigatório** e precisa ser exatamente o
 > `proof.verificationMethod`: uma chave sem identidade não é suficiente para
 > declarar confiança em um método. Na mesma revisão, a janela de validade passou a
@@ -395,7 +395,7 @@ Falhas classificadas: `MALFORMED_CREDENTIAL`, `UNSUPPORTED_CREDENTIAL`,
 `EVIDENCE_SET_MISMATCH`, `INVALID_SIGNATURE`.
 
 Verificação ≠ validação: expiração no passado é política do consumidor, não do
-`verifyCredential`.
+`verifyCredentialIntegrity`.
 
 ### 10. Evidência de interoperabilidade
 
