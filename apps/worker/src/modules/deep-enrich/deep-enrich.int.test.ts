@@ -19,7 +19,14 @@ import {
   runMigrations,
 } from '@comprova/db'
 import * as t from '@comprova/db'
-import { loadPolicy, policyHashOf, systemClock, type Clock, type PartnerGraphReader } from '@comprova/core'
+import {
+  DEFAULT_CREDENTIAL_TTL_SECONDS,
+  loadPolicy,
+  policyHashOf,
+  systemClock,
+  type Clock,
+  type PartnerGraphReader,
+} from '@comprova/core'
 import { localIssuer, verificationMethodOf, verifyCredentialIntegrity } from '@comprova/credential'
 import { makePartnerGraph, makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
@@ -542,7 +549,26 @@ describe('deepEnrich (activity core)', () => {
       expect(credential.validFrom).toBe(T1.toISOString())
       expect(credential.validFrom).not.toBe(T0.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
-      expect(credential.validUntil).toBe(after?.expiresAt?.toISOString())
+      // `validUntil` = min(completed_at + policy TTL, observed_at + ttl_seconds);
+      // NÃO é o `expires_at` de retenção.
+      const claimRows = await adminPool.db
+        .select({ claimId: t.claim.claimId })
+        .from(t.claim)
+        .where(eq(t.claim.validationId, validationId))
+        .limit(1)
+      const claimId = claimRows[0]?.claimId
+      if (claimId === undefined) throw new Error('claim missing')
+      const evidence = await adminPool.db
+        .select({ observedAt: t.claimEvidence.observedAt, ttlSeconds: t.claimEvidence.ttlSeconds })
+        .from(t.claimEvidence)
+        .where(eq(t.claimEvidence.claimId, claimId))
+      const expectedValidUntil = new Date(
+        Math.min(
+          T1.getTime() + DEFAULT_CREDENTIAL_TTL_SECONDS * 1000,
+          ...evidence.map((e) => e.observedAt.getTime() + e.ttlSeconds * 1000),
+        ),
+      )
+      expect(credential.validUntil).toBe(expectedValidUntil.toISOString())
       expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({ valid: true })
     })
 

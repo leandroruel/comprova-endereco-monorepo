@@ -101,7 +101,14 @@ export const AssertionPayloadSchema = z.object({
      * isso, pré-requisito da emissão: `buildAssertion` recusa emitir sem ele.
      */
     completed_at: z.iso.datetime(),
+    /** Horizonte de RETENÇÃO da validation (não é o `validUntil` da VC). */
     expires_at: z.iso.datetime(),
+    /**
+     * Horizonte de VALIDADE da credencial:
+     * `min(completed_at + policy.credential_ttl_seconds,
+     *      min(observed_at + ttl_seconds))`.
+     */
+    valid_until: z.iso.datetime(),
   }),
 })
 
@@ -118,6 +125,8 @@ export interface AssertionObservation {
   readonly confidence: number
   readonly source: string
   readonly observedAt: Date
+  /** TTL do sinal/evidência (`claim_evidence.ttl_seconds`). */
+  readonly ttlSeconds: number
   readonly evidenceSha256: Uint8Array | null
   readonly detail: unknown
 }
@@ -144,7 +153,14 @@ export interface AssertionSource {
     readonly createdAt: Date
     /** Conclusão da análise; pré-requisito da emissão (`completed_at` do domínio). */
     readonly completedAt: Date | null
+    /** Horizonte de retenção (`validation.expires_at`), preservado como metadado. */
     readonly expiresAt: Date
+    /**
+     * Horizonte de validade já calculado pela fronteira de emissão. Quando
+     * omitido, `buildAssertion` usa `expiresAt` (compatibilidade dos testes
+     * unitários); a API sempre calcula por policy + TTL das evidências.
+     */
+    readonly validUntil?: Date
   }
   readonly subject: {
     readonly docType: 'CPF' | 'CNPJ'

@@ -161,13 +161,14 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   // (falha fechado). A privada fica em memória; só a pública é publicada. Não há
   // chave global de reserva: cada tenant tem a sua (ADR-0026).
   const signingKeys = makeSigningKeyResolver(deps.config.CREDENTIAL_SIGNING_KEYS)
-  const credentialIssuer = {
-    issuerOrigin: deps.config.CREDENTIAL_ISSUER_ORIGIN,
-    signingKeys,
-  }
 
   const cache = makeRedisCache(deps.redis, deps.logger)
   const fastPath = buildFastPathDeps(deps.db, deps.config, cache)
+  const credentialIssuer = {
+    issuerOrigin: deps.config.CREDENTIAL_ISSUER_ORIGIN,
+    signingKeys,
+    credentialTtlSeconds: fastPath.policy.credential_ttl_seconds,
+  }
   const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
   registerAuthRoutes(app, auth)
   app.addHook('preHandler', makeSessionMiddleware(auth))

@@ -75,6 +75,7 @@ const assertion = (overrides: Partial<AssertionPayload> = {}): AssertionPayload 
     created_at: '2026-01-01T00:00:00.000Z',
     completed_at: '2026-01-01T00:00:01.000Z',
     expires_at: '2026-01-31T00:00:00.000Z',
+    valid_until: '2026-01-31T00:00:00.000Z',
   },
   ...overrides,
 })
@@ -132,6 +133,7 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
         // Análise demorada: a conclusão é 5 min depois do início.
         completed_at: '2026-01-01T00:05:00.000Z',
         expires_at: '2026-01-31T00:00:00.000Z',
+        valid_until: '2026-01-31T00:00:00.000Z',
       },
     })
 

@@ -1,4 +1,5 @@
 import { createPublicKey } from 'node:crypto'
+import { DEFAULT_CREDENTIAL_TTL_SECONDS } from '@comprova/core'
 import * as t from '@comprova/db'
 import { and, eq, withTenant } from '@comprova/db'
 import type { Db } from '@comprova/db'
@@ -24,12 +25,14 @@ import { signingKeyTrustedCondition } from './signing-key-lifecycle.js'
  *
  * Elegibilidade (FASE 9/10): só emite para `status = 'completed'` com resultado
  * completo, bindings presentes, o instante de conclusão registrado
- * (`completed_at`) e janela de validade não vazia (`completed_at < expires_at`).
- * NÃO emite silenciosamente para `partial`, NÃO presume `created_at` como
- * conclusão quando `completed_at` falta, e NÃO estende `expires_at` para caber
- * na credencial: um registro sem timestamp de conclusão falha com
- * `COMPLETION_TIME_MISSING` e um que concluiu fora do prazo, com
- * `VALIDITY_WINDOW_INVALID`.
+ * (`completed_at`) e janela de validade não vazia (`completed_at < validUntil`).
+ * `validUntil` é o horizonte da CREDENCIAL
+ * (`min(completed_at + policy.credential_ttl_seconds, observed_at + ttl_seconds
+ * de cada evidência)`), distinto de `expires_at`, que continua sendo o
+ * horizonte de RETENÇÃO. NÃO emite silenciosamente para `partial`, NÃO presume
+ * `created_at` como conclusão quando `completed_at` falta e NÃO estende o
+ * horizonte: sem timestamp falha com `COMPLETION_TIME_MISSING`; janela
+ * vazia/invertida falha com `VALIDITY_WINDOW_INVALID`.
  */
 
 export type CredentialIssuanceFailure =
@@ -120,18 +123,6 @@ export const loadAssertionSource = async (
         `validation ${validationId} has no completion timestamp (completed_at); refusing to guess when the result started to be valid`,
       )
     }
-    // Janela não vazia: `validFrom = completed_at` e `validUntil = expires_at`
-    // (ADR-0024 §5). Quando a análise concluiu no ou depois do horizonte
-    // persistido, a credencial nasceria vazia/expirada — e `expires_at` é o
-    // horizonte de retenção, que a emissão não estende (a política de 30 dias é
-    // decisão de produto, não desta fronteira).
-    if (v.completedAt.getTime() >= v.expiresAt.getTime()) {
-      throw new CredentialIssuanceError(
-        'VALIDITY_WINDOW_INVALID',
-        `validation ${validationId} concluded at ${v.completedAt.toISOString()} at or after its validity limit (${v.expiresAt.toISOString()}); refusing to emit an expired credential`,
-      )
-    }
-
     const cRows = await tx
       .select({
         claimId: t.claim.claimId,
@@ -168,6 +159,7 @@ export const loadAssertionSource = async (
         confidence: t.claimEvidence.confidence,
         source: t.claimEvidence.source,
         observedAt: t.claimEvidence.observedAt,
+        ttlSeconds: t.claimEvidence.ttlSeconds,
         evidenceSha256: t.claimEvidence.evidenceSha256,
         detail: t.claimEvidence.detail,
       })
@@ -273,10 +265,43 @@ export interface IssueCredentialDeps {
    */
   readonly signingKeys: SigningKeyResolver
   /**
+   * Horizonte da CREDENCIAL em segundos (`policy.credential_ttl_seconds`).
+   * Omitido = 30 dias, o default das policies já publicadas. NÃO é o horizonte
+   * de retenção (`validation.expires_at`).
+   */
+  readonly credentialTtlSeconds?: number
+  /**
    * Relógio da emissão (`proof.created` = momento real da prova). Injetável para
    * testes; default: o relógio do sistema.
    */
   readonly now?: () => Date
+}
+
+/**
+ * `validUntil` da credencial = menor instante entre:
+ *  - `completed_at + credential_ttl_seconds` (horizonte da policy);
+ *  - `observed_at + ttl_seconds` de CADA evidência usada no resultado.
+ *
+ * O segundo termo impede que a credencial afirme um veredito depois que uma das
+ * observações que o sustentam já expirou. `expires_at` (retenção) não entra na
+ * conta. Função pura e exportada para teste.
+ */
+export const credentialValidUntilOf = (
+  source: Pick<AssertionSource, 'validation' | 'observations'>,
+  credentialTtlSeconds: number = DEFAULT_CREDENTIAL_TTL_SECONDS,
+): Date => {
+  const completedAt = source.validation.completedAt
+  if (completedAt === null) {
+    throw new CredentialIssuanceError(
+      'COMPLETION_TIME_MISSING',
+      'validation has no completion timestamp (completed_at); refusing to compute a validity window',
+    )
+  }
+  const policyHorizon = completedAt.getTime() + credentialTtlSeconds * 1000
+  const evidenceHorizon = Math.min(
+    ...source.observations.map((o) => o.observedAt.getTime() + o.ttlSeconds * 1000),
+  )
+  return new Date(Math.min(policyHorizon, evidenceHorizon))
 }
 
 /** Dependências de assinatura do issuer já resolvidas no boot (sem relógio). */
@@ -300,6 +325,22 @@ export const issueCredential = async (
   // O issuer é derivado do MESMO tenant que escopa a leitura (RLS): uma
   // validation de outro tenant nem é encontrada (VALIDATION_NOT_FOUND).
   const source = await loadAssertionSource(db, tenantId, validationId)
+
+  // `validUntil` é o horizonte da credencial, não o de retenção. O cálculo
+  // acontece uma única vez, antes da assinatura, e é o mesmo em uma reemissão
+  // (B2): o documento assinado não pode "esticar" validade entre chamadas.
+  const validUntil = credentialValidUntilOf(source, deps.credentialTtlSeconds)
+  const completedAt = source.validation.completedAt
+  if (completedAt !== null && validUntil.getTime() <= completedAt.getTime()) {
+    throw new CredentialIssuanceError(
+      'VALIDITY_WINDOW_INVALID',
+      `validation ${validationId} concluded at ${completedAt.toISOString()} at or after its credential validity limit (${validUntil.toISOString()}); refusing to emit an empty or inverted window`,
+    )
+  }
+  const credentialSource: AssertionSource = {
+    ...source,
+    validation: { ...source.validation, validUntil },
+  }
 
   const signingKey = await loadActiveSigningKey(db, tenantId)
   if (signingKey === null) {
@@ -328,8 +369,8 @@ export const issueCredential = async (
   // outra caixa; o Postgres compara uuid sem caixa). O id assinado e a linha de
   // status têm de ser derivados do MESMO valor, senão reemitir criaria um
   // segundo status para a mesma validation.
-  const credentialId = credentialIdOf(issuer.id, source.validation.id)
-  const credential = await buildCredential(source, {
+  const credentialId = credentialIdOf(issuer.id, credentialSource.validation.id)
+  const credential = await buildCredential(credentialSource, {
     issuer,
     signer: makeEd25519Signer(privateKey),
     now: deps.now,

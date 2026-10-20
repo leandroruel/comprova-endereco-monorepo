@@ -41,6 +41,7 @@ const observation = (id: string): AssertionObservation => ({
   confidence: 0.8,
   source: 'receita',
   observedAt: new Date('2026-01-02T03:04:05.000Z'),
+  ttlSeconds: 30 * 24 * 60 * 60,
   evidenceSha256: null,
   detail: { nested: { b: 2, a: 1 } },
 })

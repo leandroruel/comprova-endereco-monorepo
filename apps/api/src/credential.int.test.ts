@@ -224,6 +224,7 @@ const observationsOf = (claimId: string) =>
       confidence: t.claimEvidence.confidence,
       source: t.claimEvidence.source,
       observedAt: t.claimEvidence.observedAt,
+      ttlSeconds: t.claimEvidence.ttlSeconds,
       evidenceSha256: t.claimEvidence.evidenceSha256,
       detail: t.claimEvidence.detail,
     })
@@ -540,44 +541,55 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     await expect(issue(validationId)).rejects.toMatchObject({ failure: 'COMPLETION_TIME_MISSING' })
   })
 
-  it('protege a janela de validade: `completed_at < expires_at` emite; igual ou posterior recusa (sem estender o prazo)', async () => {
+  it('protege a janela da CREDENCIAL: `completed_at < validUntil` emite; igual ou posterior recusa', async () => {
     const setCompletion = (validationId: string, completedAt: Date) =>
       adminPool.db
         .update(t.validation)
         .set({ completedAt })
         .where(eq(t.validation.validationId, validationId))
 
-    // Conclusão 1 ms antes do horizonte: janela mínima, mas válida e verificável.
+    const evidenceHorizonOf = async (validationId: string): Promise<Date> => {
+      const claimId = await claimIdOf(validationId)
+      const observations = await observationsOf(claimId)
+      return new Date(
+        Math.min(...observations.map((o) => o.observedAt.getTime() + o.ttlSeconds * 1000)),
+      )
+    }
+
+    // Conclusão 1 ms antes do horizonte das evidências: a policy (30 dias) não
+    // limita; a evidência limita. Janela mínima, mas válida e verificável.
     const atEdge = await newValidation()
     const edgeRow = await validationRow(atEdge)
-    const lastInstant = new Date(edgeRow!.expiresAt!.getTime() - 1)
+    const evidenceHorizon = await evidenceHorizonOf(atEdge)
+    const lastInstant = new Date(evidenceHorizon.getTime() - 1)
     await setCompletion(atEdge, lastInstant)
 
     const credential = transport(await issue(atEdge))
     expect(credential.validFrom).toBe(lastInstant.toISOString())
-    expect(credential.validUntil).toBe(edgeRow!.expiresAt!.toISOString())
+    expect(credential.validUntil).toBe(evidenceHorizon.toISOString())
+    expect(credential.validUntil).not.toBe(edgeRow!.expiresAt!.toISOString())
     expect(Date.parse(credential.validFrom)).toBeLessThan(Date.parse(credential.validUntil!))
     expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: issuer.id })).toMatchObject({ valid: true })
 
-    // `completed_at == expires_at` (janela vazia) e `completed_at > expires_at`
-    // (janela invertida): recusa explícita — e `expires_at` (horizonte de
-    // retenção, política de 30 dias) NÃO é recalculado nem estendido.
+    // `completed_at == validUntil` (janela vazia) e `completed_at > validUntil`
+    // (invertida): recusa explícita — e `expires_at` (retenção) não é alterado.
     for (const [label, delta] of [
       ['igual', 0],
       ['posterior', 1],
     ] as const) {
       const validationId = await newValidation()
       const row = await validationRow(validationId)
-      await setCompletion(validationId, new Date(row!.expiresAt!.getTime() + delta))
+      const horizon = await evidenceHorizonOf(validationId)
+      await setCompletion(validationId, new Date(horizon.getTime() + delta))
 
       await expect(issue(validationId), label).rejects.toMatchObject({
         failure: 'VALIDITY_WINDOW_INVALID',
       })
 
       const after = await validationRow(validationId)
-      expect(after!.completedAt!.getTime(), label).toBeGreaterThanOrEqual(after!.expiresAt!.getTime())
       expect(after!.expiresAt!.getTime(), label).toBe(row!.expiresAt!.getTime())
     }
+
   })
 
   it('recusa validation sem claim', async () => {
@@ -724,12 +736,14 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     expect(res.json().detail).toBe('VALIDATION_NOT_FINAL')
   })
 
-  it('recusa validation fora da janela de validade (409), sem estender o prazo', async () => {
+  it('recusa validation fora da janela de validade da credencial (409), sem estender o prazo', async () => {
     const validationId = await newValidation()
     const row = await validationRow(validationId)
+    // `validUntil` é limitado pelo TTL das evidências; uma conclusão no futuro
+    // distante não pode ser "cabida" esticando a retenção.
     await adminPool.db
       .update(t.validation)
-      .set({ completedAt: row!.expiresAt })
+      .set({ completedAt: new Date('2100-01-01T00:00:00.000Z') })
       .where(eq(t.validation.validationId, validationId))
 
     const res = await postCredential(validationId)

@@ -31,6 +31,7 @@ const observation = (
   confidence: 0.8,
   source: 'receita',
   observedAt: new Date('2026-01-02T03:04:05.000Z'),
+  ttlSeconds: 30 * 24 * 60 * 60,
   evidenceSha256: null,
   detail: { nested: { b: 2, a: 1 } },
   ...overrides,
@@ -280,7 +281,17 @@ describe('tempo: `proof.created` e `validFrom`', () => {
     ).rejects.toThrow(/completed_at/)
   })
 
-  it('exige janela NÃO vazia: `completed_at < expires_at` (nunca janela invertida ou de duração zero)', async () => {
+  it('usa `validUntil` da credencial, não `expires_at` de retenção', async () => {
+    const validUntil = new Date('2026-01-15T00:00:00.000Z')
+    const credential = await buildCredential(
+      source(twoObservations(), { validUntil }),
+      { issuer, signer, now: clock },
+    )
+    expect(credential.validUntil).toBe(validUntil.toISOString())
+    expect(credential.validUntil).not.toBe(source(twoObservations()).validation.expiresAt.toISOString())
+  })
+
+  it('exige janela NÃO vazia: `completed_at < validUntil` (nunca janela invertida ou de duração zero)', async () => {
     const expiresAt = new Date('2026-01-31T00:00:00.000Z')
     const at = (completedAt: Date): Promise<SecuredVerifiableCredential> =>
       buildCredential(source(twoObservations(), { completedAt }), { issuer, signer, now: clock })
@@ -289,7 +300,7 @@ describe('tempo: `proof.created` e `validFrom`', () => {
     await expect(at(expiresAt)).rejects.toThrow(/window/)
 
     // Janela invertida (`validFrom > validUntil`): a validação concluiu depois
-    // do horizonte persistido.
+    // do horizonte da credencial (aqui, fallback de `expiresAt`).
     await expect(at(new Date(expiresAt.getTime() + 1))).rejects.toThrow(/window/)
 
     // 1 ms antes do horizonte ainda é uma janela válida.

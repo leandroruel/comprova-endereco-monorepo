@@ -90,7 +90,7 @@ const explanationOf = (
 })
 
 /**
- * `validFrom` (VC Data Model 2.0 §4.10) é o início da validade da informação
+ * `validFrom` (VC Data Model 2.0 §4.9) é o início da validade da informação
  * certificada — não a data de emissão da prova.
  *
  * A informação certificada é o VEREDITO da validation: ele passa a existir
@@ -122,7 +122,7 @@ export const toVerifiableCredential = (
   id: credentialUrlOf(assertion.issuer.id, credentialId),
   issuer: assertion.issuer.id,
   validFrom: validFromOf(assertion.timestamps),
-  validUntil: assertion.timestamps.expires_at,
+  validUntil: assertion.timestamps.valid_until,
   credentialStatus: {
     id: credentialStatusUrlOf(assertion.issuer.id, credentialId),
     type: CREDENTIAL_STATUS_TYPE,

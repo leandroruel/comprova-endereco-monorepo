@@ -17,7 +17,7 @@ import { CredentialStatusSchema } from './status.schema.js'
  *                   → DataIntegrityProof (eddsa-jcs-2022)
  *
  * Terminologia W3C usada, sem invenção:
- *  - `@context`, `type`, `issuer`, `validFrom` (§4.6/§4.10), `validUntil`;
+ *  - `@context`, `type`, `issuer`, `validFrom` (§4.6/§4.9), `validUntil`;
  *  - `id` (§4.4) — URL pública e opaca da credencial;
  *  - `credentialStatus` (§4.9) — apenas a URL/tipo do status; o valor
  *    (`ACTIVE`/`REVOKED`) é obtido pelo verificador nessa URL (ADR-0027);
