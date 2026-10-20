@@ -24,6 +24,7 @@ import {
   persistFreshSignals,
   readEvidenceSet,
   resolveClaimId,
+  supersedeIssuedCredentials,
   updateValidationOutcome,
 } from './deep-enrich.persistence.js'
 import { runCheckersSequentially, signalFromRow } from './deep-enrich.signals.js'
@@ -53,6 +54,47 @@ const claimTypeOf = (docType: string): ClaimType =>
   docType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
 
 const subjectTypeOf = (docType: string): SubjectType => (docType === 'CNPJ' ? 'organization' : 'person')
+
+export interface PriorCredentialOutcome {
+  readonly status: string
+  readonly verdict: Verdict | null
+  readonly evidenceSetHash: string | null
+  readonly policyHash: string | null
+  readonly scorerVersion: string | null
+}
+
+export interface NextCredentialOutcome {
+  readonly stillPartial: boolean
+  readonly verdict: Verdict
+  readonly evidenceSetHash: string
+  readonly policyHash: string
+  readonly scorerVersion: string
+}
+
+/**
+ * C1/ADR-0030: uma credencial já emitida deixa de representar a conclusão
+ * vigente quando o deep path produz OUTRA conclusão — veredito, conjunto de
+ * evidências, policy ou scorer diferentes — ou quando a validation deixa de ser
+ * terminal (`partial`). Replay idêntico NÃO revoga.
+ *
+ * `previous.status === 'completed'` é o portão: só existe credencial emitível
+ * (e, portanto, possivelmente emitida) depois de uma conclusão. Se não havia
+ * conclusão, não há status a revogar e `supersedeIssuedCredentials` seria no-op
+ * de qualquer forma, mas evitamos a consulta.
+ */
+export const outcomeSupersedesCredentials = (
+  previous: PriorCredentialOutcome,
+  next: NextCredentialOutcome,
+): boolean => {
+  if (previous.status !== 'completed') return false
+  if (next.stillPartial) return true
+  return (
+    previous.verdict !== next.verdict ||
+    previous.evidenceSetHash !== next.evidenceSetHash ||
+    previous.policyHash !== next.policyHash ||
+    previous.scorerVersion !== next.scorerVersion
+  )
+}
 
 export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): Promise<DeepEnrichResult> => {
   /**
@@ -206,6 +248,21 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       },
       completedAt,
     })
+
+    // C1: mesma transação da nova conclusão. Se a revogação falhar, o novo
+    // resultado NÃO é persistido — não existe janela com credencial ACTIVE
+    // apontando para uma conclusão que já mudou.
+    if (
+      outcomeSupersedesCredentials(previous, {
+        stillPartial,
+        verdict: decision.verdict,
+        evidenceSetHash,
+        policyHash: deps.policyHash,
+        scorerVersion: SCORER_VERSION,
+      })
+    ) {
+      await supersedeIssuedCredentials(tx, input.tenantId, input.validationId)
+    }
 
     await emitOutcomeEvents(tx, {
       tenantId: input.tenantId,

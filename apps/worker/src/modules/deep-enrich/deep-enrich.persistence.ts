@@ -1,4 +1,4 @@
-import { eq, inArray } from '@comprova/db'
+import { and, eq, inArray, sql } from '@comprova/db'
 import type { DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
@@ -275,6 +275,47 @@ export const updateValidationOutcome = async (tx: DbTx, write: ValidationOutcome
       completedAt: write.stillPartial ? null : write.completedAt,
     })
     .where(eq(t.validation.validationId, write.validationId))
+}
+
+/**
+ * Revoga, na MESMA transação da nova conclusão, as credenciais já emitidas
+ * desta validation (C1/ADR-0030). O vínculo é `credential_issuance.validation_id`
+ * → `credential_id`; sem emissão, é no-op. Idempotente: só casa ACTIVE, então
+ * reexecuções não reescrevem `revoked_at` nem o motivo.
+ *
+ * O motivo `superseded` distingue a revogação automática da manual; o endpoint
+ * público continua expondo apenas ACTIVE/REVOKED.
+ */
+export const supersedeIssuedCredentials = async (
+  tx: DbTx,
+  tenantId: string,
+  validationId: string,
+): Promise<number> => {
+  const issuances = await tx
+    .select({ credentialId: t.credentialIssuance.credentialId })
+    .from(t.credentialIssuance)
+    .where(eq(t.credentialIssuance.validationId, validationId))
+  if (issuances.length === 0) return 0
+
+  const revoked = await tx
+    .update(t.credentialStatus)
+    .set({
+      status: 'REVOKED',
+      revokedAt: sql`now()`,
+      revocationReason: 'superseded',
+    })
+    .where(
+      and(
+        eq(t.credentialStatus.tenantId, tenantId),
+        inArray(
+          t.credentialStatus.credentialId,
+          issuances.map((row) => row.credentialId),
+        ),
+        eq(t.credentialStatus.status, 'ACTIVE'),
+      ),
+    )
+    .returning({ credentialId: t.credentialStatus.credentialId })
+  return revoked.length
 }
 
 export interface OutcomeEventsWrite {

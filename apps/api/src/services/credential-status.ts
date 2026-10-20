@@ -161,11 +161,12 @@ export const revokeCredentialStatus = async (
   db: Db,
   tenantId: string,
   credentialId: string,
+  reason: 'manual' | 'superseded' = 'manual',
 ): Promise<CredentialStatusValue | null> =>
   withTenant(db, tenantId, async (tx) => {
     const updated = await tx
       .update(t.credentialStatus)
-      .set({ status: 'REVOKED', revokedAt: sql`now()` })
+      .set({ status: 'REVOKED', revokedAt: sql`now()`, revocationReason: reason })
       .where(
         and(
           eq(t.credentialStatus.tenantId, tenantId),

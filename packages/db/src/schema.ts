@@ -162,6 +162,9 @@ export const credentialStatus = pgTable(
     status: text('status').$type<'ACTIVE' | 'REVOKED'>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    // Motivo auditável da revogação (`manual`, `superseded`); não é exposto no
+    // endpoint público. `superseded` = o deep path produziu uma conclusão nova.
+    revocationReason: text('revocation_reason'),
   },
   (t) => [index('credential_status_scope_idx').on(t.issuerScope)],
 )
