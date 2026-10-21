@@ -162,11 +162,19 @@ tenant A com `keys:write` tentando revogar signing key do tenant B recebe
   automaticamente; a revisão de rota precisa escolher o scope.
 - Não há migração: `api_key.scopes` é `text[]` e já aceita o novo valor. O
   grant é um `UPDATE` operacional, não uma alteração de schema.
-- `validation.issuer_scopes` continua sendo o snapshot de todos os scopes da
-  API key no momento da emissão (ADR-0017). Se a mesma key acumular
-  `keys:write` e `validate:write`, esse valor aparecerá em
-  `comprova:authorization`; para separação estrita, use uma key só
-  administrativa. O modelo da credencial não foi alterado.
+- `validation.issuer_scopes` continua sendo o snapshot **completo** de todos os
+  scopes da API key no momento da emissão (ADR-0017), inclusive `keys:write`,
+  para auditoria. A credencial publica em `assertionAuthority.scopes` somente
+  os scopes de validação (`validate:read`/`validate:write`). `keys:write` é uma
+  capacidade administrativa da API key (ator), não uma permissão do titular
+  nem uma declaração da credencial, e por isso não entra no documento assinado.
+  O termo é publicado sem o prefixo do produto e declarado no `@context`; o IRI
+  continua no namespace do vocabulário.
+- Credenciais antigas com `keys:write` em `comprova:authorization` continuam
+  verificáveis: o schema aceita essa forma legada somente para leitura e o
+  verificador não a interpreta como capacidade. A filtragem e o novo nome
+  valem para novas emissões, sem migração ou reescrita de documentos
+  existentes.
 
 ## Alternativas descartadas
 

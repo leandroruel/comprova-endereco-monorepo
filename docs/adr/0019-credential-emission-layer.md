@@ -72,10 +72,18 @@ resolução, não da assertion.
 `IssuerIdentity { id, keyId }`, com `id = comprova:issuer:<tenant_id>`. O issuer
 é o **tenant**. Não há DID/DID Document/resolução/rotação. `api_key_id` e
 `user_id` são identificadores internos e **não** entram na credencial;
-`issuer_scopes` é transportado como `authorization.scopes` (snapshot da
-autoridade vigente — conceito de domínio já existente, não secreto). Separacão
+`issuer_scopes` é transportado como `assertionAuthority.scopes` (snapshot da
+autoridade vigente — conceito de domínio já existente, não secreto). Separação
 preservada: `issuer = tenant`, `actor = api_key_id|user_id`,
-`authorization = issuer_scopes`.
+`assertionAuthority = issuer_scopes filtrado`.
+
+> **Atualizado pelo [ADR-0030](0030-enforcement-de-scopes-das-api-keys.md):**
+> a credencial publica apenas o subconjunto de `issuer_scopes` que descreve
+> autoridade de validação (`validate:read`/`validate:write`). O snapshot
+> completo continua em `validation.issuer_scopes` para auditoria; capacidades
+> administrativas como `keys:write` não entram em `assertionAuthority.scopes`.
+> O campo é publicado sem o prefixo do produto e declarado explicitamente no
+> `@context`; o IRI continua no namespace do vocabulário.
 
 > **Substituído pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
 > §2:** o `id` do issuer passou a ser `<origem HTTPS>/issuers/<escopo do tenant>`

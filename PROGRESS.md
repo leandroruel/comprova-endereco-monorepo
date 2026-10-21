@@ -26,6 +26,30 @@ validation/credencial. `apps/api/src/credential.int.test.ts` foi ajustado para
 usar `keys:write` nas keys que revogam signing keys. `pnpm test` passou com 64
 arquivos / 555 testes.
 
+## Snapshot de auditoria x autorização da credencial (2026-10-21)
+
+`validation.issuer_scopes` continua guardando o snapshot **completo** dos
+scopes da API key no momento da emissão, inclusive `keys:write`, para
+auditoria. O mapping para a credencial passou a publicar em
+`assertionAuthority.scopes` somente os scopes de validação
+(`validate:read`/`validate:write`), por allowlist em
+`packages/credential/src/service/assertion.service.ts`. `keys:write` é uma
+capacidade administrativa da API key (ator), não uma permissão do titular da
+credencial, e não entra no documento assinado.
+
+O campo foi renomeado de `comprova:authorization` para `assertionAuthority`:
+o nome agora descreve a autoridade da asserção sem repetir o nome do produto, e
+o termo é declarado explicitamente no `@context`. O verificador não interpreta
+o campo como capacidade; a mudança elimina a ambiguidade e a exposição do
+privilégio administrativo. Credenciais antigas com `keys:write` em
+`comprova:authorization` continuam verificáveis (o schema aceita a forma legada
+somente para leitura e nada é reescrito). Testes: unidade em
+`packages/credential/src/service/credential.service.test.ts` (novo documento e
+compatibilidade de leitura) e integração em
+`apps/api/src/credential.int.test.ts` (key com os três scopes: snapshot no
+banco, documento filtrado e verificação independente). `pnpm test` passou com
+64 arquivos / 558 testes; typecheck, lint, format e `db:fence` também passaram.
+
 ## Enforcement de scopes das API keys (2026-10-21)
 
 A autenticação já resolvia `request.tenant.scopes`, mas as rotas mutantes não
@@ -303,7 +327,7 @@ pnpm install
 pnpm db:migrate
 pnpm db:seed         # cria API key dev
 pnpm dev             # levanta tudo (API :3000, dashboard :5173, worker, ingestor)
-pnpm test            # unidade + integração (549/549 em 2026-10-21)
+pnpm test            # unidade + integração (558/558 em 2026-10-21)
 pnpm db:fence        # pgfence gate de migrações
 ```
 

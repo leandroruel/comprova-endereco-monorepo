@@ -202,8 +202,11 @@ handler** (`preHandler: requireReadScope`, `requireWriteScope` ou
   Sem o grant, a revogação de signing key retorna 403.
 
 - O snapshot `validation.issuer_scopes` continua registrando todos os scopes da
-  key no momento da emissão. Para separação estrita, use uma key só
-  administrativa para `keys:write`.
+  key no momento da emissão (auditoria). A credencial publica em
+  `assertionAuthority.scopes` apenas `validate:read`/`validate:write`;
+  `keys:write` não aparece no documento e não é uma permissão do titular.
+  Credenciais antigas com `comprova:authorization` continuam verificáveis
+  (compatibilidade de leitura).
 - As rotas públicas de issuer (`/issuers/:scope`, `did.json`, status e
   `.well-known/comprova-issuer/:scope`) continuam sem API key e sem scope.
 

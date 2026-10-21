@@ -144,7 +144,7 @@ describe('buildCredential + verifyCredentialIntegrity', () => {
       'comprova:hash': 'd'.repeat(64),
     })
     expect(credential['comprova:algorithm']).toEqual({ 'comprova:scorerVersion': '1' })
-    expect(credential['comprova:authorization']).toEqual({ 'comprova:scopes': ['validate:write'] })
+    expect(credential.assertionAuthority).toEqual({ scopes: ['validate:write'] })
     expect(credential.proof.type).toBe('DataIntegrityProof')
     expect(credential.proof.cryptosuite).toBe('eddsa-jcs-2022')
     expect(credential.proof.proofPurpose).toBe('assertionMethod')
@@ -158,6 +158,57 @@ describe('buildCredential + verifyCredentialIntegrity', () => {
     const credential = transport(await emit())
     expect(
       verifyCredentialIntegrity(credential, {
+        trusted,
+        expectedIssuerId: issuer.id,
+      }),
+    ).toMatchObject({ valid: true })
+  })
+
+  it('não publica scopes administrativos na credencial e continua verificável', async () => {
+    const input = source(twoObservations(), {
+      issuerScopes: ['validate:read', 'validate:write', 'keys:write'],
+    })
+    const credential = transport(
+      await buildCredential(input, { issuer, signer, now: () => PROOF_CREATED_AT }),
+    )
+
+    // O snapshot de auditoria da API key permanece completo...
+    expect(input.validation.issuerScopes).toEqual(['validate:read', 'validate:write', 'keys:write'])
+    // ...mas a credencial só declara a autoridade de validação do issuer.
+    expect(credential.assertionAuthority).toEqual({
+      scopes: ['validate:read', 'validate:write'],
+    })
+    expect(JSON.stringify(credential)).not.toContain('keys:write')
+    // O scope administrativo não vira declaração do titular.
+    expect(credential.credentialSubject).not.toHaveProperty('assertionAuthority')
+    expect(
+      verifyCredentialIntegrity(credential, {
+        trusted,
+        expectedIssuerId: issuer.id,
+      }),
+    ).toMatchObject({ valid: true })
+  })
+
+  it('continua verificando credenciais legadas que publicaram keys:write', async () => {
+    // Compatibilidade de leitura: documentos emitidos antes da filtragem
+    // continuam verificáveis e o verificador NÃO trata o scope como capacidade.
+    const document = { ...(await emit()) } as Record<string, unknown>
+    delete document.proof
+    delete document.assertionAuthority
+    document['comprova:authorization'] = { 'comprova:scopes': ['validate:write', 'keys:write'] }
+    const proof = await createDataIntegrityProof(document, {
+      created: PROOF_CREATED_AT.toISOString(),
+      verificationMethod: verificationMethodOf(issuer),
+      proofPurpose: ASSERTION_METHOD,
+      signer,
+    })
+    const legacy = { ...document, proof } as SecuredVerifiableCredential
+
+    expect(legacy['comprova:authorization']).toEqual({
+      'comprova:scopes': ['validate:write', 'keys:write'],
+    })
+    expect(
+      verifyCredentialIntegrity(transport(legacy), {
         trusted,
         expectedIssuerId: issuer.id,
       }),

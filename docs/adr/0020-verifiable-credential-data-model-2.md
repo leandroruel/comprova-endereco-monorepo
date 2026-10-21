@@ -138,7 +138,15 @@ sem objeto `issuer`, sem DID). `verificationMethod` é
 não há resolução de chave, o binding é estrutural (`<issuer>#<fragmento não
 vazio>`). Não há DID/DID Document/resolução/rotação: a chave pública é injetada
 no verifier (ADR-0019 §3). `api_key_id`/`user_id` continuam fora da credencial;
-`issuer_scopes` é transportado como `comprova:authorization.scopes`.
+`issuer_scopes` é transportado como `assertionAuthority.scopes`. O termo é
+declarado no `@context` sem o prefixo do produto; o IRI continua no namespace
+do vocabulário.
+
+> **Atualizado pelo [ADR-0030](0030-enforcement-de-scopes-das-api-keys.md):**
+> só os scopes de validação (`validate:read`/`validate:write`) são publicados
+> em `assertionAuthority.scopes`. O snapshot completo permanece em
+> `validation.issuer_scopes`; `keys:write` é capacidade administrativa e não
+> entra no documento.
 
 > **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
 > §2:** `issuer.id` passou a ser `<origem HTTPS>/issuers/<escopo do tenant>`

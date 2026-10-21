@@ -35,13 +35,22 @@ import { CredentialStatusSchema } from './status.schema.js'
  * sob a origem configurada do projeto (`service/issuer.service.ts`), nunca esquemas inventados.
  *
  * Tudo que é específico da Comprova vive no namespace
- * `https://comprova.dev/ns/credentials/v2#`, declarado no `@context` inline e
- * usado na forma de IRI compacto (`comprova:…`). Nenhum termo W3C é
+ * `https://comprova.dev/ns/credentials/v2#`, declarado no `@context` inline.
+ * A maioria dos termos usa a forma compacta (`comprova:…`); termos de negócio
+ * que não devem carregar o nome do produto, como `assertionAuthority`, são
+ * declarados individualmente no mesmo `@context`. Nenhum termo W3C é
  * redefinido nem inventado.
  */
 
 export const VC_CONTEXT_URL = 'https://www.w3.org/ns/credentials/v2'
 export const COMPROVA_CONTEXT_URL = 'https://comprova.dev/ns/credentials/v2#'
+
+/**
+ * Termos publicados sem o prefixo do produto. O nome do campo descreve o
+ * conceito de negócio; o IRI continua no namespace do vocabulário.
+ */
+export const ASSERTION_AUTHORITY_IRI = `${COMPROVA_CONTEXT_URL}assertionAuthority`
+export const SCOPES_IRI = `${COMPROVA_CONTEXT_URL}scopes`
 
 export const VERIFIABLE_CREDENTIAL_TYPE = 'VerifiableCredential'
 export const COMPROVA_CREDENTIAL_TYPE = 'comprova:AddressCredential'
@@ -121,7 +130,28 @@ const ComprovaAlgorithmSchema = z.object({
   'comprova:scorerVersion': z.string().min(1),
 })
 
-const ComprovaAuthorizationSchema = z.object({
+/**
+ * Autoridade do ISSUER sob a qual a asserção foi produzida (snapshot da API
+ * key), NÃO uma permissão do titular da credencial. A emissão publica somente
+ * os scopes de validação; capacidades administrativas (`keys:write`) são
+ * filtradas em `assertion.service.ts`. O verificador não usa este campo para
+ * autorizar operações.
+ *
+ * O nome é semanticamente fechado: `assertionAuthority` descreve a autoridade
+ * da asserção, sem repetir o nome do produto e sem sugerir uma capacidade do
+ * titular.
+ */
+const AssertionAuthoritySchema = z.object({
+  scopes: z.array(z.string()),
+})
+
+/**
+ * Forma legada, aceita apenas para LEITURA de documentos já emitidos com
+ * `comprova:authorization`. Novas emissões usam `assertionAuthority`.
+ *
+ * @deprecated Compatibilidade de leitura; não emitir.
+ */
+const LegacyComprovaAuthorizationSchema = z.object({
   'comprova:scopes': z.array(z.string()),
 })
 
@@ -157,7 +187,13 @@ export const VerifiableCredentialSchema = z.object({
   'comprova:result': ComprovaResultSchema,
   'comprova:policy': ComprovaPolicySchema,
   'comprova:algorithm': ComprovaAlgorithmSchema,
-  'comprova:authorization': ComprovaAuthorizationSchema.optional(),
+  /**
+   * Snapshot da autoridade de validação do issuer. Fica fora de
+   * `credentialSubject` de propósito: não é uma permissão do titular.
+   */
+  assertionAuthority: AssertionAuthoritySchema.optional(),
+  /** @deprecated Forma legada; aceita somente para verificação. */
+  'comprova:authorization': LegacyComprovaAuthorizationSchema.optional(),
   'comprova:legalBasis': z.string().min(1),
 })
 

@@ -29,6 +29,31 @@ export const observationEntry = (observation: CredentialObservation): EvidenceSe
 export const evidenceSetHashOfCredential = (observations: readonly CredentialObservation[]): string =>
   evidenceSetHash(observations.map(observationEntry))
 
+/**
+ * Scopes que podem ser publicados em `assertionAuthority`.
+ *
+ * O campo descreve a autoridade de VALIDAÇÃO sob a qual o issuer produziu a
+ * asserção; ele não é uma permissão do titular da credencial. Scopes
+ * administrativos, como `keys:write` (revogação de signing key), são
+ * capacidades da API key/ator, não da credencial, e não dizem nada sobre a
+ * emissão: ficam fora do documento. O snapshot completo continua persistido
+ * em `validation.issuer_scopes` para auditoria (ADR-0017/ADR-0030).
+ *
+ * A lista é uma allowlist (não uma denylist): um scope operacional novo não
+ * vaza para a credencial sem uma decisão explícita de contrato.
+ */
+export const ASSERTION_AUTHORITY_SCOPES = ['validate:read', 'validate:write'] as const
+
+const ASSERTION_AUTHORITY_SCOPE_SET: ReadonlySet<string> = new Set(ASSERTION_AUTHORITY_SCOPES)
+
+/**
+ * Projeta o snapshot de autoridade da API key no subconjunto que pertence à
+ * credencial. Não altera o snapshot persistido: a filtragem acontece somente
+ * no mapping para o documento assinado.
+ */
+export const assertionAuthorityScopes = (issuerScopes: readonly string[] | null): readonly string[] | null =>
+  issuerScopes === null ? null : issuerScopes.filter((scope) => ASSERTION_AUTHORITY_SCOPE_SET.has(scope))
+
 const byId = (a: { readonly id: string }, b: { readonly id: string }): number =>
   a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 
@@ -107,11 +132,16 @@ export const buildAssertion = (source: AssertionSource, issuerId: string): Asser
     unknown: observations.filter((o) => o.stance === 'unknown').length,
   }
 
+  // `issuerScopes` é o snapshot COMPLETO da autoridade da API key (auditoria).
+  // A credencial publica somente os scopes que descrevem a autoridade de
+  // validação; capacidades administrativas não são declarações da credencial.
+  const authorityScopes = assertionAuthorityScopes(v.issuerScopes)
+
   return {
     format: 'comprova-assertion-v1',
     issuer: {
       id: issuerId,
-      authorization: v.issuerScopes === null ? null : { scopes: [...v.issuerScopes] },
+      authority: authorityScopes === null ? null : { scopes: [...authorityScopes] },
     },
     subject: {
       id: deriveCredentialSubjectId({

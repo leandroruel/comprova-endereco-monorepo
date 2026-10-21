@@ -52,7 +52,7 @@ export const AssertionPayloadSchema = z.object({
   format: z.literal('comprova-assertion-v1'),
   issuer: z.object({
     id: z.string().min(1),
-    authorization: z.object({ scopes: z.array(z.string()) }).nullable(),
+    authority: z.object({ scopes: z.array(z.string()) }).nullable(),
   }),
   subject: z.object({
     id: z.string().min(1),
@@ -148,6 +148,11 @@ export interface AssertionSource {
     readonly scorerVersion: string | null
     readonly evidenceSetHash: string | null
     readonly legalBasis: string
+    /**
+     * Snapshot COMPLETO dos scopes da API key no momento da emissão
+     * (`validation.issuer_scopes`), usado para auditoria. O mapping para a
+     * credencial filtra capacidades administrativas (`assertionAuthorityScopes`).
+     */
     readonly issuerScopes: readonly string[] | null
     readonly explanation: AssertionPayload['result']['explanation']
     readonly createdAt: Date
