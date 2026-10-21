@@ -17,9 +17,9 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp, buildFastPathDeps } from './app.js'
-import type { AppConfig } from './config.js'
-import { batchTick } from './services/batch-processor.js'
+import { buildApp, buildFastPathDeps } from '../src/app.js'
+import type { AppConfig } from '../src/config.js'
+import { batchTick } from '../src/services/batch-processor.js'
 
 // Pré-requisitos de verificabilidade (V-1, V-3, V-5, §8, §9, §12):
 //  - issuer/api_key + snapshot de autoridade;

@@ -11,9 +11,12 @@ import {
   type TestCredentialSigningKey,
 } from '@comprova/testing'
 import { afterAll, describe, expect, it } from 'vitest'
-import { loadActiveSigningKey } from './credential-issuer.js'
-import { provisionSigningKeys, SigningKeyProvisioningError } from './provision-signing-keys.js'
-import { parseSigningKeys, type SigningKeyEntry } from './signing-keys.js'
+import { loadActiveSigningKey } from '../../src/services/credential-issuer.js'
+import {
+  provisionSigningKeys,
+  SigningKeyProvisioningError,
+} from '../../src/services/provision-signing-keys.js'
+import { parseSigningKeys, type SigningKeyEntry } from '../../src/services/signing-keys.js'
 
 // FASE 14 — provisionamento da chave publicada. Garante as duas invariantes que
 // o startup depende: (1) uma chave publicada nunca é sobrescrita e (2) a chave

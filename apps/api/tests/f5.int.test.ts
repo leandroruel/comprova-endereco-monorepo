@@ -11,7 +11,7 @@ import {
 } from '@comprova/testing'
 import Redis from 'ioredis'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
+import { buildApp } from '../src/app.js'
 
 const PEPPER = 'test-pepper-123'
 

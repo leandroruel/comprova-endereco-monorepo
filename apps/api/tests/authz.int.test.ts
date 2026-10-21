@@ -18,8 +18,8 @@ import {
 import Redis from 'ioredis'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
-import { API_SCOPES } from './plugins/scope.js'
+import { buildApp } from '../src/app.js'
+import { API_SCOPES } from '../src/plugins/scope.js'
 
 const PEPPER = 'test-pepper-123'
 

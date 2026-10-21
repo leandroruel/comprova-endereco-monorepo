@@ -8,8 +8,8 @@ import {
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
 import { afterAll, describe, expect, it } from 'vitest'
-import { loadActiveSigningKey } from './credential-issuer.js'
-import { revokeSigningKey } from './signing-key-lifecycle.js'
+import { loadActiveSigningKey } from '../../src/services/credential-issuer.js'
+import { revokeSigningKey } from '../../src/services/signing-key-lifecycle.js'
 
 // ADR-0029 — ciclo de vida da chave de assinatura na fronteira de persistência.
 // Exercita o grant por coluna, a RLS, a monotonicidade do trigger e a mesma

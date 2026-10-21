@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
 import { ed25519PublicKeyBytes } from '@comprova/credential'
 import { describe, expect, it } from 'vitest'
-import { makeSigningKeyProvider } from './signing-key-provider.factory.js'
+import { makeSigningKeyProvider } from '../../src/services/signing-key-provider.factory.js'
 
 const TENANT = '11111111-1111-4111-8111-111111111111'
 const KEY_ID = 'key-1'

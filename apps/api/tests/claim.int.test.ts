@@ -13,7 +13,7 @@ import {
 import Redis from 'ioredis'
 import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
+import { buildApp } from '../src/app.js'
 
 const PEPPER = 'test-pepper-123'
 

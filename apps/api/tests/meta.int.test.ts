@@ -10,7 +10,7 @@ import { createLogger, createMetrics } from '@comprova/observability'
 import { createDbPool, runMigrations } from '@comprova/db'
 import Redis from 'ioredis'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
+import { buildApp } from '../src/app.js'
 
 const PEPPER = 'test-pepper-123'
 

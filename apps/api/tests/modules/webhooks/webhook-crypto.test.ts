@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { decryptSecret, encryptSecret } from '../../shared/secretbox.js'
+import { decryptSecret, encryptSecret } from '../../../src/shared/secretbox.js'
 import {
   isSafeWebhookUrl,
   newWebhookSecret,
   signWebhookPayload,
   verifyWebhookSignature,
-} from './webhook-crypto.js'
+} from '../../../src/modules/webhooks/webhook-crypto.js'
 
 describe('webhook crypto', () => {
   it('segredo e cifrado e restaurado com AES-256-GCM', () => {

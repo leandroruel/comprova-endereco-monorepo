@@ -12,9 +12,9 @@ import {
   type TestCredentialSigningKey,
 } from '@comprova/testing'
 import { afterAll, describe, expect, it } from 'vitest'
-import { loadActiveSigningKey } from './credential-issuer.js'
-import { rotateSigningKey, SigningKeyRotationError } from './signing-key-rotation.js'
-import { parseSigningKeys, type SigningKeyEntry } from './signing-keys.js'
+import { loadActiveSigningKey } from '../../src/services/credential-issuer.js'
+import { rotateSigningKey, SigningKeyRotationError } from '../../src/services/signing-key-rotation.js'
+import { parseSigningKeys, type SigningKeyEntry } from '../../src/services/signing-keys.js'
 
 // Roadmap #24 / etapa 24.2 — rotação de chave de assinatura. Exercita a
 // operação de domínio contra o Postgres real: atomicidade, concorrência,

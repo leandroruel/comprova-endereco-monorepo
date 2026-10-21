@@ -13,8 +13,8 @@ import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import Redis from 'ioredis'
 import { afterAll, describe, expect, it } from 'vitest'
-import { buildApp } from './app.js'
-import { loadPolicyFile } from './policy-loader.js'
+import { buildApp } from '../src/app.js'
+import { loadPolicyFile } from '../src/policy-loader.js'
 
 const PEPPER = 'test-pepper-123'
 const differentialPolicy = loadPolicyFile('2026.11.1')

@@ -1,6 +1,6 @@
 import { createPublicKey, generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { makeSigningKeyResolver, SigningKeyConfigError } from './signing-keys.js'
+import { makeSigningKeyResolver, SigningKeyConfigError } from '../../src/services/signing-keys.js'
 
 const TENANT = '11111111-1111-4111-8111-111111111111'
 const OTHER = '22222222-2222-4222-8222-222222222222'

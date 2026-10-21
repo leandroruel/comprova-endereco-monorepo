@@ -275,6 +275,11 @@ A suíte roda em dois projetos do Vitest, escolhidos pela extensão do arquivo:
 | `node`      | Node, `pool: forks`        | `*.test.ts(x)` de API, worker, ingestor, pacotes |
 | `dashboard` | Chromium real (Playwright) | `apps/dashboard/src/**/*.test.tsx`               |
 
+A maioria dos pacotes mantém o teste ao lado do código (`src/…/coisa.test.ts`). A
+exceção é `apps/api`, que concentra os testes em `apps/api/tests/`, espelhando a
+estrutura de `src/` (`apps/api/tests/services/signing-keys.test.ts` testa
+`apps/api/src/services/signing-keys.ts`).
+
 Testes de componente (`*.test.tsx`) rodam no browser de verdade: eventos de
 ponteiro/teclado, foco e árvore de acessibilidade são os do Chromium, sem jsdom
 nem polyfills. O resto continua no Node, que é mais rápido e tem os containers

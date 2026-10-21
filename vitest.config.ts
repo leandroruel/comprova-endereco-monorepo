@@ -30,7 +30,13 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'node',
-          include: ['apps/**/src/**/*.test.{ts,tsx}', 'packages/**/src/**/*.test.{ts,tsx}'],
+          // `apps/api` mantém os testes fora do `src`, em `apps/api/tests`
+          // (espelhando a estrutura do `src`).
+          include: [
+            'apps/**/src/**/*.test.{ts,tsx}',
+            'apps/**/tests/**/*.test.{ts,tsx}',
+            'packages/**/src/**/*.test.{ts,tsx}',
+          ],
           exclude: [...configDefaults.exclude, 'apps/dashboard/src/**/*.test.tsx'],
         },
       },

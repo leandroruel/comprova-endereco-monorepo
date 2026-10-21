@@ -1,8 +1,8 @@
 import { DEFAULT_CREDENTIAL_TTL_SECONDS } from '@comprova/core'
 import type { AssertionSource } from '@comprova/credential'
 import { describe, expect, it } from 'vitest'
-import { credentialValidUntilOf, signerWithDomainErrors } from './credential-issuer.js'
-import { SigningKeyProviderError } from './signing-key-provider.js'
+import { credentialValidUntilOf, signerWithDomainErrors } from '../../src/services/credential-issuer.js'
+import { SigningKeyProviderError } from '../../src/services/signing-key-provider.js'
 
 const source = (
   completedAt: Date,

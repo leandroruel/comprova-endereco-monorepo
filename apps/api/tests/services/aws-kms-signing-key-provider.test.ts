@@ -12,8 +12,8 @@ import {
   makeAwsKmsSigningKeyProvider,
   readAwsKmsPublicKey,
   type AwsKmsSigner,
-} from './aws-kms-signing-key-provider.js'
-import type { SigningKeyRequest } from './signing-key-provider.js'
+} from '../../src/services/aws-kms-signing-key-provider.js'
+import type { SigningKeyRequest } from '../../src/services/signing-key-provider.js'
 
 const TENANT = '11111111-1111-4111-8111-111111111111'
 const KEY_ID = 'key-1'
