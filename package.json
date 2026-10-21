@@ -20,6 +20,7 @@
     "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
     "db:seed": "tsx --env-file=.env packages/db/src/bootstrap.ts",
     "db:provision-key": "tsx --env-file=.env apps/api/src/scripts/provision-signing-key.ts",
+    "db:rotate-key": "tsx --env-file=.env apps/api/src/scripts/rotate-signing-key.ts",
     "db:fence": "pgfence analyze --ci --max-risk medium packages/db/migrations/*.sql",
     "seed:golden": "tsx --env-file=.env apps/ingestor/src/cli.ts fixtures",
     "start": "pnpm compose:up && pnpm db:migrate && pnpm db:seed && pnpm db:provision-key && pnpm --filter @comprova/api dev"

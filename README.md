@@ -132,6 +132,17 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   `?effective_at=<ISO-8601>` agenda a expiração, e uma chamada sem o parâmetro
   antecipa a revogação (nunca a adia). Não há reativação: uma chave apenas
   rotacionada (`active = false`) continua publicada.
+- **Rotação de chave** (ADR-0031): `rotateSigningKey`
+  (`apps/api/src/services/signing-key-rotation.ts`) troca a chave ativa numa
+  transação atômica, serializada por tenant com `pg_advisory_xact_lock`. A chave
+  anterior vira **superada** (`active = false`, sem tocar `revoked_at`) e segue
+  publicada para verificar as credenciais antigas; a nova passa a assinar. O
+  índice parcial único garante no máximo uma ativa mesmo sob duas rotações
+  concorrentes. Não sobrescreve material publicado, não reativa `key_id`
+  superado e não reutiliza material de outra chave; repetir para a chave já ativa
+  é no-op. Operação administrativa via
+  `pnpm db:rotate-key <tenant_id> <new_key_id>` (a nova chave precisa já estar em
+  `CREDENTIAL_SIGNING_KEYS`). Não há endpoint HTTP de rotação nesta etapa.
 
 ## Dashboard
 
@@ -230,6 +241,7 @@ pnpm format       # prettier
 pnpm db:migrate   # aplica migrações SQL
 pnpm db:seed      # tenant dev + imprime a API key
 pnpm db:provision-key # publica as chaves de `CREDENTIAL_SIGNING_KEYS` (idempotente; nunca sobrescreve)
+pnpm db:rotate-key <tenant_id> <key_id> # rotaciona a chave ativa (supera a antiga, sem revogar)
 pnpm db:fence     # pgfence: gate de segurança de migrações
 pnpm seed:golden  # dataset dourado (8 classes de veredito)
 

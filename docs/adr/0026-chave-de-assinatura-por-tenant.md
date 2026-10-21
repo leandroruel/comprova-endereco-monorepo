@@ -11,6 +11,10 @@ chave, mas deixou **uma única chave global** assinando todos os issuers.
 `revoked_at` adiciona o hard stop de revogação/expiração, separado de `active`
 (que continua sendo rotação).
 
+**Complementado pelo [ADR-0031](0031-rotacao-de-chave-de-assinatura.md):** a
+operação atômica de rotação (`rotateSigningKey`) que troca a chave ativa sem
+revogar a antiga.
+
 ## Contexto
 
 Depois do ADR-0025, cada tenant já tem o seu próprio `issuer.id`
