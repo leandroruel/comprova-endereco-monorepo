@@ -1,19 +1,17 @@
 import { createHash } from 'node:crypto'
 import type {
-  CnaeCategoria,
+  AddressProfileRecord,
   CepReader,
   CepRecord,
-  CnefeReader,
   CnefeMatch,
+  CnefeReader,
   EstabelecimentoRecord,
   KnownSharedReader,
-  ProfileReader,
-  AddressProfileRecord,
   OtherActiveCnpj,
+  ProfileReader,
   RegistryReader,
   SignalCacheReader,
 } from '@comprova/core'
-import { type CacheStore } from './cache.js'
 import {
   makeCepReader,
   makeCnaeCategoriaReader,
@@ -24,13 +22,16 @@ import {
   makeProfileReader,
   makeRegistryReader,
   makeSignalCacheReader,
-} from './adapters.js'
+} from './adapters/index.js'
+import { readThrough, readThroughValue } from './cached-read.js'
+import { type CacheStore } from './cache.js'
 import type { Db } from './client.js'
-
-const CACHED_NULL = '__CACHED_NULL__'
 
 const encodeKey = (parts: readonly (string | number | Uint8Array)[]): string =>
   createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 40)
+
+/** Chave hexadecimal estável para compor a chave de cache de um endereço. */
+const buildingKeyHex = (buildingKey: Uint8Array): string => Buffer.from(buildingKey).toString('hex')
 
 export interface CachedReaders {
   readonly registry: RegistryReader
@@ -61,6 +62,8 @@ const TTL = {
   otherCnpjs: 86_400,
 } as const
 
+type CnefeCoord = { readonly lat: number; readonly lon: number }
+
 export const makeCachedReaders = (db: Db, cache: CacheStore): CachedReaders => {
   const rawRegistry = makeRegistryReader(db)
   const rawCep = makeCepReader(db)
@@ -73,110 +76,99 @@ export const makeCachedReaders = (db: Db, cache: CacheStore): CachedReaders => {
   const rawSignalCache = makeSignalCacheReader(db)
 
   const registry: RegistryReader = {
-    getEstabelecimento: async (cnpj) => {
-      const key = `reg:${encodeKey([cnpj.basico, cnpj.ordem, cnpj.dv])}`
-      const cached = await cache.get<EstabelecimentoRecord | typeof CACHED_NULL>(key)
-      if (cached === CACHED_NULL) return null
-      if (cached !== null) return cached
-      const result = await rawRegistry.getEstabelecimento(cnpj)
-      await cache.set(key, result ?? CACHED_NULL, TTL.registry)
-      return result
-    },
+    getEstabelecimento: (cnpj) =>
+      readThrough<EstabelecimentoRecord | null>({
+        cache,
+        key: `reg:${encodeKey([cnpj.basico, cnpj.ordem, cnpj.dv])}`,
+        ttlSeconds: TTL.registry,
+        load: () => rawRegistry.getEstabelecimento(cnpj),
+        fallback: null,
+      }),
   }
 
   const cep: CepReader = {
-    get: async (cepStr) => {
-      const key = `cep:${cepStr}`
-      const cached = await cache.get<CepRecord | typeof CACHED_NULL>(key)
-      if (cached === CACHED_NULL) return null
-      if (cached !== null) return cached
-      const result = await rawCep.get(cepStr)
-      await cache.set(key, result ?? CACHED_NULL, TTL.cep)
-      return result
-    },
+    get: (cepStr) =>
+      readThrough<CepRecord | null>({
+        cache,
+        key: `cep:${cepStr}`,
+        ttlSeconds: TTL.cep,
+        load: () => rawCep.get(cepStr),
+        fallback: null,
+      }),
   }
 
   const cnefe: CnefeReader = {
-    findAddress: async (query) => {
-      const key = `cnefe:${encodeKey([query.municipioIbge, query.logradouroNorm, query.numero])}`
-      const cached = await cache.get<CnefeMatch | typeof CACHED_NULL>(key)
-      if (cached === CACHED_NULL) return null
-      if (cached !== null) return cached
-      const result = await rawCnefe.findAddress(query)
-      await cache.set(key, result ?? CACHED_NULL, TTL.cnefe)
-      return result
-    },
+    findAddress: (query) =>
+      readThrough<CnefeMatch | null>({
+        cache,
+        key: `cnefe:${encodeKey([query.municipioIbge, query.logradouroNorm, query.numero])}`,
+        ttlSeconds: TTL.cnefe,
+        load: () => rawCnefe.findAddress(query),
+        fallback: null,
+      }),
   }
 
   const cnefeCoords = {
-    coordFor: async (query: {
+    coordFor: (query: {
       readonly municipioIbge: number
       readonly logradouroNorm: string
       readonly numero: string
-    }) => {
-      const key = `cnefeCoord:${encodeKey([query.municipioIbge, query.logradouroNorm, query.numero])}`
-      const cached = await cache.get<{ lat: number; lon: number } | typeof CACHED_NULL>(key)
-      if (cached === CACHED_NULL) return null
-      if (cached !== null) return cached
-      const result = await rawCnefeCoords.coordFor(query)
-      await cache.set(key, result ?? CACHED_NULL, TTL.cnefeCoords)
-      return result
-    },
+    }) =>
+      readThrough<CnefeCoord | null>({
+        cache,
+        key: `cnefeCoord:${encodeKey([query.municipioIbge, query.logradouroNorm, query.numero])}`,
+        ttlSeconds: TTL.cnefeCoords,
+        load: () => rawCnefeCoords.coordFor(query),
+        fallback: null,
+      }),
   }
 
   const profile: ProfileReader = {
-    getProfile: async (buildingKey) => {
-      const key = `prof:${encodeKey([Buffer.from(buildingKey).toString('hex')])}`
-      const cached = await cache.get<AddressProfileRecord | typeof CACHED_NULL>(key)
-      if (cached === CACHED_NULL) return null
-      if (cached !== null) return cached
-      const result = await rawProfile.getProfile(buildingKey)
-      await cache.set(key, result ?? CACHED_NULL, TTL.profile)
-      return result
-    },
-    getOtherActiveCnpjs: async (buildingKey, excludeBasico) => {
-      const key = `others:${encodeKey([Buffer.from(buildingKey).toString('hex'), excludeBasico])}`
-      const cached = await cache.get<readonly OtherActiveCnpj[] | typeof CACHED_NULL>(key)
-      if (cached === CACHED_NULL) return []
-      if (cached !== null) return cached
-      const result = await rawProfile.getOtherActiveCnpjs(buildingKey, excludeBasico)
-      await cache.set(key, result.length > 0 ? result : CACHED_NULL, TTL.otherCnpjs)
-      return result
-    },
+    getProfile: (buildingKey) =>
+      readThrough<AddressProfileRecord | null>({
+        cache,
+        key: `prof:${encodeKey([buildingKeyHex(buildingKey)])}`,
+        ttlSeconds: TTL.profile,
+        load: () => rawProfile.getProfile(buildingKey),
+        fallback: null,
+      }),
+    getOtherActiveCnpjs: (buildingKey, excludeBasico) =>
+      readThrough<readonly OtherActiveCnpj[]>({
+        cache,
+        key: `others:${encodeKey([buildingKeyHex(buildingKey), excludeBasico])}`,
+        ttlSeconds: TTL.otherCnpjs,
+        load: () => rawProfile.getOtherActiveCnpjs(buildingKey, excludeBasico),
+        fallback: [],
+        missingWhen: (rows) => rows.length === 0,
+      }),
   }
 
   const knownShared: KnownSharedReader = {
-    get: async (buildingKey) => {
-      const key = `shared:${encodeKey([Buffer.from(buildingKey).toString('hex')])}`
-      const cached = await cache.get<{ kind: string } | typeof CACHED_NULL>(key)
-      if (cached === CACHED_NULL) return null
-      if (cached !== null) return cached
-      const result = await rawKnownShared.get(buildingKey)
-      await cache.set(key, result ?? CACHED_NULL, TTL.knownShared)
-      return result
-    },
+    get: (buildingKey) =>
+      readThrough<{ readonly kind: string } | null>({
+        cache,
+        key: `shared:${encodeKey([buildingKeyHex(buildingKey)])}`,
+        ttlSeconds: TTL.knownShared,
+        load: () => rawKnownShared.get(buildingKey),
+        fallback: null,
+      }),
   }
 
   const cnaeCategoria = {
-    categoriaForDivisao: async (divisao: string): Promise<CnaeCategoria> => {
-      const key = `cnae:${divisao}`
-      const cached = await cache.get<CnaeCategoria>(key)
-      if (cached !== null) return cached
-      const result = await rawCnaeCategoria.categoriaForDivisao(divisao)
-      await cache.set(key, result, TTL.cnaeCategoria)
-      return result
-    },
+    categoriaForDivisao: (divisao: string) =>
+      readThroughValue(cache, `cnae:${divisao}`, TTL.cnaeCategoria, () =>
+        rawCnaeCategoria.categoriaForDivisao(divisao),
+      ),
   }
 
   const partnerGraph = {
-    statsFor: async (query: { readonly buildingKey: Uint8Array; readonly cnpjBasico: string }) => {
-      const key = `pgraph:${encodeKey([Buffer.from(query.buildingKey).toString('hex'), query.cnpjBasico])}`
-      const cached = await cache.get<Record<string, unknown>>(key)
-      if (cached !== null) return cached as never
-      const result = await rawPartnerGraph.statsFor(query)
-      await cache.set(key, result, TTL.partnerGraph)
-      return result
-    },
+    statsFor: (query: { readonly buildingKey: Uint8Array; readonly cnpjBasico: string }) =>
+      readThroughValue(
+        cache,
+        `pgraph:${encodeKey([buildingKeyHex(query.buildingKey), query.cnpjBasico])}`,
+        TTL.partnerGraph,
+        () => rawPartnerGraph.statsFor(query),
+      ),
   }
 
   const signalCache: SignalCacheReader = rawSignalCache
@@ -193,38 +185,4 @@ export const makeCachedReaders = (db: Db, cache: CacheStore): CachedReaders => {
     signalCache,
     raw: { registry: rawRegistry, cep: rawCep, profile: rawProfile },
   }
-}
-
-export const cacheKeys = {
-  invalidateRegistry: async (cache: CacheStore) => {
-    await cache.delPattern('reg:*')
-  },
-  invalidateCep: async (cache: CacheStore) => {
-    await cache.delPattern('cep:*')
-  },
-  invalidateCnefe: async (cache: CacheStore) => {
-    await cache.delPattern('cnefe:*')
-    await cache.delPattern('cnefeCoord:*')
-  },
-  invalidateProfiles: async (cache: CacheStore) => {
-    await cache.delPattern('prof:*')
-    await cache.delPattern('others:*')
-  },
-  invalidateKnownShared: async (cache: CacheStore) => {
-    await cache.delPattern('shared:*')
-  },
-  invalidateAll: async (cache: CacheStore) => {
-    for (const pattern of [
-      'reg:*',
-      'cep:*',
-      'cnefe:*',
-      'cnefeCoord:*',
-      'prof:*',
-      'others:*',
-      'shared:*',
-      'meta:*',
-    ]) {
-      await cache.delPattern(pattern)
-    }
-  },
 }

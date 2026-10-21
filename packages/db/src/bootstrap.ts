@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createCLILogger } from '@comprova/observability'
 import { createDbPool } from './client.js'
 import { keyPrefixOf, makeApiKeyHasher, newApiKey } from './api-keys.js'
-import * as t from './schema.js'
+import * as t from './schemas/index.js'
 
 const logger = createCLILogger('bootstrap')
 

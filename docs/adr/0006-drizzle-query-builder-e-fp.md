@@ -22,7 +22,8 @@ revertida em favor de consistência e tipo-segurança.
 
 - **Drizzle ORM (`drizzle-orm@0.45`, driver `postgres-js`) é a única forma de acesso a dados
   do domínio**: `db.select()/insert()/update()/delete()` com schema tipado em
-  `packages/db/src/schema.ts` (tabelas, enums, `bytea`/`inet`/`geography` como custom types).
+  `packages/db/src/schemas/` (tabelas, enums, `bytea`/`inet`/`geography` como custom types,
+  um módulo por domínio).
 - Exceções documentadas e deliberadas:
   - **DDL/migrações** continuam em arquivos SQL versionados (partições, RLS, índices parciais
     e `DO $$` loops não são expressáveis em builder) — executadas pelo runner

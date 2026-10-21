@@ -11,7 +11,7 @@
 - `snapshot_month` é **proveniência por linha**: guarda o mês do lote que tocou a linha por
   último e é sobrescrito a cada nova ingestão. **Não é chave de partição e nenhuma query filtra
   por ele** — o fast path filtra apenas `situacao_cadastral = 2`
-  (`packages/db/src/adapters.ts`).
+  (`packages/db/src/adapters/profile.ts`).
 - Consequência: uma carga parcial é **servida imediatamente**. Linhas já reprocessadas carregam o
   snapshot novo, as demais mantêm o antigo, e as duas aparecem no mesmo resultado.
 - Linhas alteradas vão para `ref_estabelecimento_history` (`valid_from`/`valid_to` em meses de
