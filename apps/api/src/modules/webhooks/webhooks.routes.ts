@@ -1,6 +1,7 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { ProblemSchema } from '@comprova/contracts'
+import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
 import { makeWebhookController } from './webhooks.controller.js'
 import type { WebhookServiceDeps } from './webhooks.service.js'
 import {
@@ -20,6 +21,7 @@ export const registerWebhookRoutes = (instance: FastifyInstance, deps: WebhookRo
   app.post(
     '/webhooks',
     {
+      preHandler: requireWriteScope,
       schema: {
         body: CreateWebhookSchema,
         response: { 200: CreateWebhookResponse, 422: ProblemSchema },
@@ -31,6 +33,7 @@ export const registerWebhookRoutes = (instance: FastifyInstance, deps: WebhookRo
   app.get(
     '/webhooks',
     {
+      preHandler: requireReadScope,
       schema: {
         response: { 200: ListWebhooksResponse },
       },
@@ -41,6 +44,7 @@ export const registerWebhookRoutes = (instance: FastifyInstance, deps: WebhookRo
   app.delete(
     '/webhooks/:id',
     {
+      preHandler: requireWriteScope,
       schema: {
         params: WebhookIdParams,
         response: { 200: DeleteWebhookResponse, 404: ProblemSchema },

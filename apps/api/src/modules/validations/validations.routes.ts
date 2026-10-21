@@ -1,5 +1,6 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
+import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
 import type { ValidationControllerDeps } from './validations.controller.js'
 import { makeValidationController } from './validations.controller.js'
 import {
@@ -23,6 +24,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.get(
     '/validations/:id',
     {
+      preHandler: requireReadScope,
       schema: {
         params: GetValidationParams,
         response: { 200: ValidationDtoSchema, 304: NotModifiedResponse, 404: ProblemSchema },
@@ -35,6 +37,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.post(
     '/validations',
     {
+      preHandler: requireWriteScope,
       schema: {
         headers: CreateValidationHeaders,
         body: CreateValidationRequestSchema,
@@ -58,6 +61,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.post(
     '/validations/:id/contest',
     {
+      preHandler: requireWriteScope,
       schema: {
         params: GetValidationParams,
         body: ContestValidationRequest,
@@ -80,6 +84,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.post(
     '/validations/:id/credential',
     {
+      preHandler: requireWriteScope,
       schema: {
         params: GetValidationParams,
         response: {

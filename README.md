@@ -152,13 +152,43 @@ Abre `http://localhost:5173`:
 | GET             | `/v1/batches/:id`                         | Detalhes do lote                                  |
 | GET             | `/v1/batches/:id/export?format=csv\|json` | Download                                          |
 | POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                         |
-| GET/DELETE      | `/v1/subjects/:id`                        | Relatório de acesso / eliminação LGPD             |
+| GET             | `/v1/subjects/:id/validations`            | Relatório de acesso LGPD                          |
+| DELETE          | `/v1/subjects/:id`                        | Eliminação LGPD                                   |
 | GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey)   |
 | GET             | `/issuers/:scope/did.json`                | DID Document público do issuer (`did:web`)        |
 | GET             | `/issuers/:scope/credentials/:id/status`  | Status público da credencial (`ACTIVE`/`REVOKED`) |
 | GET             | `/.well-known/comprova-issuer/:scope`     | Descoberta do documento público do issuer         |
 | GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                               |
 | GET             | `/openapi.json`                           | OpenAPI 3.1                                       |
+
+### Scopes das API keys
+
+Toda rota `/v1` autentica por API key e exige o scope da operação **antes do
+handler** (`preHandler: requireReadScope` ou `requireWriteScope`). O contrato
+atual define só dois scopes, os mesmos do default de `api_key.scopes`
+(`0002_tenancy.sql`):
+
+| Scope            | Operações                                                                                                                                                                                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `validate:read`  | `GET /v1/validations/:id`, `GET /v1/batches`, `GET /v1/batches/:id`, `GET /v1/batches/:id/export`, `GET /v1/stats`, `GET /v1/meta`, `GET /v1/webhooks`, `GET /v1/subjects/:id/validations`                                                                                           |
+| `validate:write` | `POST /v1/validations`, `POST /v1/validations/:id/contest`, `POST /v1/validations/:id/credential`, `POST /v1/credentials/:credentialId/revoke`, `POST /v1/signing-keys/:keyId/revoke`, `POST /v1/batches`, `POST /v1/webhooks`, `DELETE /v1/webhooks/:id`, `DELETE /v1/subjects/:id` |
+
+- **401 `UNAUTHORIZED`** — API key ausente, inválida ou revogada.
+- **403 `FORBIDDEN`** — API key válida, mas sem o scope exigido. A resposta é
+  genérica e não consulta o recurso; um id de outro tenant não vira oráculo de
+  existência.
+- **Isolamento por tenant continua no banco** — o scope autoriza a operação,
+  não o recurso. RLS/`withTenant` limita toda leitura e mutação ao tenant da
+  chave; uma key com `validate:write` do tenant A recebe 404 ao tentar revogar
+  credencial ou signing key do tenant B.
+- Emissão e revogação de credencial e revogação de signing key usam
+  `validate:write` porque não existe scope específico de credencial no contrato
+  atual. Nenhum scope novo foi inventado.
+- As rotas públicas de issuer (`/issuers/:scope`, `did.json`, status e
+  `.well-known/comprova-issuer/:scope`) continuam sem API key e sem scope.
+
+A decisão completa está no
+[ADR-0030](docs/adr/0030-enforcement-de-scopes-das-api-keys.md).
 
 ## Comandos
 

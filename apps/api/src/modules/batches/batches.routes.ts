@@ -1,5 +1,6 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
+import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
 import type { BatchControllerDeps } from './batches.controller.js'
 import { makeBatchController } from './batches.controller.js'
 import {
@@ -21,6 +22,7 @@ export const registerBatchRoutes = (instance: FastifyInstance, deps: BatchRoutes
   app.post(
     '/batches',
     {
+      preHandler: requireWriteScope,
       schema: {
         body: CreateBatchRequest,
         response: { 202: CreateBatchResponse, 422: BatchProblemResponse },
@@ -30,13 +32,16 @@ export const registerBatchRoutes = (instance: FastifyInstance, deps: BatchRoutes
       controller.create(request.tenant?.tenantId, request.sessionUser?.id, request.body, reply),
   )
 
-  app.get('/batches', { schema: { response: { 200: BatchListResponse } } }, async (request) =>
-    controller.list(request.tenant?.tenantId, request.sessionUser?.id),
+  app.get(
+    '/batches',
+    { preHandler: requireReadScope, schema: { response: { 200: BatchListResponse } } },
+    async (request) => controller.list(request.tenant?.tenantId, request.sessionUser?.id),
   )
 
   app.get(
     '/batches/:id',
     {
+      preHandler: requireReadScope,
       schema: {
         params: BatchIdParams,
         response: { 200: BatchDetailsResponse, 404: BatchProblemResponse },
@@ -47,7 +52,7 @@ export const registerBatchRoutes = (instance: FastifyInstance, deps: BatchRoutes
 
   app.get(
     '/batches/:id/export',
-    { schema: { params: BatchIdParams, querystring: BatchExportQuery } },
+    { preHandler: requireReadScope, schema: { params: BatchIdParams, querystring: BatchExportQuery } },
     async (request, reply) =>
       controller.export(request.tenant?.tenantId, request.params.id, request.query.format, reply),
   )

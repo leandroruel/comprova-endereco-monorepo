@@ -2,6 +2,37 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Enforcement de scopes das API keys (2026-10-21)
+
+A autenticação já resolvia `request.tenant.scopes`, mas as rotas mutantes não
+exigiam o scope correspondente. Foi adicionado um guard declarativo por rota
+(`apps/api/src/plugins/scope.ts`), executado depois do `authenticate`:
+
+- `requireReadScope` → `validate:read`;
+- `requireWriteScope` → `validate:write`;
+- API key válida sem o scope → `403 FORBIDDEN`; key ausente/inválida →
+  `401 UNAUTHORIZED` (comportamento existente).
+
+Mapa aplicado: leitura de validation/batches/stats/meta/webhooks/subjects exige
+`validate:read`; criação/contestação de validation, emissão de credencial,
+revogação de credencial, revogação de signing key, criação de batch, gestão de
+webhooks e eliminação de subject exigem `validate:write`. Não foram criados
+scopes novos; emissão/revogação de credencial e revogação de signing key usam
+`validate:write` por ser o único scope de escrita do contrato. A checagem que
+estava dentro do controller de signing keys foi movida para a rota.
+
+O tenant isolation não foi alterado: uma key com o scope correto do tenant A
+continua recebendo 404 para validation, credencial e signing key do tenant B; o
+teste verifica que o status da credencial e o `revoked_at` da chave não mudam.
+Decisão e tabela completa em
+`docs/adr/0030-enforcement-de-scopes-das-api-keys.md`; README e
+`docs/architecture.md` atualizados.
+
+Testes: novo `apps/api/src/authz.int.test.ts` cobre leitura permitida, escrita
+permitida, leitura negada para key só de escrita, todas as mutações negadas para
+key só de leitura, 401 de key inválida e cross-tenant com scope correto.
+`pnpm test` passou com 64 arquivos / 549 testes.
+
 ## Revisão de conformidade pós-PR #5 — W3C VC 2.0 (2026-10-20)
 
 Implementação dos itens A1–A4, B1–B2 e C1–C2 da revisão do PR #5, em um commit
@@ -245,7 +276,7 @@ pnpm install
 pnpm db:migrate
 pnpm db:seed         # cria API key dev
 pnpm dev             # levanta tudo (API :3000, dashboard :5173, worker, ingestor)
-pnpm test            # unidade + integração (536/536 na revisão pós-PR #5)
+pnpm test            # unidade + integração (549/549 em 2026-10-21)
 pnpm db:fence        # pgfence gate de migrações
 ```
 

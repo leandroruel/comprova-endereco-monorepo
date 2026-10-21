@@ -1,5 +1,6 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
+import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
 import type { SubjectControllerDeps } from './subjects.controller.js'
 import { makeSubjectController } from './subjects.controller.js'
 import {
@@ -18,6 +19,7 @@ export const registerSubjectRoutes = (instance: FastifyInstance, deps: SubjectRo
   app.get(
     '/subjects/:id/validations',
     {
+      preHandler: requireReadScope,
       schema: {
         params: SubjectIdParams,
         response: { 200: SubjectValidationsResponse, 404: SubjectNotFoundResponse },
@@ -29,6 +31,7 @@ export const registerSubjectRoutes = (instance: FastifyInstance, deps: SubjectRo
   app.delete(
     '/subjects/:id',
     {
+      preHandler: requireWriteScope,
       schema: {
         params: SubjectIdParams,
         response: { 200: SubjectErasureResponse, 404: SubjectNotFoundResponse },
