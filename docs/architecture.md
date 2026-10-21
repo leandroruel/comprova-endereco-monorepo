@@ -78,9 +78,11 @@ O ingestor com UPSERT detecta mudanças (logradouro, número, CEP, situação, C
 | Banco     | RLS FORCE: `SET app.tenant_id` em toda transação via `withTenant()`          |
 
 Depois da autenticação, as rotas `/v1` exigem o scope da operação no
-`preHandler` (`validate:read` para leitura, `validate:write` para mutação). A
-API key sem scope recebe 403; o isolamento por tenant continua no RLS e
-devolve 404 para recursos de outro tenant. Mapa e decisão em
+`preHandler` (`validate:read` para leitura, `validate:write` para mutações de
+validation/credencial e `keys:write` para administração de signing keys). A API
+key sem scope recebe 403; o isolamento por tenant continua no RLS e devolve 404
+para recursos de outro tenant. `keys:write` é opt-in e não é adicionado
+automaticamente às keys existentes ou ao default. Mapa e decisão em
 [ADR-0030](adr/0030-enforcement-de-scopes-das-api-keys.md).
 
 ## Stats por usuário

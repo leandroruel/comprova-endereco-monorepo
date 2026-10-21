@@ -3,7 +3,7 @@ import { ProblemSchema } from '@comprova/contracts'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { requireWriteScope } from '../../plugins/scope.js'
+import { requireKeysWriteScope } from '../../plugins/scope.js'
 import type { SigningKeysControllerDeps } from './signing-keys.controller.js'
 import { makeSigningKeysController } from './signing-keys.controller.js'
 
@@ -33,7 +33,7 @@ export const registerSigningKeyRoutes = (instance: FastifyInstance, deps: Signin
   app.post(
     '/signing-keys/:keyId/revoke',
     {
-      preHandler: requireWriteScope,
+      preHandler: requireKeysWriteScope,
       schema: {
         params: RevokeSigningKeyParams,
         querystring: RevokeSigningKeyQuery,

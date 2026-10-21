@@ -14,10 +14,11 @@ export interface SigningKeysControllerDeps {
  * e o tenant vem do API key; a consulta é escopada por RLS. Um `key_id` de
  * outro tenant é indistinguível de um inexistente: 404, sem vazar a existência.
  *
- * A revogação é uma operação de ESCRITA: a rota exige `validate:write` no
- * `preHandler` (`requireWriteScope`), mesmo que a chave de API seja válida.
- * Sem isso, uma chave somente-leitura poderia derrubar a chave de assinatura do
- * tenant. O 403 é decidido antes do handler e não revela se o `key_id` existe.
+ * A revogação é uma operação ADMINISTRATIVA: a rota exige `keys:write` no
+ * `preHandler` (`requireKeysWriteScope`), separado de `validate:write`. Uma
+ * chave usada para emitir credenciais não pode derrubar a chave de assinatura
+ * do tenant. O 403 é decidido antes do handler e não revela se o `key_id`
+ * existe.
  *
  * `effective_at` ausente significa revogação imediata (`now()` no banco). Um
  * instante futuro agenda a expiração; a chave continua publicada e utilizável

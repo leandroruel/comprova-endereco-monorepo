@@ -7,6 +7,11 @@ Aceito (2026-10-19). Dá sequência ao
 revogação de chave que o [ADR-0026](0026-chave-de-assinatura-por-tenant.md) e o
 próprio ADR-0028 deixaram explícita.
 
+> Atualização (2026-10-21): o escopo da rota foi separado de `validate:write`
+> para `keys:write` pelo [ADR-0030](0030-enforcement-de-scopes-das-api-keys.md).
+> Onde este ADR diz `validate:write` para a revogação de signing key, leia-se
+> `keys:write`.
+
 ## Contexto
 
 O `issuer_signing_key` já distingue duas coisas:
@@ -116,9 +121,9 @@ Authorization: Bearer <api key do tenant>
 - A rota é autenticada e o tenant vem da API key, exatamente como
   `POST /v1/credentials/:credentialId/revoke` (ADR-0027). A consulta é escopada
   por RLS: a chave de outro tenant é indistinguível de uma inexistente.
-- A rota exige o escopo **`validate:write`**: revogar é uma operação de
-  escrita. Uma API key somente-leitura recebe `403 FORBIDDEN`, sem revelar se o
-  `key_id` existe.
+- A rota exige o escopo **`keys:write`**: revogar é uma operação
+  administrativa, separada de `validate:write` (ADR-0030). Uma API key sem esse
+  escopo recebe `403 FORBIDDEN`, sem revelar se o `key_id` existe.
 - A operação é **idempotente e monotônica no sentido de confiança**: a
   confiança só pode encolher. O `UPDATE` casa `revoked_at IS NULL` **ou**
   `revoked_at` mais tarde que o instante pedido; portanto:
@@ -197,7 +202,7 @@ cache de decisão de confiança; mudança do formato da VC.
   revogada/vencida libera o índice para a próxima nascer ativa; expiração futura
   ainda preserva a próxima como inativa.
 - `apps/api/src/credential.int.test.ts` — endpoint autenticado, exigência de
-  `validate:write` (403 para chave somente-leitura), idempotência, isolamento
+  `keys:write` (403 para chave somente-leitura), idempotência, isolamento
   entre tenants, 404 para chave desconhecida/de outro tenant, omissão
   nos documentos `/issuers/:scope` e `/did.json`, falha fechada na verificação
   (`VERIFICATION_METHOD_UNRESOLVED`) e na emissão (`SIGNING_KEY_UNAVAILABLE`),
