@@ -21,11 +21,16 @@ useDefault = true
 # nome do campo com o identificador de alta entropia. O teste já passou a montar
 # o JSON pelo helper `signingKeysConfig`, então esse texto só existe no
 # histórico do PR e a entrada pode sair após o merge.
+# `ECC_NIST_EDWARDS25519` é o KeySpec PÚBLICO de chave Ed25519 do AWS KMS
+# (identificador de API, não material secreto). O detector genérico casa
+# `KeySpec = ECC_NIST_EDWARDS25519` como "generic-api-key" pela entropia do
+# valor; o regex de linha abaixo cobre os únicos pontos que citam o KeySpec.
 [allowlist]
-description = "vetor de teste público da W3C (eddsa-jcs-2022) e referência a variável no teste do worker"
+description = "vetor de teste público da W3C (eddsa-jcs-2022), referência a variável no teste do worker e KeySpec público do AWS KMS"
 paths = ['''packages/credential/src/data-integrity\.test\.ts$''']
 regexTarget = "line"
 regexes = [
   '''SECRET_KEY_MULTIBASE''',
   '''private_key_pem:\s*signing\.privateKeyPkcs8Pem''',
+  '''ECC_NIST_EDWARDS25519''',
 ]
