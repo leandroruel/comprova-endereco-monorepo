@@ -17,8 +17,8 @@ import { CREDENTIAL_ID_PATTERN, type CredentialStatusResolver } from './status.s
 /**
  * Verificação independente da credencial (FASE 11/13).
  *
- * `verifyCredential` é puro e sem rede: recebe a credencial e o método de
- * verificação confiável já resolvido (`{ id, publicKey }`). A resolução é uma
+ * `verifyCredentialIntegrity` é puro e sem rede: recebe a credencial e o método
+ * de verificação confiável já resolvido (`{ id, publicKey }`). A resolução é uma
  * dependência EXPLÍCITA (`VerificationMethodResolver`), de modo que a
  * biblioteca segue utilizável fora da API (sem Fastify, sem PostgreSQL, sem
  * Redis, sem S3).
@@ -32,11 +32,36 @@ export type CredentialVerificationFailure =
   | 'VERIFICATION_METHOD_MISMATCH'
   | 'PROOF_PURPOSE_MISMATCH'
   | 'INVALID_TIMESTAMP'
+  | 'NOT_YET_VALID'
+  | 'EXPIRED'
   | 'EVIDENCE_SET_MISMATCH'
   | 'INVALID_SIGNATURE'
 
+/**
+ * O que foi efetivamente checado. `integrity` cobre forma, vínculo
+ * issuer↔método, binding de evidências e assinatura; `time` só sai de
+ * `not_checked` quando o consumidor informa `now`; `status` é sempre
+ * `not_checked` aqui — revogação é responsabilidade de
+ * `verifyCredentialFromIssuer`/do consumidor (ADR-0024 §6).
+ */
+export interface CredentialVerificationChecks {
+  readonly integrity: 'valid' | 'invalid' | 'not_checked'
+  readonly time: 'valid' | 'not_yet_valid' | 'expired' | 'not_checked'
+  readonly status: 'not_checked'
+}
+
+const checksOf = (
+  integrity: CredentialVerificationChecks['integrity'],
+  time: CredentialVerificationChecks['time'] = 'not_checked',
+): CredentialVerificationChecks => ({ integrity, time, status: 'not_checked' })
+
 export type CredentialVerificationResult =
-  { readonly valid: true } | { readonly valid: false; readonly reason: CredentialVerificationFailure }
+  | { readonly valid: true; readonly checked: CredentialVerificationChecks }
+  | {
+      readonly valid: false
+      readonly reason: CredentialVerificationFailure
+      readonly checked: CredentialVerificationChecks
+    }
 
 /**
  * Método de verificação em que o consumidor confia: a chave pública **e** o
@@ -61,6 +86,14 @@ export interface VerifierOptions {
    * credencial; quando omitido, o issuer é o que o `trusted.id` já delimita.
    */
   readonly expectedIssuerId?: string
+  /**
+   * Instante a usar na checagem TEMPORAL. Quando omitido, o tempo NÃO é
+   * checado (`checked.time = 'not_checked'`): `verifyCredentialIntegrity` não
+   * inventa um relógio. Quando informado, uma credencial ainda não iniciada é
+   * `NOT_YET_VALID` e uma já encerrada é `EXPIRED` (a janela é
+   * `[validFrom, validUntil)`).
+   */
+  readonly now?: Date
 }
 
 const proofFailure = (reason: DataIntegrityFailure): CredentialVerificationFailure => {
@@ -119,41 +152,51 @@ const isCredentialStatusBindingValid = (secured: SecuredVerifiableCredential): b
  *  4. coerência estrutural `verificationMethod ↔ issuer` declarado (§5.9) e
  *     vínculo com o método confiável: o `verificationMethod` precisa ser
  *     EXATAMENTE `options.trusted.id` (§4);
- *  5. a janela de validade (`validFrom` < `validUntil`, não vazia);
+ *  5. a janela de validade (`validFrom <= validUntil`, conforme a VC 2.0 §4.9);
  *  6. o binding do conjunto de evidências (recomputado a partir da própria
  *     credencial — nunca do material físico);
  *  7. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
  *     recebido, sem o `proof`), com a chave pública confiável, exigindo
  *     `proofPurpose: assertionMethod`;
  *  8. o binding estrutural do status: `id` pertence ao issuer e
- *     `credentialStatus.id` é exatamente `<id>/status` (ADR-0027).
+ *     `credentialStatus.id` é exatamente `<id>/status` (ADR-0027);
+ *  9. quando `now` é informado, o instante contra a janela
+ *     (`[validFrom, validUntil)`), DEPOIS da assinatura: um documento adulterado
+ *     é `INVALID_SIGNATURE`, nunca `EXPIRED`.
  *
  * Escopo: este verificador cobre integridade criptográfica, o vínculo entre a
  * chave confiável e a identidade declarada e o binding do ponteiro de status.
  * Ele NÃO resolve o status (`ACTIVE`/`REVOKED`) — isso exige rede e é feito por
  * `verifyCredentialFromIssuer` com um `CredentialStatusResolver`. Ele também
- * NÃO decide validade temporal da credencial (expirada é política do consumidor)
- * nem se o issuer é uma entidade legítima — essas são responsabilidades
- * distintas, e misturá-las é o que a API de `trusted` evita (ADR-0024 §6).
+ * NÃO decide validade temporal da credencial por conta própria: só faz isso
+ * quando o consumidor informa `now` (o resultado diz exatamente o que foi
+ * checado). A legitimidade do issuer continua sendo uma escolha de `trusted`
+ * (ADR-0024 §6).
  */
-export const verifyCredential = (
+export const verifyCredentialIntegrity = (
   credential: unknown,
   options: VerifierOptions,
 ): CredentialVerificationResult => {
   if (credential === null || typeof credential !== 'object' || Array.isArray(credential)) {
-    return { valid: false, reason: 'MALFORMED_CREDENTIAL' }
+    return {
+      valid: false,
+      reason: 'MALFORMED_CREDENTIAL',
+      checked: checksOf('not_checked'),
+    }
   }
   const raw = credential as Record<string, unknown>
 
   const parsed = SecuredVerifiableCredentialSchema.safeParse(raw)
-  if (!parsed.success) return { valid: false, reason: 'MALFORMED_CREDENTIAL' }
+  if (!parsed.success) {
+    return { valid: false, reason: 'MALFORMED_CREDENTIAL', checked: checksOf('not_checked') }
+  }
   const secured = parsed.data
 
   if (secured['@context'][0] !== VC_CONTEXT_URL || !secured.type.includes(VERIFIABLE_CREDENTIAL_TYPE)) {
-    return { valid: false, reason: 'UNSUPPORTED_CREDENTIAL' }
+    return { valid: false, reason: 'UNSUPPORTED_CREDENTIAL', checked: checksOf('not_checked') }
   }
   if (options.expectedIssuerId !== undefined && secured.issuer !== options.expectedIssuerId) {
-    return { valid: false, reason: 'ISSUER_MISMATCH' }
+    return { valid: false, reason: 'ISSUER_MISMATCH', checked: checksOf('not_checked') }
   }
 
   // §5.9 Verification Method Binding: sem resolução remota de chave, o binding é
@@ -163,49 +206,92 @@ export const verifyCredential = (
   const verificationMethod = secured.proof.verificationMethod
   const issuerFragment = `${secured.issuer}#`
   if (!verificationMethod.startsWith(issuerFragment) || verificationMethod.length === issuerFragment.length) {
-    return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
+    return {
+      valid: false,
+      reason: 'VERIFICATION_METHOD_MISMATCH',
+      checked: checksOf('not_checked'),
+    }
   }
   // Vínculo com a chave confiável: a assinatura tem de ser do método que o
   // consumidor declarou confiar. Só a chave pública não basta — ela é
   // reaproveitável entre métodos (`#key-1`, `#key-2`) do mesmo issuer.
   if (verificationMethod !== options.trusted.id) {
-    return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
+    return {
+      valid: false,
+      reason: 'VERIFICATION_METHOD_MISMATCH',
+      checked: checksOf('not_checked'),
+    }
   }
 
   const validFrom = timestampOf(secured.validFrom)
   const validUntil = secured.validUntil === undefined ? null : timestampOf(secured.validUntil)
   if (validFrom === null || (secured.validUntil !== undefined && validUntil === null)) {
-    return { valid: false, reason: 'INVALID_TIMESTAMP' }
+    return { valid: false, reason: 'INVALID_TIMESTAMP', checked: checksOf('not_checked') }
   }
-  // Janela NÃO vazia: `validFrom < validUntil` (VC 2.0 §4.10), a mesma garantia
-  // que a emissão impõe (`buildAssertion`). `validFrom == validUntil` é uma
-  // janela de duração zero — não é uma credencial "válida por um instante".
-  if (validUntil !== null && validFrom >= validUntil) {
-    return { valid: false, reason: 'INVALID_TIMESTAMP' }
+  // Coerência da janela: a VC 2.0 §4.9 exige `validFrom <= validUntil`. O
+  // verificador aceita a IGUALDADE para não recusar credenciais de terceiros
+  // estruturalmente válidas. O EMISSOR continua estrito (`validFrom <
+  // validUntil`): uma credencial de duração zero não afirma nada útil e não é
+  // produzida por esta biblioteca.
+  if (validUntil !== null && validFrom > validUntil) {
+    return { valid: false, reason: 'INVALID_TIMESTAMP', checked: checksOf('not_checked') }
   }
 
   if (
     evidenceSetHashOfCredential(secured.evidence.map(observationOfEvidence)) !==
     secured['comprova:evidenceSetHash']
   ) {
-    return { valid: false, reason: 'EVIDENCE_SET_MISMATCH' }
+    return {
+      valid: false,
+      reason: 'EVIDENCE_SET_MISMATCH',
+      checked: checksOf('not_checked'),
+    }
   }
 
   const proof = verifyDataIntegrityProof(raw, {
     publicKey: options.trusted.publicKey,
     expectedProofPurpose: ASSERTION_METHOD,
   })
-  if (!proof.valid) return { valid: false, reason: proofFailure(proof.reason) }
+  if (!proof.valid) {
+    return {
+      valid: false,
+      reason: proofFailure(proof.reason),
+      checked: checksOf('invalid'),
+    }
+  }
 
   // A prova é verificada ANTES do binding: adulterar `id`/`credentialStatus.id`
   // depois da assinatura falha como INVALID_SIGNATURE (o material está coberto
   // pela prova). Um documento assinado assim, mas estruturalmente incoerente,
   // falha como MALFORMED_CREDENTIAL — nunca é aceito.
   if (!isCredentialStatusBindingValid(secured)) {
-    return { valid: false, reason: 'MALFORMED_CREDENTIAL' }
+    return { valid: false, reason: 'MALFORMED_CREDENTIAL', checked: checksOf('invalid') }
   }
 
-  return { valid: true }
+  // Tempo: só é checado quando o consumidor injeta `now`. A ordem (depois da
+  // assinatura) garante que um documento adulterado nunca é classificado como
+  // "expirado" em vez de "assinatura inválida".
+  if (options.now !== undefined) {
+    const now = options.now.getTime()
+    if (!Number.isFinite(now)) {
+      return { valid: false, reason: 'INVALID_TIMESTAMP', checked: checksOf('valid') }
+    }
+    if (now < validFrom) {
+      return {
+        valid: false,
+        reason: 'NOT_YET_VALID',
+        checked: checksOf('valid', 'not_yet_valid'),
+      }
+    }
+    // `validUntil` é o instante em que a credencial DEIXA de ser válida:
+    // `[validFrom, validUntil)`.
+    if (validUntil !== null && now >= validUntil) {
+      return { valid: false, reason: 'EXPIRED', checked: checksOf('valid', 'expired') }
+    }
+    return { valid: true, checked: checksOf('valid', 'valid') }
+  }
+
+  return { valid: true, checked: checksOf('valid') }
 }
 
 /** Método de verificação resolvido: a chave e o id ao qual ela está vinculada. */
@@ -228,8 +314,9 @@ export class VerificationMethodResolutionError extends Error {
 }
 
 /**
- * Falha de verificação com resolução: as mesmas razões de `verifyCredential`
- * mais `VERIFICATION_METHOD_UNRESOLVED` (o método não pôde ser resolvido),
+ * Falha de verificação com resolução: as mesmas razões de
+ * `verifyCredentialIntegrity` mais `VERIFICATION_METHOD_UNRESOLVED` (o método
+ * não pôde ser resolvido),
  * `STATUS_REVOKED` (o status público é REVOKED) e `STATUS_UNAVAILABLE`
  * (status ausente, desconhecido, HTTP/rede com erro ou resolver não fornecido).
  */
@@ -242,6 +329,11 @@ export type IssuerVerificationResult =
 export interface VerifyFromIssuerOptions {
   /** Issuer esperado pelo consumidor. Quando informado, precisa ser o `issuer` da credencial. */
   readonly expectedIssuerId?: string
+  /**
+   * Instante para a checagem temporal. Repassado a
+   * `verifyCredentialIntegrity`; quando omitido, o tempo não é checado.
+   */
+  readonly now?: Date
   /**
    * Resolvedor do status público. A verificação é FAIL CLOSED: sem este
    * resolver — ou se ele lançar/retornar algo que não seja ACTIVE/REVOKED —,
@@ -276,7 +368,8 @@ const credentialStatusUrlOfCredential = (credential: unknown): string | null => 
  * Verificação independente com resolução de chave e de status: valida a forma
  * mínima da credencial, amarra o `verificationMethod` ao `issuer` declarado,
  * resolve o material público pelo resolver injetado, delega a verificação
- * criptográfica a `verifyCredential` e, por fim, resolve o status público.
+ * criptográfica a `verifyCredentialIntegrity` e, por fim, resolve o status
+ * público.
  *
  * Segurança do resolver (§7): a chave resolvida só vale para o método EXATO que
  * a credencial declara (`resolved.id === verificationMethod`) e esse método tem
@@ -316,11 +409,12 @@ export const verifyCredentialFromIssuer = async (
     return { valid: false, reason: 'VERIFICATION_METHOD_MISMATCH' }
   }
 
-  const verified = verifyCredential(credential, {
+  const verified = verifyCredentialIntegrity(credential, {
     trusted: { id: resolved.id, publicKey: resolved.publicKey },
     expectedIssuerId: issuer,
+    ...(options.now !== undefined ? { now: options.now } : {}),
   })
-  if (!verified.valid) return verified
+  if (!verified.valid) return { valid: false, reason: verified.reason }
 
   // Fail closed: a credencial emitida pela API sempre carrega `credentialStatus`,
   // e o consumidor precisa fornecer um resolver. Ausência/erro nunca vira ACTIVE.

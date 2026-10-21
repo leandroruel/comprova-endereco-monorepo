@@ -16,6 +16,7 @@ import {
 import {
   makeHttpIssuerResolver,
   verifyCredentialFromIssuer,
+  verifyCredentialIntegrity,
   type VerificationMethodResolver,
 } from './verification.service.js'
 import {
@@ -40,6 +41,7 @@ const observation = (id: string): AssertionObservation => ({
   confidence: 0.8,
   source: 'receita',
   observedAt: new Date('2026-01-02T03:04:05.000Z'),
+  ttlSeconds: 30 * 24 * 60 * 60,
   evidenceSha256: null,
   detail: { nested: { b: 2, a: 1 } },
 })
@@ -126,6 +128,68 @@ describe('issuerKeyDocumentOf', () => {
     const json = JSON.stringify(document)
     expect(json).not.toContain('PRIVATE')
     expect(json).not.toContain(TENANT)
+  })
+})
+
+describe('verifyCredentialIntegrity — integridade, tempo e status', () => {
+  const trusted = { id: verificationMethodOf(issuer), publicKey: keyPair.publicKey }
+  const validFrom = new Date('2026-01-01T00:00:01.000Z')
+  const validUntil = new Date('2026-01-31T00:00:00.000Z')
+
+  it('sem `now` não checa tempo e declara exatamente o que foi checado', async () => {
+    expect(verifyCredentialIntegrity(await emit(), { trusted })).toEqual({
+      valid: true,
+      checked: { integrity: 'valid', time: 'not_checked', status: 'not_checked' },
+    })
+  })
+
+  it('aceita o instante inicial e recusa antes dele com NOT_YET_VALID', async () => {
+    expect(verifyCredentialIntegrity(await emit(), { trusted, now: validFrom })).toEqual({
+      valid: true,
+      checked: { integrity: 'valid', time: 'valid', status: 'not_checked' },
+    })
+    expect(
+      verifyCredentialIntegrity(await emit(), {
+        trusted,
+        now: new Date(validFrom.getTime() - 1),
+      }),
+    ).toEqual({
+      valid: false,
+      reason: 'NOT_YET_VALID',
+      checked: { integrity: 'valid', time: 'not_yet_valid', status: 'not_checked' },
+    })
+  })
+
+  it('recusa a partir de validUntil com EXPIRED (janela [validFrom, validUntil))', async () => {
+    expect(
+      verifyCredentialIntegrity(await emit(), {
+        trusted,
+        now: new Date(validUntil.getTime() - 1),
+      }),
+    ).toEqual({
+      valid: true,
+      checked: { integrity: 'valid', time: 'valid', status: 'not_checked' },
+    })
+    expect(verifyCredentialIntegrity(await emit(), { trusted, now: validUntil })).toEqual({
+      valid: false,
+      reason: 'EXPIRED',
+      checked: { integrity: 'valid', time: 'expired', status: 'not_checked' },
+    })
+  })
+
+  it('não classifica documento adulterado como expirado: a assinatura vem antes do tempo', async () => {
+    const credential = await emit()
+    credential['comprova:result']['comprova:verdict'] = 'NOT_FOUND'
+    expect(
+      verifyCredentialIntegrity(credential, {
+        trusted,
+        now: new Date('2030-01-01T00:00:00.000Z'),
+      }),
+    ).toEqual({
+      valid: false,
+      reason: 'INVALID_SIGNATURE',
+      checked: { integrity: 'invalid', time: 'not_checked', status: 'not_checked' },
+    })
   })
 })
 

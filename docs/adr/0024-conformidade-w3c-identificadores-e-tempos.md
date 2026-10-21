@@ -2,7 +2,8 @@
 
 ## Status
 
-Aceito (2026-10-18). **Substitui parcialmente o
+Aceito (2026-10-18). **Revisado em 2026-10-20** após o PR #5 (ver “Revisão
+pós-PR #5” ao final). **Substitui parcialmente o
 [ADR-0020](0020-verifiable-credential-data-model-2.md)** (§2 `proof.created`,
 §3 issuer/`verificationMethod`, §5 `credentialSubject.id`, §8 tempo e §9
 verifier) e o [ADR-0019](0019-credential-emission-layer.md) §4 (issuer) e §5
@@ -123,17 +124,23 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
 - **Reemissão:** o documento sem `proof` continua determinístico (função da
   assertion), mas a **prova** não — cada emissão cria uma prova nova com
   `created` real. Reproduzir bytes exigiria persistir o instante da emissão
-  original e injetá-lo explicitamente (`now`); a camada não faz isso sozinha, e
-  não há tabela de credenciais emitidas. Ou seja: **reemitir ≠ reproduzir**; o
-  procedimento para reproduzir é documentado, o produto é que decide se o quer.
+  original e injetá-lo explicitamente (`now`); a camada não faz isso sozinha.
+  **Atualizado na Revisão pós-PR #5 (B2):** a fronteira HTTP passou a persistir a
+  primeira emissão (`credential_issuance.issued_at`) e a reemitir com
+  `proof.created = issued_at`, de modo que **reemitir = reproduzir** enquanto
+  issuer/chave/policy não mudarem. Ver a seção ao final deste ADR.
 
 ### 5. `validFrom`: início da validade do veredito (o instante REAL da conclusão)
 
-| Domínio                   | Documento W3C                            |
-| ------------------------- | ---------------------------------------- |
-| `validation.completed_at` | `validFrom` **e** `comprova:completedAt` |
-| `validation.expires_at`   | `validUntil`                             |
-| `validation.created_at`   | (nenhum: é o início da requisição)       |
+| Domínio                                                                      | Documento W3C                               |
+| ---------------------------------------------------------------------------- | ------------------------------------------- |
+| `validation.completed_at`                                                    | `validFrom` **e** `comprova:completedAt`    |
+| `completed_at + policy.credential_ttl_seconds` ↔ `observed_at + ttl_seconds` | `validUntil` (o menor)                      |
+| `validation.expires_at`                                                      | (nenhum: retenção, só na assertion interna) |
+| `validation.created_at`                                                      | (nenhum: é o início da requisição)          |
+
+> A linha de `expires_at` acima reflete a Revisão pós-PR #5 (B1): `expires_at`
+> **não** é mais `validUntil`; ele continua sendo o horizonte de retenção.
 
 - A informação certificada é o **veredito** da validation: ele passa a existir
   quando a análise é concluída. `validFrom = created_at` (decisão anterior)
@@ -177,43 +184,43 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
     evidências (`evidence_set_hash`) — **preserva** o `completed_at` original:
     reexecutar o worker não é reconcluir, e avançar o instante mudaria o
     `validFrom` de credenciais emitidas depois sem nenhuma conclusão nova. Uma
-    execução que produz um resultado terminal **novo** (veredito ou evidências
-    diferentes) é uma conclusão nova e grava o instante real — preservar o
-    instante antigo anteciparia a existência de conteúdo que só passou a existir
-    ali. A comparação usa veredito + hash de evidências (valores exatos);
-    `score`/`confidence` ficam de fora porque são colunas `real` (float4) — a
-    comparação de float não é confiável, e são funções determinísticas do
-    conjunto de evidências e da policy. Isso deixa uma deriva sem detecção: se a
-    policy/scorer mudar entre a conclusão original e o replay sem que as
-    evidências mudem, o resultado pode diferir em score/confiança com o mesmo
-    veredito e hash — o instante original é preservado. O binding de policy da
-    linha é fixado na criação e o deep path reavalia com a policy do worker;
-    alinhar essa binding é decisão separada, não desta correção. Casos de borda:
-    um registro legado
-    concluído **sem** `completed_at` que seja reprocessado grava o instante da
-    reexecução (não há original a preservar, e é o único valor honesto
-    disponível); um replay que regresse a `partial` zera `completed_at`
-    (comportamento existente de `updateValidationOutcome` — a conclusão foi
-    retraída junto com o status e a emissão falha fechada).
-- **Garantia de janela não vazia (`validFrom < validUntil`).** `expires_at` é
-  ancorado no início da requisição mais 30 dias (retenção), então uma análise que
-  só conclui depois desse horizonte — worker retomando validação antiga, fila
-  parada, reprocessamento — produziria `completed_at >= expires_at`, isto é, uma
-  credencial de janela vazia ou invertida. A emissão **recusa** esse caso na
+    execução que produz um resultado terminal **novo** (veredito, evidências,
+    policy ou scorer diferentes) é uma conclusão nova e grava o instante real —
+    preservar o instante antigo anteciparia a existência de conteúdo que só
+    passou a existir ali. A comparação usa veredito + hash de evidências +
+    `policy_hash` + `scorer_version` (valores exatos); `score`/`confidence`
+    ficam de fora porque são colunas `real` (float4) — a comparação de float não
+    é confiável, e são funções determinísticas do conjunto de evidências e da
+    policy. **Atualizado na Revisão pós-PR #5 (A3):** a versão original desta
+    seção comparava só veredito + evidências e deixava a mudança de policy sem
+    detecção. O `policy_hash`/`scorer_version` da LINHA continuam imutáveis
+    (migração 0028); o deep path detecta a divergência contra a policy do worker
+    e grava novo `completed_at`, mas não reescreve o binding original. As
+    consequências e a decisão pendente estão na Revisão pós-PR #5 (A3/C1).
+    Casos de borda: um registro legado concluído **sem** `completed_at` que seja
+    reprocessado grava o instante da reexecução (não há original a preservar, e
+    é o único valor honesto disponível); um replay que regresse a `partial`
+    zera `completed_at` (comportamento existente de `updateValidationOutcome` —
+    a conclusão foi retraída junto com o status e a emissão falha fechada) e
+    revoga a credencial superada (C1).
+- **Garantia de janela não vazia (`validFrom < validUntil`).** `validUntil` é
+  calculado por `min(completed_at + policy.credential_ttl_seconds,
+observed_at + ttl_seconds)` (B1) e pode ser menor que `completed_at` quando
+  uma evidência já expirou. A emissão **recusa** `validUntil <= completed_at` na
   fronteira (`VALIDITY_WINDOW_INVALID`) e `buildAssertion` impõe a mesma
-  invariante. **`expires_at` não é recalculado nem estendido na emissão:** ele é o
-  horizonte persistido do registro (o job de retenção apaga a validation em
-  `expires_at`), e esticá-lo aqui mudaria em silêncio tanto a política de 30 dias
-  quanto a retenção. Recusar é a resposta honesta: quando o resultado concluiu
-  fora do prazo, a informação certificada já expirou.
-- A janela de validade continua `[completed_at, expires_at]`, e `expires_at`
-  segue como o início da requisição mais 30 dias (retenção): a análise consome
-  parte da janela. Mudar essa base é decisão de produto, fora do escopo.
+  invariante. **`expires_at` não é recalculado nem estendido na emissão:** ele
+  continua sendo o horizonte persistido de retenção (o job apaga a validation em
+  `expires_at`), e esticá-lo aqui mudaria em silêncio a política de retenção.
+  Recusar é a resposta honesta: quando o resultado concluiu fora do horizonte da
+  própria credencial, a informação certificada já expirou.
+- A janela de validade da credencial é `[completed_at, validUntil)`, com
+  `validUntil` distinto de `expires_at` (retenção). O detalhe do cálculo, do
+  default e dos testes está na Revisão pós-PR #5 (B1).
 
 ### 6. Verificador: a chave confiável carrega a identidade do método (obrigatória)
 
 ```ts
-verifyCredential(credential, {
+verifyCredentialIntegrity(credential, {
   trusted: { id: '<issuer>#<keyId>', publicKey },  // obrigatório
   expectedIssuerId?,                               // expectativa do consumidor
 })
@@ -222,9 +229,10 @@ verifyCredential(credential, {
 Ordem das checagens: forma do documento → contexto/tipo → `expectedIssuerId`
 (se informado) → **`verificationMethod` pertence ao `issuer` declarado**
 (`<issuer>#<fragmento não vazio>`) → **`verificationMethod === trusted.id`** →
-janela de validade (**não vazia: `validFrom < validUntil`**) → `evidenceSetHash`
-recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
-`trusted`, exigindo `proofPurpose = assertionMethod`.
+janela de validade (**não invertida: `validFrom <= validUntil`**, VC 2.0 §4.9) →
+`evidenceSetHash` recomputado → assinatura Data Integrity sobre o documento cru,
+com a chave de `trusted`, exigindo `proofPurpose = assertionMethod` → e, se `now`
+for informado, `validFrom <= now < validUntil` (`NOT_YET_VALID`/`EXPIRED`).
 
 - **Por quê:** um `KeyObject` não tem identidade. Com `expectedVerificationMethod`
   opcional, uma assinatura válida com a chave fornecida era aceita para
@@ -234,30 +242,34 @@ recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
 - Com a checagem estrutural **mais** a exigência de igualdade, aceitar implica
   `issuer` declarado = issuer do método confiável, sem precisar de resolução.
 - **Responsabilidades explícitas e separadas:** (a) integridade criptográfica +
-  vínculo com a identidade declarada → `verifyCredential`; (b) confiança na chave
-  do issuer → o consumidor, ao escolher `trusted`; (c) validade temporal da
-  credencial → política de quem consome (o verificador só valida a **coerência** da
-  janela: bem ordenada e não vazia — `validFrom < validUntil`, a mesma invariante
-  que a emissão garante); (d) revogação/status → **não implementado** (fora de
-  escopo).
+  vínculo com a identidade declarada → `verifyCredentialIntegrity`; (b) confiança
+  na chave do issuer → o consumidor, ao escolher `trusted`; (c) validade
+  temporal → `checked.time` quando `now` é informado, sem esconder que sem
+  `now` o tempo não foi checado; (d) revogação/status → **não** é checada por
+  `verifyCredentialIntegrity` (`checked.status = 'not_checked'`); quem consome
+  usa um `statusResolver` (ADR-0027).
 - Sem trust registry, sem DID: `trusted` é a chave que o consumidor já confia.
+  O DID Document (ADR-0028) é uma forma adicional de descobrir a chave; ele não
+  substitui o `issuer` HTTPS nem o `trusted` do verificador.
 
 ## Compatibilidade e impacto
 
 - **Mudanças de forma do documento:** `issuer`, `credentialSubject.id` e
   `proof.created` (valores), `validFrom` (semântica).
-- **Mudanças de API:** `verifier.ts` (`trusted` obrigatório em vez de
-  `publicKey`/`expectedVerificationMethod`; janela de validade exige
-  `validFrom < validUntil`, não apenas `≤`), `issuer.ts`
-  (`localIssuer(origem, tenant, keyId)`, `parseIssuerOrigin`,
-  `issuerScopeOf`), `subject.ts` (`deriveCredentialSubjectId` recebe `issuerId`),
-  `credential.ts` (`now` no lugar de `proofCreatedAt`; `buildAssertion` recusa
-  `completed_at` ausente **e** janela vazia/invertida
-  (`completed_at >= expires_at`) e
+- **Mudanças de API:** `verification.ts` (`trusted` obrigatório em vez de
+  `publicKey`/`expectedVerificationMethod`; `verifyCredential` renomeado para
+  `verifyCredentialIntegrity` e passou a devolver `checked` e a aceitar `now`;
+  janela `validFrom <= validUntil`, e `[validFrom, validUntil)` quando `now` é
+  informado), `issuer.ts` (`localIssuer(origem, tenant, keyId)`,
+  `parseIssuerOrigin`, `issuerScopeOf`), `subject.ts`
+  (`deriveCredentialSubjectId` recebe `issuerId`), `credential.ts` (`now` no
+  lugar de `proofCreatedAt`; `buildAssertion` recusa `completed_at` ausente
+  **e** janela vazia/invertida (`completed_at >= validUntil`) e
   `AssertionPayload['timestamps']['completed_at']` deixa de ser nullable) e
   `apps/api/src/services/credential-issuer.ts` (`IssueCredentialDeps` recebe
-  `issuerOrigin`/`keyId`/`now`; a falha `ISSUER_MISMATCH` deixa de existir e
-  surgem `COMPLETION_TIME_MISSING` e `VALIDITY_WINDOW_INVALID`).
+  `issuerOrigin`/`keyId`/`now` e `credentialTtlSeconds`; a falha
+  `ISSUER_MISMATCH` deixa de existir e surgem `COMPLETION_TIME_MISSING` e
+  `VALIDITY_WINDOW_INVALID`).
 - **Mudança interna do worker (sem API pública):**
   `ValidationOutcomeWrite.now` virou `ValidationOutcomeWrite.completedAt` em
   `deep-enrich.persistence.ts` — o valor é o instante a registrar como conclusão
@@ -353,10 +365,246 @@ recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
   confirmado. O contexto é inline e a verificação é JCS (não JSON-LD), então não
   precisa resolver; alinhar contexto e origem deve ser uma decisão única quando o
   domínio existir.
-- **Envelope temporal:** `validUntil` continua sendo `expires_at`
-  (= `created_at` + 30d) e a tensão entre retenção (30d) e material
-  (180–365d) continua decisão de produto. A camada não a resolve esticando o
-  prazo: quando a conclusão cai fora do horizonte, a emissão recusa
-  (`VALIDITY_WINDOW_INVALID`). Redefinir a base de `expires_at` (por exemplo,
-  `completed_at` + N dias, com a retenção acompanhando) é a mudança de produto que
-  resolveria o caso — e não foi feita aqui.
+- **Envelope temporal:** **atualizado na Revisão pós-PR #5 (B1).** `validUntil`
+  deixou de ser `expires_at`; agora é
+  `min(completed_at + policy.credential_ttl_seconds, observed_at + ttl_seconds)`.
+  `expires_at` continua sendo o horizonte de retenção (`created_at` + 30d). A
+  tensão entre retenção e TTL das evidências segue decisão de produto; a emissão
+  não estica nenhum dos dois horizontes e recusa `VALIDITY_WINDOW_INVALID`
+  quando a janela resultante é vazia/invertida.
+
+## Revisão pós-PR #5 (2026-10-20)
+
+Revisão de conformidade W3C VC 2.0 sobre o estado do PR #5. As correções foram
+feitas em commits pequenos, um por item, com testes: `82af9d4` (A1), `b919ade`
+(A2), `27c5aa3` (A3), `4bb729a` (A4), `e8e7740` (B1), `24d1cd9` (B2), `1146c68`
+(C1), `f1d043b` (C2) e `a3357b1` (revisão A3/C1: última policy avaliada).
+Quando esta seção divergir de um trecho anterior, **esta seção prevalece**.
+
+### A1 — origem do issuer em produção
+
+`assertProductionIssuerOrigin` (`packages/credential/src/service/issuer.service.ts`)
+passou a ser aplicada no boot da API. A checagem é **fail-safe**: só é relaxada
+quando `NODE_ENV` é exatamente `development` ou `test`. `NODE_ENV` ausente,
+`prod`, `staging` ou qualquer outro valor validam a origem como produção. A
+origem `CREDENTIAL_ISSUER_ORIGIN` é recusada quando:
+
+- usa TLD reservado (`.test`, `.example`, `.invalid`, `.localhost`, `.local`);
+- é `localhost` (ou um subdomínio `*.localhost`);
+- é um IP literal (IPv4 ou IPv6).
+
+Em `development`/`test` o comportamento não mudou: a suíte usa
+`https://issuer.test` e continua aceita. A validação anterior (HTTPS, sem
+credenciais/path/query/fragmento, host canônico) permanece. Testes cobrem
+`development`/`test`, `production` e os valores não relaxados em
+`apps/api/src/config.test.ts`; `.env.example` documenta a restrição.
+
+**Motivo:** uma credencial é uma afirmação pública. Aceitar uma origem que
+nunca será controlada pelo projeto em produção produziria identificadores
+irresolúveis e daria aparência de conformidade a um domínio de terceiro.
+
+### A2 — `verifyCredentialIntegrity` declara o que checou
+
+`verifyCredential` foi renomeado para **`verifyCredentialIntegrity`**. O
+resultado ganhou:
+
+```ts
+checked: {
+  integrity: 'valid' | 'invalid' | 'not_checked'
+  time: 'valid' | 'not_yet_valid' | 'expired' | 'not_checked'
+  status: 'not_checked' // revogação não é checada aqui
+}
+```
+
+A função aceita `now?: Date`. Sem `now`, só a janela é validada
+estruturalmente (`validFrom <= validUntil`) e `checked.time = 'not_checked'`.
+Com `now`, a janela é `[validFrom, validUntil)`:
+
+- `now < validFrom` → `NOT_YET_VALID`;
+- `now >= validUntil` → `EXPIRED`;
+- dentro da janela → `checked.time = 'valid'`.
+
+A ordem é integridade → tempo. Um documento adulterado retorna
+`INVALID_SIGNATURE`/`checked.integrity = 'invalid'`, nunca `EXPIRED`: não se
+classifica como expirado o que nem é autêntico. `verifyCredentialFromIssuer`
+continua com a forma anterior de resultado (sem `checked`) e aceita `now`.
+
+**Responsabilidade:** `verifyCredentialIntegrity` **não** consulta revogação.
+Quem precisa de status usa um `CredentialStatusResolver` (ADR-0027). Misturar as
+duas coisas faria a verificação de integridade depender de rede e esconderia a
+diferença entre “assinatura válida” e “credencial vigente”.
+
+### A3 — replay do deep path inclui policy e scorer
+
+`DeepEnrichDeps` passou a receber `policyHash` (digest do YAML efetivamente
+carregado) e a comparação de replay passou a exigir, além de veredito e
+`evidenceSetHash`:
+
+- `previous.policyHash === deps.policyHash`;
+- `previous.scorerVersion === SCORER_VERSION`.
+
+Uma mudança de policy/scorer sobre as MESMAS evidências agora é uma **nova
+conclusão**, com novo `completed_at` (e, por C1, revogação da credencial antiga).
+O teste de integração usa um `policyHash` diferente mantendo veredito e
+evidências iguais e prova que o instante muda.
+
+**Binding imutável vs última avaliação (migração 0036).** `validation.policy_hash`
+e `validation.scorer_version` continuam imutáveis por trigger (migração 0028),
+porque identificam a policy sob a qual a assertion nasceu — e é isso que a
+credencial declara. Comparar o replay só por eles, porém, faria toda reexecução
+sob uma policy nova parecer uma conclusão nova: o `completed_at` avançaria de
+novo e uma credencial emitida depois da mudança seria revogada por um replay
+idêntico. Para separar as duas responsabilidades, a `validation` ganhou
+`last_evaluated_policy_hash`/`last_evaluated_scorer_version` (migração
+`0036_validation_last_evaluated_binding.sql`), atualizados pelo deep path. A
+comparação usa o último valor, com fallback para o binding em linhas legadas
+(que ficam NULL: não há backfill — a última avaliação de uma linha antiga é
+desconhecida, e um UPDATE unbatched bloquearia a tabela).
+Assim, a primeira execução sob a policy B grava novo `completed_at`; as
+reexecuções idênticas sob B preservam esse instante e **não** revogam a
+credencial emitida depois. O binding declarado na credencial continua sendo o
+original (policy A). Se o produto exigir que uma credencial nova declare a
+policy B, isso é uma nova validation/assertion (ou um rebinding explícito),
+decisão separada desta correção. Teste de integração cobre exatamente a
+sequência “policy nova, sem credencial antiga, emissão depois, replay idêntico”.
+
+### A4 — `validFrom == validUntil`
+
+A VC Data Model 2.0 Recommendation §4.9 (“Validity Period”) exige
+`validFrom <= validUntil`; a igualdade é permitida. O **verificador** passou a
+aceitar a igualdade (recusa apenas `validFrom > validUntil`). O **emissor**
+continua estrito (`completed_at < validUntil`): uma credencial de duração zero
+não afirma nada útil e não é produzida por esta biblioteca. Teste reassina um
+documento com janela de duração zero e prova que ele verifica; a janela
+invertida continua `INVALID_TIMESTAMP`.
+
+### B1 — horizonte de validade da credencial
+
+`validUntil` deixou de ser `expires_at` e passou a ser:
+
+```text
+min(
+  completed_at + policy.credential_ttl_seconds,
+  min(observed_at + ttl_seconds) sobre TODAS as evidências do resultado
+)
+```
+
+- `credential_ttl_seconds` é opcional na policy, inteiro positivo, default
+  **30 dias** (`2_592_000`). O default não altera o YAML nem o hash de policies
+  já publicadas; nenhuma policy existente foi editada.
+- O TTL de cada evidência (`claim_evidence.ttl_seconds`) limita a credencial: se
+  uma observação que sustenta o veredito expira antes, a credencial não pode
+  continuar afirmando o resultado.
+- `expires_at` continua sendo o horizonte de **retenção** e não é recalculado,
+  esticado nem usado como `validUntil`.
+- Se o resultado for `<= completed_at`, a emissão falha com
+  `VALIDITY_WINDOW_INVALID`; `buildAssertion` repete a invariante.
+- Testes: `apps/api/src/services/credential-issuer.test.ts` (policy TTL, TTL
+  curto de uma evidência, default, igualdade), `packages/core/src/policy.test.ts`
+  (policy sem o campo e TTL inválido) e o teste de integração da janela em
+  `apps/api/src/credential.int.test.ts`.
+
+**Por que não mudar `expires_at`:** ele é o prazo de retenção do registro e do
+material; esticá-lo para caber na credencial misturaria duas políticas. Se a
+evidência já expirou, a resposta honesta é não emitir.
+
+### B2 — primeira emissão determinística
+
+Nova tabela `credential_issuance` (migração `0034_credential_issuance.sql`):
+
+```text
+validation_id  PK (uma emissão por validation)
+tenant_id      FK tenant; RLS
+issuer_scope   escopo público do issuer
+credential_id  ponteiro público de status (o “índice” atual)
+issued_at      instante da PRIMEIRA prova
+created_at     auditoria
+```
+
+A tabela é **append-only** (sem UPDATE/DELETE para `app_user`, trigger de
+proteção) e **não guarda o documento assinado**. Na primeira emissão, a linha e
+o status `ACTIVE` são gravados na **mesma transação**. Em reemissão, a fronteira
+reutiliza `issued_at` como `proof.created` e devolve o mesmo documento; o teste
+de integração compara o JSON inteiro e verifica que existe uma única linha de
+`credential_issuance` e uma única de `credential_status`.
+
+Determinismo vale enquanto issuer, chave de assinatura, policy (TTL) e
+`credentialId` não mudarem. Rotação de chave é uma prova nova por definição e
+muda `proof.verificationMethod`; isso é intencional. A reemissão **não reativa**
+uma credencial `REVOKED` (revogação é monotônica).
+
+**Troca de `CREDENTIAL_ISSUER_ORIGIN` bloqueia a reemissão.** O `credential_id`
+deriva do `issuer.id`, que inclui a origem: sob uma origem nova, reemitir a mesma
+validation produziria outro `credential_id`, incompatível com a linha
+append-only da primeira emissão (PK `validation_id`). O conflito é explícito —
+`CredentialIssuanceError` com detalhe `ISSUANCE_IDENTITY_CONFLICT`, respondido
+como `409 CREDENTIAL_NOT_ISSUABLE` —, nunca um `500`. Uma origem nova exige uma
+validation nova; o teste de integração cobre emissão → troca de origem →
+reemissão.
+
+### C1 — credenciais superadas
+
+Quando o deep path produz uma conclusão diferente da persistida — veredito,
+`evidenceSetHash`, `policyHash`, `scorerVersion` — ou quando uma validation
+`completed` volta a `partial`, as credenciais já emitidas dessa validation são
+revogadas como **`superseded`** na MESMA transação da atualização do resultado.
+Se a revogação falhar, a nova conclusão também não é persistida.
+
+- `credential_status.revocation_reason` (migração `0035_credential_status_reason.sql`,
+  com a constraint validada na `0037_credential_status_reason_validate.sql`)
+  registra `manual` (rota autenticada) ou `superseded` (deep path). A coluna não
+  é exposta no endpoint público.
+- A revogação só casa linhas `ACTIVE`; replay idêntico não revoga e reexecuções
+  não reescrevem `revoked_at` nem o motivo. O replay usa
+  `last_evaluated_policy_hash`/`last_evaluated_scorer_version` (A3), então uma
+  segunda execução sob a policy nova não revoga de novo. Testes cobrem replay
+  idêntico, mudança de policy (com e sem credencial antiga) e regressão para
+  `partial`.
+
+### C2 — identidade issuer/DID ponta a ponta
+
+O teste em `apps/api/src/credential.int.test.ts` emite pela rota real, busca o
+DID Document público, **extrai a chave** e verifica a credencial com
+`verifyCredentialIntegrity`; em seguida repete o caminho com
+`verifyCredentialFromIssuer`. Ele confirma:
+
+- `DID = didOfIssuer(issuer)` e `document.id === DID`;
+- `document.alsoKnownAs` contém exatamente o `issuer` HTTPS da credencial;
+- `credential.proof.verificationMethod` é `<issuer>#<keyId>`;
+- o método DID correspondente é `<did>#<keyId>`, com `controller === did`;
+- a chave `Multikey` do documento verifica a assinatura emitida pela rota.
+
+**Não há divergência a corrigir:** `issuer` (HTTPS) e `DID` (`did:web`) são
+URIs diferentes por desenho, ligadas por `alsoKnownAs`; o resolver devolve o
+`id` HTTPS original para que o binding exato do verificador continue valendo. O
+DID é uma porta de descoberta, não um segundo emissor.
+
+### Riscos documentados, não implementados
+
+- **Vocabulário reservado e posse do domínio.** Os termos `comprova:*` vivem em
+  um contexto inline e a verificação é JCS (não JSON-LD), então não dependem de
+  resolução. Ainda assim, o domínio do contexto e a propriedade dos termos não
+  estão confirmados; publicar vocabulário reservado sem controlar o domínio é
+  risco de interoperabilidade e de apropriação por terceiro.
+- **Pseudônimo estável e correlação de CPF.** `subject.doc_hmac` é estável para
+  o mesmo documento (por design, para permitir idempotência e continuidade).
+  Isso permite correlacionar credenciais do mesmo CPF entre tenants/emissões se
+  a chave HMAC for compartilhada ou vazar. Uma derivação por issuer/epoch
+  reduziria a linkabilidade, mas quebraria idempotência e continuidade; é
+  decisão de produto/privacidade, não uma correção local.
+- **Escopo do tenant: SHA-256 vs HMAC.** `issuerScopeOf` usa SHA-256 não
+  chaveado do `tenant_id`. O UUID tem entropia suficiente para não ser segredo,
+  mas um vazamento de `tenant_id` permite recalcular o escopo e confirmar a
+  correspondência. HMAC com segredo do servidor seria mais forte e continua
+  compatível com a URL opaca; a troca muda identificadores já emitidos e exige
+  migração/versionamento, por isso não foi feita nesta revisão.
+
+### Validação executada
+
+- `pnpm typecheck`
+- `pnpm lint`
+- `pnpm test` (unidade + integração; Docker disponível)
+- `pnpm db:fence` para as migrações `0034`–`0037`
+- Testes de integração relevantes: `apps/api/src/credential.int.test.ts`,
+  `apps/worker/src/modules/deep-enrich/deep-enrich.int.test.ts` e
+  `apps/worker/src/deep-path.e2e.test.ts`.

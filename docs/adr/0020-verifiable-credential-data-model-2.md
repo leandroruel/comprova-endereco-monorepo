@@ -352,19 +352,19 @@ foi alterado para preenchê-lo).
 
 ### 9. Verifier independente
 
-`verifyCredential(credential, { publicKey, expectedIssuerId?, expectedVerificationMethod? })`
+`verifyCredentialIntegrity(credential, { publicKey, expectedIssuerId?, expectedVerificationMethod? })`
 recebe apenas o JSON da credencial e a chave pública. Não acessa
 PostgreSQL/Redis/Temporal/S3/API.
 
 > **Atualizado pelo [ADR-0024](0024-conformidade-w3c-identificadores-e-tempos.md)
 > §6:** a API passou a ser
-> `verifyCredential(credential, { trusted: { id, publicKey }, expectedIssuerId? })`.
+> `verifyCredentialIntegrity(credential, { trusted: { id, publicKey }, expectedIssuerId? })`.
 > O `id` do método confiável é **obrigatório** e precisa ser exatamente o
 > `proof.verificationMethod`: uma chave sem identidade não é suficiente para
-> declarar confiança em um método. Na mesma revisão, a janela de validade passou a
-> exigir **`validFrom < validUntil`** (não apenas ordenada): janela de duração
-> zero é recusada com `INVALID_TIMESTAMP`, a mesma invariante que a emissão
-> garante.
+> declarar confiança em um método. Revisão pós-PR #5: o verificador aceita
+> `validFrom <= validUntil` (VC 2.0 §4.9); só o emissor exige
+> `validFrom < validUntil`. Com `now` informado, o verificador também retorna
+> `NOT_YET_VALID`/`EXPIRED` (janela `[validFrom, validUntil)`).
 
 Ordem das checagens:
 
@@ -375,7 +375,7 @@ Ordem das checagens:
    `<issuer>#<keyId>` (fragmento não vazio) e, se `expectedVerificationMethod`
    for passado, coincidir exatamente. Sem isto, um documento legítimo de A
    poderia se declarar emitido por B;
-4. janela de validade bem formada (**não vazia**: `validFrom < validUntil`);
+4. janela de validade bem formada (`validFrom <= validUntil`, VC 2.0 §4.9);
 5. `comprova:evidenceSetHash` reconferido a partir da própria credencial;
 6. proof Data Integrity `eddsa-jcs-2022` sobre o documento **cru** recebido
    (menos `proof`) — nunca sobre a versão normalizada pelo schema, para que a
@@ -394,8 +394,9 @@ Falhas classificadas: `MALFORMED_CREDENTIAL`, `UNSUPPORTED_CREDENTIAL`,
 `VERIFICATION_METHOD_MISMATCH`, `PROOF_PURPOSE_MISMATCH`, `INVALID_TIMESTAMP`,
 `EVIDENCE_SET_MISMATCH`, `INVALID_SIGNATURE`.
 
-Verificação ≠ validação: expiração no passado é política do consumidor, não do
-`verifyCredential`.
+Verificação ≠ validação: sem `now`, `verifyCredentialIntegrity` não checa
+expiração (`checked.time = 'not_checked'`); a checagem temporal só ocorre
+quando o consumidor informa `now` (`NOT_YET_VALID`/`EXPIRED`).
 
 ### 10. Evidência de interoperabilidade
 

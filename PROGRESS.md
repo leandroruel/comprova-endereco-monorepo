@@ -2,6 +2,79 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Revisão de conformidade pós-PR #5 — W3C VC 2.0 (2026-10-20)
+
+Implementação dos itens A1–A4, B1–B2 e C1–C2 da revisão do PR #5, em um commit
+por item e com testes. A decisão consolidada está em
+`docs/adr/0024-conformidade-w3c-identificadores-e-tempos.md`, seção **“Revisão
+pós-PR #5”**.
+
+- **A1 (`82af9d4`, revisão do PR #31)** — a checagem de origem é **fail-safe**:
+  só `NODE_ENV=development|test` relaxa; `production`, `prod`, `staging` e
+  `NODE_ENV` ausente recusam TLDs reservados (`.test`, `.example`, `.invalid`,
+  `.localhost`, `.local`), `localhost` e IP literal. O `dev` da API declara
+  `NODE_ENV=development` e `.env.example` o documenta, para `https://issuer.test`
+  continuar aceito em desenvolvimento sem afrouxar produção.
+- **A2 (`b919ade`)** — `verifyCredential` → `verifyCredentialIntegrity`, com
+  `checked { integrity, time, status }` e `now?: Date`. Janela temporal
+  `[validFrom, validUntil)`, `NOT_YET_VALID`/`EXPIRED`; status permanece
+  `not_checked` (revogação é do `statusResolver`).
+- **A3 (`27c5aa3`, ajuste `a3357b1`)** — replay do deep path compara policy e
+  scorer; policy/scorer diferentes produzem novo `completed_at`. A comparação
+  usa `last_evaluated_policy_hash`/`last_evaluated_scorer_version` (migração
+  `0036`), separados do binding imutável da assertion, para que replay idêntico
+  sob a policy nova preserve o instante e não revogue de novo.
+- **A4 (`4bb729a`)** — VC 2.0 §4.9 permite `validFrom == validUntil`. O
+  verificador aceita a igualdade; o emissor continua exigindo `<`.
+- **B1 (`e8e7740`)** — `validUntil` é o menor entre
+  `completed_at + policy.credential_ttl_seconds` e `observed_at + ttl_seconds`;
+  `credential_ttl_seconds` é opcional (default 30 dias) e nenhuma policy
+  publicada foi alterada. `expires_at` segue como retenção; janela
+  vazia/invertida → `VALIDITY_WINDOW_INVALID`.
+- **B2 (`24d1cd9`, revisão do PR #31)** — migração `0034_credential_issuance.sql`
+  (RLS, append-only) guarda `issued_at` e o ponteiro de status por validation. A
+  primeira emissão e o status `ACTIVE` são gravados na mesma transação; reemitir
+  usa `proof.created = issued_at` e devolve JSON byte a byte igual (teste
+  compara o documento inteiro e a unicidade das linhas). Trocar
+  `CREDENTIAL_ISSUER_ORIGIN` muda o `credential_id` e bloqueia a reemissão de
+  forma explícita (`409 CREDENTIAL_NOT_ISSUABLE`, detalhe
+  `ISSUANCE_IDENTITY_CONFLICT`); teste de integração cobre emissão → troca de
+  origem → reemissão.
+- **C1 (`1146c68`)** — migração `0035_credential_status_reason.sql` adiciona
+  `revocation_reason` (`manual`/`superseded`). Mudança de veredito, evidências,
+  policy/scorer ou regressão a `partial` revoga a credencial já emitida como
+  `superseded` na mesma transação; replay idêntico não revoga e reexecuções não
+  reescrevem `revoked_at`.
+- **C2 (`f1d043b`)** — teste ponta a ponta resolve o DID Document público,
+  extrai a chave e verifica com `verifyCredentialIntegrity`, além de conferir
+  `issuer` HTTPS, `alsoKnownAs`, `proof.verificationMethod` e o método DID
+  (`<did>#<keyId>`, `controller = did`). Não houve divergência: `issuer` e
+  `did:web` são URIs distintas ligadas por `alsoKnownAs`.
+- **Documentação** — ADR-0024 ganhou a seção de revisão (incluindo riscos de
+  vocabulário/domínio, correlação estável de CPF e SHA-256 vs HMAC do escopo do
+  tenant); README e `.env.example` atualizados.
+- **Revisão do PR #31** — guard de origem fail-safe (não só
+  `NODE_ENV=production`); default de policy do worker alinhado ao da API
+  (`2026.13.1`, evita revogação espúria de credenciais sob a policy correta);
+  conflito de troca de origem vira `409 ISSUANCE_IDENTITY_CONFLICT` tipado; ADR
+  corrigido (`validFrom <= validUntil`, ordem do `now` após a assinatura, tabela
+  sem `comprova:expiresAt`); `revocation_reason` restrito a
+  `manual|superseded` (`NOT VALID` na `0035` + `VALIDATE` na `0037`, em
+  transações separadas para não manter o `ACCESS EXCLUSIVE` durante o scan);
+  backfill unbatched da `0036` removido (o código já cai no binding imutável
+  quando `last_evaluated_*` é NULL); a assertion é montada antes de persistir a
+  primeira emissão/status `ACTIVE`, então uma validation legada sem bindings não
+  deixa status de uma credencial nunca devolvida.
+- **Validação** — `pnpm typecheck`, `pnpm lint`, `pnpm test` e `pnpm db:fence`
+  executados. Nenhum teste de integração precisou ser pulado (Docker
+  disponível). A suíte cobre as migrações `0034`/`0035`/`0036`.
+- **Binding de emissão vs avaliação (A3)** — `validation.policy_hash`/
+  `scorer_version` continuam imutáveis (0028) e são o que a credencial declara.
+  O replay usa `last_evaluated_*` (0036), mutáveis. Uma credencial emitida
+  depois de uma mudança de policy ainda declara o binding original; se o produto
+  quiser que ela declare a policy nova, isso exige nova validation/assertion ou
+  rebinding explícito (documentado no ADR-0024).
+
 ## Integridade relacional e retenção — correções da auditoria (2026-10-16)
 
 Endurecimento de integridade/tenant-isolation/retenção **sem alterar a lógica de
@@ -172,7 +245,7 @@ pnpm install
 pnpm db:migrate
 pnpm db:seed         # cria API key dev
 pnpm dev             # levanta tudo (API :3000, dashboard :5173, worker, ingestor)
-pnpm test            # 147/147 testes
+pnpm test            # unidade + integração (536/536 na revisão pós-PR #5)
 pnpm db:fence        # pgfence gate de migrações
 ```
 

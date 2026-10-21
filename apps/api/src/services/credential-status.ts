@@ -1,5 +1,5 @@
 import type { CredentialStatusValue } from '@comprova/credential'
-import { and, eq, sql, withTenant, type Db } from '@comprova/db'
+import { and, eq, sql, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 
 /**
@@ -20,38 +20,155 @@ import * as t from '@comprova/db'
  * computacionalmente inviável; ainda assim, nunca aceitamos uma linha de outro
  * tenant/escopo para a mesma credencial.
  */
+export const ensureActiveCredentialStatusInTx = async (
+  tx: DbTx,
+  tenantId: string,
+  issuerScope: string,
+  credentialId: string,
+): Promise<void> => {
+  const inserted = await tx
+    .insert(t.credentialStatus)
+    .values({
+      credentialId,
+      tenantId,
+      issuerScope,
+      status: 'ACTIVE',
+    })
+    .onConflictDoNothing()
+    .returning({ credentialId: t.credentialStatus.credentialId })
+
+  if (inserted.length > 0) return
+
+  const rows = await tx
+    .select({
+      tenantId: t.credentialStatus.tenantId,
+      issuerScope: t.credentialStatus.issuerScope,
+    })
+    .from(t.credentialStatus)
+    .where(eq(t.credentialStatus.credentialId, credentialId))
+    .limit(1)
+  const existing = rows[0]
+  if (existing === undefined || existing.tenantId !== tenantId || existing.issuerScope !== issuerScope) {
+    throw new Error(`credential status identity conflict for credential ${credentialId}`)
+  }
+}
+
 export const ensureActiveCredentialStatus = async (
   db: Db,
   tenantId: string,
   issuerScope: string,
   credentialId: string,
 ): Promise<void> => {
-  await withTenant(db, tenantId, async (tx) => {
+  await withTenant(db, tenantId, (tx) =>
+    ensureActiveCredentialStatusInTx(tx, tenantId, issuerScope, credentialId),
+  )
+}
+
+/**
+ * Conflito de identidade da PRIMEIRA emissão: existe uma linha
+ * `credential_issuance` para a validation, mas o `credential_id`/escopo atual
+ * não é o mesmo. O caso real é uma troca de `CREDENTIAL_ISSUER_ORIGIN` (o
+ * `credential_id` deriva do `issuer.id`, que inclui a origem): reemitir sob a
+ * origem nova contradiz o ponteiro gravado na primeira prova.
+ *
+ * Como `validation_id` é a PK e a linha é append-only, isso não é transitório:
+ * o chamador (`issueCredential`) traduz para `CredentialIssuanceError`
+ * (`ISSUANCE_IDENTITY_CONFLICT`), que a rota responde como 409 — nunca 500.
+ */
+export class CredentialIssuanceIdentityConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CredentialIssuanceIdentityConflictError'
+  }
+}
+
+/**
+ * Persiste a PRIMEIRA emissão da validation e garante o status ACTIVE, na
+ * MESMA transação. Em replay, devolve o `issued_at` original e não reativa uma
+ * credencial REVOKED. `now` só é lido quando não existe linha: o instante da
+ * primeira prova é imutável.
+ *
+ * Não guarda o documento assinado; só `issued_at` e o ponteiro de status
+ * (`credential_id`). A reemissão usa `issued_at` como `proof.created`.
+ */
+export const ensureFirstCredentialIssuance = async (
+  db: Db,
+  tenantId: string,
+  issuerScope: string,
+  validationId: string,
+  credentialId: string,
+  now: () => Date,
+): Promise<Date> => {
+  return withTenant(db, tenantId, async (tx) => {
+    const read = () =>
+      tx
+        .select({
+          tenantId: t.credentialIssuance.tenantId,
+          issuerScope: t.credentialIssuance.issuerScope,
+          credentialId: t.credentialIssuance.credentialId,
+          issuedAt: t.credentialIssuance.issuedAt,
+        })
+        .from(t.credentialIssuance)
+        .where(eq(t.credentialIssuance.validationId, validationId))
+        .limit(1)
+
+    const verify = (existing: {
+      readonly tenantId: string
+      readonly issuerScope: string
+      readonly credentialId: string
+      readonly issuedAt: Date
+    }): Date => {
+      if (
+        existing.tenantId !== tenantId ||
+        existing.issuerScope !== issuerScope ||
+        existing.credentialId !== credentialId
+      ) {
+        throw new CredentialIssuanceIdentityConflictError(
+          `credential issuance for validation ${validationId} is bound to a different issuer identity; ` +
+            'changing CREDENTIAL_ISSUER_ORIGIN does not allow reissuance',
+        )
+      }
+      return existing.issuedAt
+    }
+
+    const rows = await read()
+    const existing = rows[0]
+    if (existing !== undefined) {
+      // Verifica a identidade ANTES de tocar o status: sob a origem nova o
+      // `credential_id` muda e o conflito é definitivo (append-only). Não há
+      // por que tentar inserir um status que a transação descartaria.
+      const issuedAt = verify(existing)
+      await ensureActiveCredentialStatusInTx(tx, tenantId, issuerScope, credentialId)
+      return issuedAt
+    }
+
+    const first = now()
     const inserted = await tx
-      .insert(t.credentialStatus)
+      .insert(t.credentialIssuance)
       .values({
-        credentialId,
+        validationId,
         tenantId,
         issuerScope,
-        status: 'ACTIVE',
+        credentialId,
+        issuedAt: first,
       })
       .onConflictDoNothing()
-      .returning({ credentialId: t.credentialStatus.credentialId })
+      .returning({ issuedAt: t.credentialIssuance.issuedAt })
 
-    if (inserted.length > 0) return
-
-    const rows = await tx
-      .select({
-        tenantId: t.credentialStatus.tenantId,
-        issuerScope: t.credentialStatus.issuerScope,
-      })
-      .from(t.credentialStatus)
-      .where(eq(t.credentialStatus.credentialId, credentialId))
-      .limit(1)
-    const existing = rows[0]
-    if (existing === undefined || existing.tenantId !== tenantId || existing.issuerScope !== issuerScope) {
-      throw new Error(`credential status identity conflict for credential ${credentialId}`)
+    // Corrida entre duas primeiras emissões: quem perdeu lê o instante do
+    // vencedor e confere a identidade. Nunca se sobrescreve `issued_at`.
+    let issuedAt: Date
+    if (inserted[0] !== undefined) {
+      issuedAt = inserted[0].issuedAt
+    } else {
+      const raced = (await read())[0]
+      if (raced === undefined) {
+        throw new Error(`credential issuance for validation ${validationId} was not persisted`)
+      }
+      issuedAt = verify(raced)
     }
+    await ensureActiveCredentialStatusInTx(tx, tenantId, issuerScope, credentialId)
+    return issuedAt
   })
 }
 
@@ -69,11 +186,12 @@ export const revokeCredentialStatus = async (
   db: Db,
   tenantId: string,
   credentialId: string,
+  reason: 'manual' | 'superseded' = 'manual',
 ): Promise<CredentialStatusValue | null> =>
   withTenant(db, tenantId, async (tx) => {
     const updated = await tx
       .update(t.credentialStatus)
-      .set({ status: 'REVOKED', revokedAt: sql`now()` })
+      .set({ status: 'REVOKED', revokedAt: sql`now()`, revocationReason: reason })
       .where(
         and(
           eq(t.credentialStatus.tenantId, tenantId),

@@ -72,7 +72,7 @@ não entra no documento: o documento só aponta a URL pública. Isso mantém a
 credencial autocontida e evita reemitir a cada mudança de status. A URL e o
 `id` são **cobertos pela assinatura**; adulterá-los invalida a prova.
 
-O binding estrutural é verificado pelo `verifyCredential` puro: `id` tem de ser
+O binding estrutural é verificado pelo `verifyCredentialIntegrity` puro: `id` tem de ser
 `<issuer>/credentials/<id de 43 chars>` e `credentialStatus.id` tem de ser
 exatamente `<id>/status`. Um documento legado sem esses membros continua
 verificável criptograficamente, mas **quem exige status** é
@@ -157,7 +157,7 @@ duas revogações e a segunda encontra 0 linhas, mas a leitura seguinte devolve
 `verifyCredentialFromIssuer` resolve, nesta ordem:
 
 1. forma e `verificationMethod` (como antes, ADR-0025/0026);
-2. assinatura e binding estrutural do status (`verifyCredential`);
+2. assinatura e binding estrutural do status (`verifyCredentialIntegrity`);
 3. **só então** o status público, via `statusResolver` injetado.
 
 Resultados:
@@ -179,7 +179,7 @@ A verificação é **fail closed**:
 - o verificador não recebe chave privada, banco, Redis, S3, Temporal nem API
   interna. Recebe o método público, a credencial e o resolver HTTP.
 
-O `verifyCredential` puro continua **sem rede** e não resolve status; ele apenas
+O `verifyCredentialIntegrity` puro continua **sem rede** e não resolve status; ele apenas
 valida a assinatura e o binding `id ↔ credentialStatus.id`.
 
 O resolver HTTP concreto
@@ -225,7 +225,7 @@ por credencial, um endpoint público de leitura e uma revogação autenticada.
   `POST /v1/credentials/:credentialId/revoke`.
 - **Mudança de contrato no verificador**: `verifyCredentialFromIssuer` agora
   exige `statusResolver` para aceitar credenciais atuais; sem ele o resultado é
-  `STATUS_UNAVAILABLE`. `verifyCredential` permanece puro.
+  `STATUS_UNAVAILABLE`. `verifyCredentialIntegrity` permanece puro.
 - **Nenhuma mudança** em `validation`, `claim`, `claim_evidence`, `evidence`,
   `building_key`/`unit_key`, scoring, checkers, policy, T0/T1/T2, retenção,
   `subject.doc_hmac` ou no fluxo de contestação.

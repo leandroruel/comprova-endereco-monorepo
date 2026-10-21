@@ -22,6 +22,7 @@ const deepDeps: DeepEnrichDeps = {
   t1Checkers: ctx.t1Checkers,
   t2Checkers: ctx.t2Checkers,
   policy: ctx.policy,
+  policyHash: ctx.policyHash,
   clock: systemClock,
   signalCache: ctx.signalCache,
 }

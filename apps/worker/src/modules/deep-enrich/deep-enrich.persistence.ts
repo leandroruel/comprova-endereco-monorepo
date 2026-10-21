@@ -1,4 +1,4 @@
-import { eq, inArray } from '@comprova/db'
+import { and, eq, inArray, sql } from '@comprova/db'
 import type { DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
@@ -241,6 +241,13 @@ export interface ValidationOutcomeWrite {
   readonly score: number
   readonly confidence: number
   readonly evidenceSetHash: string
+  /**
+   * Policy/scorer efetivamente usados nesta execução. Vão para
+   * `last_evaluated_*`, não para o binding imutável `policy_hash`/
+   * `scorer_version` (A3/C1).
+   */
+  readonly policyHash: string
+  readonly scorerVersion: string
   readonly explanation: {
     readonly summary: string
     readonly code: string
@@ -266,6 +273,8 @@ export const updateValidationOutcome = async (tx: DbTx, write: ValidationOutcome
       score: Math.tanh(write.score),
       confidence: write.confidence,
       evidenceSetHash: write.evidenceSetHash,
+      lastEvaluatedPolicyHash: write.policyHash,
+      lastEvaluatedScorerVersion: write.scorerVersion,
       explanation: {
         summary: write.explanation.summary,
         code: write.explanation.code,
@@ -275,6 +284,48 @@ export const updateValidationOutcome = async (tx: DbTx, write: ValidationOutcome
       completedAt: write.stillPartial ? null : write.completedAt,
     })
     .where(eq(t.validation.validationId, write.validationId))
+}
+
+/**
+ * Revoga, na MESMA transação da nova conclusão, as credenciais já emitidas
+ * desta validation (C1/ADR-0024, Revisão pós-PR #5). O vínculo é
+ * `credential_issuance.validation_id`
+ * → `credential_id`; sem emissão, é no-op. Idempotente: só casa ACTIVE, então
+ * reexecuções não reescrevem `revoked_at` nem o motivo.
+ *
+ * O motivo `superseded` distingue a revogação automática da manual; o endpoint
+ * público continua expondo apenas ACTIVE/REVOKED.
+ */
+export const supersedeIssuedCredentials = async (
+  tx: DbTx,
+  tenantId: string,
+  validationId: string,
+): Promise<number> => {
+  const issuances = await tx
+    .select({ credentialId: t.credentialIssuance.credentialId })
+    .from(t.credentialIssuance)
+    .where(eq(t.credentialIssuance.validationId, validationId))
+  if (issuances.length === 0) return 0
+
+  const revoked = await tx
+    .update(t.credentialStatus)
+    .set({
+      status: 'REVOKED',
+      revokedAt: sql`now()`,
+      revocationReason: 'superseded',
+    })
+    .where(
+      and(
+        eq(t.credentialStatus.tenantId, tenantId),
+        inArray(
+          t.credentialStatus.credentialId,
+          issuances.map((row) => row.credentialId),
+        ),
+        eq(t.credentialStatus.status, 'ACTIVE'),
+      ),
+    )
+    .returning({ credentialId: t.credentialStatus.credentialId })
+  return revoked.length
 }
 
 export interface OutcomeEventsWrite {

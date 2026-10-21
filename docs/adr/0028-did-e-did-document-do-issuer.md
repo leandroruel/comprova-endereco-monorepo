@@ -170,12 +170,12 @@ verifyCredentialFromIssuer(credential, makeHttpDidResolver(...))
         ├── GET <issuer.id>/did.json  (allowlist, HTTPS, sem redirect)
         ├── valida id, @context, alsoKnownAs e assertionMethod
         ├── localiza verificationMethod e decodifica publicKeyMultibase
-        └── verifyCredential (assinatura + bindings)
+        └── verifyCredentialIntegrity (assinatura + bindings)
 ```
 
 `makeHttpDidResolver` devolve o **id original** do método
 (`<issuer.id>#<keyId>`, HTTPS), então o binding exato de
-`verifyCredential` (`verificationMethod === trusted.id`) continua valendo. O
+`verifyCredentialIntegrity` (`verificationMethod === trusted.id`) continua valendo. O
 `makeHttpIssuerResolver` existente **não foi substituído**; o DID é uma segunda
 forma de resolver a mesma chave, plugável no mesmo ponto.
 

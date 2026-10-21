@@ -19,8 +19,21 @@ import {
   runMigrations,
 } from '@comprova/db'
 import * as t from '@comprova/db'
-import { loadPolicy, policyHashOf, systemClock, type Clock, type PartnerGraphReader } from '@comprova/core'
-import { localIssuer, verificationMethodOf, verifyCredential } from '@comprova/credential'
+import {
+  DEFAULT_CREDENTIAL_TTL_SECONDS,
+  loadPolicy,
+  policyHashOf,
+  systemClock,
+  type Clock,
+  type PartnerGraphReader,
+} from '@comprova/core'
+import {
+  credentialIdOf,
+  issuerScopeOf,
+  localIssuer,
+  verificationMethodOf,
+  verifyCredentialIntegrity,
+} from '@comprova/credential'
 import { makePartnerGraph, makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
@@ -55,6 +68,7 @@ const trusted = { id: verificationMethodOf(issuer), publicKey: signing.publicKey
 
 const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.11.1.yaml'), 'utf8')
 const policy = loadPolicy(policyYaml)
+const policyHash = policyHashOf(policyYaml)
 
 afterAll(async () => {
   await adminPool.end()
@@ -118,7 +132,7 @@ describe('deepEnrich (activity core)', () => {
     expect(created.verdict).toBe('CONFIRMED_COMMERCIAL')
 
     const result = await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId },
     )
     expect(result.status).toBe('completed')
@@ -156,7 +170,7 @@ describe('deepEnrich (activity core)', () => {
     expect(created.verdict).toBe('INSUFFICIENT_EVIDENCE')
 
     const result = await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1Chaos, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1Chaos, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId },
     )
     expect(result.status).toBe('partial')
@@ -232,7 +246,7 @@ describe('deepEnrich (activity core)', () => {
     expect(afterFast.length).toBeGreaterThan(0)
 
     await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId },
     )
     const afterFirstDeep = await snapshot()
@@ -249,7 +263,7 @@ describe('deepEnrich (activity core)', () => {
 
     // Replay: nova execução não muta nem duplica as evidências já persistidas.
     await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId },
     )
     const afterReplay = await snapshot()
@@ -289,7 +303,7 @@ describe('deepEnrich (activity core)', () => {
     expect(prior.length).toBeGreaterThan(0)
 
     await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId },
     )
 
@@ -314,7 +328,7 @@ describe('deepEnrich (activity core)', () => {
 
     // Replay não duplica observações.
     await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId },
     )
     const after = await adminPool.db
@@ -460,7 +474,7 @@ describe('deepEnrich (activity core)', () => {
 
     // Não deve lançar (sem a correção, a FK rejeitaria o id legado).
     await deepEnrich(
-      { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId },
     )
 
@@ -489,6 +503,28 @@ describe('deepEnrich (activity core)', () => {
 
     const validationRow = async (validationId: string) =>
       (await adminPool.db.select().from(t.validation).where(eq(t.validation.validationId, validationId)))[0]
+
+    const issuanceOf = async (validationId: string) =>
+      (
+        await adminPool.db
+          .select({
+            credentialId: t.credentialIssuance.credentialId,
+            issuedAt: t.credentialIssuance.issuedAt,
+          })
+          .from(t.credentialIssuance)
+          .where(eq(t.credentialIssuance.validationId, validationId))
+      )[0]
+
+    const statusOf = async (validationId: string) => {
+      const issuance = await issuanceOf(validationId)
+      if (issuance === undefined) return undefined
+      return (
+        await adminPool.db
+          .select()
+          .from(t.credentialStatus)
+          .where(eq(t.credentialStatus.credentialId, issuance.credentialId))
+      )[0]
+    }
 
     const createQueued = async (idempotencyKey: string, documentValue: string): Promise<string> => {
       // `created_at` = T0: a validação nasce em `queued` (fast path) no instante
@@ -519,7 +555,7 @@ describe('deepEnrich (activity core)', () => {
       expect(before?.completedAt).toBeNull()
 
       const result = await deepEnrich(
-        { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: advancingClock() },
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: advancingClock() },
         { tenantId: tenant, validationId },
       )
       expect(result.status).toBe('completed')
@@ -541,19 +577,46 @@ describe('deepEnrich (activity core)', () => {
       expect(credential.validFrom).toBe(T1.toISOString())
       expect(credential.validFrom).not.toBe(T0.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
-      expect(credential.validUntil).toBe(after?.expiresAt?.toISOString())
-      expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
+      // `validUntil` = min(completed_at + policy TTL, observed_at + ttl_seconds);
+      // NÃO é o `expires_at` de retenção.
+      const claimRows = await adminPool.db
+        .select({ claimId: t.claim.claimId })
+        .from(t.claim)
+        .where(eq(t.claim.validationId, validationId))
+        .limit(1)
+      const claimId = claimRows[0]?.claimId
+      if (claimId === undefined) throw new Error('claim missing')
+      const evidence = await adminPool.db
+        .select({ observedAt: t.claimEvidence.observedAt, ttlSeconds: t.claimEvidence.ttlSeconds })
+        .from(t.claimEvidence)
+        .where(eq(t.claimEvidence.claimId, claimId))
+      const expectedValidUntil = new Date(
+        Math.min(
+          T1.getTime() + DEFAULT_CREDENTIAL_TTL_SECONDS * 1000,
+          ...evidence.map((e) => e.observedAt.getTime() + e.ttlSeconds * 1000),
+        ),
+      )
+      expect(credential.validUntil).toBe(expectedValidUntil.toISOString())
+      expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({ valid: true })
     })
 
     it('replay do mesmo resultado terminal preserva o `completed_at` original', async () => {
       const validationId = await createQueued('fase24-replay', '12345678000195')
 
       const first = await deepEnrich(
-        { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: advancingClock() },
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: advancingClock() },
         { tenantId: tenant, validationId },
       )
       expect(first.status).toBe('completed')
       expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T1.toISOString())
+
+      // Emite a credencial ANTES do replay: o replay idêntico não pode revogá-la.
+      const issued = await issueCredential(adminPool.db, tenant, validationId, {
+        issuerOrigin: ISSUER_ORIGIN,
+        signingKeys,
+      })
+      expect(issued.validFrom).toBe(T1.toISOString())
+      expect((await statusOf(validationId))?.status).toBe('ACTIVE')
 
       // Retry/replay do worker (mesma policy, mesmos verificadores, mesmas
       // evidências): reexecutar NÃO é reconcluir. O `completed_at` original é
@@ -561,7 +624,7 @@ describe('deepEnrich (activity core)', () => {
       // depois sem nenhuma conclusão nova (ADR-0024 §5).
       const T2 = new Date('2026-06-01T00:11:00.000Z')
       const replay = await deepEnrich(
-        { db: adminPool.db, t1Checkers: t1WithFakes, policy, clock: { now: () => T2 } },
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: { now: () => T2 } },
         { tenantId: tenant, validationId },
       )
       expect(replay.status).toBe('completed')
@@ -569,6 +632,12 @@ describe('deepEnrich (activity core)', () => {
       const row = await validationRow(validationId)
       expect(row?.status).toBe('completed')
       expect(row?.completedAt?.toISOString()).toBe(T1.toISOString())
+
+      // Replay idêntico NÃO revoga: a credencial continua ACTIVE.
+      const statusAfterReplay = await statusOf(validationId)
+      expect(statusAfterReplay?.status).toBe('ACTIVE')
+      expect(statusAfterReplay?.revokedAt).toBeNull()
+      expect(statusAfterReplay?.revocationReason).toBeNull()
 
       // A credencial emitida depois do replay continua ancorada na conclusão
       // original — e continua verificável.
@@ -578,7 +647,128 @@ describe('deepEnrich (activity core)', () => {
       })
       expect(credential.validFrom).toBe(T1.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
-      expect(verifyCredential(credential, { trusted })).toEqual({ valid: true })
+      expect(verifyCredentialIntegrity(credential, { trusted })).toMatchObject({ valid: true })
+    })
+
+    it('mudança de policy_hash é uma NOVA conclusão, mesmo com veredito e evidências iguais', async () => {
+      const validationId = await createQueued('fase24-policy', '12345678000195')
+
+      const first = await deepEnrich(
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: advancingClock() },
+        { tenantId: tenant, validationId },
+      )
+      expect(first.status).toBe('completed')
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T1.toISOString())
+
+      // Credencial emitida sob a conclusão original: fica ACTIVE.
+      await issueCredential(adminPool.db, tenant, validationId, {
+        issuerOrigin: ISSUER_ORIGIN,
+        signingKeys,
+      })
+      expect((await statusOf(validationId))?.status).toBe('ACTIVE')
+
+      // Mesma policy em memória (mesmo veredito/evidências), mas o digest
+      // efetivo mudou: é uma avaliação sob outra policy, logo uma conclusão
+      // nova. O `completed_at` não pode ser preservado.
+      const T2 = new Date('2026-06-01T00:21:00.000Z')
+      const changedPolicyHash = 'f'.repeat(64)
+      const replay = await deepEnrich(
+        {
+          db: adminPool.db,
+          t1Checkers: t1WithFakes,
+          policy,
+          policyHash: changedPolicyHash,
+          clock: { now: () => T2 },
+        },
+        { tenantId: tenant, validationId },
+      )
+      expect(replay.status).toBe('completed')
+      expect(replay.verdict).toBe(first.verdict)
+
+      const row = await validationRow(validationId)
+      expect(row?.completedAt?.toISOString()).toBe(T2.toISOString())
+
+      // C1: a credencial antiga foi revogada como `superseded`, na mesma
+      // transação da nova conclusão.
+      const superseded = await statusOf(validationId)
+      expect(superseded?.status).toBe('REVOKED')
+      expect(superseded?.revocationReason).toBe('superseded')
+      expect(superseded?.revokedAt).not.toBeNull()
+
+      // Reexecução idêntica (mesmo policy_hash novo) não reescreve a revogação.
+      const T3 = new Date('2026-06-01T00:31:00.000Z')
+      await deepEnrich(
+        {
+          db: adminPool.db,
+          t1Checkers: t1WithFakes,
+          policy,
+          policyHash: changedPolicyHash,
+          clock: { now: () => T3 },
+        },
+        { tenantId: tenant, validationId },
+      )
+      const stillSuperseded = await statusOf(validationId)
+      expect(stillSuperseded?.status).toBe('REVOKED')
+      expect(stillSuperseded?.revocationReason).toBe('superseded')
+      expect(stillSuperseded?.revokedAt?.toISOString()).toBe(superseded?.revokedAt?.toISOString())
+      // E o replay idêntico sob a policy nova preserva a conclusão que já
+      // refletia essa policy (não é uma terceira conclusão).
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T2.toISOString())
+    })
+
+    it('policy nova sem credencial antiga: replay idêntico não revoga a credencial emitida depois', async () => {
+      const validationId = await createQueued('fase24-policy-no-old-credential', '12345678000195')
+
+      // Conclusão sob a policy original, mas SEM emitir credencial ainda.
+      const first = await deepEnrich(
+        { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: advancingClock() },
+        { tenantId: tenant, validationId },
+      )
+      expect(first.status).toBe('completed')
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T1.toISOString())
+
+      // Primeira reavaliação sob a policy nova: nova conclusão, sem nada a
+      // revogar porque não havia credencial.
+      const T2 = new Date('2026-06-01T00:22:00.000Z')
+      const changedPolicyHash = 'e'.repeat(64)
+      await deepEnrich(
+        {
+          db: adminPool.db,
+          t1Checkers: t1WithFakes,
+          policy,
+          policyHash: changedPolicyHash,
+          clock: { now: () => T2 },
+        },
+        { tenantId: tenant, validationId },
+      )
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T2.toISOString())
+
+      // A credencial é emitida DEPOIS da mudança de policy. Ela é a primeira
+      // emissão desta validation e fica ACTIVE.
+      await issueCredential(adminPool.db, tenant, validationId, {
+        issuerOrigin: ISSUER_ORIGIN,
+        signingKeys,
+      })
+      expect((await statusOf(validationId))?.status).toBe('ACTIVE')
+
+      // Replay IDÊNTICO sob a mesma policy nova: não é uma conclusão nova e não
+      // pode revogar a credencial recém-emitida.
+      const T3 = new Date('2026-06-01T00:32:00.000Z')
+      await deepEnrich(
+        {
+          db: adminPool.db,
+          t1Checkers: t1WithFakes,
+          policy,
+          policyHash: changedPolicyHash,
+          clock: { now: () => T3 },
+        },
+        { tenantId: tenant, validationId },
+      )
+      expect((await validationRow(validationId))?.completedAt?.toISOString()).toBe(T2.toISOString())
+      const status = await statusOf(validationId)
+      expect(status?.status).toBe('ACTIVE')
+      expect(status?.revokedAt).toBeNull()
+      expect(status?.revocationReason).toBeNull()
     })
 
     it('reexecução com evidências novas é uma NOVA conclusão: grava novo instante', async () => {
@@ -587,7 +777,7 @@ describe('deepEnrich (activity core)', () => {
       // 1ª conclusão com um subconjunto dos verificadores T1.
       const geocodeOnly = t1WithFakes.filter((checker) => checker.id === 'geocode_consensus')
       const first = await deepEnrich(
-        { db: adminPool.db, t1Checkers: geocodeOnly, policy, clock: advancingClock() },
+        { db: adminPool.db, t1Checkers: geocodeOnly, policy, policyHash, clock: advancingClock() },
         { tenantId: tenant, validationId },
       )
       expect(first.status).toBe('completed')
@@ -612,6 +802,7 @@ describe('deepEnrich (activity core)', () => {
           db: adminPool.db,
           t1Checkers: [...t1WithFakes, makePartnerGraph(partnerGraphUnknown)],
           policy,
+          policyHash,
           clock: { now: () => T2 },
         },
         { tenantId: tenant, validationId },
@@ -624,12 +815,55 @@ describe('deepEnrich (activity core)', () => {
       expect(secondRow?.completedAt?.toISOString()).toBe(T2.toISOString())
     })
 
+    it('voltar a parcial depois de concluída revoga a credencial como `superseded`', async () => {
+      const validationId = await createQueued('fase24-partial-after-complete', '90123456000131')
+
+      // Simula uma conclusão anterior com credencial já emitida. A validação
+      // nasce `queued` (sem claim/evidência para emitir), então a linha de
+      // conclusão e a emissão são montadas diretamente; o que importa para C1 é
+      // que a PRÓXIMA execução veja `previous.status = completed`.
+      await adminPool.db
+        .update(t.validation)
+        .set({ status: 'completed', completedAt: T1 })
+        .where(eq(t.validation.validationId, validationId))
+      const issuerScope = issuerScopeOf(tenant)
+      const credentialId = credentialIdOf(issuer.id, validationId)
+      await adminPool.db.insert(t.credentialIssuance).values({
+        validationId,
+        tenantId: tenant,
+        issuerScope,
+        credentialId,
+        issuedAt: T1,
+      })
+      await adminPool.db.insert(t.credentialStatus).values({
+        credentialId,
+        tenantId: tenant,
+        issuerScope,
+        status: 'ACTIVE',
+      })
+
+      const T2 = new Date('2026-06-01T00:25:00.000Z')
+      const result = await deepEnrich(
+        { db: adminPool.db, t1Checkers: t1Chaos, policy, policyHash, clock: { now: () => T2 } },
+        { tenantId: tenant, validationId },
+      )
+      expect(result.status).toBe('partial')
+
+      const row = await validationRow(validationId)
+      expect(row?.status).toBe('partial')
+      expect(row?.completedAt).toBeNull()
+
+      const status = await statusOf(validationId)
+      expect(status?.status).toBe('REVOKED')
+      expect(status?.revocationReason).toBe('superseded')
+    })
+
     it('resultado parcial (e seu replay) permanece sem `completed_at`', async () => {
       const validationId = await createQueued('fase24-partial', '90123456000131')
 
       for (const run of [1, 2]) {
         const result = await deepEnrich(
-          { db: adminPool.db, t1Checkers: t1Chaos, policy, clock: advancingClock() },
+          { db: adminPool.db, t1Checkers: t1Chaos, policy, policyHash, clock: advancingClock() },
           { tenantId: tenant, validationId },
         )
         expect(result.status, `execução ${run}`).toBe('partial')

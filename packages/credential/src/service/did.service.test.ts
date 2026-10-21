@@ -14,7 +14,7 @@ import {
 import { issuerIdOf, issuerScopeOf, localIssuer, verificationMethodOf } from './issuer.service.js'
 import { generateEd25519KeyPair, makeEd25519Signer } from './signer.service.js'
 import {
-  verifyCredential,
+  verifyCredentialIntegrity,
   verifyCredentialFromIssuer,
   type VerificationMethodResolver,
 } from './verification.service.js'
@@ -33,6 +33,7 @@ const observation = (id: string): AssertionObservation => ({
   confidence: 0.8,
   source: 'receita',
   observedAt: new Date('2026-01-02T03:04:05.000Z'),
+  ttlSeconds: 30 * 24 * 60 * 60,
   evidenceSha256: null,
   detail: { nested: { b: 2, a: 1 } },
 })
@@ -344,8 +345,10 @@ describe('makeHttpDidResolver', () => {
     // Verificação independente: a chave resolvida confere com o método confiável.
     const resolved = await resolverWith(() => response(otherDocument))(verificationMethodOf(otherIssuer))
     expect(
-      verifyCredential(otherCredential, { trusted: { id: resolved.id, publicKey: resolved.publicKey } }),
-    ).toEqual({ valid: true })
+      verifyCredentialIntegrity(otherCredential, {
+        trusted: { id: resolved.id, publicKey: resolved.publicKey },
+      }),
+    ).toMatchObject({ valid: true })
   })
 
   it('issuer adulterado (verificationMethod de A com issuer de B) é recusado', async () => {

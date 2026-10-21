@@ -47,7 +47,7 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
 
   return {
     databaseUrl,
-    policyVersion: env.POLICY_VERSION ?? '2026.12.1',
+    policyVersion: env.POLICY_VERSION ?? '2026.13.1',
     repoRoot: findRepoRoot(process.cwd()),
     vlmEnabled: env.VLM_ENABLED === 'true',
     ...Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined)),

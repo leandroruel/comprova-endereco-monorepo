@@ -6,6 +6,7 @@ import {
   evaluateClaim,
   evidenceSetHashOfObservations,
   observationFromSignal,
+  SCORER_VERSION,
   weightedScore,
   type Checker,
   type ClaimType,
@@ -23,6 +24,7 @@ import {
   persistFreshSignals,
   readEvidenceSet,
   resolveClaimId,
+  supersedeIssuedCredentials,
   updateValidationOutcome,
 } from './deep-enrich.persistence.js'
 import { runCheckersSequentially, signalFromRow } from './deep-enrich.signals.js'
@@ -33,6 +35,13 @@ export interface DeepEnrichDeps {
   readonly t1Checkers: readonly Checker[]
   readonly t2Checkers?: readonly Checker[]
   readonly policy: Policy
+  /**
+   * Digest do CONTEÚDO efetivo da policy carregada (`policyHashOf`). Comparar
+   * só o veredito e o conjunto de evidências não detecta uma mudança de policy
+   * que preserve as evidências, mas mude a conclusão.
+   * A3/ADR-0024, Revisão pós-PR #5.
+   */
+  readonly policyHash: string
   readonly clock: Clock
   readonly signalCache?: SignalCacheReader
 }
@@ -46,6 +55,47 @@ const claimTypeOf = (docType: string): ClaimType =>
   docType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
 
 const subjectTypeOf = (docType: string): SubjectType => (docType === 'CNPJ' ? 'organization' : 'person')
+
+export interface PriorCredentialOutcome {
+  readonly status: string
+  readonly verdict: Verdict | null
+  readonly evidenceSetHash: string | null
+  readonly policyHash: string | null
+  readonly scorerVersion: string | null
+}
+
+export interface NextCredentialOutcome {
+  readonly stillPartial: boolean
+  readonly verdict: Verdict
+  readonly evidenceSetHash: string
+  readonly policyHash: string
+  readonly scorerVersion: string
+}
+
+/**
+ * C1/ADR-0024, Revisão pós-PR #5: uma credencial já emitida deixa de
+ * representar a conclusão vigente quando o deep path produz OUTRA conclusão —
+ * veredito, conjunto de evidências, policy ou scorer diferentes — ou quando a
+ * validation deixa de ser terminal (`partial`). Replay idêntico NÃO revoga.
+ *
+ * `previous.status === 'completed'` é o portão: só existe credencial emitível
+ * (e, portanto, possivelmente emitida) depois de uma conclusão. Se não havia
+ * conclusão, não há status a revogar e `supersedeIssuedCredentials` seria no-op
+ * de qualquer forma, mas evitamos a consulta.
+ */
+export const outcomeSupersedesCredentials = (
+  previous: PriorCredentialOutcome,
+  next: NextCredentialOutcome,
+): boolean => {
+  if (previous.status !== 'completed') return false
+  if (next.stillPartial) return true
+  return (
+    previous.verdict !== next.verdict ||
+    previous.evidenceSetHash !== next.evidenceSetHash ||
+    previous.policyHash !== next.policyHash ||
+    previous.scorerVersion !== next.scorerVersion
+  )
+}
 
 export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): Promise<DeepEnrichResult> => {
   /**
@@ -152,29 +202,43 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
      *
      * - `partial` não conclui: `updateValidationOutcome` mantém `completed_at`
      *   NULL (e uma conclusão anterior fica retraída junto com o status);
-     * - replay que REPRODUZ o resultado terminal persistido (mesmo veredito sobre
-     *   o mesmo conjunto de evidências) PRESERVA o `completed_at` original:
-     *   reexecutar o worker não é reconcluir, e mover o instante mudaria o
-     *   `validFrom` de credenciais emitidas depois, sem conclusão nova;
-     * - resultado terminal NOVO (veredito ou evidências diferentes — a primeira
-     *   conclusão de uma validação `queued`/`partial`, ou um registro legado
-     *   concluído sem timestamp) grava o instante real, lido aqui, depois de
-     *   todos os verificadores (T1/T2), dos cálculos e do resultado final.
+     * - replay que REPRODUZ o resultado terminal persistido (mesmo veredito,
+     *   mesmo conjunto de evidências, mesma policy e mesmo scorer) PRESERVA o
+     *   `completed_at` original: reexecutar o worker não é reconcluir, e mover o
+     *   instante mudaria o `validFrom` de credenciais emitidas depois, sem
+     *   conclusão nova;
+     * - resultado terminal NOVO (veredito, evidências, policy ou scorer
+     *   diferentes — a primeira conclusão de uma validação `queued`/`partial`,
+     *   ou um registro legado concluído sem timestamp) grava o instante real,
+     *   lido aqui, depois de todos os verificadores (T1/T2), dos cálculos e do
+     *   resultado final.
      *
-     * A comparação usa veredito + hash do conjunto de evidências (valores exatos);
-     * `score`/`confidence` ficam de fora porque são colunas `real` (float4) e a
-     * comparação de float não é confiável — são funções determinísticas do
-     * conjunto de evidências e da policy, que o hash já amarra.
+     * A comparação usa veredito + hash do conjunto de evidências + policy/scorer
+     * da ÚLTIMA AVALIAÇÃO (`last_evaluated_*`, com fallback para o binding
+     * imutável em linhas legadas); `score`/`confidence` ficam de fora porque são
+     * colunas `real` (float4) e a comparação de float não é confiável. Sem os
+     * dois últimos, uma policy nova que reordenasse/alterasse a conclusão sobre
+     * as MESMAS evidências seria tratada como replay e manteria um
+     * `completed_at` (e um `validFrom`) que já não corresponde à conclusão
+     * vigente. Comparar só o binding imutável faria o contrário: toda reexecução
+     * sob a policy nova pareceria uma conclusão nova.
      */
     const previous = state.validation
+    const previousOutcome = {
+      ...previous,
+      policyHash: previous.lastEvaluatedPolicyHash ?? previous.policyHash,
+      scorerVersion: previous.lastEvaluatedScorerVersion ?? previous.scorerVersion,
+    }
     const completedAt =
       // Replay do mesmo resultado terminal: preserva o `completed_at` original.
-      previous.status === 'completed' &&
-      previous.completedAt !== null &&
+      previousOutcome.status === 'completed' &&
+      previousOutcome.completedAt !== null &&
       !stillPartial &&
-      decision.verdict === previous.verdict &&
-      evidenceSetHash === previous.evidenceSetHash
-        ? previous.completedAt
+      decision.verdict === previousOutcome.verdict &&
+      evidenceSetHash === previousOutcome.evidenceSetHash &&
+      previousOutcome.policyHash === deps.policyHash &&
+      previousOutcome.scorerVersion === SCORER_VERSION
+        ? previousOutcome.completedAt
         : deps.clock.now()
 
     await updateValidationOutcome(tx, {
@@ -184,6 +248,8 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       score,
       confidence: decision.confidence,
       evidenceSetHash,
+      policyHash: deps.policyHash,
+      scorerVersion: SCORER_VERSION,
       explanation: {
         summary: decision.explanation,
         code: explanationDetail.code,
@@ -192,6 +258,21 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       },
       completedAt,
     })
+
+    // C1: mesma transação da nova conclusão. Se a revogação falhar, o novo
+    // resultado NÃO é persistido — não existe janela com credencial ACTIVE
+    // apontando para uma conclusão que já mudou.
+    if (
+      outcomeSupersedesCredentials(previousOutcome, {
+        stillPartial,
+        verdict: decision.verdict,
+        evidenceSetHash,
+        policyHash: deps.policyHash,
+        scorerVersion: SCORER_VERSION,
+      })
+    ) {
+      await supersedeIssuedCredentials(tx, input.tenantId, input.validationId)
+    }
 
     await emitOutcomeEvents(tx, {
       tenantId: input.tenantId,

@@ -16,7 +16,7 @@ import {
   makeHttpDidResolver,
   makeHttpIssuerResolver,
   verificationMethodOf,
-  verifyCredential,
+  verifyCredentialIntegrity,
   verifyCredentialFromIssuer,
   type SecuredVerifiableCredential,
 } from '@comprova/credential'
@@ -224,6 +224,7 @@ const observationsOf = (claimId: string) =>
       confidence: t.claimEvidence.confidence,
       source: t.claimEvidence.source,
       observedAt: t.claimEvidence.observedAt,
+      ttlSeconds: t.claimEvidence.ttlSeconds,
       evidenceSha256: t.claimEvidence.evidenceSha256,
       detail: t.claimEvidence.detail,
     })
@@ -305,11 +306,11 @@ describe('emissão e verificação independente', () => {
     // O verifier só recebe a credencial (JSON), a chave pública confiável e o id
     // do método ao qual essa chave pertence.
     expect(
-      verifyCredential(credential, {
+      verifyCredentialIntegrity(credential, {
         trusted,
         expectedIssuerId: issuer.id,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
   })
 
   const tamperCases: ReadonlyArray<readonly [string, (credential: SecuredVerifiableCredential) => void]> = [
@@ -343,7 +344,7 @@ describe('emissão e verificação independente', () => {
   it.each(tamperCases)('rejeita adulteração de %s', async (_name, mutate) => {
     const credential = transport(await issue(await newValidation()))
     mutate(credential)
-    expect(verifyCredential(credential, { trusted }).valid).toBe(false)
+    expect(verifyCredentialIntegrity(credential, { trusted }).valid).toBe(false)
   })
 
   it('marca a prova com o instante real da emissão, não com a janela da validation', async () => {
@@ -360,7 +361,7 @@ describe('emissão e verificação independente', () => {
     // Adulterar o instante de assinatura invalida o proof: ele está assinado.
     const tampered = transport(credential)
     tampered.proof.created = new Date(0).toISOString()
-    expect(verifyCredential(tampered, { trusted }).valid).toBe(false)
+    expect(verifyCredentialIntegrity(tampered, { trusted }).valid).toBe(false)
   })
 
   it('não antecipa `validFrom`: registra o instante da CONCLUSÃO da análise, não o início da requisição', async () => {
@@ -397,7 +398,9 @@ describe('emissão e verificação independente', () => {
     expect(credential['comprova:result']['comprova:completedAt']).toBe(finishedAt.toISOString())
     // `validFrom` NÃO antecede a conclusão real da análise.
     expect(Date.parse(credential.validFrom)).toBeGreaterThan(row!.createdAt!.getTime())
-    expect(verifyCredential(credential, { trusted, expectedIssuerId: issuer.id })).toEqual({ valid: true })
+    expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: issuer.id })).toMatchObject({
+      valid: true,
+    })
   })
 
   it('deriva o issuer do tenant escopado e da origem configurada (não existe issuer avulso)', async () => {
@@ -451,7 +454,7 @@ describe('emissão e verificação independente', () => {
 
     const credential = transport(await issue(validationId))
     expect(credential.evidence.some((o) => o['comprova:evidenceSha256'] === sha.toString('hex'))).toBe(true)
-    expect(verifyCredential(credential, { trusted }).valid).toBe(true)
+    expect(verifyCredentialIntegrity(credential, { trusted }).valid).toBe(true)
 
     // Retenção: desvincula e apaga o material físico (evidence_sha256 é preservado).
     await adminPool.db
@@ -461,7 +464,7 @@ describe('emissão e verificação independente', () => {
     await adminPool.db.delete(t.evidence).where(eq(t.evidence.evidenceId, evidenceId))
 
     // A credencial já emitida continua válida: depende do binding, não do S3.
-    expect(verifyCredential(credential, { trusted }).valid).toBe(true)
+    expect(verifyCredentialIntegrity(credential, { trusted }).valid).toBe(true)
   })
 })
 
@@ -540,42 +543,52 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     await expect(issue(validationId)).rejects.toMatchObject({ failure: 'COMPLETION_TIME_MISSING' })
   })
 
-  it('protege a janela de validade: `completed_at < expires_at` emite; igual ou posterior recusa (sem estender o prazo)', async () => {
+  it('protege a janela da CREDENCIAL: `completed_at < validUntil` emite; igual ou posterior recusa', async () => {
     const setCompletion = (validationId: string, completedAt: Date) =>
       adminPool.db
         .update(t.validation)
         .set({ completedAt })
         .where(eq(t.validation.validationId, validationId))
 
-    // Conclusão 1 ms antes do horizonte: janela mínima, mas válida e verificável.
+    const evidenceHorizonOf = async (validationId: string): Promise<Date> => {
+      const claimId = await claimIdOf(validationId)
+      const observations = await observationsOf(claimId)
+      return new Date(Math.min(...observations.map((o) => o.observedAt.getTime() + o.ttlSeconds * 1000)))
+    }
+
+    // Conclusão 1 ms antes do horizonte das evidências: a policy (30 dias) não
+    // limita; a evidência limita. Janela mínima, mas válida e verificável.
     const atEdge = await newValidation()
     const edgeRow = await validationRow(atEdge)
-    const lastInstant = new Date(edgeRow!.expiresAt!.getTime() - 1)
+    const evidenceHorizon = await evidenceHorizonOf(atEdge)
+    const lastInstant = new Date(evidenceHorizon.getTime() - 1)
     await setCompletion(atEdge, lastInstant)
 
     const credential = transport(await issue(atEdge))
     expect(credential.validFrom).toBe(lastInstant.toISOString())
-    expect(credential.validUntil).toBe(edgeRow!.expiresAt!.toISOString())
+    expect(credential.validUntil).toBe(evidenceHorizon.toISOString())
+    expect(credential.validUntil).not.toBe(edgeRow!.expiresAt!.toISOString())
     expect(Date.parse(credential.validFrom)).toBeLessThan(Date.parse(credential.validUntil!))
-    expect(verifyCredential(credential, { trusted, expectedIssuerId: issuer.id })).toEqual({ valid: true })
+    expect(verifyCredentialIntegrity(credential, { trusted, expectedIssuerId: issuer.id })).toMatchObject({
+      valid: true,
+    })
 
-    // `completed_at == expires_at` (janela vazia) e `completed_at > expires_at`
-    // (janela invertida): recusa explícita — e `expires_at` (horizonte de
-    // retenção, política de 30 dias) NÃO é recalculado nem estendido.
+    // `completed_at == validUntil` (janela vazia) e `completed_at > validUntil`
+    // (invertida): recusa explícita — e `expires_at` (retenção) não é alterado.
     for (const [label, delta] of [
       ['igual', 0],
       ['posterior', 1],
     ] as const) {
       const validationId = await newValidation()
       const row = await validationRow(validationId)
-      await setCompletion(validationId, new Date(row!.expiresAt!.getTime() + delta))
+      const horizon = await evidenceHorizonOf(validationId)
+      await setCompletion(validationId, new Date(horizon.getTime() + delta))
 
       await expect(issue(validationId), label).rejects.toMatchObject({
         failure: 'VALIDITY_WINDOW_INVALID',
       })
 
       const after = await validationRow(validationId)
-      expect(after!.completedAt!.getTime(), label).toBeGreaterThanOrEqual(after!.expiresAt!.getTime())
       expect(after!.expiresAt!.getTime(), label).toBe(row!.expiresAt!.getTime())
     }
   })
@@ -655,7 +668,68 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
       expectedIssuerId: issuer.id,
       statusResolver,
     })
-    expect(result).toEqual({ valid: true })
+    expect(result).toMatchObject({ valid: true })
+  })
+
+  it('reemitir a mesma validation devolve bytes idênticos e mantém um único status', async () => {
+    const validationId = await newValidation()
+    const firstAt = new Date('2026-03-01T12:00:00.000Z')
+    const later = new Date('2026-04-01T12:00:00.000Z')
+
+    const first = await issue(validationId, () => firstAt)
+    const second = await issue(validationId, () => later)
+
+    // `proof.created` é o da PRIMEIRA emissão; a assinatura Ed25519/JCS é
+    // determinística, então o JSON inteiro é idêntico.
+    expect(first.proof.created).toBe(firstAt.toISOString())
+    expect(second.proof.created).toBe(firstAt.toISOString())
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+
+    const issuance = await adminPool.db
+      .select({
+        credentialId: t.credentialIssuance.credentialId,
+        issuedAt: t.credentialIssuance.issuedAt,
+      })
+      .from(t.credentialIssuance)
+      .where(eq(t.credentialIssuance.validationId, validationId))
+    expect(issuance).toHaveLength(1)
+    expect(issuance[0]?.issuedAt.toISOString()).toBe(firstAt.toISOString())
+
+    const statuses = await adminPool.db
+      .select({ credentialId: t.credentialStatus.credentialId })
+      .from(t.credentialStatus)
+      .where(eq(t.credentialStatus.credentialId, issuance[0]!.credentialId))
+    expect(statuses).toHaveLength(1)
+  })
+
+  it('mudança de CREDENTIAL_ISSUER_ORIGIN bloqueia a reemissão com 409 explícito', async () => {
+    const validationId = await newValidation()
+    // Primeira emissão sob a origem configurada.
+    await issue(validationId)
+
+    // A mesma validation reemitida por uma API com OUTRA origem: o
+    // `credential_id` derivado do issuer muda, mas a linha da primeira emissão é
+    // append-only e presa à validation. Precisa ser um 409 com detalhe, não 500.
+    const changedApp = await buildApp({
+      config: { ...config, CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.changed.test' },
+      db: appPool.db,
+      redis,
+      logger: createLogger({ level: 'silent' }),
+      metrics: createMetrics(),
+    })
+    try {
+      const res = await changedApp.inject({
+        method: 'POST',
+        url: `/v1/validations/${validationId}/credential`,
+        headers: { authorization: `Bearer ${key.plaintext}` },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.headers['content-type']).toContain('application/problem+json')
+      expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
+      expect(res.json().detail).toBe('ISSUANCE_IDENTITY_CONFLICT')
+    } finally {
+      await changedApp.close()
+    }
   })
 
   it('publica apenas material público em GET /issuers/:scope', async () => {
@@ -724,12 +798,14 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     expect(res.json().detail).toBe('VALIDATION_NOT_FINAL')
   })
 
-  it('recusa validation fora da janela de validade (409), sem estender o prazo', async () => {
+  it('recusa validation fora da janela de validade da credencial (409), sem estender o prazo', async () => {
     const validationId = await newValidation()
     const row = await validationRow(validationId)
+    // `validUntil` é limitado pelo TTL das evidências; uma conclusão no futuro
+    // distante não pode ser "cabida" esticando a retenção.
     await adminPool.db
       .update(t.validation)
-      .set({ completedAt: row!.expiresAt })
+      .set({ completedAt: new Date('2100-01-01T00:00:00.000Z') })
       .where(eq(t.validation.validationId, validationId))
 
     const res = await postCredential(validationId)
@@ -795,31 +871,31 @@ describe('chave de assinatura escopada por tenant', () => {
 
     // Cada credencial valida com a SUA chave pública...
     expect(
-      verifyCredential(credentialA, {
+      verifyCredentialIntegrity(credentialA, {
         trusted: { id: credentialA.proof.verificationMethod, publicKey: signing.publicKey },
         expectedIssuerId: credentialA.issuer,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
     expect(
-      verifyCredential(credentialB, {
+      verifyCredentialIntegrity(credentialB, {
         trusted: { id: credentialB.proof.verificationMethod, publicKey: otherSigning.publicKey },
         expectedIssuerId: credentialB.issuer,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
 
     // ...e NÃO com a chave pública da outra (assinatura inválida).
     expect(
-      verifyCredential(credentialA, {
+      verifyCredentialIntegrity(credentialA, {
         trusted: { id: credentialA.proof.verificationMethod, publicKey: otherSigning.publicKey },
         expectedIssuerId: credentialA.issuer,
       }),
-    ).toEqual({ valid: false, reason: 'INVALID_SIGNATURE' })
+    ).toMatchObject({ valid: false, reason: 'INVALID_SIGNATURE' })
     expect(
-      verifyCredential(credentialB, {
+      verifyCredentialIntegrity(credentialB, {
         trusted: { id: credentialB.proof.verificationMethod, publicKey: signing.publicKey },
         expectedIssuerId: credentialB.issuer,
       }),
-    ).toEqual({ valid: false, reason: 'INVALID_SIGNATURE' })
+    ).toMatchObject({ valid: false, reason: 'INVALID_SIGNATURE' })
   })
 
   it('o verificador remoto resolve a chave pelo issuer e recusa a chave do outro', async () => {
@@ -832,13 +908,13 @@ describe('chave de assinatura escopada por tenant', () => {
         expectedIssuerId: credentialA.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
     expect(
       await verifyCredentialFromIssuer(credentialB, resolver, {
         expectedIssuerId: credentialB.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
 
     // Trocar o verificationMethod para o issuer do outro (mantendo a assinatura)
     // é recusado ANTES de resolver: o método não pertence ao issuer declarado.
@@ -945,7 +1021,7 @@ describe('chave de assinatura escopada por tenant', () => {
         expectedIssuerId: credentialA.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
     expect(requested).toEqual([`/.well-known/comprova-issuer/${issuerScopeOf(tenantId)}`])
 
     // Cada credencial descobre e resolve a chave do SEU issuer.
@@ -956,7 +1032,7 @@ describe('chave de assinatura escopada por tenant', () => {
         expectedIssuerId: credentialB.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
     expect(requested).toEqual([`/.well-known/comprova-issuer/${issuerScopeOf(otherTenantId)}`])
   })
 
@@ -1066,7 +1142,7 @@ describe('chave de assinatura escopada por tenant', () => {
       await verifyCredentialFromIssuer(tampered, resolver, {
         expectedIssuerId: credentialA.issuer,
       }),
-    ).toEqual({ valid: false, reason: 'ISSUER_MISMATCH' })
+    ).toMatchObject({ valid: false, reason: 'ISSUER_MISMATCH' })
   })
 })
 
@@ -1147,13 +1223,13 @@ describe('status e revogação de credenciais', () => {
     for (const internal of [tenantId, credentialId, 'doc_hmac', 'validation_id', 'subject', 'evidence']) {
       expect(res.body).not.toContain(internal)
     }
-    expect(await verify(credential)).toEqual({ valid: true })
+    expect(await verify(credential)).toMatchObject({ valid: true })
   })
 
   it('revoga de forma monotônica, idempotente e sem reativar na reemissão', async () => {
     const validationId = await newValidation()
     const credential = await issueViaHttpFromValidation(validationId)
-    expect(await verify(credential)).toEqual({ valid: true })
+    expect(await verify(credential)).toMatchObject({ valid: true })
 
     const first = await revoke(credential)
     expect(first.statusCode).toBe(200)
@@ -1165,15 +1241,15 @@ describe('status e revogação de credenciais', () => {
 
     expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
     // A credencial assinada continua íntegra; o status é que a recusa.
-    expect(await verify(credential)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
-    expect(verifyCredential(credential, { trusted }).valid).toBe(true)
+    expect(await verify(credential)).toMatchObject({ valid: false, reason: 'STATUS_REVOKED' })
+    expect(verifyCredentialIntegrity(credential, { trusted }).valid).toBe(true)
 
     // Reemitir a MESMA validation reusa o credential_id e NÃO reativa.
     const reissued = await issueViaHttpFromValidation(validationId)
     expect(reissued.id).toBe(credential.id)
     expect(reissued.credentialStatus).toEqual(credential.credentialStatus)
     expect((await getStatus(reissued)).json()).toEqual({ status: 'REVOKED' })
-    expect(await verify(reissued)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+    expect(await verify(reissued)).toMatchObject({ valid: false, reason: 'STATUS_REVOKED' })
 
     // Não existe rota de reativação.
     const reactivate = await app.inject({
@@ -1199,7 +1275,7 @@ describe('status e revogação de credenciais', () => {
     expect(cross.statusCode).toBe(404)
     expect(cross.json().code).toBe('NOT_FOUND')
     expect((await getStatus(credentialA)).json()).toEqual({ status: 'ACTIVE' })
-    expect(await verify(credentialA)).toEqual({ valid: true })
+    expect(await verify(credentialA)).toMatchObject({ valid: true })
 
     // E A também não revoga B.
     expect((await revoke(credentialB)).statusCode).toBe(404)
@@ -1253,7 +1329,7 @@ describe('status e revogação de credenciais', () => {
     }
 
     expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
-    expect(await verify(credential)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+    expect(await verify(credential)).toMatchObject({ valid: false, reason: 'STATUS_REVOKED' })
   })
 
   it('o banco recusa reativar uma linha REVOKED (defesa em profundidade)', async () => {
@@ -1296,7 +1372,7 @@ describe('status e revogação de credenciais', () => {
       expect(res.json()).toEqual({ status: 'REVOKED' })
     }
     expect((await getStatus(credential)).json()).toEqual({ status: 'REVOKED' })
-    expect(await verify(credential)).toEqual({ valid: false, reason: 'STATUS_REVOKED' })
+    expect(await verify(credential)).toMatchObject({ valid: false, reason: 'STATUS_REVOKED' })
   })
 
   it('não emite credencial sem registrar ACTIVE (falha fechada)', async () => {
@@ -1448,23 +1524,56 @@ describe('DID e DID Document do issuer', () => {
     expect(JSON.stringify(docB)).not.toContain(issuerScopeOf(tenantId))
   })
 
-  it('resolve o DID Document via HTTP e verifica a credencial ponta a ponta (VALID)', async () => {
+  it('resolve o DID Document via HTTP, extrai a chave e verifica a credencial ponta a ponta (VALID)', async () => {
     const credential = await issue()
+    const scope = issuerScopeOf(tenantId)
     expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
 
+    // Coerência de identidade: o DID é DERIVADO do issuer HTTPS, o documento
+    // declara o mesmo issuer em `alsoKnownAs` e o método da credencial
+    // (`<issuer>#<keyId>`) aponta para o método DID (`<did>#<keyId>`).
+    const did = didOfIssuer(credential.issuer)
+    const document = (await getDidDocument(scope)).json() as {
+      id: string
+      alsoKnownAs: string[]
+      verificationMethod: Array<{
+        id: string
+        controller: string
+        publicKeyMultibase: string
+      }>
+    }
+    expect(document.id).toBe(did)
+    expect(document.alsoKnownAs).toEqual([credential.issuer])
+    expect(credential.proof.verificationMethod).toBe(`${credential.issuer}#${KEY_ID}`)
+    const methodId = didVerificationMethodOf(did, KEY_ID)
+    const method = document.verificationMethod.find((entry) => entry.id === methodId)
+    expect(method).toBeDefined()
+    expect(method?.controller).toBe(did)
+
+    // A chave extraída do DID Document verifica a assinatura emitida pela rota
+    // real. O `id` confiável continua sendo o HTTPS da credencial: o DID é uma
+    // forma de DESCOBRIR a chave, não um segundo `issuer`.
+    const publicKey = decodeEd25519PublicKeyMultibase(method!.publicKeyMultibase)
+    expect(
+      verifyCredentialIntegrity(credential, {
+        trusted: { id: credential.proof.verificationMethod, publicKey },
+        expectedIssuerId: credential.issuer,
+      }),
+    ).toMatchObject({ valid: true })
+
+    // O mesmo caminho, agora com a resolução DID completa.
     const requested: string[] = []
     const resolver = resolverFrom((url) => {
       requested.push(new URL(url).pathname)
       return appFetch(url)
     })
-
     expect(
       await verifyCredentialFromIssuer(credential, resolver, {
         expectedIssuerId: credential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
-    expect(requested).toEqual([`/issuers/${issuerScopeOf(tenantId)}/did.json`])
+    ).toMatchObject({ valid: true })
+    expect(requested).toEqual([`/issuers/${scope}/did.json`])
   })
 
   it('recusa credencial de A com issuer/verificationMethod de B (INVALID_SIGNATURE)', async () => {
@@ -1599,7 +1708,7 @@ describe('revogação e expiração da chave de assinatura', () => {
         expectedIssuerId: credential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
 
     const res = await revoke(lifecycleKey.plaintext, lifecycleSigning.keyId)
     expect(res.statusCode).toBe(200)
@@ -1616,7 +1725,7 @@ describe('revogação e expiração da chave de assinatura', () => {
         expectedIssuerId: credential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
+    ).toMatchObject({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
 
     // A emissão nova também falha: a chave ativa foi revogada.
     const validationId = await newValidationAs(lifecycleKey.plaintext)
@@ -1671,7 +1780,7 @@ describe('revogação e expiração da chave de assinatura', () => {
         expectedIssuerId: credential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
     const renewed = await issueAs(scheduledKey.plaintext)
     expect(renewed.proof.verificationMethod).toBe(methodOf(scheduledTenantId, scheduledSigning.keyId))
 
@@ -1695,7 +1804,7 @@ describe('revogação e expiração da chave de assinatura', () => {
         expectedIssuerId: credential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
+    ).toMatchObject({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
   })
 
   it('rotação (active=false) continua publicada; revogar remove só a chave revogada', async () => {
@@ -1734,7 +1843,7 @@ describe('revogação e expiração da chave de assinatura', () => {
         expectedIssuerId: oldCredential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
 
     const newCredential = await issueAs(rotationKey.plaintext)
     expect(newCredential.proof.verificationMethod).toBe(methodOf(rotationTenantId, rotationNewSigning.keyId))
@@ -1753,13 +1862,13 @@ describe('revogação e expiração da chave de assinatura', () => {
         expectedIssuerId: oldCredential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
+    ).toMatchObject({ valid: false, reason: 'VERIFICATION_METHOD_UNRESOLVED' })
     expect(
       await verifyCredentialFromIssuer(newCredential, resolver, {
         expectedIssuerId: newCredential.issuer,
         statusResolver,
       }),
-    ).toEqual({ valid: true })
+    ).toMatchObject({ valid: true })
 
     const did = await didDocumentOf(rotationTenantId)
     expect(did.statusCode).toBe(200)

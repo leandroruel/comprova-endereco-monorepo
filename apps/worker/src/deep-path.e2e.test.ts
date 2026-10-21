@@ -100,6 +100,7 @@ const deepDeps: DeepEnrichDeps = {
   }),
   t2Checkers: [],
   policy,
+  policyHash: policyHashOf(policyYaml),
   clock: systemClock,
 }
 

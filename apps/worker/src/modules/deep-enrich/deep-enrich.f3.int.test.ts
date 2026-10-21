@@ -47,6 +47,7 @@ const tenant = await createTenant(adminPool.db, { name: 'f3-tenant' })
 
 const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.12.1.yaml'), 'utf8')
 const policy = loadPolicy(policyYaml)
+const policyHash = policyHashOf(policyYaml)
 
 const registry = makeRegistryReader(adminPool.db)
 const t1Checkers = makeT1Checkers({
@@ -120,7 +121,7 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
   it('caso resolvido no T1 nao roda T2 (gate < 25% do dataset dourado)', async () => {
     const created = await mkValidation('12345678000195', 'f3-gate-1')
     const result = await deepEnrich(
-      { db: adminPool.db, t1Checkers, t2Checkers, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers, t2Checkers, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId, maxTier: 2 },
     )
     expect(result.status).toBe('completed')
@@ -142,7 +143,7 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
       .where(eq(t.claimEvidence.claimId, claimRow.claimId))
 
     await deepEnrich(
-      { db: adminPool.db, t1Checkers, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId, maxTier: 0 },
     )
 
@@ -220,7 +221,7 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
     })
 
     const result = await deepEnrich(
-      { db: adminPool.db, t1Checkers, t2Checkers, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers, t2Checkers, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId, maxTier: 2 },
     )
     expect(result.t2Signals).toBe(1)
@@ -270,7 +271,7 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
   it('max_tier 0 desliga T2 mesmo ambiguo', async () => {
     const created = await mkValidation('90123456000131', 'f3-gate-3')
     const result = await deepEnrich(
-      { db: adminPool.db, t1Checkers, t2Checkers, policy, clock: systemClock },
+      { db: adminPool.db, t1Checkers, t2Checkers, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId: created.validationId, maxTier: 0 },
     )
     expect(result.t2Signals).toBe(0)
@@ -281,7 +282,7 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
       const prior = await acc
       const created = await mkValidation(testCase.cnpj, `f3-rate-${testCase.cnpj}`)
       const result = await deepEnrich(
-        { db: adminPool.db, t1Checkers, t2Checkers, policy, clock: systemClock },
+        { db: adminPool.db, t1Checkers, t2Checkers, policy, policyHash, clock: systemClock },
         { tenantId: tenant, validationId: created.validationId, maxTier: 2 },
       )
       return prior + (result.t2Signals > 0 ? 1 : 0)

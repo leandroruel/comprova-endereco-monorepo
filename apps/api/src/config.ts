@@ -1,4 +1,4 @@
-import { IssuerOriginSchema } from '@comprova/credential'
+import { assertProductionIssuerOrigin, IssuerOriginSchema } from '@comprova/credential'
 import { z } from 'zod'
 
 const EnvSchema = z.object({
@@ -51,6 +51,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.safeParse(env)
   if (!parsed.success) {
     throw new Error(`invalid configuration: ${z.prettifyError(parsed.error)}`)
+  }
+  // Fora de desenvolvimento/teste a origem precisa ser um nome DNS público:
+  // `issuer.test`, `localhost`, `.local` e IP literal passam pelo parser (são
+  // HTTPS válidos) mas nunca seriam identificadores públicos de um issuer. O
+  // guard é fail-safe: `NODE_ENV` ausente, `prod` ou `staging` também recusam
+  // (não dá para assumir que a ausência do valor significa desenvolvimento).
+  const relaxedIssuerOrigin = env.NODE_ENV === 'development' || env.NODE_ENV === 'test'
+  if (!relaxedIssuerOrigin) {
+    try {
+      assertProductionIssuerOrigin(parsed.data.CREDENTIAL_ISSUER_ORIGIN)
+    } catch (error) {
+      throw new Error(
+        `invalid configuration: CREDENTIAL_ISSUER_ORIGIN: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
   }
   return parsed.data
 }
