@@ -180,9 +180,28 @@ export const makeAwsKmsSigningKeyProvider = (kms: AwsKmsSigner): SigningKeyProvi
   },
 })
 
+/**
+ * Timeouts do cliente KMS. A emissão de credencial NÃO pode ficar pendurada
+ * numa chamada de rede: por padrão o SDK não tem `requestTimeout` efetivo (só
+ * emite warning) e tenta várias vezes, o que estenderia a espera. Aqui a
+ * chamada falha em ~2s para conectar / 5s para request+resposta, com no máximo
+ * 2 tentativas, e `throwOnRequestTimeout` garante que o estouro vire
+ * `TimeoutError` em vez de warning. O provider traduz para
+ * `SIGNING_KEY_UNAVAILABLE` (fail closed; sem fallback para o backend local).
+ */
+const KMS_REQUEST_HANDLER = {
+  connectionTimeout: 2_000,
+  requestTimeout: 5_000,
+  throwOnRequestTimeout: true,
+} as const
+
 /** Cliente KMS real; região ausente deixa o SDK usar `AWS_REGION`/default chain. */
 export const makeAwsKmsClient = (region?: string): KMSClient =>
-  region === undefined ? new KMSClient({}) : new KMSClient({ region })
+  new KMSClient({
+    ...(region === undefined ? {} : { region }),
+    requestHandler: KMS_REQUEST_HANDLER,
+    maxAttempts: 2,
+  })
 
 export const awsKmsSignerFromClient = (client: KMSClient): AwsKmsSigner =>
   makeAwsKmsSigner((input) => client.send(new SignCommand(input)))
