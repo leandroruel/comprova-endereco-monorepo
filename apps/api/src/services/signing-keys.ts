@@ -1,14 +1,15 @@
-import type { KeyObject } from 'node:crypto'
-import { KeyIdSchema, ed25519PrivateKeyFromPkcs8Pem } from '@comprova/credential'
+import { createPublicKey, type KeyObject } from 'node:crypto'
+import { KeyIdSchema, ed25519PrivateKeyFromPkcs8Pem, ed25519PublicKeyBytes } from '@comprova/credential'
 import { z } from 'zod'
 
 /**
- * Resolução do material PRIVADO de assinatura por tenant + `key_id` (FASE 14).
- *
- * A chave privada NÃO vive no banco: ela vem de configuração/segredo externo e é
- * associada ao registro público de `issuer_signing_key` pela chave
- * (`tenant_id`, `key_id`). Este resolver é a fronteira entre "qual chave este
- * tenant usa" (config) e "qual chave está publicada" (banco).
+ * Configuração e provisionamento do material de assinatura por tenant +
+ * `key_id` (FASE 14). O material pode ser local (`CREDENTIAL_SIGNING_KEYS`, com
+ * a privada em segredo externo) ou AWS KMS (só a referência e a pública;
+ * ADR-0032). A chave privada NUNCA vive no banco: ela é associada ao registro
+ * público de `issuer_signing_key` pela chave (`tenant_id`, `key_id`). Este
+ * resolver é a fronteira entre "qual chave este tenant usa" (config) e "qual
+ * chave está publicada" (banco).
  *
  * Devolver `null` significa "não há material configurado para este
  * tenant/`key_id`" — a emissão falha fechado, jamais cai numa chave global.
@@ -37,12 +38,41 @@ const SigningKeyEntrySchema = z.object({
 
 const SigningKeysSchema = z.array(SigningKeyEntrySchema)
 
-/** Material privado configurado para um par (tenant, `key_id`). */
-export interface SigningKeyEntry {
+/** Chave local configurada para um par (tenant, `key_id`). */
+export interface LocalSigningKeyEntry {
+  readonly kind: 'local'
   readonly tenantId: string
   readonly keyId: string
   readonly privateKey: KeyObject
 }
+
+/**
+ * Chave cujo material privado vive no AWS KMS. O provisionamento/rotação lê a
+ * pública com `GetPublicKey` (nunca a privada) e a persiste em
+ * `issuer_signing_key.public_key`; a referência canônica (ARN) fica em
+ * `kms_key_reference` (ADR-0032).
+ */
+export interface KmsSigningKeyEntry {
+  readonly kind: 'kms'
+  readonly tenantId: string
+  readonly keyId: string
+  readonly kmsKeyReference: string
+  /** 32 bytes crus da Ed25519, lidos do KMS antes de publicar. */
+  readonly publicKey: Buffer
+}
+
+/** Material de uma chave que pode ser provisionada/rotacionada, local ou KMS. */
+export type SigningKeyEntry = LocalSigningKeyEntry | KmsSigningKeyEntry
+
+/** Pública correspondente à entrada, sem jamais tocar na privada do KMS. */
+export const publicKeyOf = (entry: SigningKeyEntry): Buffer =>
+  entry.kind === 'local'
+    ? ed25519PublicKeyBytes(createPublicKey(entry.privateKey))
+    : Buffer.from(entry.publicKey)
+
+/** Referência externa da entrada (`null` para material local). */
+export const kmsKeyReferenceOf = (entry: SigningKeyEntry): string | null =>
+  entry.kind === 'kms' ? entry.kmsKeyReference : null
 
 const mapKey = (tenantId: string, keyId: string): string => `${tenantId}\u0000${keyId}`
 
@@ -52,7 +82,7 @@ const mapKey = (tenantId: string, keyId: string): string => `${tenantId}\u0000${
  * de aceitar tráfego (falha fechado). A chave privada fica só no `KeyObject` em
  * memória — nunca é logada, devolvida nem incluída em documento público.
  */
-export const parseSigningKeys = (rawJson: string): readonly SigningKeyEntry[] => {
+export const parseSigningKeys = (rawJson: string): readonly LocalSigningKeyEntry[] => {
   const parsed = ((): z.infer<typeof SigningKeysSchema> => {
     let json: unknown
     try {
@@ -81,6 +111,7 @@ export const parseSigningKeys = (rawJson: string): readonly SigningKeyEntry[] =>
     }
     seen.add(lookup)
     return {
+      kind: 'local',
       tenantId: entry.tenant_id,
       keyId: entry.key_id,
       privateKey: ed25519PrivateKeyFromPkcs8Pem(entry.private_key_pem),

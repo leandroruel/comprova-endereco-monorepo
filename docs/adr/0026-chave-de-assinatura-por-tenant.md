@@ -15,6 +15,10 @@ chave, mas deixou **uma única chave global** assinando todos os issuers.
 operação atômica de rotação (`rotateSigningKey`) que troca a chave ativa sem
 revogar a antiga.
 
+**Complementado pelo [ADR-0032](0032-backend-de-assinatura-aws-kms.md):** o
+backend AWS KMS, que assina a chave já selecionada sem entregar a privada e
+mantém a pública no banco para verificação independente.
+
 ## Contexto
 
 Depois do ADR-0025, cada tenant já tem o seu próprio `issuer.id`

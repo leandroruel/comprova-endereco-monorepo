@@ -1,14 +1,17 @@
-import { createPublicKey, randomUUID } from 'node:crypto'
-import { ed25519PublicKeyBytes, issuerScopeOf } from '@comprova/credential'
+import { randomUUID } from 'node:crypto'
+import { issuerScopeOf } from '@comprova/credential'
 import { and, eq, isNotNull, lte, sql, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
-import type { SigningKeyEntry } from './signing-keys.js'
+import { kmsKeyReferenceOf, publicKeyOf, type SigningKeyEntry } from './signing-keys.js'
 import { signingKeyTrustedCondition } from './signing-key-lifecycle.js'
 
 /**
  * Publicação da chave pública do issuer em `issuer_signing_key` (FASE 14),
- * separada do CLI para ser exercitada por teste.
+ * separada do CLI para ser exercitada por teste. Aceita entradas locais
+ * (privada em memória) e KMS (pública já lida com `GetPublicKey`); em ambos, a
+ * referência externa (`kms_key_reference`) entra na identidade publicada
+ * (ADR-0032).
  *
  * Duas invariantes que o startup depende:
  *
@@ -66,11 +69,16 @@ export const provisionSigningKeys = async (
 
   const outcomes: ProvisioningOutcome[] = []
   for (const entry of entries) {
-    const publicKey = ed25519PublicKeyBytes(createPublicKey(entry.privateKey))
+    const publicKey = publicKeyOf(entry)
+    const kmsKeyReference = kmsKeyReferenceOf(entry)
 
     const existing = (
       await db
-        .select({ publicKey: t.issuerSigningKey.publicKey, active: t.issuerSigningKey.active })
+        .select({
+          publicKey: t.issuerSigningKey.publicKey,
+          active: t.issuerSigningKey.active,
+          kmsKeyReference: t.issuerSigningKey.kmsKeyReference,
+        })
         .from(t.issuerSigningKey)
         .where(
           and(eq(t.issuerSigningKey.tenantId, entry.tenantId), eq(t.issuerSigningKey.keyId, entry.keyId)),
@@ -84,8 +92,20 @@ export const provisionSigningKeys = async (
           `issuer_signing_key already published a different public key for tenant ${entry.tenantId} key ${entry.keyId}; publish the new material under a NEW key_id instead of overwriting the published key`,
         )
       }
+      // A referência externa também faz parte da identidade da chave: trocar
+      // local ↔ KMS (ou apontar para outra chave KMS) com a mesma pública
+      // mudaria o backend que assina sem alterar o verificationMethod.
+      if (existing.kmsKeyReference !== kmsKeyReference) {
+        throw new SigningKeyProvisioningError(
+          `issuer_signing_key already published tenant ${entry.tenantId} key ${entry.keyId} with a different signing backend reference; publish the new material under a NEW key_id`,
+        )
+      }
       logger.info(
-        { tenant_id: entry.tenantId, key_id: entry.keyId },
+        {
+          tenant_id: entry.tenantId,
+          key_id: entry.keyId,
+          backend: entry.kind,
+        },
         'issuer signing key already published (unchanged)',
       )
       outcomes.push({
@@ -123,10 +143,19 @@ export const provisionSigningKeys = async (
       keyId: entry.keyId,
       algorithm: 'Ed25519',
       publicKey,
+      kmsKeyReference,
       active,
     })
     if (active) tenantsWithActiveKey.add(entry.tenantId)
-    logger.info({ tenant_id: entry.tenantId, key_id: entry.keyId, active }, 'issuer signing key published')
+    logger.info(
+      {
+        tenant_id: entry.tenantId,
+        key_id: entry.keyId,
+        active,
+        backend: entry.kind,
+      },
+      'issuer signing key published',
+    )
     outcomes.push({ tenantId: entry.tenantId, keyId: entry.keyId, status: 'published', active })
   }
 

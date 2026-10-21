@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1151.0",
     "@comprova/checkers": "workspace:*",
     "@comprova/contracts": "workspace:*",
     "@comprova/core": "workspace:*",

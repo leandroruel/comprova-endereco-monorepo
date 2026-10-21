@@ -25,6 +25,24 @@ const EnvSchema = z.object({
    * daquele tenant falha fechado.
    */
   CREDENTIAL_SIGNING_KEYS: z.string().default('[]'),
+  /**
+   * Backend de assinatura (roadmap #24, etapa 24.3). `local` usa o material
+   * privado de `CREDENTIAL_SIGNING_KEYS` (comportamento atual); `aws-kms` usa
+   * chaves Ed25519 no AWS KMS, referenciadas por
+   * `issuer_signing_key.kms_key_reference`.
+   *
+   * O default é `local`: KMS nunca vira default silenciosamente. Um backend
+   * remoto é escolha explícita e falha fechado se a chave ativa não tiver
+   * referência KMS (e vice-versa).
+   */
+  SIGNING_KEY_PROVIDER: z.enum(['local', 'aws-kms']).default('local'),
+  /**
+   * Região do AWS KMS. Opcional: ausente, o SDK usa a cadeia padrão do AWS
+   * (`AWS_REGION`/config). Credenciais NÃO são configuradas aqui: o SDK usa a
+   * credential provider chain (IAM role, SSO, etc.) — nenhuma access key entra
+   * no `.env`.
+   */
+  AWS_KMS_REGION: z.string().min(1).optional(),
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),

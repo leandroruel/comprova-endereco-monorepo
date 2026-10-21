@@ -99,6 +99,7 @@ const app = await buildApp({
       { tenantId: keysTenant, key: keysSigning },
       { tenantId: fullTenant, key: fullSigningKey },
     ]),
+    SIGNING_KEY_PROVIDER: 'local',
     PORT: 3000,
     HOST: '127.0.0.1',
     LOG_LEVEL: 'silent',

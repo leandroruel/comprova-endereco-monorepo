@@ -223,6 +223,11 @@ export interface ActiveSigningKey {
   readonly keyId: string
   /** 32 bytes crus da chave pública Ed25519 publicada para este `key_id`. */
   readonly publicKey: Buffer
+  /**
+   * Referência do backend externo de assinatura (ARN do AWS KMS) ou `null` para
+   * material local. O domínio só repassa ao provider; não interpreta o valor.
+   */
+  readonly kmsKeyReference: string | null
 }
 
 /**
@@ -244,7 +249,11 @@ export interface ActiveSigningKey {
 export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<ActiveSigningKey | null> =>
   withTenant(db, tenantId, async (tx) => {
     const rows = await tx
-      .select({ keyId: t.issuerSigningKey.keyId, publicKey: t.issuerSigningKey.publicKey })
+      .select({
+        keyId: t.issuerSigningKey.keyId,
+        publicKey: t.issuerSigningKey.publicKey,
+        kmsKeyReference: t.issuerSigningKey.kmsKeyReference,
+      })
       .from(t.issuerSigningKey)
       .where(
         and(
@@ -255,7 +264,9 @@ export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<Ac
       )
       .limit(1)
     const row = rows[0]
-    return row === undefined ? null : { keyId: row.keyId, publicKey: row.publicKey }
+    return row === undefined
+      ? null
+      : { keyId: row.keyId, publicKey: row.publicKey, kmsKeyReference: row.kmsKeyReference }
   })
 
 /**
@@ -264,7 +275,9 @@ export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<Ac
  * os códigos (`SIGNING_KEY_UNAVAILABLE`/`SIGNING_KEY_MISMATCH`). A resolução
  * acontece ANTES de persistir a primeira emissão: material ausente ou incoerente
  * falha fechado, sem deixar um status ACTIVE de credencial que nunca foi
- * devolvida.
+ * devolvida. A assinatura em si (KMS) pode falhar DEPOIS da persistência; o
+ * `Signer` devolvido traduz essa falha para o mesmo tipo, e a credencial não é
+ * devolvida — a reemissão reaproveita a primeira emissão já persistida.
  */
 const signerForIssuance = async (
   provider: SigningKeyProvider,
@@ -275,9 +288,10 @@ const signerForIssuance = async (
     tenantId,
     keyId: signingKey.keyId,
     publicKey: signingKey.publicKey,
+    kmsKeyReference: signingKey.kmsKeyReference,
   }
   try {
-    return await provider.signerFor(request)
+    return signerWithDomainErrors(await provider.signerFor(request))
   } catch (error) {
     if (error instanceof SigningKeyProviderError) {
       throw new CredentialIssuanceError(error.failure, error.message)
@@ -285,6 +299,28 @@ const signerForIssuance = async (
     throw error
   }
 }
+
+/**
+ * Envolve o `Signer` para traduzir falhas do provider no momento da
+ * ASSINATURA. No backend local a assinatura é infalível na prática; no AWS KMS
+ * ela atravessa a rede e pode falhar (ou devolver uma assinatura que não
+ * corresponde à pública publicada) DEPOIS que `signerFor` já resolveu. Sem
+ * esta camada, um erro do KMS escaparia como erro cru (500) em vez de
+ * `CredentialIssuanceError` com `SIGNING_KEY_UNAVAILABLE`/
+ * `SIGNING_KEY_MISMATCH`.
+ */
+export const signerWithDomainErrors = (signer: Signer): Signer => ({
+  sign: async (bytes) => {
+    try {
+      return await signer.sign(bytes)
+    } catch (error) {
+      if (error instanceof SigningKeyProviderError) {
+        throw new CredentialIssuanceError(error.failure, error.message)
+      }
+      throw error
+    }
+  },
+})
 
 export interface IssueCredentialDeps {
   /**
@@ -391,7 +427,9 @@ export const issueCredential = async (
   // O provider resolve o material da chave JÁ SELECIONADA e confere a
   // correspondência com a pública publicada. A resolução é feita AQUI, antes de
   // persistir a primeira emissão: material ausente/incoerente não deixa um
-  // status ACTIVE de credencial que nunca foi devolvida (fail closed).
+  // status ACTIVE de credencial que nunca foi devolvida (fail closed). No KMS, a
+  // assinatura em si pode falhar depois; a credencial também não é devolvida e
+  // a reemissão reaproveita a primeira emissão persistida.
   const signer = await signerForIssuance(deps.signingKeyProvider, tenantId, signingKey)
 
   const issuer = localIssuer(deps.issuerOrigin, tenantId, signingKey.keyId)

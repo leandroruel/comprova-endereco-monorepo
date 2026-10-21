@@ -7,6 +7,10 @@ Aceito (2026-10-21). Roadmap #24, etapa 24.2. Complementa o
 o [ADR-0029](0029-revogacao-e-expiracao-de-chave-de-assinatura.md)
 (`revoked_at` como hard stop) e a etapa 24.1 (`SigningKeyProvider`).
 
+**Complementado pelo [ADR-0032](0032-backend-de-assinatura-aws-kms.md):** a
+mesma operação de rotação aceita uma chave cujo material vive no AWS KMS
+(`kms_key_reference`), publicando a pública lida com `GetPublicKey`.
+
 ## Contexto
 
 O modelo de estados já existia:
@@ -40,7 +44,8 @@ scopes e uma API pública que ainda não tem contrato no roadmap.
 A entrada é um `SigningKeyEntry` (o mesmo de `CREDENTIAL_SIGNING_KEYS`): a
 pública publicada é **derivada** do material privado, então não é possível
 publicar uma pública que não corresponda ao que o provider vai usar. O material
-privado continua só na configuração — sem KMS/HSM nesta etapa.
+privado continua só na configuração nesta etapa (o backend KMS, que estende a
+mesma operação, é o ADR-0032).
 
 ### 2. `superseded ≠ revoked`
 
@@ -114,10 +119,10 @@ responsabilidade.
 
 ## Itens deliberadamente NÃO implementados
 
-AWS/GCP/Azure KMS, HSM/CloudHSM/PKCS#11, Vault/OpenBao; rotação automática ou
-por cron; endpoint HTTP de rotação; novos scopes; reativação de chave
-superada; janela de carência; mudança do formato da VC/`proof`/JCS/DID/status;
-migration.
+AWS KMS nesta etapa (implementado na etapa 24.3, ADR-0032); GCP/Azure KMS,
+HSM/CloudHSM/PKCS#11, Vault/OpenBao; rotação automática ou por cron; endpoint
+HTTP de rotação; novos scopes; reativação de chave superada; janela de carência;
+mudança do formato da VC/`proof`/JCS/DID/status; migration.
 
 ## Testes
 

@@ -43,7 +43,7 @@ import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
-import { makeConfiguredSigningKeyProvider } from './services/signing-key-provider.js'
+import { makeSigningKeyProvider } from './services/signing-key-provider.factory.js'
 import { readPolicyFile } from './policy-loader.js'
 
 export const buildFastPathDeps = (
@@ -156,14 +156,12 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const authenticate = makeAuthenticate(deps.db, hasher)
   const rateLimit = makeRateLimiter(deps.redis)
 
-  // Provider de assinatura por tenant resolvido no boot: JSON inválido, PEM
-  // inválida ou chave não-Ed25519 derrubam a API antes de aceitar tráfego
-  // (falha fechado). A privada fica em memória, atrás do provider; só a pública
-  // é publicada. Não há chave global de reserva: cada tenant tem a sua
-  // (ADR-0026). O domínio de emissão não conhece a origem do material — a
-  // implementação atual é a de configuração local; KMS/HSM serão providers
-  // futuros (roadmap #24).
-  const signingKeyProvider = makeConfiguredSigningKeyProvider(deps.config.CREDENTIAL_SIGNING_KEYS)
+  // Provider de assinatura por tenant resolvido no boot. `local` (default)
+  // lê `CREDENTIAL_SIGNING_KEYS` e mantém a privada só em memória; `aws-kms`
+  // envia os bytes ao KMS e nunca recebe a privada (ADR-0032). Em ambos, a
+  // pública publicada é a fonte da verdade e não há chave global de reserva
+  // (ADR-0026). JSON/PEM inválidos derrubam a API antes de aceitar tráfego.
+  const signingKeyProvider = await makeSigningKeyProvider(deps.config)
 
   const cache = makeRedisCache(deps.redis, deps.logger)
   const fastPath = buildFastPathDeps(deps.db, deps.config, cache)
