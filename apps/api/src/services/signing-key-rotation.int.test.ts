@@ -226,6 +226,39 @@ describe('rotateSigningKey', () => {
     expect(rows[0]!.active).toBe(true)
   })
 
+  it('o lock_timeout vale para a aquisição do advisory lock (não espera indefinidamente)', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'rotation-advisory-locked' })
+    const oldKey = createTestCredentialSigningKey('key-old')
+    const newKey = createTestCredentialSigningKey('key-new')
+    await createIssuerSigningKey(adminPool.db, tenantId, oldKey)
+
+    // Outra "rotação" já está com o lock do tenant. O timeout é definido ANTES
+    // do advisory lock, então esta chamada precisa desistir em ~3s.
+    const holder = createDbPool(db.adminUrl, { max: 1 })
+    try {
+      await holder.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${'comprova-signing-key-rotate:' + tenantId}))`,
+        )
+        const startedAt = Date.now()
+        const failure = await rotateSigningKey(adminPool.db, entryOf(tenantId, newKey), logger).catch(
+          (error: unknown) => error,
+        )
+        expect(Date.now() - startedAt).toBeLessThan(5_000)
+        // O driver embrulha o erro; a causa é o cancelamento por lock timeout.
+        const causeMessage = (failure as { cause?: { message?: string } }).cause?.message ?? ''
+        expect(causeMessage).toMatch(/lock timeout/i)
+      })
+    } finally {
+      await holder.end()
+    }
+
+    const rows = await rowsOf(tenantId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.keyId).toBe('key-old')
+    expect(rows[0]!.active).toBe(true)
+  })
+
   it('duas rotações concorrentes não produzem duas chaves ativas', async () => {
     const tenantId = await createTenant(adminPool.db, { name: 'rotation-concurrent' })
     const keyA = createTestCredentialSigningKey('key-a')

@@ -62,12 +62,17 @@ Tudo em uma transação:
 
 ```text
 BEGIN
+  SET LOCAL lock_timeout = '3s' / statement_timeout = '10s'  -- antes de qualquer lock
   pg_advisory_xact_lock(hash('comprova-signing-key-rotate:' || tenant))
   checagens de conflito/idempotência
   UPDATE ... SET active = false WHERE tenant AND active   -- nunca revoked_at
   INSERT nova chave (active = true)
 COMMIT
 ```
+
+Os timeouts são definidos **antes** da aquisição do advisory lock: `lock_timeout`
+vale para qualquer espera de lock, inclusive o advisory lock. Invertendo a
+ordem, uma rotação concorrente ficaria esperando sem limite.
 
 Uma falha depois do `UPDATE` (constraint, timeout, erro do chamador) desfaz tudo:
 o tenant nunca fica sem chave utilizável nem com duas ativas.
@@ -76,9 +81,10 @@ o tenant nunca fica sem chave utilizável nem com duas ativas.
 
 Duas rotações simultâneas do mesmo tenant são serializadas por um
 `pg_advisory_xact_lock` escopado ao tenant (mesmo padrão que o runner de
-migrations já usa). A segunda espera a primeira commitar e enxerga o estado
-novo, então `rotate → rotate` produz `A superada, B superada, C ativa`, nunca
-duas ativas.
+migrations já usa), com `lock_timeout` definido **antes** da aquisição — a
+esfera de espera também tem limite. A segunda espera a primeira commitar e
+enxerga o estado novo, então `rotate → rotate` produz
+`A superada, B superada, C ativa`, nunca duas ativas.
 
 O índice parcial único é a **segunda barreira**: mesmo que um caminho futuro
 esqueça o lock, o banco recusa a segunda ativa. A garantia não é um
@@ -118,9 +124,9 @@ migration.
 - `apps/api/src/services/signing-key-rotation.int.test.ts` — rotação normal,
   `superseded ≠ revoked`, idempotência, duas rotações (A/B superadas, C ativa),
   recusa de reativar superada, recusa de sobrescrever material, recusa de reusar
-  material, rollback após falha no meio, lock timeout, duas rotações
-  concorrentes sem duas ativas, isolamento entre tenants e bootstrap sem chave
-  ativa.
+  material, rollback após falha no meio, lock timeout (row lock e aquisição do
+  advisory lock), duas rotações concorrentes sem duas ativas, isolamento entre
+  tenants e bootstrap sem chave ativa.
 - `apps/api/src/credential.int.test.ts` — rotação pelo caminho real: VC antiga
   continua verificando com A, VC nova sai com `verificationMethod` de B, os
   documentos públicos listam as duas e revogar A depois falha fechado.

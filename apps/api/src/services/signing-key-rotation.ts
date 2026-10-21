@@ -86,13 +86,15 @@ export const rotateSigningKey = async (
   const lockKey = `comprova-signing-key-rotate:${entry.tenantId}`
 
   return db.transaction(async (tx) => {
+    // Os timeouts valem para TODA espera de lock, inclusive o advisory lock
+    // abaixo: definir depois deixaria a aquisição do advisory lock esperando
+    // indefinidamente por outra rotação. Falha fechado em 3s.
+    await tx.execute(sql`SET LOCAL lock_timeout = '3s'`)
+    await tx.execute(sql`SET LOCAL statement_timeout = '10s'`)
     // Serializa rotações do mesmo tenant (mesmo padrão do runner de migrations).
     // Segura até o fim da transação, quando a próxima rotação enxerga o estado
     // já rotacionado. Conflito de hash entre tenants só reduz concorrência.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`)
-    // Falha fechado: nunca esperar indefinidamente por um lock.
-    await tx.execute(sql`SET LOCAL lock_timeout = '3s'`)
-    await tx.execute(sql`SET LOCAL statement_timeout = '10s'`)
 
     const published = (
       await tx
