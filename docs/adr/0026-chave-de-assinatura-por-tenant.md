@@ -104,23 +104,38 @@ emite.
 O `Signer` segue recebendo **apenas os bytes**. Nada de banco na biblioteca:
 
 ```text
-apps/api = persistência + configuração + resolução da chave
+apps/api = persistência + seleção de lifecycle + provider de assinatura
 packages/credential = domínio criptográfico puro
 ```
 
-Fluxo de emissão (`issueCredential`):
+A resolução do material privado fica atrás de `SigningKeyProvider`
+(`apps/api/src/services/signing-key-provider.ts`), cuja implementação **atual** é
+a de configuração local (`CREDENTIAL_SIGNING_KEYS`). O domínio de emissão só diz
+"assine com esta chave":
 
 ```text
-issueCredential(db, tenant, validationId, { issuerOrigin, signingKeys })
-  ├─ loadAssertionSource        (RLS; elegibilidade inalterada)
-  ├─ loadActiveSigningKey       (RLS; SELECT issuer_signing_key WHERE active)
-  ├─ signingKeys(tenant, keyId) (config; privada em memória)   ── null ⇒ SIGNING_KEY_UNAVAILABLE
-  ├─ createPublicKey(priv) == public_key publicada             ── ≠   ⇒ SIGNING_KEY_MISMATCH
+issueCredential(db, tenant, validationId, { issuerOrigin, signingKeyProvider })
+  ├─ loadAssertionSource       (RLS; elegibilidade inalterada)
+  ├─ loadActiveSigningKey      (RLS; lifecycle: active + revoked_at)
+  ├─ signingKeyProvider.signerFor({ tenantId, keyId, publicKey })
+  │      └─ resolve o material e confere a pública publicada
+  │         (ausente ⇒ SIGNING_KEY_UNAVAILABLE; incoerente ⇒ SIGNING_KEY_MISMATCH)
   └─ buildCredential(issuer = localIssuer(origem, tenant, keyId), Signer)
 ```
 
+Quatro responsabilidades separadas — nenhuma delas mistura as outras:
+
+```text
+Key lifecycle / selection   (loadActiveSigningKey: active + revoked_at, RLS)
+Private-key storage         (provider; hoje CREDENTIAL_SIGNING_KEYS)
+Cryptographic signing       (Signer sobre Ed25519)
+Public-key publication      (GET /issuers/:scope, DID Document; só pública)
+```
+
 O guard de coerência garante que a credencial **não** saia assinada por uma chave
-que o verificador não consegue resolver.
+que o verificador não consegue resolver. KMS/HSM serão implementações **futuras**
+de `SigningKeyProvider`, sem tocar o domínio de emissão; a implementação atual
+continua sendo a de configuração local (ver "Limitação operacional declarada").
 
 ### 4. `key_id`, `verificationMethod` e rotação
 
@@ -166,10 +181,14 @@ no ADR-0029.
 
 Sem KMS/HSM, o material privado vive em configuração/segredo externo
 (`CREDENTIAL_SIGNING_KEYS`) e é associado à chave publicada por
-(`tenant_id`, `key_id`). Isto é uma **limitação temporária e explícita** deste
-passo — não uma arquitetura final. A seleção por tenant/`key_id` já existe, de
-modo que a substituição por um secret manager/KMS no futuro não muda o contrato
-da aplicação.
+(`tenant_id`, `key_id`) — atrás de `SigningKeyProvider`
+(`makeConfiguredSigningKeyProvider`). Isto é uma **limitação temporária e
+explícita** deste passo — não uma arquitetura final. A seleção por
+tenant/`key_id` e a fronteira de assinatura já existem, de modo que a
+substituição por um secret manager/KMS no futuro é outra implementação do
+provider (`class KmsSigningKeyProvider implements SigningKeyProvider`), sem
+mudar o domínio de emissão, o formato da VC, o `proof`, o DID, o verificador nem
+o `credentialStatus`.
 
 ## Testes
 
@@ -178,6 +197,11 @@ da aplicação.
   `issuerKeyDocumentOf`).
 - `apps/api/src/services/signing-keys.test.ts` — resolução por (tenant,
   `key_id`); lista vazia; JSON inválido, duplicata e chave não-Ed25519 recusados.
+- `apps/api/src/services/signing-key-provider.test.ts` — provider de assinatura
+  local: assina e a assinatura verifica com a pública publicada; material
+  ausente ⇒ `SIGNING_KEY_UNAVAILABLE` e material incoerente ⇒
+  `SIGNING_KEY_MISMATCH`; isolamento por (`tenant_id`, `key_id`); determinismo
+  (mesmos bytes/chave ⇒ mesma assinatura); configuração inválida falha no boot.
 - `apps/api/src/credential.int.test.ts` — dois tenants com chaves diferentes
   (mesmo `key_id`) emitem e cada credencial só valida com a sua chave pública;
   o verificador remoto resolve pelo issuer e recusa o `verificationMethod` do

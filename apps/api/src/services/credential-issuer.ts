@@ -1,4 +1,3 @@
-import { createPublicKey } from 'node:crypto'
 import { DEFAULT_CREDENTIAL_TTL_SECONDS } from '@comprova/core'
 import * as t from '@comprova/db'
 import { and, eq, withTenant } from '@comprova/db'
@@ -7,14 +6,17 @@ import {
   buildAssertion,
   buildCredential,
   credentialIdOf,
-  ed25519PublicKeyBytes,
   issuerScopeOf,
   localIssuer,
-  makeEd25519Signer,
   type AssertionSource,
   type SecuredVerifiableCredential,
+  type Signer,
 } from '@comprova/credential'
-import type { SigningKeyResolver } from './signing-keys.js'
+import {
+  SigningKeyProviderError,
+  type SigningKeyProvider,
+  type SigningKeyRequest,
+} from './signing-key-provider.js'
 import {
   CredentialIssuanceIdentityConflictError,
   ensureFirstCredentialIssuance,
@@ -256,6 +258,34 @@ export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<Ac
     return row === undefined ? null : { keyId: row.keyId, publicKey: row.publicKey }
   })
 
+/**
+ * Resolve o `Signer` da chave JÁ SELECIONADA pelo provider de assinatura e
+ * traduz a falha tipada do provider para `CredentialIssuanceError`, preservando
+ * os códigos (`SIGNING_KEY_UNAVAILABLE`/`SIGNING_KEY_MISMATCH`). A resolução
+ * acontece ANTES de persistir a primeira emissão: material ausente ou incoerente
+ * falha fechado, sem deixar um status ACTIVE de credencial que nunca foi
+ * devolvida.
+ */
+const signerForIssuance = async (
+  provider: SigningKeyProvider,
+  tenantId: string,
+  signingKey: ActiveSigningKey,
+): Promise<Signer> => {
+  const request: SigningKeyRequest = {
+    tenantId,
+    keyId: signingKey.keyId,
+    publicKey: signingKey.publicKey,
+  }
+  try {
+    return await provider.signerFor(request)
+  } catch (error) {
+    if (error instanceof SigningKeyProviderError) {
+      throw new CredentialIssuanceError(error.failure, error.message)
+    }
+    throw error
+  }
+}
+
 export interface IssueCredentialDeps {
   /**
    * Origem HTTPS controlada pelo projeto (`CREDENTIAL_ISSUER_ORIGIN`). O `id` do
@@ -264,11 +294,14 @@ export interface IssueCredentialDeps {
    */
   readonly issuerOrigin: string
   /**
-   * Material privado de assinatura por (`tenant_id`, `key_id`), resolvido da
-   * configuração no boot. NÃO existe chave global de fallback: tenant sem
-   * material configurado falha fechado (`SIGNING_KEY_UNAVAILABLE`).
+   * Provider de assinatura por (`tenant_id`, `key_id`). Resolve o material da
+   * chave JÁ SELECIONADA (o domínio não escolhe a chave nem conhece onde o
+   * material vive: configuração local, KMS ou HSM) e devolve um `Signer`. NÃO
+   * existe chave global de fallback: tenant sem material configurado ou com
+   * material incoerente falha fechado (`SIGNING_KEY_UNAVAILABLE`/
+   * `SIGNING_KEY_MISMATCH`).
    */
-  readonly signingKeys: SigningKeyResolver
+  readonly signingKeyProvider: SigningKeyProvider
   /**
    * Horizonte da CREDENCIAL em segundos (`policy.credential_ttl_seconds`).
    * Omitido = 30 dias, o default das policies já publicadas. NÃO é o horizonte
@@ -313,13 +346,14 @@ export const credentialValidUntilOf = (
 export type CredentialIssuerDeps = Omit<IssueCredentialDeps, 'now'>
 
 /**
- * `validation_id → carrega o grafo → resolve a chave do tenant → payload →
- * canonicalização → assinatura → credencial`.
+ * `validation_id → carrega o grafo → resolve a chave ativa do tenant → provider
+ * de assinatura → payload → canonicalização → assinatura → credencial`.
  *
- * A chave sai do par (tenant, `key_id` ativo no banco), nunca de uma global: a
- * privada vem da configuração, e a pública publicada (`issuer_signing_key`) tem
- * de CORRESPONDER a ela — senão a credencial nasceria assinada por uma chave que
- * o verificador não resolve (`SIGNING_KEY_MISMATCH`).
+ * A chave sai do par (tenant, `key_id` ativo no banco), nunca de uma global. O
+ * `SigningKeyProvider` resolve o material dessa chave (onde ele vive é detalhe
+ * do provider) e valida que a pública publicada (`issuer_signing_key`)
+ * CORRESPONDE a ele — senão a credencial nasceria assinada por uma chave que o
+ * verificador não resolve (`SIGNING_KEY_MISMATCH`).
  */
 export const issueCredential = async (
   db: Db,
@@ -354,20 +388,11 @@ export const issueCredential = async (
       `tenant ${tenantId} has no active signing key; refusing to emit a credential it cannot sign`,
     )
   }
-  const privateKey = deps.signingKeys(tenantId, signingKey.keyId)
-  if (privateKey === null) {
-    throw new CredentialIssuanceError(
-      'SIGNING_KEY_UNAVAILABLE',
-      `no signing material configured for tenant ${tenantId} key ${signingKey.keyId}`,
-    )
-  }
-  const derivedPublicKey = createPublicKey(privateKey)
-  if (!ed25519PublicKeyBytes(derivedPublicKey).equals(signingKey.publicKey)) {
-    throw new CredentialIssuanceError(
-      'SIGNING_KEY_MISMATCH',
-      `configured signing material for tenant ${tenantId} key ${signingKey.keyId} does not match the published public key`,
-    )
-  }
+  // O provider resolve o material da chave JÁ SELECIONADA e confere a
+  // correspondência com a pública publicada. A resolução é feita AQUI, antes de
+  // persistir a primeira emissão: material ausente/incoerente não deixa um
+  // status ACTIVE de credencial que nunca foi devolvida (fail closed).
+  const signer = await signerForIssuance(deps.signingKeyProvider, tenantId, signingKey)
 
   const issuer = localIssuer(deps.issuerOrigin, tenantId, signingKey.keyId)
   // Usa o id canônico que veio do banco (o parâmetro de rota pode chegar em
@@ -414,7 +439,7 @@ export const issueCredential = async (
   // estão persistidos: se o insert falhar, a emissão falha (fail closed).
   return buildCredential(credentialSource, {
     issuer,
-    signer: makeEd25519Signer(privateKey),
+    signer,
     now: () => issuedAt,
     credentialId,
   })

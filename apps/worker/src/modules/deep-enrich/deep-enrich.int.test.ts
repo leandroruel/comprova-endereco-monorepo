@@ -44,7 +44,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { deepEnrich } from './deep-enrich.service.js'
 import { runFastPath } from '../../../../api/src/services/fastpath.js'
 import { issueCredential } from '../../../../api/src/services/credential-issuer.js'
-import { makeSigningKeyResolver } from '../../../../api/src/services/signing-keys.js'
+import { makeConfiguredSigningKeyProvider } from '../../../../api/src/services/signing-key-provider.js'
 
 /** Origem de teste (TLD reservado), como no resto da suíte. */
 const ISSUER_ORIGIN = 'https://issuer.test'
@@ -62,7 +62,9 @@ const tenant = await createTenant(adminPool.db, { name: 'deep-tenant' })
 // em memória; só a chave pública é registrada em `issuer_signing_key`.
 const signing = createTestCredentialSigningKey('key-1')
 await createIssuerSigningKey(adminPool.db, tenant, signing)
-const signingKeys = makeSigningKeyResolver(signingKeysConfig([{ tenantId: tenant, key: signing }]))
+const signingKeyProvider = makeConfiguredSigningKeyProvider(
+  signingKeysConfig([{ tenantId: tenant, key: signing }]),
+)
 const issuer = localIssuer(ISSUER_ORIGIN, tenant, signing.keyId)
 const trusted = { id: verificationMethodOf(issuer), publicKey: signing.publicKey }
 
@@ -571,7 +573,7 @@ describe('deepEnrich (activity core)', () => {
       // A credencial daí derivada usa o instante de conclusão como `validFrom`.
       const credential = await issueCredential(adminPool.db, tenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        signingKeys,
+        signingKeyProvider,
       })
 
       expect(credential.validFrom).toBe(T1.toISOString())
@@ -613,7 +615,7 @@ describe('deepEnrich (activity core)', () => {
       // Emite a credencial ANTES do replay: o replay idêntico não pode revogá-la.
       const issued = await issueCredential(adminPool.db, tenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        signingKeys,
+        signingKeyProvider,
       })
       expect(issued.validFrom).toBe(T1.toISOString())
       expect((await statusOf(validationId))?.status).toBe('ACTIVE')
@@ -643,7 +645,7 @@ describe('deepEnrich (activity core)', () => {
       // original — e continua verificável.
       const credential = await issueCredential(adminPool.db, tenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        signingKeys,
+        signingKeyProvider,
       })
       expect(credential.validFrom).toBe(T1.toISOString())
       expect(credential['comprova:result']['comprova:completedAt']).toBe(T1.toISOString())
@@ -663,7 +665,7 @@ describe('deepEnrich (activity core)', () => {
       // Credencial emitida sob a conclusão original: fica ACTIVE.
       await issueCredential(adminPool.db, tenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        signingKeys,
+        signingKeyProvider,
       })
       expect((await statusOf(validationId))?.status).toBe('ACTIVE')
 
@@ -747,7 +749,7 @@ describe('deepEnrich (activity core)', () => {
       // emissão desta validation e fica ACTIVE.
       await issueCredential(adminPool.db, tenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        signingKeys,
+        signingKeyProvider,
       })
       expect((await statusOf(validationId))?.status).toBe('ACTIVE')
 

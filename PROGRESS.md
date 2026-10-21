@@ -2,6 +2,29 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Fronteira de assinatura: `SigningKeyProvider` (roadmap #24, etapa 24.1) (2026-10-21)
+
+O domínio de emissão deixou de resolver o material privado e de derivar/validar a
+chave pública. `issueCredential` agora depende de
+`SigningKeyProvider.signerFor({ tenantId, keyId, publicKey })`, que devolve um
+`Signer` para a chave **já selecionada** por `loadActiveSigningKey` (RLS +
+`active`/`revoked_at`). A resolução do material, o guard de coerência
+(`SIGNING_KEY_UNAVAILABLE`/`SIGNING_KEY_MISMATCH`) e o isolamento por
+(`tenant_id`, `key_id`) ficam atrás do provider
+(`apps/api/src/services/signing-key-provider.ts`).
+
+A implementação atual (`makeConfiguredSigningKeyProvider`) continua lendo
+`CREDENTIAL_SIGNING_KEYS`, com a mesma semântica (Ed25519, sem chave global de
+reserva, sem fallback). Nenhum KMS/HSM foi integrado: a fronteira só torna
+possível um `KmsSigningKeyProvider` futuro, sem tocar o domínio, o formato da VC,
+o `proof`, o DID, o verificador ou o `credentialStatus`.
+
+Testes: novo `apps/api/src/services/signing-key-provider.test.ts` (assinatura
+verificável com a pública publicada; material ausente/incoerente; isolamento de
+tenant; determinismo; configuração inválida no boot). Validação local:
+`typecheck`, `lint` e `format` OK; `pnpm test` com 45 arquivos / 357 testes — as
+20 suítes de integração exigem Docker/Podman e sua validação fica na CI.
+
 ## Escopo dedicado para administração de signing keys (2026-10-21)
 
 A revogação de signing key deixou de exigir `validate:write` e passou a exigir
