@@ -143,6 +143,16 @@ const readOnlyKey = await createApiKey(adminPool.db, readOnlyTenantId, PEPPER, {
 const readOnlySigning = createTestCredentialSigningKey('readonly-key')
 await createIssuerSigningKey(adminPool.db, readOnlyTenantId, readOnlySigning)
 
+// Tenant I: API key com autoridade de validação E administração. O snapshot de
+// auditoria (`validation.issuer_scopes`) guarda `keys:write`; a credencial não
+// o publica, porque ele não é uma capacidade do titular nem da credencial.
+const combinedTenantId = await createTenant(adminPool.db, { name: 'credential-combined-scopes' })
+const combinedKey = await createApiKey(adminPool.db, combinedTenantId, PEPPER, {
+  scopes: ['validate:read', 'validate:write', 'keys:write'],
+})
+const combinedSigning = createTestCredentialSigningKey('combined-key')
+await createIssuerSigningKey(adminPool.db, combinedTenantId, combinedSigning)
+
 const appPool = createDbPool(db.appUrl)
 const config: AppConfig = {
   DATABASE_URL: db.appUrl,
@@ -159,6 +169,7 @@ const config: AppConfig = {
     { tenantId: rotationTenantId, key: rotationOldSigning },
     { tenantId: rotationTenantId, key: rotationNewSigning },
     { tenantId: readOnlyTenantId, key: readOnlySigning },
+    { tenantId: combinedTenantId, key: combinedSigning },
   ]),
   PORT: 3000,
   HOST: '127.0.0.1',
@@ -292,8 +303,8 @@ describe('emissão e verificação independente', () => {
     expect(row!.completedAt!.getTime()).toBeGreaterThanOrEqual(row!.createdAt!.getTime())
     expect(credential['comprova:result']['comprova:completedAt']).toBe(row!.completedAt!.toISOString())
     expect(credential.validFrom).toBe(row!.completedAt!.toISOString())
-    expect(credential['comprova:authorization']).toEqual({
-      'comprova:scopes': ['validate:read', 'validate:write'],
+    expect(credential.assertionAuthority).toEqual({
+      scopes: ['validate:read', 'validate:write'],
     })
 
     const subjectRow = (
@@ -310,6 +321,44 @@ describe('emissão e verificação independente', () => {
       verifyCredentialIntegrity(credential, {
         trusted,
         expectedIssuerId: issuer.id,
+      }),
+    ).toMatchObject({ valid: true })
+  })
+
+  it('mantém keys:write no snapshot de auditoria, mas não o publica na credencial', async () => {
+    const validationId = await newValidationAs(combinedKey.plaintext)
+    const row = await validationRow(validationId)
+
+    // Auditoria: o snapshot persistido continua sendo a autoridade EFETIVA
+    // completa da API key associada à validation.
+    expect(row?.issuerScopes).toEqual(['validate:read', 'validate:write', 'keys:write'])
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/validations/${validationId}/credential`,
+      headers: { authorization: `Bearer ${combinedKey.plaintext}` },
+    })
+    expect(res.statusCode).toBe(200)
+    const credential = res.json() as SecuredVerifiableCredential
+
+    // A credencial só declara a autoridade de validação do issuer. `keys:write`
+    // não é uma permissão do titular e não aparece no documento assinado.
+    expect(credential.assertionAuthority).toEqual({
+      scopes: ['validate:read', 'validate:write'],
+    })
+    expect(JSON.stringify(credential)).not.toContain('keys:write')
+    expect(credential.credentialSubject).not.toHaveProperty('assertionAuthority')
+
+    // Remover o scope administrativo do documento não quebra a assinatura nem a
+    // verificação independente.
+    const combinedIssuer = localIssuer(ISSUER_ORIGIN, combinedTenantId, 'combined-key')
+    expect(
+      verifyCredentialIntegrity(credential, {
+        trusted: {
+          id: verificationMethodOf(combinedIssuer),
+          publicKey: combinedSigning.publicKey,
+        },
+        expectedIssuerId: combinedIssuer.id,
       }),
     ).toMatchObject({ valid: true })
   })

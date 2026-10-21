@@ -3,9 +3,11 @@ import type { AssertionPayload } from './assertion.schema.js'
 import { issuerIdOf } from '../service/issuer.service.js'
 import { observationOfEvidence, toVerifiableCredential } from '../service/credential.service.js'
 import {
+  ASSERTION_AUTHORITY_IRI,
   COMPROVA_CONTEXT_URL,
   COMPROVA_CREDENTIAL_TYPE,
   COMPROVA_EVIDENCE_TYPE,
+  SCOPES_IRI,
   SecuredVerifiableCredentialSchema,
   urnUuidOf,
   uuidOfUrn,
@@ -25,7 +27,7 @@ const assertion = (overrides: Partial<AssertionPayload> = {}): AssertionPayload 
   format: 'comprova-assertion-v1',
   issuer: {
     id: ISSUER_ID,
-    authorization: { scopes: ['validate:write', 'validate:read'] },
+    authority: { scopes: ['validate:write', 'validate:read'] },
   },
   subject: { id: SUBJECT_ID, doc_type: 'CNPJ' },
   claim: {
@@ -88,7 +90,11 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
     const vc = credentialOf()
 
     expect(vc['@context'][0]).toBe(VC_CONTEXT_URL)
-    expect(vc['@context'][1]).toEqual({ comprova: COMPROVA_CONTEXT_URL })
+    expect(vc['@context'][1]).toEqual({
+      comprova: COMPROVA_CONTEXT_URL,
+      assertionAuthority: ASSERTION_AUTHORITY_IRI,
+      scopes: SCOPES_IRI,
+    })
     expect(vc.type).toEqual(['VerifiableCredential', COMPROVA_CREDENTIAL_TYPE])
     expect(vc.issuer).toBe(ISSUER_ID)
     expect(vc.issuer).toMatch(/^https:\/\/issuer\.test\/issuers\//)
@@ -225,13 +231,13 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
       'comprova:hash': 'd'.repeat(64),
     })
     expect(vc['comprova:algorithm']).toEqual({ 'comprova:scorerVersion': '1' })
-    expect(vc['comprova:authorization']).toEqual({ 'comprova:scopes': ['validate:write', 'validate:read'] })
+    expect(vc.assertionAuthority).toEqual({ scopes: ['validate:write', 'validate:read'] })
     expect(vc['comprova:legalBasis']).toBe('FRAUD_PREVENTION')
   })
 
   it('omite (em vez de fabricar) o que não existe no domínio', () => {
     const vc = credentialOf({
-      issuer: { id: `${ISSUER_ORIGIN}/issuers/t`, authorization: null },
+      issuer: { id: `${ISSUER_ORIGIN}/issuers/t`, authority: null },
       claim: {
         id: '22222222-2222-4222-8222-222222222222',
         type: 'address_exists',
@@ -247,7 +253,7 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
       },
     })
 
-    expect(vc['comprova:authorization']).toBeUndefined()
+    expect(vc.assertionAuthority).toBeUndefined()
     expect(vc['comprova:result']['comprova:explanation']).toBeUndefined()
     expect(vc.credentialSubject['comprova:claim']['comprova:address']).toEqual({})
     expect(VerifiableCredentialSchema.safeParse(vc).success).toBe(true)
@@ -257,7 +263,9 @@ describe('toVerifiableCredential (W3C VC Data Model 2.0)', () => {
     const vc = credentialOf()
     const compprovaKeys = Object.keys(vc).filter((key) => key.startsWith('comprova:'))
     expect(compprovaKeys.length).toBeGreaterThan(0)
-    // Toda chave Comprova é namespaced; `evidence` continua sendo o termo W3C.
+    // Termos de negócio sem o prefixo do produto são declarados no @context.
+    expect(Object.keys(vc)).toContain('assertionAuthority')
+    // `evidence` continua sendo o termo W3C.
     expect(Object.keys(vc)).toContain('evidence')
     expect(Object.keys(vc)).not.toContain('result')
     expect(Object.keys(vc)).not.toContain('policy')

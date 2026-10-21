@@ -1,10 +1,12 @@
 import type { AssertionPayload, AssertionSource, CredentialObservation } from '../schema/assertion.schema.js'
 import {
+  ASSERTION_AUTHORITY_IRI,
   COMPROVA_CLAIM_TYPE,
   COMPROVA_CONTEXT_URL,
   COMPROVA_CREDENTIAL_TYPE,
   COMPROVA_EVIDENCE_TYPE,
   COMPROVA_SUBJECT_TYPE,
+  SCOPES_IRI,
   urnUuidOf,
   uuidOfUrn,
   VC_CONTEXT_URL,
@@ -53,10 +55,24 @@ export interface BuildCredentialDeps {
   readonly now?: () => Date
 }
 
-/** `@context` do documento: o contexto base da VC 2.0 + o prefixo Comprova. */
-const context = (): [typeof VC_CONTEXT_URL, { comprova: typeof COMPROVA_CONTEXT_URL }] => [
+/**
+ * `@context` do documento: contexto base da VC 2.0 + prefixo do vocabulário
+ * Comprova + termos semânticos publicados sem o prefixo do produto.
+ */
+const context = (): [
+  typeof VC_CONTEXT_URL,
+  {
+    comprova: typeof COMPROVA_CONTEXT_URL
+    assertionAuthority: typeof ASSERTION_AUTHORITY_IRI
+    scopes: typeof SCOPES_IRI
+  },
+] => [
   VC_CONTEXT_URL,
-  { comprova: COMPROVA_CONTEXT_URL },
+  {
+    comprova: COMPROVA_CONTEXT_URL,
+    assertionAuthority: ASSERTION_AUTHORITY_IRI,
+    scopes: SCOPES_IRI,
+  },
 ]
 
 const addressOf = (
@@ -157,9 +173,9 @@ export const toVerifiableCredential = (
     'comprova:hash': assertion.policy.hash,
   },
   'comprova:algorithm': { 'comprova:scorerVersion': assertion.algorithm.scorer_version },
-  ...(assertion.issuer.authorization === null
+  ...(assertion.issuer.authority === null
     ? {}
-    : { 'comprova:authorization': { 'comprova:scopes': [...assertion.issuer.authorization.scopes] } }),
+    : { assertionAuthority: { scopes: [...assertion.issuer.authority.scopes] } }),
   'comprova:legalBasis': assertion.legal_basis,
 })
 

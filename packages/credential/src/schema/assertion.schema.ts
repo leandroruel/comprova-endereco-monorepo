@@ -52,7 +52,7 @@ export const AssertionPayloadSchema = z.object({
   format: z.literal('comprova-assertion-v1'),
   issuer: z.object({
     id: z.string().min(1),
-    authorization: z.object({ scopes: z.array(z.string()) }).nullable(),
+    authority: z.object({ scopes: z.array(z.string()) }).nullable(),
   }),
   subject: z.object({
     id: z.string().min(1),
@@ -148,6 +148,13 @@ export interface AssertionSource {
     readonly scorerVersion: string | null
     readonly evidenceSetHash: string | null
     readonly legalBasis: string
+    /**
+     * Snapshot COMPLETO dos scopes da API key associado à validation
+     * (`validation.issuer_scopes`): é gravado quando a validation é criada e
+     * permanece imutável. Não é recalculado na emissão da credencial. O mapping
+     * filtra capacidades administrativas (`assertionAuthorityScopes`); o
+     * snapshot completo fica para auditoria.
+     */
     readonly issuerScopes: readonly string[] | null
     readonly explanation: AssertionPayload['result']['explanation']
     readonly createdAt: Date

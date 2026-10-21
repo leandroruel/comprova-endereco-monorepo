@@ -483,7 +483,9 @@ export const validation = pgTable(
     userId: text('user_id'),
     // V-1: credencial que originou a asserção (nullable: histórico e batch).
     apiKeyId: uuid('api_key_id'),
-    // V-1: snapshot da autoridade efetiva no momento da emissão.
+    // V-1: snapshot COMPLETO da autoridade efetiva associado à validation
+    // (gravado na criação e imutável). A credencial filtra capacidades
+    // administrativas (ADR-0030).
     issuerScopes: text('issuer_scopes').array(),
     // V-5/§8/§9: binding de policy, scorer e conjunto de evidências.
     policyHash: text('policy_hash'),
