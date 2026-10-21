@@ -1,5 +1,5 @@
 import { createLogger, createMetrics } from '@comprova/observability'
-import { and, createDbPool, eq, runMigrations } from '@comprova/db'
+import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import { evidenceSetHashOfObservations, policyHashOf, SCORER_VERSION } from '@comprova/core'
 import {
@@ -43,6 +43,8 @@ import type { AppConfig } from './config.js'
 import { CredentialIssuanceError, issueCredential } from './services/credential-issuer.js'
 import { runFastPath } from './services/fastpath.js'
 import { makeConfiguredSigningKeyProvider } from './services/signing-key-provider.js'
+import { rotateSigningKey } from './services/signing-key-rotation.js'
+import { parseSigningKeys } from './services/signing-keys.js'
 
 // FASE 12 — ponta a ponta: validation persistida → credential builder → credencial
 // assinada → JSON transportável → verifier independente → VALID. Também cobre a
@@ -123,7 +125,8 @@ const scheduledSigning = createTestCredentialSigningKey('scheduled-key')
 await createIssuerSigningKey(adminPool.db, scheduledTenantId, scheduledSigning)
 
 // Tenant G: rotação (`active = false`) SEM revogação. A chave antiga continua
-// publicada; a nova é que assina. Revogar a antiga depois a remove.
+// publicada; a nova é que assina. Revogar a antiga depois a remove. A `key-new`
+// NÃO é publicada aqui: é a operação de rotação que a publica e ativa.
 const rotationTenantId = await createTenant(adminPool.db, { name: 'credential-rotation' })
 const rotationKey = await createApiKey(adminPool.db, rotationTenantId, PEPPER, {
   scopes: ['validate:read', 'validate:write', 'keys:write'],
@@ -131,7 +134,6 @@ const rotationKey = await createApiKey(adminPool.db, rotationTenantId, PEPPER, {
 const rotationOldSigning = createTestCredentialSigningKey('key-old')
 const rotationNewSigning = createTestCredentialSigningKey('key-new')
 await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationOldSigning)
-await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationNewSigning, { active: false })
 
 // Tenant H: API key SOMENTE-LEITURA. Revogar é uma operação administrativa;
 // a rota exige `keys:write` e deve recusar mesmo com uma API key válida (403),
@@ -1862,25 +1864,12 @@ describe('revogação e expiração da chave de assinatura', () => {
     expect(oldCredential.proof.verificationMethod).toBe(methodOf(rotationTenantId, rotationOldSigning.keyId))
 
     // Rotação: a antiga deixa de assinar, a nova passa a assinar. Nenhuma é
-    // revogada; a antiga continua publicada para verificar o passado.
-    await adminPool.db
-      .update(t.issuerSigningKey)
-      .set({ active: false })
-      .where(
-        and(
-          eq(t.issuerSigningKey.tenantId, rotationTenantId),
-          eq(t.issuerSigningKey.keyId, rotationOldSigning.keyId),
-        ),
-      )
-    await adminPool.db
-      .update(t.issuerSigningKey)
-      .set({ active: true })
-      .where(
-        and(
-          eq(t.issuerSigningKey.tenantId, rotationTenantId),
-          eq(t.issuerSigningKey.keyId, rotationNewSigning.keyId),
-        ),
-      )
+    // revogada; a antiga continua publicada para verificar o passado. A operação
+    // publica a chave nova e faz a troca de forma atômica.
+    const rotationEntry = parseSigningKeys(
+      signingKeysConfig([{ tenantId: rotationTenantId, key: rotationNewSigning }]),
+    )[0]!
+    await rotateSigningKey(adminPool.db, rotationEntry, createLogger({ level: 'silent' }))
 
     const rotated = await documentOf(rotationTenantId)
     expect(rotated.statusCode).toBe(200)

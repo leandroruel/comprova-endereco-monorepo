@@ -2,6 +2,35 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Rotação segura de signing key (roadmap #24, etapa 24.2) (2026-10-21)
+
+O modelo de estados já existia (`active = false` = superada, publicada para
+verificar o passado; `revoked_at` = hard stop — ADR-0029). Faltava a **operação**:
+a troca era feita à mão, sem atomicidade nem serialização. Agora
+`rotateSigningKey` (`apps/api/src/services/signing-key-rotation.ts`) roda numa
+transação que serializa rotações do mesmo tenant com
+`pg_advisory_xact_lock`, marca a chave ativa atual como **superada** (só
+`active`, nunca `revoked_at`) e publica/ativa a nova. O índice parcial único
+`issuer_signing_key_active_uq` continua garantindo no máximo uma ativa; não há
+`if (active)` na aplicação. Conflitos são explícitos: não sobrescrever material,
+não reativar `key_id` superado, não reutilizar material de outra chave; repetir a
+rotação para a chave já ativa é no-op.
+
+Não houve migration (o schema já sustentava o lifecycle) nem endpoint novo: a
+operação é administrativa (owner, como o provisionamento), exposta por
+`pnpm db:rotate-key <tenant_id> <new_key_id>` — a nova chave precisa estar em
+`CREDENTIAL_SIGNING_KEYS`. O `SigningKeyProvider` da etapa 24.1 não mudou: ele
+continua recebendo a chave já selecionada por `loadActiveSigningKey`, então a
+emissão nova usa B enquanto a VC antiga continua verificando com A. KMS/HSM e
+rotação automática seguem fora de escopo.
+
+Testes: novo `apps/api/src/services/signing-key-rotation.int.test.ts` (12 casos:
+rotação, `superseded ≠ revoked`, idempotência, A→B→C, conflitos, rollback após
+falha no meio, lock timeout, duas rotações concorrentes, isolamento entre tenants
+e bootstrap). `apps/api/src/credential.int.test.ts` passou a rotacionar pela
+operação real e verifica VC antiga (A) + VC nova (B), documentos públicos e
+revogação posterior de A.
+
 ## Fronteira de assinatura: `SigningKeyProvider` (roadmap #24, etapa 24.1) (2026-10-21)
 
 O domínio de emissão deixou de resolver o material privado e de derivar/validar a
