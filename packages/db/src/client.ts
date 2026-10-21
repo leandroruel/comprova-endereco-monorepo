@@ -1,7 +1,7 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
-import * as schema from './schema.js'
+import { schema } from './schemas/index.js'
 
 export type Db = PostgresJsDatabase<typeof schema>
 export type DbTx = Parameters<Parameters<Db['transaction']>[0]>[0]
