@@ -18,13 +18,11 @@ SET application_name = 'comprova-migrations';
 ALTER TABLE validation ADD COLUMN last_evaluated_policy_hash text;
 ALTER TABLE validation ADD COLUMN last_evaluated_scorer_version text;
 
--- Backfill: para linhas existentes, a última avaliação conhecida é o binding
--- gravado na criação. Linhas criadas depois começam NULL e são preenchidas pelo
--- primeiro deep path; nesse caso o código usa o binding como fallback.
-UPDATE validation
-SET last_evaluated_policy_hash = policy_hash,
-    last_evaluated_scorer_version = scorer_version
-WHERE policy_hash IS NOT NULL;
+-- Sem backfill: a "última avaliação" de uma linha legada é DESCONHECIDA, e
+-- reescrever todas as linhas em um único UPDATE bloquearia a tabela sob o
+-- `statement_timeout`. O código usa `policy_hash`/`scorer_version` como fallback
+-- quando `last_evaluated_*` é NULL; a primeira execução do deep path sob a
+-- policy atual preenche as colunas.
 
 COMMENT ON COLUMN validation.last_evaluated_policy_hash IS
   'Digest da policy usada na última execução do deep path (mutável; distinto do binding imutável policy_hash)';

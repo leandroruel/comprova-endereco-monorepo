@@ -90,6 +90,7 @@ export const IssuerOriginSchema = z.string().transform((value, ctx) => {
 /** TLDs reservados por RFC 2606/RFC 6761 e sufixos usados só localmente. */
 const RESERVED_ISSUER_HOST_SUFFIXES = ['.test', '.example', '.invalid', '.localhost', '.local'] as const
 
+/** `localhost` ou um host sob TLD reservado (comparação sem caixa e sem ponto final). */
 const isReservedIssuerHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase().replace(/\.$/, '')
   return (

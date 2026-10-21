@@ -152,15 +152,17 @@ const isCredentialStatusBindingValid = (secured: SecuredVerifiableCredential): b
  *  4. coerência estrutural `verificationMethod ↔ issuer` declarado (§5.9) e
  *     vínculo com o método confiável: o `verificationMethod` precisa ser
  *     EXATAMENTE `options.trusted.id` (§4);
- *  5. a janela de validade (`validFrom <= validUntil`, conforme a VC 2.0 §4.9)
- *     e, quando `now` é informado, o instante contra a janela;
+ *  5. a janela de validade (`validFrom <= validUntil`, conforme a VC 2.0 §4.9);
  *  6. o binding do conjunto de evidências (recomputado a partir da própria
  *     credencial — nunca do material físico);
  *  7. o proof Data Integrity `eddsa-jcs-2022` sobre o documento CRU (o JSON
  *     recebido, sem o `proof`), com a chave pública confiável, exigindo
  *     `proofPurpose: assertionMethod`;
  *  8. o binding estrutural do status: `id` pertence ao issuer e
- *     `credentialStatus.id` é exatamente `<id>/status` (ADR-0027).
+ *     `credentialStatus.id` é exatamente `<id>/status` (ADR-0027);
+ *  9. quando `now` é informado, o instante contra a janela
+ *     (`[validFrom, validUntil)`), DEPOIS da assinatura: um documento adulterado
+ *     é `INVALID_SIGNATURE`, nunca `EXPIRED`.
  *
  * Escopo: este verificador cobre integridade criptográfica, o vínculo entre a
  * chave confiável e a identidade declarada e o binding do ponteiro de status.

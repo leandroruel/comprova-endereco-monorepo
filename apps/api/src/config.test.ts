@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { loadConfig } from './config.js'
 
 const baseEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+  NODE_ENV: 'test',
   DATABASE_URL: 'postgres://app_user:app_user@localhost:5432/comprova',
   REDIS_URL: 'redis://localhost:6379',
   API_KEY_PEPPER: 'test-pepper',
@@ -10,10 +11,10 @@ const baseEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
 })
 
 describe('loadConfig — origem do issuer', () => {
-  it('fora de produção aceita a origem reservada usada em dev/testes', () => {
+  it('em desenvolvimento/teste aceita a origem reservada usada em dev/testes', () => {
     expect(loadConfig(baseEnv()).CREDENTIAL_ISSUER_ORIGIN).toBe('https://issuer.test')
     expect(
-      loadConfig(baseEnv({ NODE_ENV: 'test', CREDENTIAL_ISSUER_ORIGIN: 'https://localhost:8443' }))
+      loadConfig(baseEnv({ NODE_ENV: 'development', CREDENTIAL_ISSUER_ORIGIN: 'https://localhost:8443' }))
         .CREDENTIAL_ISSUER_ORIGIN,
     ).toBe('https://localhost:8443')
   })
@@ -23,6 +24,16 @@ describe('loadConfig — origem do issuer', () => {
       baseEnv({ NODE_ENV: 'production', CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.comprova.dev' }),
     )
     expect(config.CREDENTIAL_ISSUER_ORIGIN).toBe('https://issuer.comprova.dev')
+  })
+
+  it.each([
+    ['NODE_ENV ausente', undefined],
+    ['prod', 'prod'],
+    ['staging', 'staging'],
+  ])('recusa a origem reservada com %s (fail-safe: só dev/test relaxam)', (_label, nodeEnv) => {
+    expect(() =>
+      loadConfig(baseEnv({ NODE_ENV: nodeEnv, CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test' })),
+    ).toThrow(/CREDENTIAL_ISSUER_ORIGIN: issuer origin must use a public DNS name in production/)
   })
 
   it.each([

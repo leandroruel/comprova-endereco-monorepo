@@ -20,8 +20,12 @@ ALTER TABLE credential_status
   ADD CONSTRAINT credential_status_reason_ck
   CHECK (
     (status = 'ACTIVE' AND revocation_reason IS NULL) OR
-    (status = 'REVOKED')
-  );
+    (status = 'REVOKED' AND (revocation_reason IS NULL OR revocation_reason IN ('manual', 'superseded')))
+  ) NOT VALID;
+
+-- `NOT VALID` evita o scan bloqueante sob `lock_timeout`; a validação é um
+-- passo separado (SHARE UPDATE EXCLUSIVE, não bloqueia leituras/escritas).
+ALTER TABLE credential_status VALIDATE CONSTRAINT credential_status_reason_ck;
 
 COMMENT ON COLUMN credential_status.revocation_reason IS
   'Motivo auditável da revogação: manual | superseded (não exposto publicamente)';

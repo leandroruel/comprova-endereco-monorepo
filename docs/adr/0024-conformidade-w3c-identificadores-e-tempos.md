@@ -132,12 +132,12 @@ new Date()))().toISOString()`. Nenhum timestamp histórico da validation
 
 ### 5. `validFrom`: início da validade do veredito (o instante REAL da conclusão)
 
-| Domínio                                                                      | Documento W3C                            |
-| ---------------------------------------------------------------------------- | ---------------------------------------- |
-| `validation.completed_at`                                                    | `validFrom` **e** `comprova:completedAt` |
-| `completed_at + policy.credential_ttl_seconds` ↔ `observed_at + ttl_seconds` | `validUntil` (o menor)                   |
-| `validation.expires_at`                                                      | `comprova:expiresAt` (retenção)          |
-| `validation.created_at`                                                      | (nenhum: é o início da requisição)       |
+| Domínio                                                                      | Documento W3C                               |
+| ---------------------------------------------------------------------------- | ------------------------------------------- |
+| `validation.completed_at`                                                    | `validFrom` **e** `comprova:completedAt`    |
+| `completed_at + policy.credential_ttl_seconds` ↔ `observed_at + ttl_seconds` | `validUntil` (o menor)                      |
+| `validation.expires_at`                                                      | (nenhum: retenção, só na assertion interna) |
+| `validation.created_at`                                                      | (nenhum: é o início da requisição)          |
 
 > A linha de `expires_at` acima reflete a Revisão pós-PR #5 (B1): `expires_at`
 > **não** é mais `validUntil`; ele continua sendo o horizonte de retenção.
@@ -229,10 +229,10 @@ verifyCredentialIntegrity(credential, {
 Ordem das checagens: forma do documento → contexto/tipo → `expectedIssuerId`
 (se informado) → **`verificationMethod` pertence ao `issuer` declarado**
 (`<issuer>#<fragmento não vazio>`) → **`verificationMethod === trusted.id`** →
-janela de validade (**não invertida: `validFrom <= validUntil`**, VC 2.0 §4.9) e,
-se `now` for informado, `validFrom <= now < validUntil` → `evidenceSetHash`
-recomputado → assinatura Data Integrity sobre o documento cru, com a chave de
-`trusted`, exigindo `proofPurpose = assertionMethod`.
+janela de validade (**não invertida: `validFrom <= validUntil`**, VC 2.0 §4.9) →
+`evidenceSetHash` recomputado → assinatura Data Integrity sobre o documento cru,
+com a chave de `trusted`, exigindo `proofPurpose = assertionMethod` → e, se `now`
+for informado, `validFrom <= now < validUntil` (`NOT_YET_VALID`/`EXPIRED`).
 
 - **Por quê:** um `KeyObject` não tem identidade. Com `expectedVerificationMethod`
   opcional, uma assinatura válida com a chave fornecida era aceita para
@@ -384,18 +384,20 @@ Quando esta seção divergir de um trecho anterior, **esta seção prevalece**.
 ### A1 — origem do issuer em produção
 
 `assertProductionIssuerOrigin` (`packages/credential/src/service/issuer.service.ts`)
-passou a ser aplicada no boot da API. Em `NODE_ENV=production`, a origem
-`CREDENTIAL_ISSUER_ORIGIN` é recusada quando:
+passou a ser aplicada no boot da API. A checagem é **fail-safe**: só é relaxada
+quando `NODE_ENV` é exatamente `development` ou `test`. `NODE_ENV` ausente,
+`prod`, `staging` ou qualquer outro valor validam a origem como produção. A
+origem `CREDENTIAL_ISSUER_ORIGIN` é recusada quando:
 
 - usa TLD reservado (`.test`, `.example`, `.invalid`, `.localhost`, `.local`);
 - é `localhost` (ou um subdomínio `*.localhost`);
 - é um IP literal (IPv4 ou IPv6).
 
-Fora de produção o comportamento não mudou: a suíte usa
+Em `development`/`test` o comportamento não mudou: a suíte usa
 `https://issuer.test` e continua aceita. A validação anterior (HTTPS, sem
-credenciais/path/query/fragmento, host canônico) permanece. Testes cobrem os
-dois ambientes em `apps/api/src/config.test.ts`; `.env.example` documenta a
-restrição.
+credenciais/path/query/fragmento, host canônico) permanece. Testes cobrem
+`development`/`test`, `production` e os valores não relaxados em
+`apps/api/src/config.test.ts`; `.env.example` documenta a restrição.
 
 **Motivo:** uma credencial é uma afirmação pública. Aceitar uma origem que
 nunca será controlada pelo projeto em produção produziria identificadores
@@ -455,7 +457,9 @@ novo e uma credencial emitida depois da mudança seria revogada por um replay
 idêntico. Para separar as duas responsabilidades, a `validation` ganhou
 `last_evaluated_policy_hash`/`last_evaluated_scorer_version` (migração
 `0036_validation_last_evaluated_binding.sql`), atualizados pelo deep path. A
-comparação usa o último valor, com fallback para o binding em linhas legadas.
+comparação usa o último valor, com fallback para o binding em linhas legadas
+(que ficam NULL: não há backfill — a última avaliação de uma linha antiga é
+desconhecida, e um UPDATE unbatched bloquearia a tabela).
 Assim, a primeira execução sob a policy B grava novo `completed_at`; as
 reexecuções idênticas sob B preservam esse instante e **não** revogam a
 credencial emitida depois. O binding declarado na credencial continua sendo o
@@ -528,6 +532,15 @@ Determinismo vale enquanto issuer, chave de assinatura, policy (TTL) e
 `credentialId` não mudarem. Rotação de chave é uma prova nova por definição e
 muda `proof.verificationMethod`; isso é intencional. A reemissão **não reativa**
 uma credencial `REVOKED` (revogação é monotônica).
+
+**Troca de `CREDENTIAL_ISSUER_ORIGIN` bloqueia a reemissão.** O `credential_id`
+deriva do `issuer.id`, que inclui a origem: sob uma origem nova, reemitir a mesma
+validation produziria outro `credential_id`, incompatível com a linha
+append-only da primeira emissão (PK `validation_id`). O conflito é explícito —
+`CredentialIssuanceError` com detalhe `ISSUANCE_IDENTITY_CONFLICT`, respondido
+como `409 CREDENTIAL_NOT_ISSUABLE` —, nunca um `500`. Uma origem nova exige uma
+validation nova; o teste de integração cobre emissão → troca de origem →
+reemissão.
 
 ### C1 — credenciais superadas
 

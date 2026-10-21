@@ -52,9 +52,15 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   conhece domínio nenhum: o valor é validado no boot (HTTPS, sem
   path/query/fragmento) e, enquanto não houver um domínio de produção
   confirmado, use uma origem reservada (`https://issuer.test`). O `tenant_id`
-  interno **não** aparece na URL — o path do issuer leva um digest do tenant. Em
-  produção (`NODE_ENV=production`), o boot recusa TLDs reservados (`.test`,
-  `.example`, `.invalid`, `.localhost`, `.local`), `localhost` e IP literal.
+  interno **não** aparece na URL — o path do issuer leva um digest do tenant. A
+  validação da origem é **fail-safe**: só é relaxada com `NODE_ENV=development`
+  ou `NODE_ENV=test`; com `NODE_ENV` ausente, `prod`, `staging` ou `production`
+  o boot recusa TLDs reservados (`.test`, `.example`, `.invalid`, `.localhost`,
+  `.local`), `localhost` e IP literal. Como o `issuer.id` (e o `credential_id`)
+  derivam da origem, **trocar `CREDENTIAL_ISSUER_ORIGIN` impede reemitir
+  validations já emitidas** — a API responde `409 CREDENTIAL_NOT_ISSUABLE` com
+  detalhe `ISSUANCE_IDENTITY_CONFLICT`; a origem definitiva deve ser escolhida
+  antes de emitir em produção.
 - **`CREDENTIAL_SIGNING_KEYS`** assina a credencial **por tenant** (ADR-0026).
   É um JSON — lista de `{"tenant_id", "key_id", "private_key_pem"}` — lido no
   boot: JSON inválido, PEM inválida ou chave não-Ed25519 **derrubam a API**

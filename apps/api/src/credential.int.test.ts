@@ -702,6 +702,36 @@ describe('emissão HTTP e verificação com resolução de chave pública', () =
     expect(statuses).toHaveLength(1)
   })
 
+  it('mudança de CREDENTIAL_ISSUER_ORIGIN bloqueia a reemissão com 409 explícito', async () => {
+    const validationId = await newValidation()
+    // Primeira emissão sob a origem configurada.
+    await issue(validationId)
+
+    // A mesma validation reemitida por uma API com OUTRA origem: o
+    // `credential_id` derivado do issuer muda, mas a linha da primeira emissão é
+    // append-only e presa à validation. Precisa ser um 409 com detalhe, não 500.
+    const changedApp = await buildApp({
+      config: { ...config, CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.changed.test' },
+      db: appPool.db,
+      redis,
+      logger: createLogger({ level: 'silent' }),
+      metrics: createMetrics(),
+    })
+    try {
+      const res = await changedApp.inject({
+        method: 'POST',
+        url: `/v1/validations/${validationId}/credential`,
+        headers: { authorization: `Bearer ${key.plaintext}` },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.headers['content-type']).toContain('application/problem+json')
+      expect(res.json().code).toBe('CREDENTIAL_NOT_ISSUABLE')
+      expect(res.json().detail).toBe('ISSUANCE_IDENTITY_CONFLICT')
+    } finally {
+      await changedApp.close()
+    }
+  })
+
   it('publica apenas material público em GET /issuers/:scope', async () => {
     const credential = (await postCredential(await newValidation())).json() as SecuredVerifiableCredential
 

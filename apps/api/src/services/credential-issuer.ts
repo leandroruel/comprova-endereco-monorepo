@@ -14,7 +14,10 @@ import {
   type SecuredVerifiableCredential,
 } from '@comprova/credential'
 import type { SigningKeyResolver } from './signing-keys.js'
-import { ensureFirstCredentialIssuance } from './credential-status.js'
+import {
+  CredentialIssuanceIdentityConflictError,
+  ensureFirstCredentialIssuance,
+} from './credential-status.js'
 import { signingKeyTrustedCondition } from './signing-key-lifecycle.js'
 
 /**
@@ -45,6 +48,7 @@ export type CredentialIssuanceFailure =
   | 'EVIDENCE_MISSING'
   | 'SIGNING_KEY_UNAVAILABLE'
   | 'SIGNING_KEY_MISMATCH'
+  | 'ISSUANCE_IDENTITY_CONFLICT'
 
 export class CredentialIssuanceError extends Error {
   readonly failure: CredentialIssuanceFailure
@@ -376,14 +380,27 @@ export const issueCredential = async (
   // Em reemissão, `issued_at` original é reutilizado como `proof.created`, de
   // modo que o documento assinado é byte a byte o mesmo (mesma issuer/key/
   // policy). Reemitir não reativa uma credencial REVOKED.
-  const issuedAt = await ensureFirstCredentialIssuance(
-    db,
-    tenantId,
-    issuerScope,
-    credentialSource.validation.id,
-    credentialId,
-    deps.now ?? (() => new Date()),
-  )
+  //
+  // A troca de `CREDENTIAL_ISSUER_ORIGIN` muda o `credential_id` derivado do
+  // issuer, mas a linha da primeira emissão é append-only e presa à validação:
+  // o conflito é traduzido para `CredentialIssuanceError` para a rota responder
+  // 409 com detalhe, em vez de 500.
+  let issuedAt: Date
+  try {
+    issuedAt = await ensureFirstCredentialIssuance(
+      db,
+      tenantId,
+      issuerScope,
+      credentialSource.validation.id,
+      credentialId,
+      deps.now ?? (() => new Date()),
+    )
+  } catch (error) {
+    if (error instanceof CredentialIssuanceIdentityConflictError) {
+      throw new CredentialIssuanceError('ISSUANCE_IDENTITY_CONFLICT', error.message)
+    }
+    throw error
+  }
 
   // A credencial só é devolvida depois que a primeira emissão e o status ACTIVE
   // estão persistidos: se o insert falhar, a emissão falha (fail closed).

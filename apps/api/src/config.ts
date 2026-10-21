@@ -52,11 +52,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!parsed.success) {
     throw new Error(`invalid configuration: ${z.prettifyError(parsed.error)}`)
   }
-  // Em produção a origem precisa ser um nome DNS público: `issuer.test`,
-  // `localhost`, `.local` e IP literal passam pelo parser (são HTTPS válidos)
-  // mas nunca seriam identificadores públicos de um issuer. Fora de produção a
-  // origem reservada continua aceita (é o default de dev/testes).
-  if (env.NODE_ENV === 'production') {
+  // Fora de desenvolvimento/teste a origem precisa ser um nome DNS público:
+  // `issuer.test`, `localhost`, `.local` e IP literal passam pelo parser (são
+  // HTTPS válidos) mas nunca seriam identificadores públicos de um issuer. O
+  // guard é fail-safe: `NODE_ENV` ausente, `prod` ou `staging` também recusam
+  // (não dá para assumir que a ausência do valor significa desenvolvimento).
+  const relaxedIssuerOrigin = env.NODE_ENV === 'development' || env.NODE_ENV === 'test'
+  if (!relaxedIssuerOrigin) {
     try {
       assertProductionIssuerOrigin(parsed.data.CREDENTIAL_ISSUER_ORIGIN)
     } catch (error) {

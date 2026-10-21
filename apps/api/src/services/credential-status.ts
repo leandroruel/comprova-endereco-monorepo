@@ -65,6 +65,24 @@ export const ensureActiveCredentialStatus = async (
 }
 
 /**
+ * Conflito de identidade da PRIMEIRA emissão: existe uma linha
+ * `credential_issuance` para a validation, mas o `credential_id`/escopo atual
+ * não é o mesmo. O caso real é uma troca de `CREDENTIAL_ISSUER_ORIGIN` (o
+ * `credential_id` deriva do `issuer.id`, que inclui a origem): reemitir sob a
+ * origem nova contradiz o ponteiro gravado na primeira prova.
+ *
+ * Como `validation_id` é a PK e a linha é append-only, isso não é transitório:
+ * o chamador (`issueCredential`) traduz para `CredentialIssuanceError`
+ * (`ISSUANCE_IDENTITY_CONFLICT`), que a rota responde como 409 — nunca 500.
+ */
+export class CredentialIssuanceIdentityConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CredentialIssuanceIdentityConflictError'
+  }
+}
+
+/**
  * Persiste a PRIMEIRA emissão da validation e garante o status ACTIVE, na
  * MESMA transação. Em replay, devolve o `issued_at` original e não reativa uma
  * credencial REVOKED. `now` só é lido quando não existe linha: o instante da
@@ -105,7 +123,10 @@ export const ensureFirstCredentialIssuance = async (
         existing.issuerScope !== issuerScope ||
         existing.credentialId !== credentialId
       ) {
-        throw new Error(`credential issuance identity conflict for validation ${validationId}`)
+        throw new CredentialIssuanceIdentityConflictError(
+          `credential issuance for validation ${validationId} is bound to a different issuer identity; ` +
+            'changing CREDENTIAL_ISSUER_ORIGIN does not allow reissuance',
+        )
       }
       return existing.issuedAt
     }
@@ -113,8 +134,12 @@ export const ensureFirstCredentialIssuance = async (
     const rows = await read()
     const existing = rows[0]
     if (existing !== undefined) {
+      // Verifica a identidade ANTES de tocar o status: sob a origem nova o
+      // `credential_id` muda e o conflito é definitivo (append-only). Não há
+      // por que tentar inserir um status que a transação descartaria.
+      const issuedAt = verify(existing)
       await ensureActiveCredentialStatusInTx(tx, tenantId, issuerScope, credentialId)
-      return verify(existing)
+      return issuedAt
     }
 
     const first = now()

@@ -9,10 +9,12 @@ por item e com testes. A decisão consolidada está em
 `docs/adr/0024-conformidade-w3c-identificadores-e-tempos.md`, seção **“Revisão
 pós-PR #5”**.
 
-- **A1 (`82af9d4`)** — em produção, `CREDENTIAL_ISSUER_ORIGIN` recusa TLDs
-  reservados (`.test`, `.example`, `.invalid`, `.localhost`, `.local`),
-  `localhost` e IP literal; dev/test continuam aceitando `https://issuer.test`.
-  Testes de config cobrem os dois ambientes; `.env.example` documenta.
+- **A1 (`82af9d4`, revisão do PR #31)** — a checagem de origem é **fail-safe**:
+  só `NODE_ENV=development|test` relaxa; `production`, `prod`, `staging` e
+  `NODE_ENV` ausente recusam TLDs reservados (`.test`, `.example`, `.invalid`,
+  `.localhost`, `.local`), `localhost` e IP literal. O `dev` da API declara
+  `NODE_ENV=development` e `.env.example` o documenta, para `https://issuer.test`
+  continuar aceito em desenvolvimento sem afrouxar produção.
 - **A2 (`b919ade`)** — `verifyCredential` → `verifyCredentialIntegrity`, com
   `checked { integrity, time, status }` e `now?: Date`. Janela temporal
   `[validFrom, validUntil)`, `NOT_YET_VALID`/`EXPIRED`; status permanece
@@ -29,11 +31,15 @@ pós-PR #5”**.
   `credential_ttl_seconds` é opcional (default 30 dias) e nenhuma policy
   publicada foi alterada. `expires_at` segue como retenção; janela
   vazia/invertida → `VALIDITY_WINDOW_INVALID`.
-- **B2 (`24d1cd9`)** — migração `0034_credential_issuance.sql` (RLS,
-  append-only) guarda `issued_at` e o ponteiro de status por validation. A
+- **B2 (`24d1cd9`, revisão do PR #31)** — migração `0034_credential_issuance.sql`
+  (RLS, append-only) guarda `issued_at` e o ponteiro de status por validation. A
   primeira emissão e o status `ACTIVE` são gravados na mesma transação; reemitir
   usa `proof.created = issued_at` e devolve JSON byte a byte igual (teste
-  compara o documento inteiro e a unicidade das linhas).
+  compara o documento inteiro e a unicidade das linhas). Trocar
+  `CREDENTIAL_ISSUER_ORIGIN` muda o `credential_id` e bloqueia a reemissão de
+  forma explícita (`409 CREDENTIAL_NOT_ISSUABLE`, detalhe
+  `ISSUANCE_IDENTITY_CONFLICT`); teste de integração cobre emissão → troca de
+  origem → reemissão.
 - **C1 (`1146c68`)** — migração `0035_credential_status_reason.sql` adiciona
   `revocation_reason` (`manual`/`superseded`). Mudança de veredito, evidências,
   policy/scorer ou regressão a `partial` revoga a credencial já emitida como
@@ -47,6 +53,15 @@ pós-PR #5”**.
 - **Documentação** — ADR-0024 ganhou a seção de revisão (incluindo riscos de
   vocabulário/domínio, correlação estável de CPF e SHA-256 vs HMAC do escopo do
   tenant); README e `.env.example` atualizados.
+- **Revisão do PR #31** — guard de origem fail-safe (não só
+  `NODE_ENV=production`); default de policy do worker alinhado ao da API
+  (`2026.13.1`, evita revogação espúria de credenciais sob a policy correta);
+  conflito de troca de origem vira `409 ISSUANCE_IDENTITY_CONFLICT` tipado; ADR
+  corrigido (`validFrom <= validUntil`, ordem do `now` após a assinatura, tabela
+  sem `comprova:expiresAt`); `revocation_reason` restrito a
+  `manual|superseded` (`NOT VALID` + `VALIDATE`); backfill unbatched da `0036`
+  removido (o código já cai no binding imutável quando `last_evaluated_*` é
+  NULL).
 - **Validação** — `pnpm typecheck`, `pnpm lint`, `pnpm test` e `pnpm db:fence`
   executados. Nenhum teste de integração precisou ser pulado (Docker
   disponível). A suíte cobre as migrações `0034`/`0035`/`0036`.
