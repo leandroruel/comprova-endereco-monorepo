@@ -74,7 +74,12 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   `GET /.well-known/comprova-issuer/:scope`, em `publicKeyMultibase`); a
   privada nunca é persistida, logada nem devolvida. A chave pública publicada
   tem de **corresponder** ao material configurado, senão a emissão falha com
-  `SIGNING_KEY_MISMATCH`. (Limitação operacional deste passo: sem KMS/HSM, o
+  `SIGNING_KEY_MISMATCH`. O domínio de emissão não resolve a privada
+  diretamente: ele fala com um `SigningKeyProvider`
+  (`apps/api/src/services/signing-key-provider.ts`) e recebe um assinador para a
+  chave **já selecionada** (tenant + `key_id` + pública publicada). A
+  implementação atual lê `CREDENTIAL_SIGNING_KEYS`; KMS/HSM serão providers
+  futuros, sem mudar o domínio. (Limitação operacional deste passo: sem KMS/HSM, o
   material privado vive em configuração/segredo externo.) Uma chave com
   `revoked_at` (ADR-0029) sai dos documentos públicos e deixa de ser aceita; o
   `active = false` continua sendo apenas rotação.

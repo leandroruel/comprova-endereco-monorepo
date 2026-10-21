@@ -19,9 +19,10 @@ const EnvSchema = z.object({
    *
    * A chave PRIVADA fica aqui (configuração/segredo externo) e é associada à
    * chave publicada no banco por (`tenant_id`, `key_id`) — nunca é persistida
-   * (ADR-0026). É parseada no boot por `makeSigningKeyResolver`: JSON inválido,
-   * PEM inválida ou não-Ed25519 derrubam a API antes de aceitar tráfego. Vazio =
-   * nenhum tenant provisionado; a emissão daquele tenant falha fechado.
+   * (ADR-0026). É lida no boot por `makeConfiguredSigningKeyProvider` (provider
+   * de assinatura local): JSON inválido, PEM inválida ou não-Ed25519 derrubam a
+   * API antes de aceitar tráfego. Vazio = nenhum tenant provisionado; a emissão
+   * daquele tenant falha fechado.
    */
   CREDENTIAL_SIGNING_KEYS: z.string().default('[]'),
   PORT: z.coerce.number().int().default(3000),

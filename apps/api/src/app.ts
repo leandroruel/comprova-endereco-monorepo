@@ -43,7 +43,7 @@ import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
-import { makeSigningKeyResolver } from './services/signing-keys.js'
+import { makeConfiguredSigningKeyProvider } from './services/signing-key-provider.js'
 import { readPolicyFile } from './policy-loader.js'
 
 export const buildFastPathDeps = (
@@ -156,17 +156,20 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const authenticate = makeAuthenticate(deps.db, hasher)
   const rateLimit = makeRateLimiter(deps.redis)
 
-  // Material privado de assinatura por tenant resolvido no boot: JSON inválido,
-  // PEM inválida ou chave não-Ed25519 derrubam a API antes de aceitar tráfego
-  // (falha fechado). A privada fica em memória; só a pública é publicada. Não há
-  // chave global de reserva: cada tenant tem a sua (ADR-0026).
-  const signingKeys = makeSigningKeyResolver(deps.config.CREDENTIAL_SIGNING_KEYS)
+  // Provider de assinatura por tenant resolvido no boot: JSON inválido, PEM
+  // inválida ou chave não-Ed25519 derrubam a API antes de aceitar tráfego
+  // (falha fechado). A privada fica em memória, atrás do provider; só a pública
+  // é publicada. Não há chave global de reserva: cada tenant tem a sua
+  // (ADR-0026). O domínio de emissão não conhece a origem do material — a
+  // implementação atual é a de configuração local; KMS/HSM serão providers
+  // futuros (roadmap #24).
+  const signingKeyProvider = makeConfiguredSigningKeyProvider(deps.config.CREDENTIAL_SIGNING_KEYS)
 
   const cache = makeRedisCache(deps.redis, deps.logger)
   const fastPath = buildFastPathDeps(deps.db, deps.config, cache)
   const credentialIssuer = {
     issuerOrigin: deps.config.CREDENTIAL_ISSUER_ORIGIN,
-    signingKeys,
+    signingKeyProvider,
     credentialTtlSeconds: fastPath.policy.credential_ttl_seconds,
   }
   const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)

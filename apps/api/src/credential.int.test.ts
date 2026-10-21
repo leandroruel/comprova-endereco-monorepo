@@ -42,7 +42,7 @@ import { buildApp, buildFastPathDeps } from './app.js'
 import type { AppConfig } from './config.js'
 import { CredentialIssuanceError, issueCredential } from './services/credential-issuer.js'
 import { runFastPath } from './services/fastpath.js'
-import { makeSigningKeyResolver } from './services/signing-keys.js'
+import { makeConfiguredSigningKeyProvider } from './services/signing-key-provider.js'
 
 // FASE 12 — ponta a ponta: validation persistida → credential builder → credencial
 // assinada → JSON transportável → verifier independente → VALID. Também cobre a
@@ -244,14 +244,14 @@ const observationsOf = (claimId: string) =>
     .where(eq(t.claimEvidence.claimId, claimId))
 
 const issuer = localIssuer(ISSUER_ORIGIN, tenantId, KEY_ID)
-const signingKeys = makeSigningKeyResolver(config.CREDENTIAL_SIGNING_KEYS)
+const signingKeyProvider = makeConfiguredSigningKeyProvider(config.CREDENTIAL_SIGNING_KEYS)
 /** Método confiável declarado pelo consumidor (identidade + chave). */
 const trusted = { id: verificationMethodOf(issuer), publicKey: signing.publicKey }
 
 const issue = (validationId: string, now?: () => Date): Promise<SecuredVerifiableCredential> =>
   issueCredential(appPool.db, tenantId, validationId, {
     issuerOrigin: ISSUER_ORIGIN,
-    signingKeys,
+    signingKeyProvider,
     now,
   })
 
@@ -554,7 +554,7 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
     const validationId = await newValidation()
     const credential = await issueCredential(appPool.db, tenantId, validationId, {
       issuerOrigin: ISSUER_ORIGIN,
-      signingKeys,
+      signingKeyProvider,
     })
 
     expect(credential.issuer).toBe(issuerIdOf(ISSUER_ORIGIN, tenantId))
@@ -1166,7 +1166,7 @@ describe('chave de assinatura escopada por tenant', () => {
     await expect(
       issueCredential(appPool.db, unconfiguredTenant, validationId, {
         issuerOrigin: ISSUER_ORIGIN,
-        signingKeys,
+        signingKeyProvider,
       }),
     ).rejects.toMatchObject({ failure: 'SIGNING_KEY_UNAVAILABLE' })
   })
