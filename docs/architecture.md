@@ -77,6 +77,12 @@ O ingestor com UPSERT detecta mudanças (logradouro, número, CEP, situação, C
 | API /v1   | Bearer token (API key HMAC-SHA256) + sessionMiddleware lê cookie Better Auth |
 | Banco     | RLS FORCE: `SET app.tenant_id` em toda transação via `withTenant()`          |
 
+Depois da autenticação, as rotas `/v1` exigem o scope da operação no
+`preHandler` (`validate:read` para leitura, `validate:write` para mutação). A
+API key sem scope recebe 403; o isolamento por tenant continua no RLS e
+devolve 404 para recursos de outro tenant. Mapa e decisão em
+[ADR-0030](adr/0030-enforcement-de-scopes-das-api-keys.md).
+
 ## Stats por usuário
 
 O middleware de sessão Better Auth extrai `user.id` do cookie e anexa a `request.sessionUser`.
