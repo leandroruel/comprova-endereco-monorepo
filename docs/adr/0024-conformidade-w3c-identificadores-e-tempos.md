@@ -550,7 +550,8 @@ Quando o deep path produz uma conclusão diferente da persistida — veredito,
 revogadas como **`superseded`** na MESMA transação da atualização do resultado.
 Se a revogação falhar, a nova conclusão também não é persistida.
 
-- `credential_status.revocation_reason` (migração `0035_credential_status_reason.sql`)
+- `credential_status.revocation_reason` (migração `0035_credential_status_reason.sql`,
+  com a constraint validada na `0037_credential_status_reason_validate.sql`)
   registra `manual` (rota autenticada) ou `superseded` (deep path). A coluna não
   é exposta no endpoint público.
 - A revogação só casa linhas `ACTIVE`; replay idêntico não revoga e reexecuções
@@ -603,7 +604,7 @@ DID é uma porta de descoberta, não um segundo emissor.
 - `pnpm typecheck`
 - `pnpm lint`
 - `pnpm test` (unidade + integração; Docker disponível)
-- `pnpm db:fence` para as migrações `0034`/`0035`/`0036`
+- `pnpm db:fence` para as migrações `0034`–`0037`
 - Testes de integração relevantes: `apps/api/src/credential.int.test.ts`,
   `apps/worker/src/modules/deep-enrich/deep-enrich.int.test.ts` e
   `apps/worker/src/deep-path.e2e.test.ts`.

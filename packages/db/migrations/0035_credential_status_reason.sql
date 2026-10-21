@@ -23,9 +23,9 @@ ALTER TABLE credential_status
     (status = 'REVOKED' AND (revocation_reason IS NULL OR revocation_reason IN ('manual', 'superseded')))
   ) NOT VALID;
 
--- `NOT VALID` evita o scan bloqueante sob `lock_timeout`; a validação é um
--- passo separado (SHARE UPDATE EXCLUSIVE, não bloqueia leituras/escritas).
-ALTER TABLE credential_status VALIDATE CONSTRAINT credential_status_reason_ck;
-
+-- `NOT VALID` evita o scan bloqueante sob `lock_timeout`. A validação fica na
+-- migração seguinte (`0037`), em outra transação: o runner executa cada arquivo
+-- em um único `BEGIN`, e validar aqui manteria o ACCESS EXCLUSIVE do
+-- ADD CONSTRAINT ativo durante o scan, bloqueando leituras/escritas.
 COMMENT ON COLUMN credential_status.revocation_reason IS
   'Motivo auditável da revogação: manual | superseded (não exposto publicamente)';

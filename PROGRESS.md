@@ -59,9 +59,12 @@ pós-PR #5”**.
   conflito de troca de origem vira `409 ISSUANCE_IDENTITY_CONFLICT` tipado; ADR
   corrigido (`validFrom <= validUntil`, ordem do `now` após a assinatura, tabela
   sem `comprova:expiresAt`); `revocation_reason` restrito a
-  `manual|superseded` (`NOT VALID` + `VALIDATE`); backfill unbatched da `0036`
-  removido (o código já cai no binding imutável quando `last_evaluated_*` é
-  NULL).
+  `manual|superseded` (`NOT VALID` na `0035` + `VALIDATE` na `0037`, em
+  transações separadas para não manter o `ACCESS EXCLUSIVE` durante o scan);
+  backfill unbatched da `0036` removido (o código já cai no binding imutável
+  quando `last_evaluated_*` é NULL); a assertion é montada antes de persistir a
+  primeira emissão/status `ACTIVE`, então uma validation legada sem bindings não
+  deixa status de uma credencial nunca devolvida.
 - **Validação** — `pnpm typecheck`, `pnpm lint`, `pnpm test` e `pnpm db:fence`
   executados. Nenhum teste de integração precisou ser pulado (Docker
   disponível). A suíte cobre as migrações `0034`/`0035`/`0036`.

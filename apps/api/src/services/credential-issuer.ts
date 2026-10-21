@@ -4,6 +4,7 @@ import * as t from '@comprova/db'
 import { and, eq, withTenant } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import {
+  buildAssertion,
   buildCredential,
   credentialIdOf,
   ed25519PublicKeyBytes,
@@ -375,6 +376,13 @@ export const issueCredential = async (
   // segundo status para a mesma validation.
   const credentialId = credentialIdOf(issuer.id, credentialSource.validation.id)
   const issuerScope = issuerScopeOf(tenantId)
+
+  // Valida a assertion ANTES de persistir a primeira emissão/status ACTIVE.
+  // `buildCredential` chama `buildAssertion`, que recusa bindings ausentes
+  // (validation anterior à 0028), `completed_at` nulo e evidence_set_hash
+  // incoerente. Sem esta checagem, o erro só apareceria depois do commit da
+  // emissão, deixando ACTIVE uma credencial que nunca foi devolvida.
+  buildAssertion(credentialSource, issuer.id)
 
   // B2: o instante da PRIMEIRA prova é persistido na mesma transação do status.
   // Em reemissão, `issued_at` original é reutilizado como `proof.created`, de
