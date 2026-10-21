@@ -163,9 +163,10 @@ tenant A com `keys:write` tentando revogar signing key do tenant B recebe
 - Não há migração: `api_key.scopes` é `text[]` e já aceita o novo valor. O
   grant é um `UPDATE` operacional, não uma alteração de schema.
 - `validation.issuer_scopes` continua sendo o snapshot **completo** de todos os
-  scopes da API key no momento da emissão (ADR-0017), inclusive `keys:write`,
-  para auditoria. A credencial publica em `assertionAuthority.scopes` somente
-  os scopes de validação (`validate:read`/`validate:write`). `keys:write` é uma
+  scopes da API key associado à validation (gravado na criação e imutável)
+  (ADR-0017), inclusive `keys:write`, para auditoria. A credencial publica em
+  `assertionAuthority.scopes` somente os scopes de validação
+  (`validate:read`/`validate:write`). `keys:write` é uma
   capacidade administrativa da API key (ator), não uma permissão do titular
   nem uma declaração da credencial, e por isso não entra no documento assinado.
   O termo é publicado sem o prefixo do produto e declarado no `@context`; o IRI

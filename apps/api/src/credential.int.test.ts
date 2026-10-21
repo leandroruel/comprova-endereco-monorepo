@@ -330,7 +330,7 @@ describe('emissão e verificação independente', () => {
     const row = await validationRow(validationId)
 
     // Auditoria: o snapshot persistido continua sendo a autoridade EFETIVA
-    // completa da API key no momento da emissão.
+    // completa da API key associada à validation.
     expect(row?.issuerScopes).toEqual(['validate:read', 'validate:write', 'keys:write'])
 
     const res = await app.inject({

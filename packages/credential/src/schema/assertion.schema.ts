@@ -149,9 +149,11 @@ export interface AssertionSource {
     readonly evidenceSetHash: string | null
     readonly legalBasis: string
     /**
-     * Snapshot COMPLETO dos scopes da API key no momento da emissão
-     * (`validation.issuer_scopes`), usado para auditoria. O mapping para a
-     * credencial filtra capacidades administrativas (`assertionAuthorityScopes`).
+     * Snapshot COMPLETO dos scopes da API key associado à validation
+     * (`validation.issuer_scopes`): é gravado quando a validation é criada e
+     * permanece imutável. Não é recalculado na emissão da credencial. O mapping
+     * filtra capacidades administrativas (`assertionAuthorityScopes`); o
+     * snapshot completo fica para auditoria.
      */
     readonly issuerScopes: readonly string[] | null
     readonly explanation: AssertionPayload['result']['explanation']
