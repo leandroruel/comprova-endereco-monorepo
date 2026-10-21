@@ -31,6 +31,8 @@ export interface CreateIssuerSigningKeyOptions {
   readonly active?: boolean
   /** Instante de revogação/expiração (ADR-0029); `null`/ausente = confiável. */
   readonly revokedAt?: Date | null
+  /** Referência do backend externo (AWS KMS); `null`/ausente = material local. */
+  readonly kmsKeyReference?: string | null
 }
 
 /**
@@ -52,6 +54,7 @@ export const createIssuerSigningKey = async (
     keyId: key.keyId,
     algorithm: 'Ed25519',
     publicKey: ed25519PublicKeyBytes(key.publicKey),
+    kmsKeyReference: opts.kmsKeyReference ?? null,
     active: opts.active ?? true,
     revokedAt: opts.revokedAt ?? null,
   })

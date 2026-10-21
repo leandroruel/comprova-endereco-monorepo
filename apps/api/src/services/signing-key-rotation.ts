@@ -1,9 +1,9 @@
-import { createPublicKey, randomUUID } from 'node:crypto'
-import { ed25519PublicKeyBytes, issuerScopeOf } from '@comprova/credential'
+import { randomUUID } from 'node:crypto'
+import { issuerScopeOf } from '@comprova/credential'
 import { and, eq, sql, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
-import type { SigningKeyEntry } from './signing-keys.js'
+import { kmsKeyReferenceOf, publicKeyOf, type SigningKeyEntry } from './signing-keys.js'
 
 /**
  * Rotação de chave de assinatura (roadmap #24, etapa 24.2; ADR-0026/ADR-0029).
@@ -17,6 +17,10 @@ import type { SigningKeyEntry } from './signing-keys.js'
  * `revoked_at` (o hard stop, ADR-0029) NUNCA é tocado aqui: revogar é uma
  * decisão de confiança, separada de rotacionar. Uma chave superada continua
  * confiável para o passado até que alguém a revogue explicitamente.
+ *
+ * A entrada pode ser local ou AWS KMS (ADR-0032). Para KMS, a pública já vem
+ * resolvida com `GetPublicKey` e a referência canônica é persistida junto; a
+ * privada nunca sai do KMS.
  *
  * Quem executa é a operação ADMINISTRATIVA (conexão owner, como o
  * provisionamento): a aplicação só LÊ `issuer_signing_key` e atualiza
@@ -82,7 +86,8 @@ export const rotateSigningKey = async (
   entry: SigningKeyEntry,
   logger: Logger,
 ): Promise<SigningKeyRotationOutcome> => {
-  const publicKey = ed25519PublicKeyBytes(createPublicKey(entry.privateKey))
+  const publicKey = publicKeyOf(entry)
+  const kmsKeyReference = kmsKeyReferenceOf(entry)
   const lockKey = `comprova-signing-key-rotate:${entry.tenantId}`
 
   return db.transaction(async (tx) => {
@@ -98,7 +103,11 @@ export const rotateSigningKey = async (
 
     const published = (
       await tx
-        .select({ publicKey: t.issuerSigningKey.publicKey, active: t.issuerSigningKey.active })
+        .select({
+          publicKey: t.issuerSigningKey.publicKey,
+          active: t.issuerSigningKey.active,
+          kmsKeyReference: t.issuerSigningKey.kmsKeyReference,
+        })
         .from(t.issuerSigningKey)
         .where(
           and(eq(t.issuerSigningKey.tenantId, entry.tenantId), eq(t.issuerSigningKey.keyId, entry.keyId)),
@@ -110,6 +119,11 @@ export const rotateSigningKey = async (
       if (!Buffer.from(published.publicKey).equals(publicKey)) {
         throw new SigningKeyRotationError(
           `issuer_signing_key already published a different public key for tenant ${entry.tenantId} key ${entry.keyId}; a published key is never overwritten`,
+        )
+      }
+      if (published.kmsKeyReference !== kmsKeyReference) {
+        throw new SigningKeyRotationError(
+          `issuer_signing_key already published tenant ${entry.tenantId} key ${entry.keyId} with a different signing backend reference; a published key is never overwritten`,
         )
       }
       if (published.active) {
@@ -162,6 +176,7 @@ export const rotateSigningKey = async (
       keyId: entry.keyId,
       algorithm: 'Ed25519',
       publicKey,
+      kmsKeyReference,
       active: true,
     })
 

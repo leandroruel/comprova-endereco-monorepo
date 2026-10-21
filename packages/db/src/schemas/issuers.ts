@@ -7,11 +7,13 @@ import { tenant } from './tenancy.js'
  * Chave de assinatura do issuer de um tenant (FASE 14). Cada tenant tem a sua,
  * de modo que o comprometimento de uma chave não atinge os demais issuers.
  *
- * A tabela guarda SOMENTE material público: a chave pública crua (32 bytes) e os
- * metadados do método. A chave privada nunca é persistida — ela vive em
- * configuração/segredo externo e é associada aqui por (`tenant_id`, `key_id`)
- * (ADR-0026). `issuer_scope` é o digest opaco do tenant que aparece na URL do
- * issuer; é o que permite ao endpoint público resolver a chave pelo `issuer.id`.
+ * A tabela guarda SOMENTE material público e referências: a chave pública crua
+ * (32 bytes), os metadados do método e, para chaves externas, a referência do
+ * backend (`kms_key_reference`). A chave privada nunca é persistida — ela vive
+ * em configuração/segredo externo (ou no KMS) e é associada aqui por
+ * (`tenant_id`, `key_id`) (ADR-0026/ADR-0032). `issuer_scope` é o digest opaco
+ * do tenant que aparece na URL do issuer; é o que permite ao endpoint público
+ * resolver a chave pelo `issuer.id`.
  *
  * `active = false` marca a chave superada (rotação): ela deixa de assinar
  * credenciais novas, mas continua publicada para verificar as antigas. NÃO é
@@ -28,6 +30,13 @@ export const issuerSigningKey = pgTable(
     keyId: text('key_id').notNull(),
     algorithm: text('algorithm').notNull(),
     publicKey: bytea('public_key').notNull(),
+    // Referência da chave no backend externo de assinatura (AWS KMS). NULL =
+    // material local em `CREDENTIAL_SIGNING_KEYS`. É uma referência opaca, nunca
+    // material privado; o KMS assina e a verificação pública continua local
+    // (ADR-0032). Imutável depois de publicada (trigger da migration 0038) e
+    // não é devolvida pelos endpoints públicos (eles selecionam colunas
+    // explícitas).
+    kmsKeyReference: text('kms_key_reference'),
     active: boolean('active').notNull().default(true),
     // `revoked_at` é o hard stop (ADR-0029): NULL = confiável; passado =
     // revogada/expirada; futuro = expiração agendada. A chave sai dos

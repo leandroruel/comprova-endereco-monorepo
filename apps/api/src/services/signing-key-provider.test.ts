@@ -42,6 +42,7 @@ const request = (tenantId: string, keyId: string, publicKey: Uint8Array): Signin
   tenantId,
   keyId,
   publicKey,
+  kmsKeyReference: null,
 })
 
 describe('makeConfiguredSigningKeyProvider', () => {
@@ -69,6 +70,18 @@ describe('makeConfiguredSigningKeyProvider', () => {
     await expect(provider.signerFor(request(OTHER, KEY_ID, other.publicKey))).rejects.toMatchObject({
       failure: 'SIGNING_KEY_UNAVAILABLE',
     })
+  })
+
+  it('não assina no backend local uma chave marcada como KMS (sem fallback cruzado)', async () => {
+    const key = testSigningKey()
+    const provider = providerFor([{ tenantId: TENANT, keyId: KEY_ID, pem: key.pem }])
+
+    await expect(
+      provider.signerFor({
+        ...request(TENANT, KEY_ID, key.publicKey),
+        kmsKeyReference: 'arn:aws:kms:sa-east-1:111122223333:key/1234',
+      }),
+    ).rejects.toMatchObject({ failure: 'SIGNING_KEY_UNAVAILABLE' })
   })
 
   it('material privado que não corresponde à pública publicada é recusado', async () => {

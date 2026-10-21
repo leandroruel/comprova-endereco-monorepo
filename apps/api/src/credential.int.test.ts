@@ -173,6 +173,7 @@ const config: AppConfig = {
     { tenantId: readOnlyTenantId, key: readOnlySigning },
     { tenantId: combinedTenantId, key: combinedSigning },
   ]),
+  SIGNING_KEY_PROVIDER: 'local',
   PORT: 3000,
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',

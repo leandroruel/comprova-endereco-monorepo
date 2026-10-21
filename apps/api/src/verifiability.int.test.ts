@@ -53,6 +53,7 @@ const config: AppConfig = {
   API_KEY_PEPPER: PEPPER,
   CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
   CREDENTIAL_SIGNING_KEYS: '[]',
+  SIGNING_KEY_PROVIDER: 'local',
   PORT: 3000,
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',

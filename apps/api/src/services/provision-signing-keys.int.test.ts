@@ -11,6 +11,7 @@ import {
   type TestCredentialSigningKey,
 } from '@comprova/testing'
 import { afterAll, describe, expect, it } from 'vitest'
+import { loadActiveSigningKey } from './credential-issuer.js'
 import { provisionSigningKeys, SigningKeyProvisioningError } from './provision-signing-keys.js'
 import { parseSigningKeys, type SigningKeyEntry } from './signing-keys.js'
 
@@ -33,6 +34,19 @@ afterAll(async () => {
 /** Entradas como o boot as veria: o JSON de config passa pelo mesmo parser. */
 const entriesOf = (tenantId: string, keys: readonly TestCredentialSigningKey[]): readonly SigningKeyEntry[] =>
   parseSigningKeys(signingKeysConfig(keys.map((key) => ({ tenantId, key }))))
+
+/** Entrada KMS com a pública já resolvida, como o CLI a monta após GetPublicKey. */
+const entryOfKms = (
+  key: TestCredentialSigningKey,
+  tenantId: string,
+  kmsKeyReference: string,
+): SigningKeyEntry => ({
+  kind: 'kms',
+  tenantId,
+  keyId: key.keyId,
+  kmsKeyReference,
+  publicKey: ed25519PublicKeyBytes(key.publicKey),
+})
 
 const rowsOf = async (tenantId: string) =>
   adminPool.db.select().from(t.issuerSigningKey).where(eq(t.issuerSigningKey.tenantId, tenantId))
@@ -192,5 +206,36 @@ describe('provisionSigningKeys', () => {
     const scopeA = (await rowsOf(tenantA))[0]!.issuerScope
     const scopeB = (await rowsOf(tenantB))[0]!.issuerScope
     expect(scopeA).not.toBe(scopeB)
+  })
+
+  it('publica chave KMS: pública lida do KMS e referência externa persistida', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'provision-kms' })
+    const key = createTestCredentialSigningKey('kms-key')
+    const kmsKeyReference = 'arn:aws:kms:sa-east-1:111122223333:key/1234abcd'
+
+    const outcomes = await provisionSigningKeys(
+      adminPool.db,
+      [entryOfKms(key, tenantId, kmsKeyReference)],
+      logger,
+    )
+
+    expect(outcomes).toEqual([{ tenantId, keyId: 'kms-key', status: 'published', active: true }])
+    const row = (await rowsOf(tenantId))[0]!
+    expect(row.kmsKeyReference).toBe(kmsKeyReference)
+    expect(Buffer.from(row.publicKey).equals(ed25519PublicKeyBytes(key.publicKey))).toBe(true)
+    expect(await loadActiveSigningKey(adminPool.db, tenantId)).toMatchObject({
+      keyId: 'kms-key',
+      kmsKeyReference,
+    })
+
+    // Repetir com a MESMA referência é idempotente...
+    await expect(
+      provisionSigningKeys(adminPool.db, [entryOfKms(key, tenantId, kmsKeyReference)], logger),
+    ).resolves.toEqual([{ tenantId, keyId: 'kms-key', status: 'unchanged', active: true }])
+
+    // ...mas trocar o backend/referência da chave publicada é recusado.
+    await expect(
+      provisionSigningKeys(adminPool.db, [entryOfKms(key, tenantId, `${kmsKeyReference}-other`)], logger),
+    ).rejects.toBeInstanceOf(SigningKeyProvisioningError)
   })
 })

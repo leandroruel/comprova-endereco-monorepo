@@ -10,6 +10,22 @@ const baseEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...overrides,
 })
 
+describe('loadConfig — backend de assinatura', () => {
+  it('default é local (KMS nunca vira default silenciosamente)', () => {
+    expect(loadConfig(baseEnv()).SIGNING_KEY_PROVIDER).toBe('local')
+  })
+
+  it('aceita aws-kms e região explícita', () => {
+    const config = loadConfig(baseEnv({ SIGNING_KEY_PROVIDER: 'aws-kms', AWS_KMS_REGION: 'sa-east-1' }))
+    expect(config.SIGNING_KEY_PROVIDER).toBe('aws-kms')
+    expect(config.AWS_KMS_REGION).toBe('sa-east-1')
+  })
+
+  it('recusa backend desconhecido', () => {
+    expect(() => loadConfig(baseEnv({ SIGNING_KEY_PROVIDER: 'hsm' }))).toThrow(/SIGNING_KEY_PROVIDER/)
+  })
+})
+
 describe('loadConfig — origem do issuer', () => {
   it('em desenvolvimento/teste aceita a origem reservada usada em dev/testes', () => {
     expect(loadConfig(baseEnv()).CREDENTIAL_ISSUER_ORIGIN).toBe('https://issuer.test')

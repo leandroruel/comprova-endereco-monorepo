@@ -1,7 +1,8 @@
 import { DEFAULT_CREDENTIAL_TTL_SECONDS } from '@comprova/core'
 import type { AssertionSource } from '@comprova/credential'
 import { describe, expect, it } from 'vitest'
-import { credentialValidUntilOf } from './credential-issuer.js'
+import { credentialValidUntilOf, signerWithDomainErrors } from './credential-issuer.js'
+import { SigningKeyProviderError } from './signing-key-provider.js'
 
 const source = (
   completedAt: Date,
@@ -67,5 +68,38 @@ describe('credentialValidUntilOf', () => {
       60,
     )
     expect(validUntil.toISOString()).toBe('2026-01-01T00:01:00.000Z')
+  })
+})
+
+describe('signerWithDomainErrors', () => {
+  it('traduz falha do provider no momento da assinatura (KMS) para CredentialIssuanceError', async () => {
+    const signer = signerWithDomainErrors({
+      sign: async () => {
+        throw new SigningKeyProviderError('SIGNING_KEY_UNAVAILABLE', 'kms unavailable')
+      },
+    })
+
+    await expect(signer.sign(new Uint8Array([1]))).rejects.toMatchObject({
+      name: 'CredentialIssuanceError',
+      failure: 'SIGNING_KEY_UNAVAILABLE',
+    })
+  })
+
+  it('preserva erros que não são do provider', async () => {
+    const original = new Error('boom')
+    const signer = signerWithDomainErrors({
+      sign: async () => {
+        throw original
+      },
+    })
+
+    await expect(signer.sign(new Uint8Array([1]))).rejects.toBe(original)
+  })
+
+  it('devolve a assinatura quando o backend responde', async () => {
+    const signature = new Uint8Array([1, 2, 3])
+    const signer = signerWithDomainErrors({ sign: async () => signature })
+
+    await expect(signer.sign(new Uint8Array([4]))).resolves.toBe(signature)
   })
 })

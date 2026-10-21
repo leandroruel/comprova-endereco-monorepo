@@ -1,3 +1,4 @@
+import { ed25519PublicKeyBytes } from '@comprova/credential'
 import { createDbPool, eq, runMigrations, sql } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createLogger, type Logger } from '@comprova/observability'
@@ -311,5 +312,72 @@ describe('rotateSigningKey', () => {
       status: 'rotated',
     })
     expect((await activeRowsOf(tenantId)).map((row) => row.keyId)).toEqual(['key-first'])
+  })
+
+  it('rotaciona para uma chave KMS e persiste a referência externa', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'rotation-kms' })
+    const oldKey = createTestCredentialSigningKey('key-local')
+    const newKey = createTestCredentialSigningKey('key-kms')
+    const kmsKeyReference = 'arn:aws:kms:sa-east-1:111122223333:key/1234abcd'
+    await createIssuerSigningKey(adminPool.db, tenantId, oldKey)
+
+    const outcome = await rotateSigningKey(
+      adminPool.db,
+      {
+        kind: 'kms',
+        tenantId,
+        keyId: newKey.keyId,
+        kmsKeyReference,
+        publicKey: ed25519PublicKeyBytes(newKey.publicKey),
+      },
+      logger,
+    )
+
+    expect(outcome).toEqual({
+      tenantId,
+      keyId: 'key-kms',
+      previousKeyId: 'key-local',
+      status: 'rotated',
+    })
+    const fresh = (await rowsOf(tenantId)).find((row) => row.keyId === 'key-kms')!
+    expect(fresh.kmsKeyReference).toBe(kmsKeyReference)
+    expect(fresh.active).toBe(true)
+    expect(await loadActiveSigningKey(adminPool.db, tenantId)).toMatchObject({
+      keyId: 'key-kms',
+      kmsKeyReference,
+    })
+
+    // Repetir com a mesma referência é no-op; trocar a referência é recusado.
+    await expect(
+      rotateSigningKey(
+        adminPool.db,
+        {
+          kind: 'kms',
+          tenantId,
+          keyId: 'key-kms',
+          kmsKeyReference,
+          publicKey: ed25519PublicKeyBytes(newKey.publicKey),
+        },
+        logger,
+      ),
+    ).resolves.toEqual({
+      tenantId,
+      keyId: 'key-kms',
+      previousKeyId: null,
+      status: 'unchanged',
+    })
+    await expect(
+      rotateSigningKey(
+        adminPool.db,
+        {
+          kind: 'kms',
+          tenantId,
+          keyId: 'key-kms',
+          kmsKeyReference: `${kmsKeyReference}-other`,
+          publicKey: ed25519PublicKeyBytes(newKey.publicKey),
+        },
+        logger,
+      ),
+    ).rejects.toBeInstanceOf(SigningKeyRotationError)
   })
 })

@@ -2,6 +2,42 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Backend de assinatura AWS KMS (roadmap #24, etapa 24.3) (2026-10-21)
+
+O `SigningKeyProvider` ganhou uma segunda implementação, selecionável por
+`SIGNING_KEY_PROVIDER=aws-kms` (default `local`). O KMS **assina** os bytes e
+devolve a assinatura; a privada nunca chega à aplicação, não há `GetPrivateKey`,
+envelope/`Decrypt` nem material privado do KMS em memória. O provider local e
+`CREDENTIAL_SIGNING_KEYS` continuam intactos.
+
+Antes do código, a compatibilidade criptográfica foi auditada: o KMS suporta
+Ed25519 com `ECC_NIST_EDWARDS25519` + `ED25519_SHA_512` + `MessageType: RAW`
+(Pure EdDSA, FIPS 186-5 §7.6), exatamente o que `eddsa-jcs-2022` usa. Não foi
+preciso mudar o formato da VC, o `proof`, o DID, o verificador nem a
+`verificationMethod`. `ED25519_PH_SHA_512`/`DIGEST` (HashEdDSA) foi
+deliberadamente descartado: o prehash duplo quebraria a verificação Pure EdDSA.
+
+A migration `0038_issuer_signing_key_kms_reference.sql` adiciona
+`issuer_signing_key.kms_key_reference` (NULL = local; ARN canônico = KMS) e
+inclui a referência na identidade imutável do trigger. O provisionamento grava o
+ARN devolvido pelo `GetPublicKey`, não o alias de entrada, e a pública continua
+em `public_key` — a verificação pública segue local, sem consultar a AWS.
+
+`SigningKeyEntry` virou uma união `local | kms`; `provisionSigningKeys` e
+`rotateSigningKey` publicam a pública e a referência sem nunca tocar na privada
+do KMS. Os comandos explícitos são
+`pnpm db:provision-kms-key <tenant_id> <key_id> <kms_key_reference>` e
+`pnpm db:rotate-kms-key <tenant_id> <new_key_id> <kms_key_reference>`; não há
+migração automática das chaves existentes nem endpoint HTTP novo.
+
+Testes: unidade do provider KMS com assinador fake (assinatura verificável,
+`RAW`/`ED25519_SHA_512`, referência ausente, mismatch e falha do KMS) e do
+`GetPublicKey` (ARN canônico, KeySpec/KeyUsage); integração com Postgres para
+persistência da referência no provisionamento/rotação, leitura por
+`loadActiveSigningKey` e imutabilidade no trigger. Nenhum teste chama a AWS real.
+Credenciais continuam vindo da credential provider chain; `AWS_KMS_REGION` é
+opcional e não há access key/secret no `.env`.
+
 ## Rotação segura de signing key (roadmap #24, etapa 24.2) (2026-10-21)
 
 O modelo de estados já existia (`active = false` = superada, publicada para

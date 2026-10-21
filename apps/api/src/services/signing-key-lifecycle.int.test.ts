@@ -165,11 +165,27 @@ describe('revokeSigningKey', () => {
     )
     expect(await rejectionOf(update({ revokedAt: null }))).toMatch(/revogação é monotônica/)
     expect(await rejectionOf(update({ keyId: 'other-key' }))).toMatch(/identidade é imutável/)
+    expect(
+      await rejectionOf(update({ kmsKeyReference: 'arn:aws:kms:sa-east-1:111122223333:key/other' })),
+    ).toMatch(/identidade é imutável/)
 
     // Rotação é permitida e não mexe na revogação.
     await update({ active: false })
     const row = await rowOf(tenantId, 'key-1')
     expect(row!.active).toBe(false)
     expect(row!.revokedAt).toEqual(earlier)
+  })
+
+  it('expõe a referência KMS da chave ativa sem consultar a AWS', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'lifecycle-kms-reference' })
+    const kmsKeyReference = 'arn:aws:kms:sa-east-1:111122223333:key/1234abcd'
+    await createIssuerSigningKey(adminPool.db, tenantId, createTestCredentialSigningKey('key-1'), {
+      kmsKeyReference,
+    })
+
+    expect(await loadActiveSigningKey(adminPool.db, tenantId)).toMatchObject({
+      keyId: 'key-1',
+      kmsKeyReference,
+    })
   })
 })

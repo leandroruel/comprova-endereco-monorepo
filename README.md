@@ -77,10 +77,11 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   `SIGNING_KEY_MISMATCH`. O domínio de emissão não resolve a privada
   diretamente: ele fala com um `SigningKeyProvider`
   (`apps/api/src/services/signing-key-provider.ts`) e recebe um assinador para a
-  chave **já selecionada** (tenant + `key_id` + pública publicada). A
-  implementação atual lê `CREDENTIAL_SIGNING_KEYS`; KMS/HSM serão providers
-  futuros, sem mudar o domínio. (Limitação operacional deste passo: sem KMS/HSM, o
-  material privado vive em configuração/segredo externo.) Uma chave com
+  chave **já selecionada** (tenant + `key_id` + pública publicada). O backend
+  default (`SIGNING_KEY_PROVIDER=local`) lê `CREDENTIAL_SIGNING_KEYS`; com
+  `SIGNING_KEY_PROVIDER=aws-kms` o KMS assina sem entregar a privada (ADR-0032),
+  sem mudar o domínio. No backend local o material privado vive em
+  configuração/segredo externo; no KMS ele nunca sai do KMS. Uma chave com
   `revoked_at` (ADR-0029) sai dos documentos públicos e deixa de ser aceita; o
   `active = false` continua sendo apenas rotação.
 - **Validade da credencial** (ADR-0024, revisão pós-PR #5): `validFrom` é o
@@ -143,6 +144,16 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   é no-op. Operação administrativa via
   `pnpm db:rotate-key <tenant_id> <new_key_id>` (a nova chave precisa já estar em
   `CREDENTIAL_SIGNING_KEYS`). Não há endpoint HTTP de rotação nesta etapa.
+- **Backend AWS KMS** (ADR-0032): `SIGNING_KEY_PROVIDER=aws-kms` faz o KMS
+  assinar a chave já selecionada com `ECC_NIST_EDWARDS25519`/`ED25519_SHA_512` +
+  `MessageType: RAW` (Pure EdDSA, compatível com `eddsa-jcs-2022`); a privada
+  nunca chega à aplicação. A referência canônica (ARN) fica em
+  `issuer_signing_key.kms_key_reference` (NULL = material local, o default). A
+  pública continua no banco e a verificação pública **não** consulta a AWS.
+  Provisionamento/rotação explícitos por
+  `pnpm db:provision-kms-key <tenant_id> <key_id> <kms_key_reference>` e
+  `pnpm db:rotate-kms-key <tenant_id> <new_key_id> <kms_key_reference>`; não há
+  migração automática das chaves locais nem endpoint HTTP novo.
 
 ## Dashboard
 
