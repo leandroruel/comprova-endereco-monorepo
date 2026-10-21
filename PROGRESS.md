@@ -2,6 +2,30 @@
 
 Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
 
+## Escopo dedicado para administração de signing keys (2026-10-21)
+
+A revogação de signing key deixou de exigir `validate:write` e passou a exigir
+o novo scope `keys:write` (`apps/api/src/plugins/scope.ts`). Uma key usada para
+validar/emitir credenciais não pode mais derrubar a chave de assinatura do
+tenant; em contrapartida, uma key `keys:write` não ganha leitura, emissão ou
+revogação de credencial.
+
+O default de `api_key.scopes` continua `{validate:read,validate:write}`.
+`keys:write` não é adicionado por autenticação, `bootstrap`, `load-tenant` nem
+migration. Como não existe endpoint de administração de API keys, o grant é
+operacional e explícito por `api_key_id`, com `UPDATE api_key` usando a
+credencial administrativa do banco; o procedimento está no README e no
+ADR-0030. Sem o grant, a rota retorna 403.
+
+Testes ampliados em `apps/api/src/authz.int.test.ts`: `keys:write` revoga a
+signing key do próprio tenant; `validate:write` e `validate:read` recebem 403
+sem efeito colateral; key sem `keys:write` não revoga signing key de outro
+tenant; key com `keys:write` de outro tenant recebe 404; key criada com o
+default não ganha `keys:write`; e `keys:write` não autoriza escrita de
+validation/credencial. `apps/api/src/credential.int.test.ts` foi ajustado para
+usar `keys:write` nas keys que revogam signing keys. `pnpm test` passou com 64
+arquivos / 555 testes.
+
 ## Enforcement de scopes das API keys (2026-10-21)
 
 A autenticação já resolvia `request.tenant.scopes`, mas as rotas mutantes não
@@ -32,6 +56,9 @@ Testes: novo `apps/api/src/authz.int.test.ts` cobre leitura permitida, escrita
 permitida, leitura negada para key só de escrita, todas as mutações negadas para
 key só de leitura, 401 de key inválida e cross-tenant com scope correto.
 `pnpm test` passou com 64 arquivos / 549 testes.
+
+> Atualização (2026-10-21): a revogação de signing key foi separada para
+> `keys:write`; o restante desta seção descreve o escopo do PR #32.
 
 ## Revisão de conformidade pós-PR #5 — W3C VC 2.0 (2026-10-20)
 

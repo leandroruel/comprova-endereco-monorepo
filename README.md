@@ -123,7 +123,7 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   revogada/vencida não aparece em `GET /issuers/:scope` nem no DID Document, e
   o verificador falha fechado (`VERIFICATION_METHOD_UNRESOLVED`). O
   `POST /v1/signing-keys/:keyId/revoke` é autenticado, escopado por tenant,
-  exige `validate:write`, é idempotente e só permite encolher a confiança;
+  exige `keys:write`, é idempotente e só permite encolher a confiança;
   `?effective_at=<ISO-8601>` agenda a expiração, e uma chamada sem o parâmetro
   antecipa a revogação (nunca a adia). Não há reativação: uma chave apenas
   rotacionada (`active = false`) continua publicada.
@@ -164,14 +164,15 @@ Abre `http://localhost:5173`:
 ### Scopes das API keys
 
 Toda rota `/v1` autentica por API key e exige o scope da operação **antes do
-handler** (`preHandler: requireReadScope` ou `requireWriteScope`). O contrato
-atual define só dois scopes, os mesmos do default de `api_key.scopes`
-(`0002_tenancy.sql`):
+handler** (`preHandler: requireReadScope`, `requireWriteScope` ou
+`requireKeysWriteScope`). O contrato define três scopes; o default de
+`api_key.scopes` continua com dois, e `keys:write` é opt-in:
 
-| Scope            | Operações                                                                                                                                                                                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `validate:read`  | `GET /v1/validations/:id`, `GET /v1/batches`, `GET /v1/batches/:id`, `GET /v1/batches/:id/export`, `GET /v1/stats`, `GET /v1/meta`, `GET /v1/webhooks`, `GET /v1/subjects/:id/validations`                                                                                           |
-| `validate:write` | `POST /v1/validations`, `POST /v1/validations/:id/contest`, `POST /v1/validations/:id/credential`, `POST /v1/credentials/:credentialId/revoke`, `POST /v1/signing-keys/:keyId/revoke`, `POST /v1/batches`, `POST /v1/webhooks`, `DELETE /v1/webhooks/:id`, `DELETE /v1/subjects/:id` |
+| Scope            | Operações                                                                                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate:read`  | `GET /v1/validations/:id`, `GET /v1/batches`, `GET /v1/batches/:id`, `GET /v1/batches/:id/export`, `GET /v1/stats`, `GET /v1/meta`, `GET /v1/webhooks`, `GET /v1/subjects/:id/validations`                                                    |
+| `validate:write` | `POST /v1/validations`, `POST /v1/validations/:id/contest`, `POST /v1/validations/:id/credential`, `POST /v1/credentials/:credentialId/revoke`, `POST /v1/batches`, `POST /v1/webhooks`, `DELETE /v1/webhooks/:id`, `DELETE /v1/subjects/:id` |
+| `keys:write`     | `POST /v1/signing-keys/:keyId/revoke`                                                                                                                                                                                                         |
 
 - **401 `UNAUTHORIZED`** — API key ausente, inválida ou revogada.
 - **403 `FORBIDDEN`** — API key válida, mas sem o scope exigido. A resposta é
@@ -179,11 +180,30 @@ atual define só dois scopes, os mesmos do default de `api_key.scopes`
   existência.
 - **Isolamento por tenant continua no banco** — o scope autoriza a operação,
   não o recurso. RLS/`withTenant` limita toda leitura e mutação ao tenant da
-  chave; uma key com `validate:write` do tenant A recebe 404 ao tentar revogar
-  credencial ou signing key do tenant B.
-- Emissão e revogação de credencial e revogação de signing key usam
-  `validate:write` porque não existe scope específico de credencial no contrato
-  atual. Nenhum scope novo foi inventado.
+  chave; uma key com `keys:write` do tenant A recebe 404 ao tentar revogar
+  signing key do tenant B.
+- Emissão e revogação de credencial continuam usando `validate:write`. A
+  revogação de signing key usa `keys:write`, separada da key usada para emitir
+  credenciais.
+- **`keys:write` não é concedido automaticamente** — nem por autenticação, nem
+  por `db:seed`/`bootstrap`, nem por `load-tenant`, nem por migration. Keys
+  antigas e novas nascem com o default de dois scopes. Como não há endpoint de
+  administração de API keys, o grant é operacional, com a credencial de
+  administração do banco:
+
+  ```sql
+  UPDATE api_key
+  SET scopes = array_append(scopes, 'keys:write')
+  WHERE api_key_id = '<uuid-da-key>'
+    AND NOT ('keys:write' = ANY (scopes));
+  ```
+
+  O `UPDATE` é explícito por `api_key_id`, idempotente e deve ser auditado.
+  Sem o grant, a revogação de signing key retorna 403.
+
+- O snapshot `validation.issuer_scopes` continua registrando todos os scopes da
+  key no momento da emissão. Para separação estrita, use uma key só
+  administrativa para `keys:write`.
 - As rotas públicas de issuer (`/issuers/:scope`, `did.json`, status e
   `.well-known/comprova-issuer/:scope`) continuam sem API key e sem scope.
 

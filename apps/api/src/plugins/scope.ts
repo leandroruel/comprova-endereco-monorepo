@@ -6,12 +6,14 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
  *
  * Não crie um scope novo para uma operação existente sem uma decisão de
  * contrato: a API key é emitida fora desta camada e o valor é assinado no
- * snapshot `validation.issuer_scopes`. Enquanto só existirem estes dois,
- * leitura = `validate:read` e qualquer mutação = `validate:write`.
+ * snapshot `validation.issuer_scopes`. O default continua sendo
+ * `validate:read` + `validate:write`; `keys:write` é administrativo, opt-in e
+ * não é concedido automaticamente a keys existentes (ADR-0030).
  */
 export const API_SCOPES = {
   validateRead: 'validate:read',
   validateWrite: 'validate:write',
+  keysWrite: 'keys:write',
 } as const
 
 export type ApiScope = (typeof API_SCOPES)[keyof typeof API_SCOPES]
@@ -41,3 +43,4 @@ export const requireScope =
 
 export const requireReadScope = requireScope(API_SCOPES.validateRead)
 export const requireWriteScope = requireScope(API_SCOPES.validateWrite)
+export const requireKeysWriteScope = requireScope(API_SCOPES.keysWrite)

@@ -108,7 +108,7 @@ await createIssuerSigningKey(adminPool.db, supersededTenantId, supersededSigning
 // revogação é irreversível: o tenant fica sem chave confiável depois do teste.
 const lifecycleTenantId = await createTenant(adminPool.db, { name: 'credential-lifecycle' })
 const lifecycleKey = await createApiKey(adminPool.db, lifecycleTenantId, PEPPER, {
-  scopes: ['validate:read', 'validate:write'],
+  scopes: ['validate:read', 'validate:write', 'keys:write'],
 })
 const lifecycleSigning = createTestCredentialSigningKey('lifecycle-key')
 await createIssuerSigningKey(adminPool.db, lifecycleTenantId, lifecycleSigning)
@@ -117,7 +117,7 @@ await createIssuerSigningKey(adminPool.db, lifecycleTenantId, lifecycleSigning)
 // publicada/ativa até o instante — não é o mesmo que `active = false`.
 const scheduledTenantId = await createTenant(adminPool.db, { name: 'credential-scheduled-key' })
 const scheduledKey = await createApiKey(adminPool.db, scheduledTenantId, PEPPER, {
-  scopes: ['validate:read', 'validate:write'],
+  scopes: ['validate:read', 'validate:write', 'keys:write'],
 })
 const scheduledSigning = createTestCredentialSigningKey('scheduled-key')
 await createIssuerSigningKey(adminPool.db, scheduledTenantId, scheduledSigning)
@@ -126,15 +126,16 @@ await createIssuerSigningKey(adminPool.db, scheduledTenantId, scheduledSigning)
 // publicada; a nova é que assina. Revogar a antiga depois a remove.
 const rotationTenantId = await createTenant(adminPool.db, { name: 'credential-rotation' })
 const rotationKey = await createApiKey(adminPool.db, rotationTenantId, PEPPER, {
-  scopes: ['validate:read', 'validate:write'],
+  scopes: ['validate:read', 'validate:write', 'keys:write'],
 })
 const rotationOldSigning = createTestCredentialSigningKey('key-old')
 const rotationNewSigning = createTestCredentialSigningKey('key-new')
 await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationOldSigning)
 await createIssuerSigningKey(adminPool.db, rotationTenantId, rotationNewSigning, { active: false })
 
-// Tenant H: API key SOMENTE-LEITURA. Revogar é escrita; a rota deve recusar
-// mesmo com uma chave de API válida (403), sem revelar se o key_id existe.
+// Tenant H: API key SOMENTE-LEITURA. Revogar é uma operação administrativa;
+// a rota exige `keys:write` e deve recusar mesmo com uma API key válida (403),
+// sem revelar se o key_id existe.
 const readOnlyTenantId = await createTenant(adminPool.db, { name: 'credential-readonly-key' })
 const readOnlyKey = await createApiKey(adminPool.db, readOnlyTenantId, PEPPER, {
   scopes: ['validate:read'],
@@ -1690,7 +1691,7 @@ describe('revogação e expiração da chave de assinatura', () => {
   const didMethodOf = (tenant: string, keyId: string) =>
     didVerificationMethodOf(didOfIssuer(issuerIdOf(ISSUER_ORIGIN, tenant)), keyId)
 
-  it('exige validate:write: API key somente-leitura recebe 403 e não revoga', async () => {
+  it('exige keys:write: API key somente-leitura recebe 403 e não revoga', async () => {
     const res = await revoke(readOnlyKey.plaintext, readOnlySigning.keyId)
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('FORBIDDEN')

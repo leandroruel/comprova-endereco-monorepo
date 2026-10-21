@@ -90,6 +90,7 @@ export const apiKey = pgTable(
       .references(() => tenant.tenantId),
     keyPrefix: text('key_prefix').notNull(),
     keyHash: bytea('key_hash').notNull(),
+    // `keys:write` é administrativo e opt-in: não entra no default (ADR-0030).
     scopes: text('scopes').array().notNull().default(['validate:read', 'validate:write']),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),

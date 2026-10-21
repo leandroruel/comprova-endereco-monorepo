@@ -39,6 +39,8 @@ const readValidation = await createValidation(adminPool.db, readTenant, readSubj
   verdict: 'RESIDENTIAL',
   explanationSummary: 'Endereco parece residencial.',
 })
+const readSigning = createTestCredentialSigningKey('authz-read-key')
+await createIssuerSigningKey(adminPool.db, readTenant, readSigning)
 
 const writeTenant = await createTenant(adminPool.db, { name: 'authz-write' })
 const writeKey = await createApiKey(adminPool.db, writeTenant, PEPPER, {
@@ -51,6 +53,15 @@ const writeValidation = await createValidation(adminPool.db, writeTenant, writeS
 })
 const writeSigning = createTestCredentialSigningKey('authz-write-key')
 await createIssuerSigningKey(adminPool.db, writeTenant, writeSigning)
+
+// Chave administrativa: só `keys:write`, sem leitura nem escrita de validação.
+// Prova que o novo scope autoriza a revogação da própria signing key e nada mais.
+const keysTenant = await createTenant(adminPool.db, { name: 'authz-keys' })
+const keysKey = await createApiKey(adminPool.db, keysTenant, PEPPER, {
+  scopes: [API_SCOPES.keysWrite],
+})
+const keysSigning = createTestCredentialSigningKey('authz-keys-key')
+await createIssuerSigningKey(adminPool.db, keysTenant, keysSigning)
 
 const fullTenant = await createTenant(adminPool.db, { name: 'authz-full' })
 const fullKey = await createApiKey(adminPool.db, fullTenant, PEPPER)
@@ -83,7 +94,9 @@ const app = await buildApp({
     API_KEY_PEPPER: PEPPER,
     CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
     CREDENTIAL_SIGNING_KEYS: signingKeysConfig([
+      { tenantId: readTenant, key: readSigning },
       { tenantId: writeTenant, key: writeSigning },
+      { tenantId: keysTenant, key: keysSigning },
       { tenantId: fullTenant, key: fullSigningKey },
     ]),
     PORT: 3000,
@@ -194,6 +207,38 @@ describe('scope enforcement', () => {
     expect(res.json()).toEqual({ contested: true, validation_id: writeValidation })
   })
 
+  it('API key só com validate:write não revoga signing key (403, sem efeito)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/signing-keys/${writeSigning.keyId}/revoke`,
+      headers: auth(writeKey.plaintext),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('FORBIDDEN')
+
+    const [signingKey] = await adminPool.db
+      .select({ revokedAt: t.issuerSigningKey.revokedAt })
+      .from(t.issuerSigningKey)
+      .where(eq(t.issuerSigningKey.keyId, writeSigning.keyId))
+    expect(signingKey?.revokedAt).toBeNull()
+  })
+
+  it('API key só com validate:read não revoga signing key (403, sem efeito)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/signing-keys/${readSigning.keyId}/revoke`,
+      headers: auth(readKey.plaintext),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('FORBIDDEN')
+
+    const [signingKey] = await adminPool.db
+      .select({ revokedAt: t.issuerSigningKey.revokedAt })
+      .from(t.issuerSigningKey)
+      .where(eq(t.issuerSigningKey.keyId, readSigning.keyId))
+    expect(signingKey?.revokedAt).toBeNull()
+  })
+
   it('API key com validate:write emite e revoga credencial (200)', async () => {
     const created = await app.inject({
       method: 'POST',
@@ -225,6 +270,38 @@ describe('scope enforcement', () => {
     })
     expect(revoked.statusCode).toBe(200)
     expect(revoked.json().status).toBe('REVOKED')
+  })
+
+  it('API key com keys:write revoga signing key do próprio tenant (200)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/signing-keys/${keysSigning.keyId}/revoke`,
+      headers: auth(keysKey.plaintext),
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().key_id).toBe(keysSigning.keyId)
+
+    const [signingKey] = await adminPool.db
+      .select({ revokedAt: t.issuerSigningKey.revokedAt })
+      .from(t.issuerSigningKey)
+      .where(eq(t.issuerSigningKey.keyId, keysSigning.keyId))
+    expect(signingKey?.revokedAt).not.toBeNull()
+  })
+
+  it('keys:write não autoriza escrita de validação/credencial', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/validations',
+      headers: authJson(keysKey.plaintext),
+      payload: {
+        document: { type: 'CNPJ', value: '12345678000195' },
+        address: null,
+        mode: 'fast',
+        legal_basis: 'FRAUD_PREVENTION',
+      },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('FORBIDDEN')
   })
 
   it('API key só com validate:read não executa mutação alguma (403)', async () => {
@@ -283,6 +360,22 @@ describe('scope enforcement', () => {
     ]
 
     for (const route of writes) await expectForbidden(readKey.plaintext, route)
+  })
+
+  it('API key sem keys:write não revoga signing key de outro tenant (403, sem efeito)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/signing-keys/${fullSigningKey.keyId}/revoke`,
+      headers: auth(writeKey.plaintext),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('FORBIDDEN')
+
+    const [signingKey] = await adminPool.db
+      .select({ revokedAt: t.issuerSigningKey.revokedAt })
+      .from(t.issuerSigningKey)
+      .where(eq(t.issuerSigningKey.keyId, fullSigningKey.keyId))
+    expect(signingKey?.revokedAt).toBeNull()
   })
 
   it('scope correto não escapa do tenant: leitura e revogação alheias dão 404', async () => {
@@ -347,12 +440,37 @@ describe('scope enforcement', () => {
     const crossSigning = await app.inject({
       method: 'POST',
       url: `/v1/signing-keys/${fullSigningKey.keyId}/revoke`,
-      headers: auth(otherKey.plaintext),
+      // `keysKey` tem o scope exigido, mas é de outro tenant: o guard passa e
+      // o RLS devolve 404, sem revelar se a chave existe.
+      headers: auth(keysKey.plaintext),
     })
     expect(crossSigning.statusCode).toBe(404)
 
     const [signingKey] = await adminPool.db
       .select()
+      .from(t.issuerSigningKey)
+      .where(eq(t.issuerSigningKey.keyId, fullSigningKey.keyId))
+    expect(signingKey?.revokedAt).toBeNull()
+  })
+
+  it('key criada com o default não recebe keys:write implicitamente', async () => {
+    const [apiKey] = await adminPool.db
+      .select({ scopes: t.apiKey.scopes })
+      .from(t.apiKey)
+      .where(eq(t.apiKey.apiKeyId, fullKey.apiKeyId))
+    expect(apiKey?.scopes).toEqual([API_SCOPES.validateRead, API_SCOPES.validateWrite])
+    expect(apiKey?.scopes).not.toContain(API_SCOPES.keysWrite)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/signing-keys/${fullSigningKey.keyId}/revoke`,
+      headers: auth(fullKey.plaintext),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('FORBIDDEN')
+
+    const [signingKey] = await adminPool.db
+      .select({ revokedAt: t.issuerSigningKey.revokedAt })
       .from(t.issuerSigningKey)
       .where(eq(t.issuerSigningKey.keyId, fullSigningKey.keyId))
     expect(signingKey?.revokedAt).toBeNull()
