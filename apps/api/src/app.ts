@@ -27,7 +27,7 @@ import {
 } from '@fastify/type-provider-zod'
 import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
-import type { AppConfig } from './config.js'
+import { DEFAULT_EVIDENCE_MAX_CONCURRENCY, type AppConfig } from './config.js'
 import { makeAuthenticate } from './plugins/auth.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
 import { createAuth } from './auth.js'
@@ -115,6 +115,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   app.setSerializerCompiler(serializerCompiler)
 
   const evidenceMaxBytes = deps.config.EVIDENCE_MAX_BYTES ?? EVIDENCE_ARTIFACT_MAX_BYTES
+  const evidenceMaxConcurrency = deps.config.EVIDENCE_MAX_CONCURRENCY ?? DEFAULT_EVIDENCE_MAX_CONCURRENCY
 
   await app.register(helmet)
   await app.register(cors, { origin: true, credentials: true })
@@ -225,6 +226,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         credentialIssuer,
         objectStore,
         evidenceMaxBytes,
+        evidenceMaxConcurrency,
         logger: deps.logger,
       })
       registerCredentialRoutes(v1, { db: deps.db })

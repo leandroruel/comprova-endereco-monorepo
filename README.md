@@ -46,15 +46,17 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   Para revogar uma chave, `UPDATE api_key SET revoked_at = now() WHERE ...`; a
   API confere a revogação no banco, mas guarda o resultado por 60s em memória
   (cache por prefixo), então o 401 pode demorar até um minuto.
-- **`S3_*` / `EVIDENCE_MAX_BYTES`** configuram o intake de comprovante (F1.1).
-  O endpoint usa o mesmo bucket privado do worker via
-  `S3_ENDPOINT`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/`S3_BUCKET`
+- **`S3_*` / `EVIDENCE_MAX_BYTES` / `EVIDENCE_MAX_CONCURRENCY`** configuram o
+  intake de comprovante (F1.1). O endpoint usa o mesmo bucket privado do worker
+  via `S3_ENDPOINT`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/`S3_BUCKET`
   (`S3_REGION` opcional, default `us-east-1`) e grava em
   `tenants/<tenant>/evidence/<artifact-id>`. Se o conjunto S3 não estiver
   completo, a API sobe, mas o upload falha fechado com
   `503 EVIDENCE_STORAGE_UNAVAILABLE`; não há fallback para memória. O limite
   default é **50 MiB** (o mesmo de `evidence_artifact`) e `EVIDENCE_MAX_BYTES`
-  só pode reduzi-lo.
+  só pode reduzi-lo. Como o arquivo é bufferizado antes do storage, um semáforo
+  por processo limita uploads em voo com `EVIDENCE_MAX_CONCURRENCY` (default
+  **4**, máximo **16**); o limite é por processo, então cada réplica tem o seu.
 - **`CREDENTIAL_ISSUER_ORIGIN`** é a origem HTTPS **controlada pelo projeto**
   que serve de base para o `issuer` e para o `credentialSubject.id` das
   credenciais verificáveis (ADR-0024). Não há default e a biblioteca não

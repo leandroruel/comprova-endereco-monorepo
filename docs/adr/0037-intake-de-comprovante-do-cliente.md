@@ -63,6 +63,13 @@ criar uma hierarquia/tabela paralela que duplique o grafo de evidência.
    `business_registered_address`/`organization`; `CPF` →
    `address_exists`/`person`). Isso preserva o invariante
    `validation → claim → claim_evidence` sem hierarquia paralela.
+10. **Limite de uploads em voo.** Antes de bufferizar o arquivo
+    (`part.toBuffer()`), o controller adquire um slot de um semáforo por
+    processo (`EVIDENCE_MAX_CONCURRENCY`, default 4, máximo 16). O rate limit
+    não limita requisições em voo; com burst 100 e 50 MiB por arquivo, um único
+    tenant poderia reter ~4,9 GiB. O limite é por processo — réplicas
+    multiplicam o total — e será substituído por streaming com SHA-256
+    incremental quando o intake deixar de bufferizar o arquivo.
 
 ## Consequências
 

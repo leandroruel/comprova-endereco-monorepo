@@ -11,11 +11,13 @@ import {
 } from './evidence-intake.multipart.js'
 import { EvidenceIntakeError, uploadEvidence, type EvidenceIntakeResult } from './evidence-intake.service.js'
 import type { TenantContext } from '../../plugins/auth.js'
+import { makeSemaphore } from '../../shared/semaphore.js'
 
 export interface EvidenceIntakeControllerDeps {
   readonly db: Db
   readonly objectStore: ObjectStore
   readonly evidenceMaxBytes: number
+  readonly evidenceMaxConcurrency: number
   readonly logger: Logger
 }
 
@@ -69,40 +71,54 @@ export interface EvidenceIntakeController {
 
 export const makeEvidenceIntakeController = (
   deps: EvidenceIntakeControllerDeps,
-): EvidenceIntakeController => ({
-  upload: async (tenant, request, reply) => {
-    if (tenant === undefined) return sendProblem(reply, problems.unauthorized())
+): EvidenceIntakeController => {
+  const uploadSemaphore = makeSemaphore(deps.evidenceMaxConcurrency)
 
-    const contentLength = parseContentLength(request.headers['content-length'])
-    if (contentLength !== null && contentLength > deps.evidenceMaxBytes + EVIDENCE_MULTIPART_OVERHEAD_BYTES) {
-      return sendProblem(reply, problems.evidenceTooLarge())
-    }
+  return {
+    upload: async (tenant, request, reply) => {
+      if (tenant === undefined) return sendProblem(reply, problems.unauthorized())
 
-    try {
-      const validationId = (request.params as { readonly id?: unknown }).id
-      if (typeof validationId !== 'string') return sendProblem(reply, problems.notFound('validation'))
-      const rawIdempotencyKey = request.headers['idempotency-key']
-      const idempotencyKey = Array.isArray(rawIdempotencyKey) ? rawIdempotencyKey[0] : rawIdempotencyKey
-      const file = await readEvidenceFile(request, deps.evidenceMaxBytes)
-      const result = await uploadEvidence(
-        {
-          db: deps.db,
-          store: deps.objectStore,
-          logger: deps.logger,
-          maxBytes: deps.evidenceMaxBytes,
-        },
-        {
-          tenantId: tenant.tenantId,
-          validationId,
-          data: file.data,
-          declaredContentType: file.mimetype,
-          idempotencyKey,
-        },
-      )
-      if (result.replayed) reply.header('Idempotent-Replayed', 'true')
-      return reply.code(result.replayed ? 200 : 201).send(responseOf(result))
-    } catch (error) {
-      return sendIntakeError(reply, error)
-    }
-  },
-})
+      const contentLength = parseContentLength(request.headers['content-length'])
+      if (
+        contentLength !== null &&
+        contentLength > deps.evidenceMaxBytes + EVIDENCE_MULTIPART_OVERHEAD_BYTES
+      ) {
+        return sendProblem(reply, problems.evidenceTooLarge())
+      }
+
+      // Adquirido depois de auth/escopo e do precheck de Content-Length, mas
+      // antes de `readEvidenceFile`: é ali que `part.toBuffer()` retém até
+      // `EVIDENCE_MAX_BYTES` por requisição. O release cobre sucesso, replay,
+      // 4xx e 5xx.
+      const release = await uploadSemaphore.acquire()
+      try {
+        const validationId = (request.params as { readonly id?: unknown }).id
+        if (typeof validationId !== 'string') return sendProblem(reply, problems.notFound('validation'))
+        const rawIdempotencyKey = request.headers['idempotency-key']
+        const idempotencyKey = Array.isArray(rawIdempotencyKey) ? rawIdempotencyKey[0] : rawIdempotencyKey
+        const file = await readEvidenceFile(request, deps.evidenceMaxBytes)
+        const result = await uploadEvidence(
+          {
+            db: deps.db,
+            store: deps.objectStore,
+            logger: deps.logger,
+            maxBytes: deps.evidenceMaxBytes,
+          },
+          {
+            tenantId: tenant.tenantId,
+            validationId,
+            data: file.data,
+            declaredContentType: file.mimetype,
+            idempotencyKey,
+          },
+        )
+        if (result.replayed) reply.header('Idempotent-Replayed', 'true')
+        return reply.code(result.replayed ? 200 : 201).send(responseOf(result))
+      } catch (error) {
+        return sendIntakeError(reply, error)
+      } finally {
+        release()
+      }
+    },
+  }
+}

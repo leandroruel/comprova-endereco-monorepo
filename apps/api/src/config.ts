@@ -2,6 +2,13 @@ import { assertProductionIssuerOrigin, IssuerOriginSchema } from '@comprova/cred
 import { EVIDENCE_ARTIFACT_MAX_BYTES } from '@comprova/db'
 import { z } from 'zod'
 
+/**
+ * Quantos uploads de comprovante podem estar em voo por processo. Cada slot
+ * pode bufferizar até `EVIDENCE_MAX_BYTES`; 4 mantém o pior caso em ~200 MiB
+ * com o default de 50 MiB.
+ */
+export const DEFAULT_EVIDENCE_MAX_CONCURRENCY = 4
+
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   DATABASE_ADMIN_URL: z.string().optional(),
@@ -79,6 +86,14 @@ const EnvSchema = z.object({
    * para baixo, para testes e para políticas operacionais mais restritas.
    */
   EVIDENCE_MAX_BYTES: z.coerce.number().int().positive().max(EVIDENCE_ARTIFACT_MAX_BYTES).optional(),
+  /**
+   * Limite de uploads de comprovante simultâneos por processo. O multipart
+   * bufferiza o arquivo inteiro antes de ir para o storage; sem esse limite o
+   * burst do rate limit poderia reter vários arquivos de até 50 MiB. Default
+   * 4, teto 16 (800 MiB no pior caso com o tamanho default). É por processo:
+   * réplicas multiplicam o total.
+   */
+  EVIDENCE_MAX_CONCURRENCY: z.coerce.number().int().positive().max(16).optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

@@ -99,4 +99,14 @@ describe('loadConfig — intake de comprovante', () => {
   it.each(['0', '-1', 'abc'])('recusa limite inválido %s', (value) => {
     expect(() => loadConfig(baseEnv({ EVIDENCE_MAX_BYTES: value }))).toThrow(/EVIDENCE_MAX_BYTES/)
   })
+
+  it('aceita limite de uploads simultâneos dentro do teto', () => {
+    expect(loadConfig(baseEnv()).EVIDENCE_MAX_CONCURRENCY).toBeUndefined()
+    expect(loadConfig(baseEnv({ EVIDENCE_MAX_CONCURRENCY: '2' })).EVIDENCE_MAX_CONCURRENCY).toBe(2)
+    expect(loadConfig(baseEnv({ EVIDENCE_MAX_CONCURRENCY: '16' })).EVIDENCE_MAX_CONCURRENCY).toBe(16)
+  })
+
+  it.each(['0', '-1', 'abc', '17'])('recusa concorrência inválida %s', (value) => {
+    expect(() => loadConfig(baseEnv({ EVIDENCE_MAX_CONCURRENCY: value }))).toThrow(/EVIDENCE_MAX_CONCURRENCY/)
+  })
 })

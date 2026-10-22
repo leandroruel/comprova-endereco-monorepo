@@ -160,7 +160,7 @@ público.
   API key e validação de outro tenant responde `404`.
 - PDF/JPEG/PNG detectados por **magic bytes**; filename/extensão/`Content-Type`
   não definem o tipo. Limite default de 50 MiB, configurável para baixo por
-  `EVIDENCE_MAX_BYTES`, aplicado durante o streaming.
+  `EVIDENCE_MAX_BYTES`, aplicado pelo parser e pelo buffer do handler.
 - Objeto privado no `ObjectStore` existente em
   `tenants/<tenant>/evidence/<artifact-id>`, SHA-256 calculado no servidor e
   conferido com o storage; nenhuma URL pública.
@@ -171,9 +171,10 @@ público.
 - Um documento do cliente por claim; mesmos bytes são replay `200`, bytes
   diferentes são `409 EVIDENCE_ALREADY_EXISTS`. `Idempotency-Key` opcional
   reutiliza `validation_idempotency` com namespace próprio.
-- Lock da validation + índice único parcial serializam concorrência. Falha de
-  DB/claim/artifact após o storage apaga o objeto (compensação); falha do
-  próprio delete é logada sem PII.
+- Lock da validation + índice único parcial serializam concorrência. Um semáforo
+  por processo (`EVIDENCE_MAX_CONCURRENCY`, default 4) limita uploads em voo
+  antes do buffer. Falha de DB/claim/artifact após o storage apaga o objeto
+  (compensação); falha do próprio delete é logada sem PII.
 - `retention_until`/`expires_at` derivam de `validation.expires_at`; o job de
   retenção existente remove objeto e grafo.
 - Contrato detalhado em

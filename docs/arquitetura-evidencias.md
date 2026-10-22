@@ -229,7 +229,11 @@ Contrato entregue em
   múltiplos arquivos são rejeitados. O limite default é 50 MiB (o mesmo de
   `evidence_artifact`), configurável para baixo por `EVIDENCE_MAX_BYTES`. O
   parser aplica `fileSize` durante o streaming e o handler rejeita
-  `Content-Length` claramente acima do limite antes de ler.
+  `Content-Length` claramente acima do limite antes de ler. Como o arquivo é
+  bufferizado para o storage, um semáforo por processo
+  (`EVIDENCE_MAX_CONCURRENCY`, default 4, máximo 16) limita quantos uploads
+  ficam em voo antes de `part.toBuffer()`; o limite é por processo, não global
+  entre réplicas.
 - **Tipo por conteúdo:** a allowlist é PDF (`%PDF-`), JPEG (`FF D8 FF`) e PNG
   (assinatura de 8 bytes). `filename`, extensão e `Content-Type` declarado não
   definem o tipo persistido; um header permitido que não bate com o conteúdo

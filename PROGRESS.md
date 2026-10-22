@@ -26,18 +26,20 @@ em [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md).
 - Um documento do cliente por claim (índice único parcial). Mesmos bytes são
   replay idempotente; bytes diferentes retornam `409`. `Idempotency-Key`
   opcional reutiliza `validation_idempotency` com namespace próprio.
-- Lock da validation + índice único serializam uploads concorrentes. Falha de
-  DB/claim/artifact após o storage apaga o objeto; replay também apaga o objeto
-  redundante. Falha do delete de compensação é logada com ids técnicos, sem
-  filename/conteúdo/API key.
+- Lock da validation + índice único serializam uploads concorrentes; um semáforo
+  por processo (`EVIDENCE_MAX_CONCURRENCY`, default 4) limita arquivos
+  bufferizados em voo. Falha de DB/claim/artifact após o storage apaga o objeto;
+  replay também apaga o objeto redundante. Falha do delete de compensação é
+  logada com ids técnicos, sem filename/conteúdo/API key.
 - `retention_until`/`expires_at` derivam de `validation.expires_at`; o job de
   retenção existente remove objeto e grafo. A resposta expõe só
   `evidence_id`, `artifact_id` e `status`; replay usa `200` +
   `Idempotent-Replayed: true`.
-- Testes: `apps/api/tests/evidence-intake.int.test.ts` (14 casos, incluindo
+- Testes: `apps/api/tests/evidence-intake.int.test.ts` (15 casos, incluindo
   auth/scope, cross-tenant, traversal, MIME spoofing, vazio/ausente/limite,
-  idempotência/concorrência, falha de storage/DB/claim, compensação sem PII e
-  retenção). Migração `0040_evidence_intake.sql`.
+  idempotência/concorrência, limite de uploads em voo, falha de
+  storage/DB/claim, compensação sem PII e retenção). Migração
+  `0040_evidence_intake.sql`.
 
 Ainda falta da Fase 1: OCR/extração de campos, matching de documento/endereço/
 titular e detalhe completo no `GET` (F1.2/F1.3).

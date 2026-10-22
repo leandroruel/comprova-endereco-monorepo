@@ -33,13 +33,23 @@ class TestObjectStore implements ObjectStore {
   readonly deletes: string[] = []
   failPut: Error | null = null
   failDelete: Error | null = null
+  putGate: Promise<void> | null = null
+  activePuts = 0
+  maxActivePuts = 0
 
   async put(key: string, data: Uint8Array, contentType: string): Promise<StoredObject> {
     if (this.failPut !== null) throw this.failPut
-    const bytes = Buffer.from(data)
-    this.puts.push(key)
-    this.objects.set(key, { data: bytes, contentType })
-    return { key, uri: `test://${key}`, sha256: sha256Of(data), bytes: data.byteLength }
+    this.activePuts += 1
+    this.maxActivePuts = Math.max(this.maxActivePuts, this.activePuts)
+    try {
+      if (this.putGate !== null) await this.putGate
+      const bytes = Buffer.from(data)
+      this.puts.push(key)
+      this.objects.set(key, { data: bytes, contentType })
+      return { key, uri: `test://${key}`, sha256: sha256Of(data), bytes: data.byteLength }
+    } finally {
+      this.activePuts -= 1
+    }
   }
 
   async delete(key: string): Promise<void> {
@@ -87,6 +97,7 @@ const app = await buildApp({
     TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
     EVIDENCE_MAX_BYTES: MAX_BYTES,
+    EVIDENCE_MAX_CONCURRENCY: 2,
   },
   db: appPool.db,
   redis,
@@ -270,6 +281,14 @@ const expectProblem = (response: Awaited<ReturnType<typeof upload>>, status: num
   expect(response.statusCode).toBe(status)
   expect(response.headers['content-type']).toContain('application/problem+json')
   expect(response.json()).toMatchObject({ status, code })
+}
+
+const waitFor = async (predicate: () => boolean): Promise<void> => {
+  const deadline = Date.now() + 2_000
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for condition')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
 }
 
 interface Graph {
@@ -617,6 +636,36 @@ describe('POST /v1/validations/:id/evidence', () => {
     expect(store.objects.has(artifact.storageKey)).toBe(true)
   })
 
+  it('limita uploads em voo antes de bufferizar o arquivo', async () => {
+    const validations = await Promise.all([
+      makeValidation(tenantA),
+      makeValidation(tenantA),
+      makeValidation(tenantA),
+    ])
+    let releaseGate: (() => void) | undefined
+    store.putGate = new Promise<void>((resolve) => {
+      releaseGate = resolve
+    })
+    store.activePuts = 0
+    store.maxActivePuts = 0
+    try {
+      const uploads = validations.map((validationId) => upload(validationId, { data: pdf }))
+
+      await waitFor(() => store.activePuts === 2)
+      // Com EVIDENCE_MAX_CONCURRENCY=2, só dois uploads entram no storage
+      // enquanto o gate está fechado; o terceiro fica no semáforo.
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      expect(store.maxActivePuts).toBe(2)
+
+      releaseGate?.()
+      const responses = await Promise.all(uploads)
+      expect(responses.map((response) => response.statusCode)).toEqual([201, 201, 201])
+    } finally {
+      store.putGate = null
+      releaseGate?.()
+    }
+  })
+
   it('falha fechado quando o storage não está disponível', async () => {
     const validationId = await makeValidation(tenantA)
     store.failPut = new Error('test object storage down')
@@ -690,7 +739,7 @@ describe('POST /v1/validations/:id/evidence', () => {
     expect(logs).toContain('EVIDENCE_COMPENSATION_FAILED')
     expect(logs).not.toContain('segredo-do-cliente')
     expect(logs).not.toContain('%PDF-')
-    expect(logs).not.toContain(keyA)
+    expect(logs).not.toContain(keyClaimFail)
     expect(logs).not.toContain('tenants/')
   })
 
