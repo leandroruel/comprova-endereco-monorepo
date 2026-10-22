@@ -128,10 +128,12 @@ elas serão temporárias e autorizadas (fora desta decisão).
 2. a linha em `evidence_artifact`;
 3. `claim_evidence` → `claim` → `signal`/`validation_idempotency`/`validation`.
 
-A auditoria `validation.expired` ganhou `artifacts_removed`. Não foi criada uma
-política comercial nova: o artefato participa do ciclo da validation. O campo
-`retention_until` existe para a política futura (por exemplo, remoção antecipada
-ou artefato desacoplado); hoje a retenção efetiva é a da validation.
+A auditoria `validation.expired` ganhou `artifacts_removed` e é inserida na
+mesma transação que apaga o grafo: se o INSERT falhar, as linhas voltam e o tick
+repete (o delete do objeto é idempotente). Não foi criada uma política comercial
+nova: o artefato participa do ciclo da validation. O campo `retention_until`
+existe para a política futura (por exemplo, remoção antecipada ou artefato
+desacoplado); hoje a retenção efetiva é a da validation.
 
 ### 7. Serviço de domínio
 
@@ -140,7 +142,9 @@ ou artefato desacoplado); hoje a retenção efetiva é a da validation.
 - `createEvidenceArtifact` — valida allowlist/tamanho, calcula o hash local,
   grava no storage, registra a linha em `withTenant` e **compensa** (apaga o
   objeto) se o INSERT falhar;
-- `deleteEvidenceArtifact` — apaga o objeto e só então a linha (retry seguro).
+- `deleteEvidenceArtifact` — apaga o objeto e só então a linha. Se o DELETE da
+  linha falhar, a linha permanece como marcador de retry; uma nova chamada
+  repete o delete idempotente do objeto e conclui a remoção.
 
 Não há endpoint HTTP nesta entrega.
 
@@ -151,7 +155,8 @@ Positivas:
 - PII de cliente deixa de depender de uma tabela global;
 - cross-tenant é bloqueado por RLS **e** por FK composta;
 - o objeto não fica no banco e pode migrar de provider;
-- retenção/erasure não deixam linha sem objeto nem objeto sem linha;
+- retenção/erasure apagam o objeto antes da linha; uma falha no DELETE da linha
+  deixa a linha como marcador de retry, nunca um objeto órfão;
 - o street view não sofre regressão.
 
 Negativas / custos:

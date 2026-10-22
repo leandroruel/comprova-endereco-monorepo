@@ -63,13 +63,16 @@ Regras vinculantes:
    tentativa.
 2. **`unavailable`, `inconclusive` e `unsupported` mapeiam para `unknown`.**
    Nunca para `contradicts`. Teste obrigatório.
-3. **`not_found` só contradiz quando a consulta foi conclusiva no autorizador
+3. **`invalid` só contradiz quando a invalidade é definitiva.** Estrutura,
+   assinatura ou chave reconhecidamente inválidas no autorizador competente
+   mapeiam para `contradicts`; invalidade inconclusiva mapeia para `unknown`.
+4. **`not_found` só contradiz quando a consulta foi conclusiva no autorizador
    competente.** "Não achei" não é prova de fraude.
-4. **A dimensão `holder` é separada da `address`.** O adaptador não decide o
+5. **A dimensão `holder` é separada da `address`.** O adaptador não decide o
    veredito; ele informa as três dimensões e a política mapeia.
-5. **Uma observação por fonte.** Não se emite uma linha por dimensão, para não
+6. **Uma observação por fonte.** Não se emite uma linha por dimensão, para não
    contar a mesma prova três vezes no score aditivo (`weightedScore`).
-6. **Credencial não é evidência.** A credencial continua sendo saída da
+7. **Credencial não é evidência.** A credencial continua sendo saída da
    validação (`@comprova/credential`), não entrada do verificador.
 
 ### Escopo do contrato

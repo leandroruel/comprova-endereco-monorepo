@@ -7,6 +7,7 @@ import {
 } from '@comprova/testing'
 import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
+import { createLogger } from '@comprova/observability'
 import { makeFakeObjectStore } from '@comprova/providers'
 import type { ObjectStore } from '@comprova/providers'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -362,5 +363,129 @@ describe('retention de evidence_artifact (F0.1)', () => {
       .from(t.auditLog)
       .where(eq(t.auditLog.action, 'validation.expired'))
     expect(audits.some((row) => row.details.artifacts_removed === 1)).toBe(true)
+  })
+})
+
+describe('retention isolada por validation', () => {
+  it('não bloqueia outras validations quando o storage falha e mantém a falha para retry', async () => {
+    const retryTenant = await createTenant(adminPool.db, { name: 'ret-tenant-retry' })
+    const subject = await createSubject(adminPool.db, retryTenant)
+    const failedValidation = await createValidation(adminPool.db, retryTenant, subject)
+    const successfulValidation = await createValidation(adminPool.db, retryTenant, subject)
+    const expiredAt = new Date(Date.now() - 86_400_000)
+
+    for (const validationId of [failedValidation, successfulValidation]) {
+      await adminPool.db
+        .update(t.validation)
+        .set({ expiresAt: expiredAt })
+        .where(eq(t.validation.validationId, validationId))
+    }
+
+    const claimId = randomUUID()
+    await adminPool.db.insert(t.claim).values({
+      claimId,
+      tenantId: retryTenant,
+      validationId: failedValidation,
+      subjectId: subject,
+      type: 'address_exists',
+      subjectType: 'organization',
+      targetType: 'address',
+    })
+
+    const claimEvidenceId = randomUUID()
+    await adminPool.db.insert(t.claimEvidence).values({
+      claimEvidenceId,
+      tenantId: retryTenant,
+      claimId,
+      checker: 'document_integrity',
+      checkerVersion: '1.0.0',
+      stance: 'supports',
+      strength: 0.5,
+      confidence: 1,
+      source: 'test',
+      observedAt: new Date(),
+      ttlSeconds: 3600,
+      expiresAt: new Date(Date.now() + 3_600_000),
+      detail: {},
+    })
+
+    const artifactId = randomUUID()
+    const storageKey = `tenants/${retryTenant}/evidence/${artifactId}`
+    await adminPool.db.insert(t.evidenceArtifact).values({
+      artifactId,
+      tenantId: retryTenant,
+      claimEvidenceId,
+      storageKey,
+      contentType: 'application/pdf',
+      sizeBytes: 3,
+      sha256: randomBytes(32),
+      retentionUntil: new Date(Date.now() + 86_400_000),
+    })
+
+    const base = makeFakeObjectStore()
+    const failingStore: ObjectStore = {
+      put: base.put,
+      delete: async (key) => {
+        if (key === storageKey) throw new Error('storage unavailable')
+        await base.delete(key)
+      },
+    }
+    const logs: string[] = []
+    const logger = createLogger({
+      level: 'warn',
+      stream: { write: (line) => logs.push(line) },
+    })
+
+    const removed = await validationRetentionTick(adminPool.db, failingStore, 200, logger)
+    expect(removed).toBe(1)
+
+    // A validation sem artefato foi removida; a que falhou no storage continua
+    // viva e elegível para o próximo tick.
+    expect(
+      (
+        await adminPool.db
+          .select()
+          .from(t.validation)
+          .where(eq(t.validation.validationId, successfulValidation))
+      ).length,
+    ).toBe(0)
+    expect(
+      (await adminPool.db.select().from(t.validation).where(eq(t.validation.validationId, failedValidation)))
+        .length,
+    ).toBe(1)
+    expect(
+      (
+        await adminPool.db
+          .select()
+          .from(t.evidenceArtifact)
+          .where(eq(t.evidenceArtifact.artifactId, artifactId))
+      ).length,
+    ).toBe(1)
+
+    const audits = await adminPool.db
+      .select({ details: t.auditLog.details })
+      .from(t.auditLog)
+      .where(eq(t.auditLog.tenantId, retryTenant))
+    expect(audits).toHaveLength(1)
+    expect(audits[0]?.details.removed).toBe(1)
+    const logText = logs.join('\n')
+    expect(logText).toContain('"validation_id"')
+    expect(logText).toContain('RETENTION_DELETE_FAILED')
+
+    // Com o storage recuperado, o próximo tick remove a validação que falhou.
+    const retried = await validationRetentionTick(adminPool.db, base, 200, logger)
+    expect(retried).toBe(1)
+    expect(
+      (await adminPool.db.select().from(t.validation).where(eq(t.validation.validationId, failedValidation)))
+        .length,
+    ).toBe(0)
+    expect(
+      (
+        await adminPool.db
+          .select()
+          .from(t.evidenceArtifact)
+          .where(eq(t.evidenceArtifact.artifactId, artifactId))
+      ).length,
+    ).toBe(0)
   })
 })

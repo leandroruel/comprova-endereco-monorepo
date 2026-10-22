@@ -426,6 +426,49 @@ describe('evidence_artifact: serviço e lifecycle', () => {
     expect(await selectArtifact(tenantA, metadata.artifactId)).toHaveLength(0)
   })
 
+  it('deleteEvidenceArtifact deixa a linha como marcador de retry quando o DELETE falha', async () => {
+    const obsA = await seedObservation(tenantA)
+    const tracking = trackingStore()
+    const metadata = await createEvidenceArtifact(
+      { db: appPool.db, store: tracking.store },
+      {
+        tenantId: tenantA,
+        claimEvidenceId: obsA.claimEvidenceId,
+        data: Buffer.from('%PDF-1.7\n'),
+        contentType: 'application/pdf',
+        retentionUntil: new Date(Date.now() + 86_400_000),
+      },
+    )
+
+    let transactions = 0
+    const failingDb = new Proxy(appPool.db, {
+      get(target, prop, receiver) {
+        if (prop === 'transaction') {
+          return async (...args: Parameters<typeof target.transaction>) => {
+            transactions += 1
+            if (transactions === 2) throw new Error('db delete failed')
+            return target.transaction(...args)
+          }
+        }
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+
+    await expect(
+      deleteEvidenceArtifact({ db: failingDb, store: tracking.store }, tenantA, metadata.artifactId),
+    ).rejects.toThrow('db delete failed')
+
+    // O objeto saiu, mas a linha permanece como marcador para o próximo retry.
+    expect(tracking.deletes).toContain(metadata.storageKey)
+    expect(await selectArtifact(tenantA, metadata.artifactId)).toHaveLength(1)
+
+    // O retry com o banco recuperado conclui a remoção; o delete é idempotente.
+    expect(
+      await deleteEvidenceArtifact({ db: appPool.db, store: tracking.store }, tenantA, metadata.artifactId),
+    ).toBe(true)
+    expect(await selectArtifact(tenantA, metadata.artifactId)).toHaveLength(0)
+  })
+
   it('claim_evidence com artefato não pode ser removida (RESTRICT); após remover o artefato, pode', async () => {
     const obsA = await seedObservation(tenantA)
     const tracking = trackingStore()

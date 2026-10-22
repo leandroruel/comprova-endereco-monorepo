@@ -88,11 +88,7 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
    street view e **incorreto** para comprovante com dado pessoal do cliente. A
    fundação tenant-scoped foi entregue em F0.1 (`evidence_artifact`, ADR-0035);
    o intake com PII continua sendo F1.
-3. **Divergência de documentação:** `docs/lgpd/retencao.md` ainda diz
-   "job diario (TODO F6)" para `validation.expires_at`, mas o job já existe; o
-   README afirma "SSRF: hostname allowlist + private range block", o que não é
-   o que o código faz.
-4. **Não há checklist de produção** para issuer origin definitivo, KMS por
+3. **Não há checklist de produção** para issuer origin definitivo, KMS por
    tenant, restore de backup, alarmes e capacidade.
 
 ### Escopo
@@ -103,9 +99,10 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
   `safeExternalFetch` no `packages/providers`, aplicada ao webhook no envio
   (ADR-0036). A allowlist por autorizador fiscal fica em F2 (ADR-0034).
 - ~~Decidir o escopo tenant de artefato enviado pelo cliente~~ **Entregue em
-  F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, FK composta e retenção
-  integrada (ADR-0035; migration 0039).
-- Corrigir a documentação divergente (retenção, SSRF, contagem de ADRs/runbooks).
+  F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE e FK composta. A remoção
+  atual ocorre no fluxo de retenção após a expiração da validação;
+  `retention_until` ainda não define o prazo comercial do binário (ADR-0035;
+  migration 0039).
 - Definir o **evento faturável canônico** (uma validação nova = no máximo um
   evento; replay/retry = zero) antes de F3 implementar.
 
@@ -575,14 +572,12 @@ endereço e no recibo verificável, não em uma wallet.
 
 ### Adiar ou descartar
 
-| Item                                        | Decisão                  | Motivo                                         |
-| ------------------------------------------- | ------------------------ | ---------------------------------------------- |
-| Cobertura fiscal nacional                   | **descartar a premissa** | Só autorizadores confirmados; declarar UF a UF |
-| NFAg-e agora                                | adiar para F7            | Minuta sem ato definitivo; só SVRS             |
-| Wallet própria                              | adiar/descartar no MVP   | Não é diferencial                              |
-| "SSRF: allowlist + private range" no README | **corrigir**             | Não descreve o código                          |
-| "TODO F6" da retenção                       | **remover**              | Job já existe                                  |
-| Segundo roadmap                             | **não criar**            | Este arquivo é o canônico                      |
+| Item                      | Decisão                  | Motivo                                         |
+| ------------------------- | ------------------------ | ---------------------------------------------- |
+| Cobertura fiscal nacional | **descartar a premissa** | Só autorizadores confirmados; declarar UF a UF |
+| NFAg-e agora              | adiar para F7            | Minuta sem ato definitivo; só SVRS             |
+| Wallet própria            | adiar/descartar no MVP   | Não é diferencial                              |
+| Segundo roadmap           | **não criar**            | Este arquivo é o canônico                      |
 
 ### Adicionar
 
@@ -593,7 +588,6 @@ endereço e no recibo verificável, não em uma wallet.
 | Guarda de fetch (SSRF real)         | F0              | Pré-requisito de qualquer fonte externa |
 | Medição faturável                   | F3              | Sem isso não há receita auditável       |
 | Link seguro do titular              | F4              | Requisito de atualização                |
-| Escopo tenant de artefato           | F0              | PII de cliente em tabela global é risco |
 | Policy por cliente/caso             | F3/F5 (decisão) | Hoje só existe policy global            |
 
 ## Decisões de produto em aberto
@@ -601,7 +595,9 @@ endereço e no recibo verificável, não em uma wallet.
 1. **Unidade de cobrança** e o que não é faturável.
 2. **Dashboard multi-tenant**: chave por tenant + sessão/BFF vs continuar
    single-tenant de dev.
-3. **Artefato**: reter binário ou só hash/campos?
+3. **Artefato**: por quanto tempo reter o binário no object storage privado (o
+   armazenamento já foi decidido no ADR-0035). Hoje a remoção segue a expiração
+   da validação; `retention_until` ainda não controla o ciclo de vida do binário.
 4. **Policy por cliente**: necessária para o primeiro contrato ou pode ser
    global com contrato de versão?
 5. **Credencial**: recibo B2B ou credencial do titular?
