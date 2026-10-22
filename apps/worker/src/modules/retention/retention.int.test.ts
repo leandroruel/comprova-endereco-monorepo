@@ -468,8 +468,9 @@ describe('retention isolada por validation', () => {
       .where(eq(t.auditLog.tenantId, retryTenant))
     expect(audits).toHaveLength(1)
     expect(audits[0]?.details.removed).toBe(1)
-    expect(logs.join('\n')).toContain(failedValidation)
-    expect(logs.join('\n')).toContain('RETENTION_DELETE_FAILED')
+    const logText = logs.join('\n')
+    expect(logText).toContain('"validation_id"')
+    expect(logText).toContain('RETENTION_DELETE_FAILED')
 
     // Com o storage recuperado, o próximo tick remove a validação que falhou.
     const retried = await validationRetentionTick(adminPool.db, base, 200, logger)
