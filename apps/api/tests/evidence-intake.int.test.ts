@@ -373,7 +373,9 @@ describe('POST /v1/validations/:id/evidence', () => {
     expect(evidence.checkerVersion).toBe('1.0.0')
     expect(evidence.stance).toBe('unknown')
     expect(evidence.strength).toBe(0)
-    expect(evidence.confidence).toBe(1)
+    // O documento foi recebido, mas ainda não foi verificado: confidence 0 é
+    // ausência de avaliação, não confiança máxima.
+    expect(evidence.confidence).toBe(0)
     expect(evidence.evidenceId).toBeNull()
     expect(evidence.evidenceSha256?.equals(sha256Of(pdf))).toBe(true)
     expect(evidence.detail).toMatchObject({
@@ -572,13 +574,17 @@ describe('POST /v1/validations/:id/evidence', () => {
     expect(store.puts.length).toBe(putsBefore)
   })
 
-  it('é idempotente por conteúdo e por Idempotency-Key', async () => {
+  it('faz replay com a mesma Idempotency-Key e o mesmo conteúdo sem duplicar', async () => {
     const validationId = await makeValidation(tenantA)
-    const idempotencyKey = 'evidence-idem-key-0001'
+    const idempotencyKey = 'evidence-idem-same-key-0001'
 
     const first = await upload(validationId, { data: pdf }, { idempotencyKey })
     expect(first.statusCode).toBe(201)
-    const firstBody = first.json() as { evidence_id: string; artifact_id: string }
+    const firstBody = first.json() as {
+      evidence_id: string
+      artifact_id: string
+      status: string
+    }
     const putsAfterFirst = store.puts.length
 
     const replay = await upload(validationId, { data: pdf }, { idempotencyKey })
@@ -587,37 +593,91 @@ describe('POST /v1/validations/:id/evidence', () => {
     expect(replay.json()).toMatchObject(firstBody)
     expect(store.puts.length).toBe(putsAfterFirst)
 
-    const replayWithoutKey = await upload(validationId, { data: pdf })
-    expect(replayWithoutKey.statusCode).toBe(200)
-    expect(replayWithoutKey.json()).toMatchObject(firstBody)
-    expect(store.puts.length).toBe(putsAfterFirst)
-
-    const aliasKey = 'evidence-idem-key-0002'
-    const aliasReplay = await upload(validationId, { data: pdf }, { idempotencyKey: aliasKey })
-    expect(aliasReplay.statusCode).toBe(200)
-    expect(aliasReplay.json()).toMatchObject(firstBody)
-    expect(store.puts.length).toBe(putsAfterFirst)
-    expectProblem(
-      await upload(validationId, { data: jpeg, contentType: 'image/jpeg' }, { idempotencyKey: aliasKey }),
-      422,
-      'IDEMPOTENCY_MISMATCH',
-    )
-
-    const different = await upload(validationId, { data: jpeg, contentType: 'image/jpeg' })
-    expectProblem(different, 409, 'EVIDENCE_ALREADY_EXISTS')
-    expect(store.puts.length).toBe(putsAfterFirst)
-
-    const keyMismatch = await upload(
-      validationId,
-      { data: jpeg, contentType: 'image/jpeg' },
-      { idempotencyKey },
-    )
-    expectProblem(keyMismatch, 422, 'IDEMPOTENCY_MISMATCH')
+    // O SHA-256 do conteúdo continua sendo a fonte de verdade mesmo sem key.
+    const replayByContent = await upload(validationId, { data: pdf })
+    expect(replayByContent.statusCode).toBe(200)
+    expect(replayByContent.json()).toMatchObject(firstBody)
     expect(store.puts.length).toBe(putsAfterFirst)
 
     const graph = await graphOf(validationId)
     expect(graph.evidence).toHaveLength(1)
     expect(graph.artifacts).toHaveLength(1)
+  })
+
+  it('rejeita de forma determinística a mesma Idempotency-Key com conteúdo diferente', async () => {
+    const validationId = await makeValidation(tenantA)
+    const idempotencyKey = 'evidence-idem-conflict-key-0001'
+
+    const first = await upload(validationId, { data: pdf }, { idempotencyKey })
+    expect(first.statusCode).toBe(201)
+    const firstBody = first.json() as {
+      evidence_id: string
+      artifact_id: string
+      status: string
+    }
+    const putsAfterFirst = store.puts.length
+
+    expectProblem(
+      await upload(validationId, { data: jpeg, contentType: 'image/jpeg' }, { idempotencyKey }),
+      422,
+      'IDEMPOTENCY_MISMATCH',
+    )
+    // Repetir o conflito não altera o marcador nem cria objeto/evidência.
+    expectProblem(
+      await upload(validationId, { data: jpeg, contentType: 'image/jpeg' }, { idempotencyKey }),
+      422,
+      'IDEMPOTENCY_MISMATCH',
+    )
+    const replayAfterConflict = await upload(validationId, { data: pdf }, { idempotencyKey })
+    expect(replayAfterConflict.statusCode).toBe(200)
+    expect(replayAfterConflict.json()).toMatchObject(firstBody)
+    expect(store.puts.length).toBe(putsAfterFirst)
+
+    const graph = await graphOf(validationId)
+    expect(graph.evidence).toHaveLength(1)
+    expect(graph.artifacts).toHaveLength(1)
+  })
+
+  it('não cria nova evidência para chave nova com o mesmo conteúdo e preserva a unicidade', async () => {
+    const validationId = await makeValidation(tenantA)
+    const keyX = 'evidence-idem-case-c-x-0001'
+    const keyY = 'evidence-idem-case-c-y-0001'
+    const keyZ = 'evidence-idem-case-c-z-0001'
+
+    const first = await upload(validationId, { data: pdf }, { idempotencyKey: keyX })
+    expect(first.statusCode).toBe(201)
+    const firstBody = first.json() as {
+      evidence_id: string
+      artifact_id: string
+      status: string
+    }
+    const putsAfterFirst = store.puts.length
+
+    // Key nova + mesmos bytes: alias idempotente, sem nova evidência/artefato.
+    const alias = await upload(validationId, { data: pdf }, { idempotencyKey: keyY })
+    expect(alias.statusCode).toBe(200)
+    expect(alias.headers['idempotent-replayed']).toBe('true')
+    expect(alias.json()).toMatchObject(firstBody)
+    expect(store.puts.length).toBe(putsAfterFirst)
+
+    // Key nova + conteúdo diferente não contorna a cardinalidade do domínio.
+    expectProblem(
+      await upload(validationId, { data: jpeg, contentType: 'image/jpeg' }, { idempotencyKey: keyZ }),
+      409,
+      'EVIDENCE_ALREADY_EXISTS',
+    )
+    // Reutilizar o alias Y com outro conteúdo é conflito de idempotência.
+    expectProblem(
+      await upload(validationId, { data: jpeg, contentType: 'image/jpeg' }, { idempotencyKey: keyY }),
+      422,
+      'IDEMPOTENCY_MISMATCH',
+    )
+    expect(store.puts.length).toBe(putsAfterFirst)
+
+    const graph = await graphOf(validationId)
+    expect(graph.evidence).toHaveLength(1)
+    expect(graph.artifacts).toHaveLength(1)
+    expect(graph.artifacts[0]?.sha256.equals(sha256Of(pdf))).toBe(true)
   })
 
   it('serializa uploads concorrentes e mantém uma única evidência', async () => {

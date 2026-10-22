@@ -27,10 +27,11 @@ criar uma hierarquia/tabela paralela que duplique o grafo de evidência.
    e serializada por lock da linha da validation.
 3. **Semântica de pendência.** O upload grava `claim_evidence` com
    `source = 'customer_submitted_document'`, `checker = 'customer_document_intake'`,
-   `stance = 'unknown'`, `strength = 0`, `confidence = 1` e
+   `stance = 'unknown'`, `strength = 0`, `confidence = 0` e
    `detail.verification = { status: 'pending', method: 'content_intake', document: null, address: null, holder: null }`.
-   O upload prova apenas que o documento foi recebido; não soma score nem
-   afirma endereço/titular.
+   `confidence` é `NOT NULL` no schema; o valor **0** expressa ausência de
+   avaliação de verificação, não uma negação do documento. O upload prova apenas
+   que o documento foi recebido; não soma score nem afirma endereço/titular.
 4. **Artefato privado, chave e hash do servidor.** O binário vai para o
    `ObjectStore` privado existente em
    `tenants/<tenant-id>/evidence/<artifact-id>`. O filename do cliente nunca
@@ -42,12 +43,17 @@ criar uma hierarquia/tabela paralela que duplique o grafo de evidência.
    detecção; `application/octet-stream` é aceito quando o conteúdo é
    reconhecível. O limite default é 50 MiB (o mesmo do banco), configurável
    apenas para baixo.
-6. **Idempotência em duas camadas.** O SHA-256 do conteúdo é a chave natural.
-   Um `Idempotency-Key` opcional é gravado no
+6. **Idempotência da requisição, não identidade da evidência.** O SHA-256 do
+   conteúdo é a chave natural da evidência. Um `Idempotency-Key` opcional
+   identifica a tentativa/operação do cliente e é gravado no
    `validation_idempotency` existente sob o namespace
    `evidence:<validation-id>:<client-key>`, com hash da solicitação
-   (validation + tipo detectado + SHA-256). Reuso da mesma key com conteúdo
-   diferente responde `422 IDEMPOTENCY_MISMATCH`.
+   (validation + tipo detectado + SHA-256). A mesma key com o mesmo conteúdo
+   responde replay `200`; a mesma key com conteúdo diferente responde
+   `422 IDEMPOTENCY_MISMATCH`; uma key nova com o mesmo conteúdo também é replay
+   (alias), sem criar nova evidência/artefato; uma key nova com conteúdo
+   diferente continua sujeita ao `409 EVIDENCE_ALREADY_EXISTS` da cardinalidade.
+   A key nunca substitui o SHA-256 nem cria uma segunda evidência.
 7. **Compensação sem nova fila.** O objeto é gravado antes da transação. Se
    `claim_evidence`, `evidence_artifact` ou o marcador de idempotência falharem,
    a transação é desfeita e o objeto recém-gravado é apagado. Replay também
@@ -68,8 +74,10 @@ criar uma hierarquia/tabela paralela que duplique o grafo de evidência.
     processo (`EVIDENCE_MAX_CONCURRENCY`, default 4, máximo 16). O rate limit
     não limita requisições em voo; com burst 100 e 50 MiB por arquivo, um único
     tenant poderia reter ~4,9 GiB. O limite é por processo — réplicas
-    multiplicam o total — e será substituído por streaming com SHA-256
-    incremental quando o intake deixar de bufferizar o arquivo.
+    multiplicam o total. **Dívida técnica:** o intake ainda bufferiza o arquivo
+    inteiro com `part.toBuffer()`; streaming com SHA-256 incremental fica para
+    uma etapa futura, junto com a remoção do semáforo se ele deixar de ser
+    necessário.
 
 ## Consequências
 

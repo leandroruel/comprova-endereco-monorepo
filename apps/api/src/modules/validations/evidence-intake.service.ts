@@ -498,10 +498,11 @@ export const uploadEvidence = async (
         checker: EVIDENCE_INTAKE_CHECKER,
         checkerVersion: EVIDENCE_INTAKE_CHECKER_VERSION,
         // O upload só prova que um documento foi apresentado. Não há stance
-        // de endereço/titular até F1.2/F1.3.
+        // de endereço/titular até F1.2/F1.3; `confidence` é NOT NULL, então o
+        // valor neutro 0 expressa ausência de avaliação, não negação.
         stance: 'unknown',
         strength: 0,
-        confidence: 1,
+        confidence: 0,
         source: EVIDENCE_INTAKE_SOURCE,
         observedAt: now,
         ttlSeconds,

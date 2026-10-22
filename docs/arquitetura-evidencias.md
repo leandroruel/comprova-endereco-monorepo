@@ -246,19 +246,23 @@ Contrato entregue em
   validation legada ainda não tiver uma. O vínculo usa a FK composta da F0.1.
 - **Semântica:** `source = customer_submitted_document`,
   `checker = customer_document_intake`, `stance = unknown`, `strength = 0`,
-  `confidence = 1` e
+  `confidence = 0` e
   `detail.verification = { status: 'pending', method: 'content_intake', document: null, address: null, holder: null }`.
-  Não há score nem afirmação de endereço/titular enquanto F1.2/F1.3 não
-  rodarem.
+  `confidence` é `NOT NULL`; **0** expressa ausência de avaliação de
+  verificação, não negação do documento. Não há score nem afirmação de
+  endereço/titular enquanto F1.2/F1.3 não rodarem.
 - **Cardinalidade:** no máximo **um** documento do cliente por claim
   (`UNIQUE (claim_id) WHERE source = 'customer_submitted_document'`). Outras
   fontes usam `source` diferente e podem coexistir. Mesmos bytes são replay
   `200`; bytes diferentes retornam `409 EVIDENCE_ALREADY_EXISTS`.
-- **Idempotência:** SHA-256 do conteúdo é a chave natural. O
-  `Idempotency-Key` opcional é namespaced em
+- **Idempotência:** o SHA-256 do conteúdo é a chave natural. O
+  `Idempotency-Key` opcional identifica a tentativa do cliente, não a
+  identidade permanente da evidência, e é namespaced em
   `validation_idempotency` (`evidence:<validation-id>:<client-key>`) com hash da
-  solicitação; a mesma key com conteúdo diferente retorna
-  `422 IDEMPOTENCY_MISMATCH`.
+  solicitação. Mesma key + mesmo conteúdo = replay `200`; mesma key + conteúdo
+  diferente = `422 IDEMPOTENCY_MISMATCH`; key nova + mesmo conteúdo = replay
+  (alias), sem nova evidência/artefato; key nova + conteúdo diferente = `409`
+  pela cardinalidade.
 - **Concorrência:** a transação faz lock da linha da validation; o índice único
   parcial é a segunda barreira. Duas requisições simultâneas produzem uma única
   linha/artefato.

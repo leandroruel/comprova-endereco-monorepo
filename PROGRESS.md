@@ -22,10 +22,13 @@ em [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md).
 - Cadeia `validation → claim → claim_evidence → evidence_artifact` em uma
   transação. Claim ausente em validation legada é criada com tipo derivado de
   `subject.doc_type`. `source = customer_submitted_document`, `stance = unknown`,
-  `strength = 0`, `detail.verification.status = "pending"`.
-- Um documento do cliente por claim (índice único parcial). Mesmos bytes são
-  replay idempotente; bytes diferentes retornam `409`. `Idempotency-Key`
-  opcional reutiliza `validation_idempotency` com namespace próprio.
+  `strength = 0`, `confidence = 0` (sem avaliação de verificação; campo
+  `NOT NULL`), `detail.verification.status = "pending"`.
+- Um documento do cliente por claim (índice único parcial). O SHA-256 é a chave
+  natural: mesmos bytes são replay; bytes diferentes retornam `409`.
+  `Idempotency-Key` identifica a tentativa do cliente, não a evidência:
+  mesma key + mesmo conteúdo = replay; mesma key + conteúdo diferente = `422`;
+  key nova + mesmo conteúdo = replay (alias), sem nova evidência.
 - Lock da validation + índice único serializam uploads concorrentes; um semáforo
   por processo (`EVIDENCE_MAX_CONCURRENCY`, default 4) limita arquivos
   bufferizados em voo. Falha de DB/claim/artifact após o storage apaga o objeto;
@@ -35,10 +38,10 @@ em [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md).
   retenção existente remove objeto e grafo. A resposta expõe só
   `evidence_id`, `artifact_id` e `status`; replay usa `200` +
   `Idempotent-Replayed: true`.
-- Testes: `apps/api/tests/evidence-intake.int.test.ts` (15 casos, incluindo
+- Testes: `apps/api/tests/evidence-intake.int.test.ts` (17 casos, incluindo
   auth/scope, cross-tenant, traversal, MIME spoofing, vazio/ausente/limite,
-  idempotência/concorrência, limite de uploads em voo, falha de
-  storage/DB/claim, compensação sem PII e retenção). Migração
+  confiança neutra, idempotência por conteúdo/key, limite de uploads em voo,
+  falha de storage/DB/claim, compensação sem PII e retenção). Migração
   `0040_evidence_intake.sql`.
 
 Ainda falta da Fase 1: OCR/extração de campos, matching de documento/endereço/
