@@ -218,28 +218,38 @@ segunda é a saída verificável da avaliação.
 
 ## 6. Segurança das consultas externas
 
-O guard atual (`isSafeWebhookUrl`) **não serve** para fonte fiscal. Ele só olha
-a string da URL no cadastro, não resolve DNS, não limita corpo e não protege
-contra redirecionamento. Requisitos mínimos (ADR-0034):
+A guarda genérica `safeExternalFetch` foi entregue em F0.2 (ADR-0036) e já é
+usada no envio de webhook. Ela cobre resolução/fixação de IP, HTTPS, ausência de
+redirect e limites de tempo/corpo/content-type. Para fonte fiscal ainda falta a
+**allowlist por autorizador** e o adaptador (ADR-0034). Requisitos:
 
 1. **Allowlist server-side** por `(tipo de documento, autorizador, ambiente)`.
    A URL do QR é usada apenas para **identificar** o autorizador — nunca para
-   fetch.
+   fetch. **Ainda não implementado (F2).**
 2. **Resolução e fixação de IP:** resolver o host, rejeitar loopback, RFC1918,
    link-local (`169.254.0.0/16`), metadata (`169.254.169.254`), IPv6
    `::1`/`fc00::/7`/`fe80::/10`, e conectar ao IP validado (evita DNS
-   rebinding).
-3. **Sem redirect:** 3xx é erro de fonte, não segue.
-4. **Limites:** timeout (ex.: 5 s), corpo (ex.: 256 KB), content-type
-   (`text/html`, `application/xml`, `application/json`), método `GET`.
-5. **Sem credenciais/cookies** e sem executar JavaScript.
-6. **Auditoria:** gravar URL pedida, IP resolvido, status HTTP e sha256 da
-   resposta (não a resposta inteira em log).
-7. **Rate limit** por tenant e por fonte, além do cache por chave.
+   rebinding). **Implementado em `safeExternalFetch` (F0.2).**
+3. **Sem redirect:** 3xx é erro de fonte, não segue. **Implementado (F0.2).**
+4. **Limites:** timeout, corpo e content-type. **Implementado (F0.2);** a
+   allowlist de MIME por fonte fiscal deve ser escolhida no adaptador (ex.:
+   `text/html`, `application/xml`, `application/json`).
+5. **Sem credenciais/cookies** e sem executar JavaScript. A guarda rejeita
+   credenciais embutidas na URL (F0.2); cookies e headers de sessão são proibidos
+   por política do caller fiscal, que ainda será implementado em F2.
+6. **Auditoria:** gravar IP resolvido (`SafeFetchResponse.address`), status HTTP
+   e sha256 da resposta, não a resposta inteira em log. **O IP/status são
+   expostos pela guarda;** o hash e a URL ficam para o caller fiscal (F2).
+7. **Rate limit** por tenant e por fonte, além do cache por chave. **Ainda não
+   implementado (F2).**
 
-Testes obrigatórios: host privado literal, host que resolve para privado,
-redirect para privado, corpo grande, content-type inesperado, URL de QR fora da
-allowlist.
+`isSafeWebhookUrl` continua apenas no cadastro como validação de UX; ela não
+resolve DNS e não substitui a guarda no envio.
+
+Testes obrigatórios já cobertos para a guarda: host privado literal, host que
+resolve para privado, redirect para privado/HTTP/outro host, corpo grande,
+content-type inesperado, timeout e rebinding. A URL de QR fora da allowlist será
+testada em F2.
 
 ## 7. Confiança, atualidade e divergência
 

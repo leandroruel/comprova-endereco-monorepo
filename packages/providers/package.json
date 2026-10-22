@@ -12,6 +12,7 @@
     "@aws-sdk/client-s3": "^3.1151.0",
     "@comprova/core": "workspace:*",
     "@comprova/db": "workspace:*",
+    "ipaddr.js": "^2.5.0",
     "zod": "^4.6.5"
   }
 }

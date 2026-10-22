@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { isSafeExternalUrl } from '@comprova/providers'
 
 export const newWebhookSecret = (): string => `whsec_${randomBytes(24).toString('base64url')}`
 
@@ -29,14 +30,8 @@ export const verifyWebhookSignature = (
   return received.length === expected.length && timingSafeEqual(expected, received)
 }
 
-const PRIVATE_HOST_RE = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|169\.254\.|\[?::1)/i
-
-export const isSafeWebhookUrl = (url: string): boolean => {
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol !== 'https:') return false
-    return !PRIVATE_HOST_RE.test(parsed.hostname)
-  } catch {
-    return false
-  }
-}
+/**
+ * Validação antecipada de UX no cadastro. Não resolve DNS e não substitui a
+ * guarda `safeExternalFetch`, que valida IP e conexão no envio (ADR-0036).
+ */
+export const isSafeWebhookUrl = (url: string): boolean => isSafeExternalUrl(url)

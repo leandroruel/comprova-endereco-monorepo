@@ -20,7 +20,10 @@ processos de sistema que precisam operar cross-tenant.
   AES-256-GCM (chave derivada do pepper; KMS em produção).
 - **Assinatura**: `X-Signature` = HMAC-SHA256(secret, `${timestamp}.${body}`) com
   `X-Timestamp` e janela anti-replay de 300s (`verifyWebhookSignature`).
-- **SSRF**: `isSafeWebhookUrl` bloqueia hosts locais/privados/link-local e esquemas não-HTTP.
+- **SSRF**: desde F0.2, o envio usa `safeExternalFetch` (`packages/providers`):
+  resolve/valida todos os IPs, fixa o IP na conexão, exige HTTPS, não segue
+  redirect e limita tempo/corpo/content-type ([ADR-0036](0036-guarda-de-fetch-externo.md)).
+  `isSafeWebhookUrl` continua no cadastro apenas como validação de UX.
 - **Dispatcher** (outbox → deliveries): loop em processo (2s) — `webhook_delivery` recebe
   payload + event_type (migração 0012) para retry independente do outbox. Backoff exponencial
   (2^n × 15s), máximo 5 tentativas → `failed`. Bug corrigido no processo: falha não-final
