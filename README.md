@@ -4,7 +4,7 @@ Address Intelligence API: valida o endereço de um CNPJ/CPF cruzando múltiplos 
 
 ## Quickstart
 
-Requer Node `>=22.12` e pnpm 12 (`corepack enable`, ou `npm i -g pnpm@12`): o
+Requer Node `^24.22.1` e pnpm 12 (`corepack enable`, ou `npm i -g pnpm@12`): o
 `packageManager` do repo pina `pnpm@12.14.0` e versões anteriores não conseguem
 provisioná-lo. O pnpm 12 traz de padrão uma quarentena de 24h para versões
 recém-publicadas (`minimumReleaseAge`) — um `pnpm install` que falhe com
