@@ -1,12 +1,14 @@
 # Arquitetura de evidências e verificação fiscal (alvo)
 
-> **Status:** proposta de arquitetura, 2026-10-22. **Somente F0.1 (artefato
-> tenant-scoped) está implementado**; upload, OCR, contrato de verificador e
-> consulta fiscal continuam não implementados.
+> **Status:** proposta de arquitetura, 2026-10-22. **F0.1 (artefato
+> tenant-scoped) e F1.1 (intake do comprovante) estão implementados**; OCR,
+> extração, matching, contrato de verificador e consulta fiscal continuam não
+> implementados.
 > Este documento descreve o alvo e o que já existe para reaproveitar. As decisões
 > estão registradas em [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md),
-> [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md) e
-> [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md).
+> [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md),
+> [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) e
+> [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md).
 > **Estado atual:** [`architecture.md`](architecture.md).
 > **Prioridades:** [`roadmap.md`](roadmap.md).
 
@@ -46,17 +48,17 @@ taxonomia de resultado — não tabelas novas.
 
 ## 3. Responsabilidades e onde vivem
 
-| Responsabilidade      | Hoje                                           | Alvo                                                     |
-| --------------------- | ---------------------------------------------- | -------------------------------------------------------- |
-| Entrada de evidência  | Só street view no worker                       | HTTP autenticado + storage privado (F1)                  |
-| Identificação do tipo | Intenção do usuário (`claim_type`, `doc_type`) | Por **conteúdo** (PDF/imagem/XML/QR)                     |
-| Extração de campos    | VLM de fachada                                 | OCR/PDF no intake; parse no adaptador fiscal             |
-| Consulta externa      | Providers de endereço com URL fixa             | Adaptadores com allowlist (F2)                           |
-| Normalização          | Checkers T0/T1/T2                              | Normalizador por fonte                                   |
-| Persistência          | `claim_evidence` + `evidence`                  | `claim_evidence` + `evidence`/`evidence_artifact` (F0.1) |
-| Avaliação             | `evaluateClaim` / `weightedScore`              | Igual + metadados de independência                       |
-| Explicação            | `assessment` / `explanation_detail`            | Igual                                                    |
-| Credencial            | `@comprova/credential`                         | Igual (credencial é saída, não evidência)                |
+| Responsabilidade      | Hoje                                                             | Alvo                                         |
+| --------------------- | ---------------------------------------------------------------- | -------------------------------------------- |
+| Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker | Igual                                        |
+| Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                      | Estrutura/OCR e XML/QR (F1.2/F2)             |
+| Extração de campos    | VLM de fachada                                                   | OCR/PDF no intake; parse no adaptador fiscal |
+| Consulta externa      | Providers de endereço com URL fixa                               | Adaptadores com allowlist (F2)               |
+| Normalização          | Checkers T0/T1/T2                                                | Normalizador por fonte                       |
+| Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` (F0.1/F1.1)    | Igual + evidência de fonte fiscal (F2)       |
+| Avaliação             | `evaluateClaim` / `weightedScore`                                | Igual + metadados de independência           |
+| Explicação            | `assessment` / `explanation_detail`                              | Igual                                        |
+| Credencial            | `@comprova/credential`                                           | Igual (credencial é saída, não evidência)    |
 
 ## 4. Contrato conceitual do verificador
 
@@ -137,7 +139,7 @@ A decisão de stance é do **adaptador de política**, não da fonte:
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | `document=authentic` e `address=matches`       | `supports`                                                                                                | Evidência forte de existência/uso do endereço    |
 | `document=authentic` e `address=differs`       | `contradicts`                                                                                             | Documento real aponta outro endereço             |
-| `document=authentic` e `address=not_extracted` | `neutral`                                                                                                 | Autenticidade sem informação de endereço         |
+| `document=authentic` e `address=not_extracted` | `unknown`                                                                                                 | Autenticidade sem informação de endereço         |
 | `document=not_found`                           | `contradicts` **só** se o autorizador era o correto e a consulta foi conclusiva; caso contrário `unknown` | "Não achei" não é prova de fraude                |
 | `document=invalid`                             | `contradicts` quando a invalidade é definitiva; senão `unknown`                                           | Ex.: chave inexistente no autorizador competente |
 | `document=inconclusive`                        | `unknown`                                                                                                 | Nunca contradiz                                  |
@@ -215,6 +217,70 @@ Artifact (bruto) → Evidence (observação) → Assessment (avaliação) → Cr
 
 `artifact` não é `credential`: o primeiro é matéria-prima com retenção curta; a
 segunda é a saída verificável da avaliação.
+
+### 5.2 Intake do comprovante do cliente (F1.1, implementado)
+
+Contrato entregue em
+[ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md):
+
+- **Rota:** `POST /v1/validations/:id/evidence`, autenticada por API key e
+  `validate:write`. O tenant vem só da key; validação de outro tenant é `404`.
+- **Multipart:** exatamente um arquivo no campo `file`; campos de texto e
+  múltiplos arquivos são rejeitados. O limite default é 50 MiB (o mesmo de
+  `evidence_artifact`), configurável para baixo por `EVIDENCE_MAX_BYTES`. O
+  parser aplica `fileSize` durante o streaming e o handler rejeita
+  `Content-Length` claramente acima do limite antes de ler. Como o arquivo é
+  bufferizado para o storage, um semáforo por processo
+  (`EVIDENCE_MAX_CONCURRENCY`, default 4, máximo 16) limita quantos uploads
+  ficam em voo antes de `part.toBuffer()`; o limite é por processo, não global
+  entre réplicas.
+- **Tipo por conteúdo:** a allowlist é PDF (`%PDF-`), JPEG (`FF D8 FF`) e PNG
+  (assinatura de 8 bytes). `filename`, extensão e `Content-Type` declarado não
+  definem o tipo persistido; um header permitido que não bate com o conteúdo
+  retorna `422`, e tipo não suportado retorna `415`.
+- **Storage:** o objeto vai para o `ObjectStore` privado existente em
+  `tenants/<tenant-id>/evidence/<artifact-id>`, sem URL pública/presigned. O
+  SHA-256 é calculado dos bytes recebidos e conferido com o retorno do storage.
+- **Grafo:** `validation → claim → claim_evidence` (observação) →
+  `evidence_artifact` (binário). A claim é criada na mesma transação se a
+  validation legada ainda não tiver uma. O vínculo usa a FK composta da F0.1.
+- **Semântica:** `source = customer_submitted_document`,
+  `checker = customer_document_intake`, `stance = unknown`, `strength = 0`,
+  `confidence = 0` e
+  `detail.verification = { status: 'pending', method: 'content_intake', document: null, address: null, holder: null }`.
+  `confidence` é `NOT NULL`; **0** expressa ausência de avaliação de
+  verificação, não negação do documento. Não há score nem afirmação de
+  endereço/titular enquanto F1.2/F1.3 não rodarem.
+- **Cardinalidade:** no máximo **um** documento do cliente por claim
+  (`UNIQUE (claim_id) WHERE source = 'customer_submitted_document'`). Outras
+  fontes usam `source` diferente e podem coexistir. Mesmos bytes são replay
+  `200`; bytes diferentes retornam `409 EVIDENCE_ALREADY_EXISTS`.
+- **Idempotência:** o SHA-256 do conteúdo é a chave natural. O
+  `Idempotency-Key` opcional identifica a tentativa do cliente, não a
+  identidade permanente da evidência, e é namespaced em
+  `validation_idempotency` (`evidence:<validation-id>:<client-key>`) com hash da
+  solicitação. Mesma key + mesmo conteúdo = replay `200`; mesma key + conteúdo
+  diferente = `422 IDEMPOTENCY_MISMATCH`; key nova + mesmo conteúdo = replay
+  (alias), sem nova evidência/artefato; key nova + conteúdo diferente = `409`
+  pela cardinalidade.
+- **Concorrência:** a transação faz lock da linha da validation; o índice único
+  parcial é a segunda barreira. Duas requisições simultâneas produzem uma única
+  linha/artefato.
+- **Compensação:** o objeto é gravado antes da transação. Falha de
+  `claim_evidence`, `evidence_artifact`, marcador de idempotência ou replay
+  apaga o objeto recém-gravado. Se o próprio delete falhar, o log registra
+  `EVIDENCE_COMPENSATION_FAILED` com ids técnicos e sem filename/conteúdo; não
+  há outbox/fila nova.
+- **Retenção:** `evidence_artifact.retention_until` e
+  `claim_evidence.expires_at` usam `validation.expires_at`; o job de retenção
+  existente apaga objeto e grafo. F1.1 não define prazo comercial novo.
+- **Resposta:** apenas `evidence_id`, `artifact_id` e `status: "pending"`; nunca
+  `storage_key`, URL, filename ou bytes. Replay devolve `200` e o header
+  `Idempotent-Replayed: true`; criação devolve `201`.
+
+O `GET /v1/validations/:id` existente reflete a observação em
+`evidence_summary.unknown`. Detalhe do documento e resultado de verificação
+continuam fora do payload até a extração de F1.2.
 
 ## 6. Segurança das consultas externas
 

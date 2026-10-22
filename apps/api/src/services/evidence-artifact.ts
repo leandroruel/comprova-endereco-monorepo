@@ -1,5 +1,5 @@
 import { and, eq, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { sha256Of } from '@comprova/providers'
 import type { ObjectStore } from '@comprova/providers'
@@ -9,8 +9,10 @@ import { randomUUID } from 'node:crypto'
  * Fundação de artefatos de evidência (F0.1 / ADR-0035).
  *
  * Esta camada NÃO é um endpoint de upload: ela apenas grava o objeto bruto no
- * object storage existente e registra os metadados tenant-scoped. A extração,
- * o OCR e o vínculo com uma claim ficam para F1.
+ * object storage existente e registra os metadados tenant-scoped. O intake da
+ * F1.1 (`evidence-intake.service.ts`) usa `storeEvidenceObject` +
+ * `insertEvidenceArtifact`; extração, OCR e a semântica de endereço/titular
+ * ficam para F1.2/F1.3.
  *
  * Garantias:
  *   - o objeto é gravado sob `tenants/<tenant>/evidence/<artifact>`;
@@ -44,14 +46,30 @@ export interface CreateEvidenceArtifactInput {
   readonly retentionUntil: Date
 }
 
-export interface EvidenceArtifactMetadata {
-  readonly artifactId: string
+export interface StoreEvidenceObjectInput {
   readonly tenantId: string
-  readonly claimEvidenceId: string
+  readonly data: Uint8Array
+  readonly contentType: string
+}
+
+export interface StoredEvidenceObject {
+  readonly artifactId: string
   readonly storageKey: string
   readonly contentType: EvidenceArtifactContentType
   readonly sizeBytes: number
   readonly sha256: Buffer
+}
+
+export interface InsertEvidenceArtifactInput {
+  readonly tenantId: string
+  readonly claimEvidenceId: string
+  readonly object: StoredEvidenceObject
+  readonly retentionUntil: Date
+}
+
+export interface EvidenceArtifactMetadata extends StoredEvidenceObject {
+  readonly tenantId: string
+  readonly claimEvidenceId: string
   readonly retentionUntil: Date
 }
 
@@ -63,23 +81,92 @@ const normalizeContentType = (value: string): string => {
   return (base ?? '').trim().toLowerCase()
 }
 
-const assertValidInput = (input: CreateEvidenceArtifactInput): EvidenceArtifactContentType => {
-  if (input.tenantId.trim() === '') throw new Error('tenantId é obrigatório')
-  if (input.claimEvidenceId.trim() === '') throw new Error('claimEvidenceId é obrigatório')
-  if (input.data.byteLength === 0) throw new Error('artefato vazio')
-  if (input.data.byteLength > t.EVIDENCE_ARTIFACT_MAX_BYTES) {
-    throw new Error(`artefato excede o limite de ${t.EVIDENCE_ARTIFACT_MAX_BYTES} bytes`)
-  }
-
-  const contentType = normalizeContentType(input.contentType)
+const assertContentType = (value: string): EvidenceArtifactContentType => {
+  const contentType = normalizeContentType(value)
   if (!CONTENT_TYPE_SET.has(contentType)) {
-    throw new Error(`content-type não suportado: ${input.contentType}`)
+    throw new Error(`content-type não suportado: ${value}`)
   }
-  if (!(input.retentionUntil instanceof Date) || Number.isNaN(input.retentionUntil.getTime())) {
+  return contentType as EvidenceArtifactContentType
+}
+
+const assertRetentionUntil = (retentionUntil: Date): void => {
+  if (!(retentionUntil instanceof Date) || Number.isNaN(retentionUntil.getTime())) {
     throw new Error('retentionUntil inválido')
   }
+}
 
-  return contentType as EvidenceArtifactContentType
+const assertObjectInput = (
+  tenantId: string,
+  data: Uint8Array,
+  contentType: string,
+): { readonly contentType: EvidenceArtifactContentType } => {
+  if (tenantId.trim() === '') throw new Error('tenantId é obrigatório')
+  if (data.byteLength === 0) throw new Error('artefato vazio')
+  if (data.byteLength > t.EVIDENCE_ARTIFACT_MAX_BYTES) {
+    throw new Error(`artefato excede o limite de ${t.EVIDENCE_ARTIFACT_MAX_BYTES} bytes`)
+  }
+  return { contentType: assertContentType(contentType) }
+}
+
+/**
+ * Só grava o objeto no storage; não toca no banco. O chamador é responsável
+ * pela compensação (`store.delete`) se a persistência posterior falhar. O
+ * `artifactId` e a `storage_key` são sempre gerados no servidor.
+ */
+export const storeEvidenceObject = async (
+  deps: Pick<EvidenceArtifactDeps, 'store'>,
+  input: StoreEvidenceObjectInput,
+): Promise<StoredEvidenceObject> => {
+  const { contentType } = assertObjectInput(input.tenantId, input.data, input.contentType)
+  const artifactId = randomUUID()
+  const storageKey = evidenceArtifactStorageKey(input.tenantId, artifactId)
+  const sha256 = sha256Of(input.data)
+
+  const stored = await deps.store.put(storageKey, input.data, contentType)
+  if (stored.bytes !== input.data.byteLength || !stored.sha256.equals(sha256)) {
+    await deps.store.delete(storageKey).catch(() => undefined)
+    throw new Error('object storage devolveu metadados inconsistentes para o artefato')
+  }
+
+  return {
+    artifactId,
+    storageKey,
+    contentType,
+    sizeBytes: input.data.byteLength,
+    sha256,
+  }
+}
+
+/**
+ * Insere a linha do artefato na transação do chamador. Precisa rodar dentro de
+ * `withTenant` (RLS WITH CHECK) e depois que `claim_evidence` existir (FK
+ * composta).
+ */
+export const insertEvidenceArtifact = async (
+  tx: DbTx,
+  input: InsertEvidenceArtifactInput,
+): Promise<EvidenceArtifactMetadata> => {
+  if (input.tenantId.trim() === '') throw new Error('tenantId é obrigatório')
+  if (input.claimEvidenceId.trim() === '') throw new Error('claimEvidenceId é obrigatório')
+  assertRetentionUntil(input.retentionUntil)
+
+  await tx.insert(t.evidenceArtifact).values({
+    artifactId: input.object.artifactId,
+    tenantId: input.tenantId,
+    claimEvidenceId: input.claimEvidenceId,
+    storageKey: input.object.storageKey,
+    contentType: input.object.contentType,
+    sizeBytes: input.object.sizeBytes,
+    sha256: input.object.sha256,
+    retentionUntil: input.retentionUntil,
+  })
+
+  return {
+    ...input.object,
+    tenantId: input.tenantId,
+    claimEvidenceId: input.claimEvidenceId,
+    retentionUntil: input.retentionUntil,
+  }
 }
 
 /**
@@ -92,45 +179,23 @@ export const createEvidenceArtifact = async (
   deps: EvidenceArtifactDeps,
   input: CreateEvidenceArtifactInput,
 ): Promise<EvidenceArtifactMetadata> => {
-  const contentType = assertValidInput(input)
-  const artifactId = randomUUID()
-  const storageKey = evidenceArtifactStorageKey(input.tenantId, artifactId)
-  const sha256 = sha256Of(input.data)
-
-  const stored = await deps.store.put(storageKey, input.data, contentType)
-  if (stored.bytes !== input.data.byteLength || !stored.sha256.equals(sha256)) {
-    await deps.store.delete(storageKey).catch(() => undefined)
-    throw new Error('object storage devolveu metadados inconsistentes para o artefato')
-  }
+  if (input.claimEvidenceId.trim() === '') throw new Error('claimEvidenceId é obrigatório')
+  assertRetentionUntil(input.retentionUntil)
+  const object = await storeEvidenceObject(deps, input)
 
   try {
-    await withTenant(deps.db, input.tenantId, (tx) =>
-      tx.insert(t.evidenceArtifact).values({
-        artifactId,
+    return await withTenant(deps.db, input.tenantId, (tx) =>
+      insertEvidenceArtifact(tx, {
         tenantId: input.tenantId,
         claimEvidenceId: input.claimEvidenceId,
-        storageKey,
-        contentType,
-        sizeBytes: input.data.byteLength,
-        sha256,
+        object,
         retentionUntil: input.retentionUntil,
       }),
     )
   } catch (error) {
     // A linha não existe; o objeto órfão não pode permanecer no storage.
-    await deps.store.delete(storageKey).catch(() => undefined)
+    await deps.store.delete(object.storageKey).catch(() => undefined)
     throw error
-  }
-
-  return {
-    artifactId,
-    tenantId: input.tenantId,
-    claimEvidenceId: input.claimEvidenceId,
-    storageKey,
-    contentType,
-    sizeBytes: input.data.byteLength,
-    sha256,
-    retentionUntil: input.retentionUntil,
   }
 }
 

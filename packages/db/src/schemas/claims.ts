@@ -90,6 +90,11 @@ export const claimEvidence = pgTable(
     uniqueIndex('idx_claim_evidence_claim_signal_uq')
       .on(t.claimId, t.signalId)
       .where(sql`signal_id IS NOT NULL`),
+    // F1.1: no máximo um documento enviado pelo cliente por claim. Outras
+    // fontes (fiscal, registry) usam `source` diferente e continuam livres.
+    uniqueIndex('idx_claim_evidence_customer_document_uq')
+      .on(t.claimId)
+      .where(sql`source = 'customer_submitted_document'`),
     unique('claim_evidence_id_tenant_uq').on(t.claimEvidenceId, t.tenantId),
   ],
 )

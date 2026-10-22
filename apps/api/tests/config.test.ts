@@ -1,3 +1,4 @@
+import { EVIDENCE_ARTIFACT_MAX_BYTES } from '@comprova/db'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from '../src/config.js'
 
@@ -71,5 +72,41 @@ describe('loadConfig — origem do issuer', () => {
     expect(() =>
       loadConfig(baseEnv({ NODE_ENV: 'production', CREDENTIAL_ISSUER_ORIGIN: 'http://issuer.comprova.dev' })),
     ).toThrow(/https/)
+  })
+})
+
+describe('loadConfig — intake de comprovante', () => {
+  it('aceita S3 opcional e limite abaixo do teto do artefato', () => {
+    const config = loadConfig(
+      baseEnv({
+        S3_ENDPOINT: 'http://localhost:9000',
+        S3_ACCESS_KEY_ID: 'accessKey1',
+        S3_SECRET_ACCESS_KEY: 'secret',
+        S3_BUCKET: 'evidence',
+        EVIDENCE_MAX_BYTES: '1024',
+      }),
+    )
+    expect(config.S3_BUCKET).toBe('evidence')
+    expect(config.EVIDENCE_MAX_BYTES).toBe(1024)
+  })
+
+  it('recusa limite acima do teto já imposto por evidence_artifact', () => {
+    expect(() =>
+      loadConfig(baseEnv({ EVIDENCE_MAX_BYTES: String(EVIDENCE_ARTIFACT_MAX_BYTES + 1) })),
+    ).toThrow(/EVIDENCE_MAX_BYTES/)
+  })
+
+  it.each(['0', '-1', 'abc'])('recusa limite inválido %s', (value) => {
+    expect(() => loadConfig(baseEnv({ EVIDENCE_MAX_BYTES: value }))).toThrow(/EVIDENCE_MAX_BYTES/)
+  })
+
+  it('aceita limite de uploads simultâneos dentro do teto', () => {
+    expect(loadConfig(baseEnv()).EVIDENCE_MAX_CONCURRENCY).toBeUndefined()
+    expect(loadConfig(baseEnv({ EVIDENCE_MAX_CONCURRENCY: '2' })).EVIDENCE_MAX_CONCURRENCY).toBe(2)
+    expect(loadConfig(baseEnv({ EVIDENCE_MAX_CONCURRENCY: '16' })).EVIDENCE_MAX_CONCURRENCY).toBe(16)
+  })
+
+  it.each(['0', '-1', 'abc', '17'])('recusa concorrência inválida %s', (value) => {
+    expect(() => loadConfig(baseEnv({ EVIDENCE_MAX_CONCURRENCY: value }))).toThrow(/EVIDENCE_MAX_CONCURRENCY/)
   })
 })

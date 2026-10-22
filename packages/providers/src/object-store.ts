@@ -64,6 +64,20 @@ export const makeS3ObjectStore = (options: S3ObjectStoreOptions): ObjectStore =>
   },
 })
 
+/**
+ * Store fail-closed para quando o object storage não foi configurado. Evita
+ * cair silenciosamente em memória em produção: o intake responde 503 e nada é
+ * aceito. Testes injetam um store explícito no `buildApp`.
+ */
+export const makeUnavailableObjectStore = (reason = 'object storage is not configured'): ObjectStore => ({
+  put: async () => {
+    throw new Error(reason)
+  },
+  delete: async () => {
+    throw new Error(reason)
+  },
+})
+
 export const makeFakeObjectStore = (): ObjectStore => {
   const stored = new Map<string, Uint8Array>()
   return {

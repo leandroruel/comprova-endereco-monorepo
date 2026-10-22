@@ -42,4 +42,25 @@ export const problems = {
     'CREDENTIAL_NOT_ISSUABLE',
     'Validation cannot be issued as a credential',
   ),
+  evidenceFileRequired: internal(400, 'EVIDENCE_FILE_REQUIRED', 'Evidence file is required'),
+  invalidMultipart: internal(400, 'INVALID_MULTIPART', 'Malformed multipart request'),
+  evidenceEmpty: internal(422, 'EVIDENCE_EMPTY', 'Evidence file is empty'),
+  evidenceTooLarge: internal(413, 'EVIDENCE_TOO_LARGE', 'Evidence file exceeds the upload limit'),
+  unsupportedEvidenceType: internal(415, 'UNSUPPORTED_EVIDENCE_TYPE', 'Evidence file type is not supported'),
+  evidenceContentMismatch: internal(
+    422,
+    'EVIDENCE_CONTENT_MISMATCH',
+    'Evidence content does not match the declared type',
+  ),
+  evidenceAlreadyExists: internal(
+    409,
+    'EVIDENCE_ALREADY_EXISTS',
+    'A customer document already exists for this validation',
+  ),
+  evidenceStorageUnavailable: internal(
+    503,
+    'EVIDENCE_STORAGE_UNAVAILABLE',
+    'Evidence storage is unavailable',
+  ),
+  evidencePersistenceFailed: internal(500, 'EVIDENCE_PERSISTENCE_FAILED', 'Evidence could not be persisted'),
 }

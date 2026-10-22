@@ -1,6 +1,51 @@
 # PROGRESS.md
 
-Estado: **Guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
+Estado: **Intake de comprovante (F1.1) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
+
+## Intake de comprovante do cliente (F1.1) (2026-10-22)
+
+`POST /v1/validations/:id/evidence` recebe um comprovante em multipart e grava
+a observação pendente + o artefato, sem afirmar autenticidade ou endereço. O
+contrato está em [ADR-0037](docs/adr/0037-intake-de-comprovante-do-cliente.md) e
+em [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md).
+
+- Autenticação por API key existente (`validate:write`), tenant só da key;
+  validação de outro tenant responde `404` (não `403`).
+- Um arquivo por requisição; campos de texto e múltiplos arquivos são
+  rejeitados. Limite default de 50 MiB (`EVIDENCE_MAX_BYTES` pode reduzir),
+  aplicado no streaming + pré-checagem de `Content-Length`.
+- Tipo por magic bytes: PDF, JPEG, PNG. `filename`, extensão e `Content-Type`
+  declarado não definem o tipo; mismatch retorna `422`, tipo não suportado `415`.
+- ObjectStore privado existente em
+  `tenants/<tenant>/evidence/<artifact-id>`; SHA-256 calculado no servidor e
+  conferido com o retorno do storage. Nenhuma URL pública/presigned.
+- Cadeia `validation → claim → claim_evidence → evidence_artifact` em uma
+  transação. Claim ausente em validation legada é criada com tipo derivado de
+  `subject.doc_type`. `source = customer_submitted_document`, `stance = unknown`,
+  `strength = 0`, `confidence = 0` (sem avaliação de verificação; campo
+  `NOT NULL`), `detail.verification.status = "pending"`.
+- Um documento do cliente por claim (índice único parcial). O SHA-256 é a chave
+  natural: mesmos bytes são replay; bytes diferentes retornam `409`.
+  `Idempotency-Key` identifica a tentativa do cliente, não a evidência:
+  mesma key + mesmo conteúdo = replay; mesma key + conteúdo diferente = `422`;
+  key nova + mesmo conteúdo = replay (alias), sem nova evidência.
+- Lock da validation + índice único serializam uploads concorrentes; um semáforo
+  por processo (`EVIDENCE_MAX_CONCURRENCY`, default 4) limita arquivos
+  bufferizados em voo. Falha de DB/claim/artifact após o storage apaga o objeto;
+  replay também apaga o objeto redundante. Falha do delete de compensação é
+  logada com ids técnicos, sem filename/conteúdo/API key.
+- `retention_until`/`expires_at` derivam de `validation.expires_at`; o job de
+  retenção existente remove objeto e grafo. A resposta expõe só
+  `evidence_id`, `artifact_id` e `status`; replay usa `200` +
+  `Idempotent-Replayed: true`.
+- Testes: `apps/api/tests/evidence-intake.int.test.ts` (17 casos, incluindo
+  auth/scope, cross-tenant, traversal, MIME spoofing, vazio/ausente/limite,
+  confiança neutra, idempotência por conteúdo/key, limite de uploads em voo,
+  falha de storage/DB/claim, compensação sem PII e retenção). Migração
+  `0040_evidence_intake.sql`.
+
+Ainda falta da Fase 1: OCR/extração de campos, matching de documento/endereço/
+titular e detalhe completo no `GET` (F1.2/F1.3).
 
 ## Guarda de fetch externo seguro (F0.2) (2026-10-22)
 

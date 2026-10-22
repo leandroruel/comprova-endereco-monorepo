@@ -1,5 +1,13 @@
 import { assertProductionIssuerOrigin, IssuerOriginSchema } from '@comprova/credential'
+import { EVIDENCE_ARTIFACT_MAX_BYTES } from '@comprova/db'
 import { z } from 'zod'
+
+/**
+ * Quantos uploads de comprovante podem estar em voo por processo. Cada slot
+ * pode bufferizar até `EVIDENCE_MAX_BYTES`; 4 mantém o pior caso em ~200 MiB
+ * com o default de 50 MiB.
+ */
+export const DEFAULT_EVIDENCE_MAX_CONCURRENCY = 4
 
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -62,6 +70,30 @@ const EnvSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true'),
+  /**
+   * Object storage privado usado pelo intake de comprovantes. As quatro
+   * variáveis são opcionais no boot: sem elas a rota de upload falha fechado
+   * com 503 e nenhum objeto é aceito. O worker já usa as mesmas credenciais.
+   */
+  S3_ENDPOINT: z.string().min(1).optional(),
+  S3_REGION: z.string().min(1).optional(),
+  S3_BUCKET: z.string().min(1).optional(),
+  S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+  S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  /**
+   * Limite de upload do comprovante em bytes. O default é o limite que o
+   * banco já impõe em `evidence_artifact` (50 MiB). É configurável apenas
+   * para baixo, para testes e para políticas operacionais mais restritas.
+   */
+  EVIDENCE_MAX_BYTES: z.coerce.number().int().positive().max(EVIDENCE_ARTIFACT_MAX_BYTES).optional(),
+  /**
+   * Limite de uploads de comprovante simultâneos por processo. O multipart
+   * bufferiza o arquivo inteiro antes de ir para o storage; sem esse limite o
+   * burst do rate limit poderia reter vários arquivos de até 50 MiB. Default
+   * 4, teto 16 (800 MiB no pior caso com o tamanho default). É por processo:
+   * réplicas multiplicam o total.
+   */
+  EVIDENCE_MAX_CONCURRENCY: z.coerce.number().int().positive().max(16).optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

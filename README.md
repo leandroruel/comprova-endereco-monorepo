@@ -46,6 +46,17 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   Para revogar uma chave, `UPDATE api_key SET revoked_at = now() WHERE ...`; a
   API confere a revogação no banco, mas guarda o resultado por 60s em memória
   (cache por prefixo), então o 401 pode demorar até um minuto.
+- **`S3_*` / `EVIDENCE_MAX_BYTES` / `EVIDENCE_MAX_CONCURRENCY`** configuram o
+  intake de comprovante (F1.1). O endpoint usa o mesmo bucket privado do worker
+  via `S3_ENDPOINT`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/`S3_BUCKET`
+  (`S3_REGION` opcional, default `us-east-1`) e grava em
+  `tenants/<tenant>/evidence/<artifact-id>`. Se o conjunto S3 não estiver
+  completo, a API sobe, mas o upload falha fechado com
+  `503 EVIDENCE_STORAGE_UNAVAILABLE`; não há fallback para memória. O limite
+  default é **50 MiB** (o mesmo de `evidence_artifact`) e `EVIDENCE_MAX_BYTES`
+  só pode reduzi-lo. Como o arquivo é bufferizado antes do storage, um semáforo
+  por processo limita uploads em voo com `EVIDENCE_MAX_CONCURRENCY` (default
+  **4**, máximo **16**); o limite é por processo, então cada réplica tem o seu.
 - **`CREDENTIAL_ISSUER_ORIGIN`** é a origem HTTPS **controlada pelo projeto**
   que serve de base para o `issuer` e para o `credentialSubject.id` das
   credenciais verificáveis (ADR-0024). Não há default e a biblioteca não
@@ -165,28 +176,29 @@ Abre `http://localhost:5173`:
 
 ## Endpoints da API
 
-| Método          | Path                                      | Descrição                                         |
-| --------------- | ----------------------------------------- | ------------------------------------------------- |
-| POST            | `/v1/validations`                         | Valida um CNPJ/CPF (fast/auto/deep)               |
-| GET             | `/v1/validations/:id`                     | Consulta resultado com ETag                       |
-| POST            | `/v1/validations/:id/credential`          | Emite a credencial verificável (JSON)             |
-| POST            | `/v1/credentials/:credentialId/revoke`    | Revoga a credencial (idempotente, monotônico)     |
-| POST            | `/v1/signing-keys/:keyId/revoke`          | Revoga/agenda a expiração da chave do tenant      |
-| POST            | `/v1/validations/:id/contest`             | Contestação (art. 20 LGPD)                        |
-| GET             | `/v1/stats`                               | Stats por usuário (total, únicos, por veredito)   |
-| POST            | `/v1/batches`                             | Cria lote (background)                            |
-| GET             | `/v1/batches`                             | Lista lotes do usuário                            |
-| GET             | `/v1/batches/:id`                         | Detalhes do lote                                  |
-| GET             | `/v1/batches/:id/export?format=csv\|json` | Download                                          |
-| POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                         |
-| GET             | `/v1/subjects/:id/validations`            | Relatório de acesso LGPD                          |
-| DELETE          | `/v1/subjects/:id`                        | Eliminação LGPD                                   |
-| GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey)   |
-| GET             | `/issuers/:scope/did.json`                | DID Document público do issuer (`did:web`)        |
-| GET             | `/issuers/:scope/credentials/:id/status`  | Status público da credencial (`ACTIVE`/`REVOKED`) |
-| GET             | `/.well-known/comprova-issuer/:scope`     | Descoberta do documento público do issuer         |
-| GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                               |
-| GET             | `/openapi.json`                           | OpenAPI 3.1                                       |
+| Método          | Path                                      | Descrição                                           |
+| --------------- | ----------------------------------------- | --------------------------------------------------- |
+| POST            | `/v1/validations`                         | Valida um CNPJ/CPF (fast/auto/deep)                 |
+| GET             | `/v1/validations/:id`                     | Consulta resultado com ETag                         |
+| POST            | `/v1/validations/:id/evidence`            | Envia comprovante (PDF/JPEG/PNG, multipart, 50 MiB) |
+| POST            | `/v1/validations/:id/credential`          | Emite a credencial verificável (JSON)               |
+| POST            | `/v1/credentials/:credentialId/revoke`    | Revoga a credencial (idempotente, monotônico)       |
+| POST            | `/v1/signing-keys/:keyId/revoke`          | Revoga/agenda a expiração da chave do tenant        |
+| POST            | `/v1/validations/:id/contest`             | Contestação (art. 20 LGPD)                          |
+| GET             | `/v1/stats`                               | Stats por usuário (total, únicos, por veredito)     |
+| POST            | `/v1/batches`                             | Cria lote (background)                              |
+| GET             | `/v1/batches`                             | Lista lotes do usuário                              |
+| GET             | `/v1/batches/:id`                         | Detalhes do lote                                    |
+| GET             | `/v1/batches/:id/export?format=csv\|json` | Download                                            |
+| POST/GET/DELETE | `/v1/webhooks`                            | Gestão de webhooks (HMAC)                           |
+| GET             | `/v1/subjects/:id/validations`            | Relatório de acesso LGPD                            |
+| DELETE          | `/v1/subjects/:id`                        | Eliminação LGPD                                     |
+| GET             | `/issuers/:scope`                         | Documento público de chave do issuer (Multikey)     |
+| GET             | `/issuers/:scope/did.json`                | DID Document público do issuer (`did:web`)          |
+| GET             | `/issuers/:scope/credentials/:id/status`  | Status público da credencial (`ACTIVE`/`REVOKED`)   |
+| GET             | `/.well-known/comprova-issuer/:scope`     | Descoberta do documento público do issuer           |
+| GET             | `/healthz` / `/readyz` / `/metrics`       | Ops                                                 |
+| GET             | `/openapi.json`                           | OpenAPI 3.1                                         |
 
 ### Scopes das API keys
 
@@ -195,11 +207,11 @@ handler** (`preHandler: requireReadScope`, `requireWriteScope` ou
 `requireKeysWriteScope`). O contrato define três scopes; o default de
 `api_key.scopes` continua com dois, e `keys:write` é opt-in:
 
-| Scope            | Operações                                                                                                                                                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `validate:read`  | `GET /v1/validations/:id`, `GET /v1/batches`, `GET /v1/batches/:id`, `GET /v1/batches/:id/export`, `GET /v1/stats`, `GET /v1/meta`, `GET /v1/webhooks`, `GET /v1/subjects/:id/validations`                                                    |
-| `validate:write` | `POST /v1/validations`, `POST /v1/validations/:id/contest`, `POST /v1/validations/:id/credential`, `POST /v1/credentials/:credentialId/revoke`, `POST /v1/batches`, `POST /v1/webhooks`, `DELETE /v1/webhooks/:id`, `DELETE /v1/subjects/:id` |
-| `keys:write`     | `POST /v1/signing-keys/:keyId/revoke`                                                                                                                                                                                                         |
+| Scope            | Operações                                                                                                                                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate:read`  | `GET /v1/validations/:id`, `GET /v1/batches`, `GET /v1/batches/:id`, `GET /v1/batches/:id/export`, `GET /v1/stats`, `GET /v1/meta`, `GET /v1/webhooks`, `GET /v1/subjects/:id/validations`                                                                                         |
+| `validate:write` | `POST /v1/validations`, `POST /v1/validations/:id/evidence`, `POST /v1/validations/:id/contest`, `POST /v1/validations/:id/credential`, `POST /v1/credentials/:credentialId/revoke`, `POST /v1/batches`, `POST /v1/webhooks`, `DELETE /v1/webhooks/:id`, `DELETE /v1/subjects/:id` |
+| `keys:write`     | `POST /v1/signing-keys/:keyId/revoke`                                                                                                                                                                                                                                              |
 
 - **401 `UNAUTHORIZED`** — API key ausente, inválida ou revogada.
 - **403 `FORBIDDEN`** — API key válida, mas sem o scope exigido. A resposta é
@@ -348,7 +360,7 @@ policies/          Políticas de scoring versionadas (YAML)
 docs/roadmap.md     Roadmap canônico (prioridades, fases, decisões)
 docs/architecture.md  Arquitetura atual
 docs/arquitetura-evidencias.md  Alvo de evidências e fontes fiscais
-docs/adr/           36 ADRs
+docs/adr/           37 ADRs
 docs/lgpd/          Mapa de dados, RIPD, retenção, LIA
 docs/runbooks/      6 runbooks operacionais
 infra/              Terraform + k8s como código-alvo documentado
