@@ -16,8 +16,8 @@ const startLoop = (tick: () => Promise<unknown>, intervalMs: number): (() => voi
 export const startEvidenceRetentionLoop = (db: Db, store: ObjectStore, intervalMs = DAY_MS): (() => void) =>
   startLoop(() => retentionTick(db, store), intervalMs)
 
-export const startValidationRetentionLoop = (db: Db, intervalMs = DAY_MS): (() => void) =>
-  startLoop(() => validationRetentionTick(db), intervalMs)
+export const startValidationRetentionLoop = (db: Db, store: ObjectStore, intervalMs = DAY_MS): (() => void) =>
+  startLoop(() => validationRetentionTick(db, store), intervalMs)
 
 export const startPartitionLoop = (db: Db, intervalMs = DAY_MS): (() => void) =>
   startLoop(() => ensurePartitions(db), intervalMs)

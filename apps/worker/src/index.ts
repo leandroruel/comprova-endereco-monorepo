@@ -36,7 +36,7 @@ const retentionPool = adminRetentionPool ?? createDbPool(env.databaseUrl)
 const retentionStore = makeObjectStore(env)
 const stopEvidenceRetention = startEvidenceRetentionLoop(retentionPool.db, retentionStore)
 const stopValidationRetention =
-  adminRetentionPool !== null ? startValidationRetentionLoop(adminRetentionPool.db) : null
+  adminRetentionPool !== null ? startValidationRetentionLoop(adminRetentionPool.db, retentionStore) : null
 
 const worker = await Worker.create({
   taskQueue,

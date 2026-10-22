@@ -1,6 +1,59 @@
 # PROGRESS.md
 
-Estado: **Dashboard com auth + bulk search + stats por usuário** (2026-10-15)
+Estado: **Artefato de evidência tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
+
+## Artefato de evidência tenant-scoped (F0.1) (2026-10-22)
+
+Fundação de armazenamento para documentos de cliente (PII) sem tocar em
+`evidence`, que continua global e restrita ao street view. A nova tabela
+`evidence_artifact` é tenant-scoped e ligada à observação por FK composta
+`(claim_evidence_id, tenant_id)` — um artefato do tenant A não pode apontar para
+`claim_evidence` do tenant B. O binário fica no `ObjectStore` existente
+(`tenants/<tenant>/evidence/<artifact>`); o banco guarda só metadados,
+`storage_key`, `sha256` e `retention_until`.
+
+- Migration `0039_evidence_artifact.sql`: RLS ENABLE/FORCE, grants
+  `SELECT/INSERT/DELETE` (sem `UPDATE`), trigger de imutabilidade, checks de
+  tamanho/hash/content-type/namespace e unique `(tenant_id, storage_key)`.
+- Serviço `apps/api/src/services/evidence-artifact.ts`: allowlist PDF/JPEG/PNG/
+  WebP, limite de 50 MiB, hash local, compensação do storage se o INSERT falhar.
+- Retenção: `validationRetentionTick` apaga o objeto, a linha do artefato e só
+  então o grafo; a auditoria registra `artifacts_removed`.
+- Testes: 15 de isolamento/integridade/lifecycle na API e retenção de artefato no
+  worker. Gates: `pnpm test` (71 arquivos, 623 testes), `pnpm typecheck`,
+  `pnpm lint`, `pnpm format`, `pnpm db:fence` (exit 0).
+- Decisão em [ADR-0035](docs/adr/0035-artefato-de-evidencia-tenant-scoped.md).
+  Upload/download HTTP, presigned URLs, OCR/VLM e NF3e/NFAg-e ficam fora.
+
+## Auditoria de arquitetura, roadmap canônico e arquitetura de evidências (2026-10-22)
+
+Auditoria documental do monorepo (sem mudança de código, schema, endpoint ou
+dependência) para separar o que existe do que é intenção. O repositório não
+tinha roadmap versionado — só este log e referências a um "roadmap #24" externo.
+
+Novos documentos:
+
+- [`docs/roadmap.md`](docs/roadmap.md) — roadmap canônico (P0–P3, fases F0–F8,
+  dependências, critérios, riscos e decisões em aberto). Absorve o roadmap #24
+  como concluído e reordena SSI/VLM/credencial.
+- [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md) — alvo de
+  evidências (upload convencional + NF3e/NFAg-e), contrato de verificação,
+  taxonomia, segurança de consulta externa, semântica temporal e extensões
+  mínimas. Deixa explícito que nada disso está implementado.
+- [`docs/adr/0033-verificacao-de-evidencias-por-adaptadores.md`](docs/adr/0033-verificacao-de-evidencias-por-adaptadores.md)
+  — contrato de verificação com resultado em três dimensões e regra
+  "indisponível ≠ contradiz".
+- [`docs/adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md`](docs/adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md)
+  — QR apenas identifica o autorizador; a URL de consulta vem de allowlist no
+  servidor.
+
+Correções de documentação: README (contagem de ADRs/runbooks e afirmação de
+SSRF), `docs/architecture.md` (seção de evidências e policy global) e
+`docs/lgpd/retencao.md` (o job de expiração já existe; detach de partição não).
+
+Fatos externos verificados em 2026-10-22: NF3e (modelo 66) com autorizadores
+MG/MS/MT/PR/SVRS/SC e QR por autorizador; NFAg-e (modelo 75) ainda como Minuta,
+somente SVRS. Nenhuma cobertura nacional é assumida.
 
 ## Backend de assinatura AWS KMS (roadmap #24, etapa 24.3) (2026-10-21)
 

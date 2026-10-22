@@ -8,6 +8,7 @@ import {
   real,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
@@ -82,10 +83,14 @@ export const claimEvidence = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   // MÉDIO-3: 1 claim + 1 signal = 1 claim_evidence.
+  // A chave (claim_evidence_id, tenant_id) existe para a FK composta de
+  // `evidence_artifact` (ADR-0035): o artefato só pode apontar para uma
+  // observação do MESMO tenant.
   (t) => [
     uniqueIndex('idx_claim_evidence_claim_signal_uq')
       .on(t.claimId, t.signalId)
       .where(sql`signal_id IS NOT NULL`),
+    unique('claim_evidence_id_tenant_uq').on(t.claimEvidenceId, t.tenantId),
   ],
 )
 

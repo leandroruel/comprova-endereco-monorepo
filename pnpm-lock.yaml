@@ -241,6 +241,9 @@ importers:
       '@comprova/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@comprova/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@fastify/cors':
         specifier: ^11.3.1
         version: 11.3.1

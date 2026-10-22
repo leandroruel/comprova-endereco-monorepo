@@ -8,6 +8,7 @@ import {
 import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import { makeFakeObjectStore } from '@comprova/providers'
+import type { ObjectStore } from '@comprova/providers'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { validationRetentionTick } from './retention.service.js'
@@ -59,7 +60,7 @@ describe('retention de validacoes (expires_at)', () => {
       validationId: fresh,
     })
 
-    const removed = await validationRetentionTick(adminPool.db)
+    const removed = await validationRetentionTick(adminPool.db, makeFakeObjectStore())
     expect(removed).toBeGreaterThanOrEqual(1)
 
     const goneSignals = await adminPool.db.select().from(t.signal).where(eq(t.signal.validationId, expired))
@@ -139,7 +140,7 @@ describe('retention do grafo claim/claim_evidence (ALTO-1)', () => {
       detail: {},
     })
 
-    await validationRetentionTick(adminPool.db)
+    await validationRetentionTick(adminPool.db, makeFakeObjectStore())
 
     expect(
       (await adminPool.db.select().from(t.claim).where(eq(t.claim.validationId, validationId))).length,
@@ -267,5 +268,99 @@ describe('retention de evidence material (ALTO-2)', () => {
     expect(
       (await adminPool.db.select().from(t.evidence).where(eq(t.evidence.evidenceId, evidenceId))).length,
     ).toBe(0)
+  })
+})
+
+// F0.1/ADR-0035: o artefato físico tenant-scoped é apagado do object storage
+// ANTES da linha; a linha precisa sair antes de claim_evidence (FK RESTRICT).
+describe('retention de evidence_artifact (F0.1)', () => {
+  it('remove objeto e linha do artefato ao expirar a validation', async () => {
+    const subject = await createSubject(adminPool.db, tenant)
+    const validationId = await createValidation(adminPool.db, tenant, subject)
+    await adminPool.db
+      .update(t.validation)
+      .set({ expiresAt: new Date(Date.now() - 86_400_000) })
+      .where(eq(t.validation.validationId, validationId))
+
+    const claimId = randomUUID()
+    await adminPool.db.insert(t.claim).values({
+      claimId,
+      tenantId: tenant,
+      validationId,
+      subjectId: subject,
+      type: 'address_exists',
+      subjectType: 'organization',
+      targetType: 'address',
+    })
+
+    const claimEvidenceId = randomUUID()
+    await adminPool.db.insert(t.claimEvidence).values({
+      claimEvidenceId,
+      tenantId: tenant,
+      claimId,
+      checker: 'document_integrity',
+      checkerVersion: '1.0.0',
+      stance: 'supports',
+      strength: 0.5,
+      confidence: 1,
+      source: 'test',
+      observedAt: new Date(),
+      ttlSeconds: 3600,
+      expiresAt: new Date(Date.now() + 3_600_000),
+      detail: {},
+    })
+
+    const artifactId = randomUUID()
+    const storageKey = `tenants/${tenant}/evidence/${artifactId}`
+    await adminPool.db.insert(t.evidenceArtifact).values({
+      artifactId,
+      tenantId: tenant,
+      claimEvidenceId,
+      storageKey,
+      contentType: 'application/pdf',
+      sizeBytes: 3,
+      sha256: randomBytes(32),
+      retentionUntil: new Date(Date.now() + 86_400_000),
+    })
+
+    const deletedKeys: string[] = []
+    const base = makeFakeObjectStore()
+    const store: ObjectStore = {
+      put: base.put,
+      delete: async (key) => {
+        deletedKeys.push(key)
+        await base.delete(key)
+      },
+    }
+
+    const removed = await validationRetentionTick(adminPool.db, store)
+    expect(removed).toBeGreaterThanOrEqual(1)
+
+    // O objeto foi removido antes do grafo.
+    expect(deletedKeys).toContain(storageKey)
+
+    expect(
+      (
+        await adminPool.db
+          .select()
+          .from(t.evidenceArtifact)
+          .where(eq(t.evidenceArtifact.artifactId, artifactId))
+      ).length,
+    ).toBe(0)
+    expect(
+      (
+        await adminPool.db
+          .select()
+          .from(t.claimEvidence)
+          .where(eq(t.claimEvidence.claimEvidenceId, claimEvidenceId))
+      ).length,
+    ).toBe(0)
+
+    // Auditoria da remoção inclui a contagem de artefatos.
+    const audits = await adminPool.db
+      .select({ details: t.auditLog.details })
+      .from(t.auditLog)
+      .where(eq(t.auditLog.action, 'validation.expired'))
+    expect(audits.some((row) => row.details.artifacts_removed === 1)).toBe(true)
   })
 })

@@ -322,6 +322,13 @@ Dashboard (React+Vite:5173) ─► API (Fastify:3000)
                                    └► Postgres 16+PostGIS (particionado, RLS multi-tenant)
 ```
 
+## Roadmap
+
+O roadmap canônico é [`docs/roadmap.md`](docs/roadmap.md) (prioridades P0–P3,
+fases, dependências e decisões em aberto). O `PROGRESS.md` é o log do que já foi
+entregue. O alvo de evidências e verificação fiscal está em
+[`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md).
+
 ## Estrutura
 
 ```
@@ -338,9 +345,12 @@ packages/observability  Logger com redação PII + métricas
 packages/testing    Testcontainers + fixtures + dataset dourado
 packages/sdk        Cliente TypeScript gerado do OpenAPI
 policies/          Políticas de scoring versionadas (YAML)
-docs/adr/           14 ADRs
+docs/roadmap.md     Roadmap canônico (prioridades, fases, decisões)
+docs/architecture.md  Arquitetura atual
+docs/arquitetura-evidencias.md  Alvo de evidências e fontes fiscais
+docs/adr/           34 ADRs
 docs/lgpd/          Mapa de dados, RIPD, retenção, LIA
-docs/runbooks/      5 runbooks operacionais
+docs/runbooks/      6 runbooks operacionais
 infra/              Terraform + k8s como código-alvo documentado
 load/               k6 scenarios
 ```
@@ -352,6 +362,9 @@ load/               k6 scenarios
 - **Logs**: redator central com testes anti-vazamento no CI
 - **API keys**: HMAC-SHA256 (sem argon2), prefix 12 chars
 - **Webhooks**: HTTPS only, HMAC-SHA256, timingSafeEqual, redirect: manual
-- **SSRF**: hostname allowlist + private range block
+- **SSRF**: hoje só o cadastro de webhook valida HTTPS + bloqueio de host
+  privado por regex (`isSafeWebhookUrl`); **sem resolução de DNS**, sem IP
+  fixado e sem limite de resposta. Consulta a fonte fiscal exigirá uma guarda
+  mais forte ([ADR-0034](docs/adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md))
 - **LGPD**: DELETE /v1/subjects/:id (eliminação transacional), contestação com reason cifrada
 - **pgfence**: gate de migrações no CI (lock analysis, risk scoring)
