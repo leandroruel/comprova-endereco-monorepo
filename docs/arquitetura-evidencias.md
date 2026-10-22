@@ -243,14 +243,14 @@ allowlist.
 
 ## 7. Confiança, atualidade e divergência
 
-| Dimensão               | Campo hoje                               | Semântica                             |
-| ---------------------- | ---------------------------------------- | ------------------------------------- |
-| Quando foi observado   | `claim_evidence.observed_at`             | Momento da coleta (consulta/extração) |
-| Validade da evidência  | `claim_evidence.ttl_seconds` + `decayOf` | Quanto o sinal decai no score         |
-| Validade do artefato   | `evidence.retention_until`               | Quanto o binário é retido (LGPD)      |
-| Emissão do documento   | `detail.issued_at` (proposto)            | Competência do comprovante            |
-| Retenção da validação  | `validation.expires_at`                  | 30 dias hoje, hardcoded               |
-| Validade da credencial | `validFrom` / `validUntil`               | Derivada do completion + TTL          |
+| Dimensão               | Campo hoje                                                                          | Semântica                             |
+| ---------------------- | ----------------------------------------------------------------------------------- | ------------------------------------- |
+| Quando foi observado   | `claim_evidence.observed_at`                                                        | Momento da coleta (consulta/extração) |
+| Validade da evidência  | `claim_evidence.ttl_seconds` + `decayOf`                                            | Quanto o sinal decai no score         |
+| Validade do artefato   | `evidence_artifact.retention_until` (cliente) / `evidence.retention_until` (legado) | Quanto o binário é retido (LGPD)      |
+| Emissão do documento   | `detail.issued_at` (proposto)                                                       | Competência do comprovante            |
+| Retenção da validação  | `validation.expires_at`                                                             | 30 dias hoje, hardcoded               |
+| Validade da credencial | `validFrom` / `validUntil`                                                          | Derivada do completion + TTL          |
 
 Regras:
 

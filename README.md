@@ -348,7 +348,7 @@ policies/          Políticas de scoring versionadas (YAML)
 docs/roadmap.md     Roadmap canônico (prioridades, fases, decisões)
 docs/architecture.md  Arquitetura atual
 docs/arquitetura-evidencias.md  Alvo de evidências e fontes fiscais
-docs/adr/           34 ADRs
+docs/adr/           35 ADRs
 docs/lgpd/          Mapa de dados, RIPD, retenção, LIA
 docs/runbooks/      6 runbooks operacionais
 infra/              Terraform + k8s como código-alvo documentado

@@ -1,6 +1,7 @@
-import { eq, inArray, lte } from '@comprova/db'
+import { and, eq, inArray, lte } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import * as t from '@comprova/db'
+import type { Logger } from '@comprova/observability'
 import type { ObjectStore } from '@comprova/providers'
 
 interface ExpiredValidation {
@@ -26,34 +27,45 @@ interface DeletionStats {
  */
 const deleteValidationGraph = async (
   db: Db,
-  validationIds: readonly string[],
+  validationId: string,
   store: ObjectStore,
 ): Promise<DeletionStats> => {
   const artifactsByTenant = new Map<string, number>()
   const claims = await db
     .select({ claimId: t.claim.claimId })
     .from(t.claim)
-    .where(inArray(t.claim.validationId, [...validationIds]))
+    .where(eq(t.claim.validationId, validationId))
 
-  if (claims.length > 0) {
-    const artifacts = await db
-      .select({
-        artifactId: t.evidenceArtifact.artifactId,
-        storageKey: t.evidenceArtifact.storageKey,
-        tenantId: t.evidenceArtifact.tenantId,
-      })
-      .from(t.evidenceArtifact)
-      .innerJoin(t.claimEvidence, eq(t.evidenceArtifact.claimEvidenceId, t.claimEvidence.claimEvidenceId))
-      .innerJoin(t.claim, eq(t.claimEvidence.claimId, t.claim.claimId))
-      .where(inArray(t.claim.validationId, [...validationIds]))
+  const artifacts =
+    claims.length === 0
+      ? []
+      : await db
+          .select({
+            artifactId: t.evidenceArtifact.artifactId,
+            storageKey: t.evidenceArtifact.storageKey,
+            tenantId: t.evidenceArtifact.tenantId,
+          })
+          .from(t.evidenceArtifact)
+          .innerJoin(
+            t.claimEvidence,
+            and(
+              eq(t.evidenceArtifact.claimEvidenceId, t.claimEvidence.claimEvidenceId),
+              eq(t.evidenceArtifact.tenantId, t.claimEvidence.tenantId),
+            ),
+          )
+          .innerJoin(t.claim, eq(t.claimEvidence.claimId, t.claim.claimId))
+          .where(eq(t.claim.validationId, validationId))
 
-    for (const artifact of artifacts) {
-      await store.delete(artifact.storageKey)
-      artifactsByTenant.set(artifact.tenantId, (artifactsByTenant.get(artifact.tenantId) ?? 0) + 1)
-    }
+  // O objeto sai antes da linha. Se um delete falhar, a transação de banco
+  // abaixo nem começa e a validation continua elegível para o próximo tick.
+  for (const artifact of artifacts) {
+    await store.delete(artifact.storageKey)
+    artifactsByTenant.set(artifact.tenantId, (artifactsByTenant.get(artifact.tenantId) ?? 0) + 1)
+  }
 
+  await db.transaction(async (tx) => {
     if (artifacts.length > 0) {
-      await db.delete(t.evidenceArtifact).where(
+      await tx.delete(t.evidenceArtifact).where(
         inArray(
           t.evidenceArtifact.artifactId,
           artifacts.map((artifact) => artifact.artifactId),
@@ -61,20 +73,20 @@ const deleteValidationGraph = async (
       )
     }
 
-    await db.delete(t.claimEvidence).where(
-      inArray(
-        t.claimEvidence.claimId,
-        claims.map((claim) => claim.claimId),
-      ),
-    )
-    await db.delete(t.claim).where(inArray(t.claim.validationId, [...validationIds]))
-  }
+    if (claims.length > 0) {
+      await tx.delete(t.claimEvidence).where(
+        inArray(
+          t.claimEvidence.claimId,
+          claims.map((claim) => claim.claimId),
+        ),
+      )
+      await tx.delete(t.claim).where(eq(t.claim.validationId, validationId))
+    }
 
-  await db.delete(t.signal).where(inArray(t.signal.validationId, [...validationIds]))
-  await db
-    .delete(t.validationIdempotency)
-    .where(inArray(t.validationIdempotency.validationId, [...validationIds]))
-  await db.delete(t.validation).where(inArray(t.validation.validationId, [...validationIds]))
+    await tx.delete(t.signal).where(eq(t.signal.validationId, validationId))
+    await tx.delete(t.validationIdempotency).where(eq(t.validationIdempotency.validationId, validationId))
+    await tx.delete(t.validation).where(eq(t.validation.validationId, validationId))
+  })
 
   return { artifactsByTenant }
 }
@@ -100,7 +112,12 @@ const recordExpirationAudit = async (
   )
 }
 
-export const validationRetentionTick = async (db: Db, store: ObjectStore, limit = 200): Promise<number> => {
+export const validationRetentionTick = async (
+  db: Db,
+  store: ObjectStore,
+  limit = 200,
+  logger?: Logger,
+): Promise<number> => {
   const expired = await db
     .select({
       validationId: t.validation.validationId,
@@ -112,11 +129,32 @@ export const validationRetentionTick = async (db: Db, store: ObjectStore, limit 
 
   if (expired.length === 0) return 0
 
-  const { artifactsByTenant } = await deleteValidationGraph(
-    db,
-    expired.map((row) => row.validationId),
-    store,
-  )
-  await recordExpirationAudit(db, expired, artifactsByTenant)
-  return expired.length
+  const removed: ExpiredValidation[] = []
+  const artifactsByTenant = new Map<string, number>()
+
+  for (const row of expired) {
+    try {
+      const stats = await deleteValidationGraph(db, row.validationId, store)
+      removed.push(row)
+      for (const [tenantId, count] of stats.artifactsByTenant) {
+        artifactsByTenant.set(tenantId, (artifactsByTenant.get(tenantId) ?? 0) + count)
+      }
+    } catch (error) {
+      // A linha continua expirada e será tentada de novo no próximo tick. A
+      // falha de uma validation não impede a remoção das demais.
+      logger?.warn(
+        {
+          validation_id: row.validationId,
+          reason: 'RETENTION_DELETE_FAILED',
+          error_name: error instanceof Error ? error.name : 'unknown',
+        },
+        'validation retention failed; will retry next tick',
+      )
+    }
+  }
+
+  if (removed.length > 0) {
+    await recordExpirationAudit(db, removed, artifactsByTenant)
+  }
+  return removed.length
 }
