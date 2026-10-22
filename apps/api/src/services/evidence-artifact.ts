@@ -135,8 +135,10 @@ export const createEvidenceArtifact = async (
 }
 
 /**
- * Remove o objeto físico e, só então, a linha. Se o storage falhar, a linha
- * permanece (o retry é seguro e não deixa ponteiro sem objeto).
+ * Remove o objeto físico e, só então, a linha. O objeto sai primeiro para nunca
+ * deixar objeto órfão. Se o DELETE da linha falhar, a linha permanece como
+ * marcador de retry; `store.delete` é idempotente e a próxima chamada conclui.
+ * A ordem inversa deixaria um objeto órfão se o storage falhasse.
  */
 export const deleteEvidenceArtifact = async (
   deps: EvidenceArtifactDeps,
