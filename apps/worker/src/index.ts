@@ -34,9 +34,11 @@ const adminUrl = process.env.DATABASE_ADMIN_URL
 const adminRetentionPool = adminUrl !== undefined && adminUrl !== '' ? createDbPool(adminUrl) : null
 const retentionPool = adminRetentionPool ?? createDbPool(env.databaseUrl)
 const retentionStore = makeObjectStore(env)
-const stopEvidenceRetention = startEvidenceRetentionLoop(retentionPool.db, retentionStore)
+const stopEvidenceRetention = startEvidenceRetentionLoop(retentionPool.db, retentionStore, logger)
 const stopValidationRetention =
-  adminRetentionPool !== null ? startValidationRetentionLoop(adminRetentionPool.db) : null
+  adminRetentionPool !== null
+    ? startValidationRetentionLoop(adminRetentionPool.db, retentionStore, logger)
+    : null
 
 const worker = await Worker.create({
   taskQueue,

@@ -106,7 +106,8 @@ Cada validação grava `user_id`. O endpoint `/v1/stats` filtra por user_id:
 
 - **RLS FORCE por tenant** em `subject`, `validation`, `validation_idempotency`,
   `usage_event`, `webhook_*`, `audit_log`, `batch`, `batch_item`, `claim`,
-  `claim_evidence`. O runtime sempre acessa via `withTenant` (`SET LOCAL app.tenant_id`).
+  `claim_evidence`, `evidence_artifact`. O runtime sempre acessa via `withTenant`
+  (`SET LOCAL app.tenant_id`).
 - **Integridade relacional** (migrações 0024–0027): unicidade
   `claim_evidence (claim_id, signal_id)`; FK composta
   `claim (subject_id, tenant_id) → subject (subject_id, tenant_id)`; constraint
@@ -116,11 +117,16 @@ Cada validação grava `user_id`. O endpoint `/v1/stats` filtra por user_id:
   `claim_evidence` (RLS FORCE) e `claim_evidence.evidence_id` é ponteiro opcional.
   **`signal`** é derivado da validation (sem `tenant_id`/RLS); a coerência tenant é
   garantida pela cadeia `signal.validation_id → validation.tenant_id` + trigger 0026.
+  **`evidence_artifact`** (F0.1/ADR-0035) é o artefato físico tenant-scoped para
+  documentos de cliente: FK composta `(claim_evidence_id, tenant_id)`, RLS FORCE,
+  sem `UPDATE`, `storage_key` no namespace do tenant e nenhum binário no Postgres.
 - **Retenção** (matriz de TTL em ADR-0016): `validation` expira por `expires_at` e
-  remove o grafo `claim_evidence → claim → signal → validation_idempotency`;
-  `evidence` expira por `retention_until` com **desvinculação antes** da remoção do
-  objeto físico. `subject`/`canonical_address` têm ciclo próprio e **não** são
-  removidos pela retenção.
+  remove o grafo `evidence_artifact → claim_evidence → claim → signal →
+validation_idempotency`; o objeto do artefato é apagado **antes** da linha e a
+  auditoria registra `artifacts_removed`. `evidence` expira por `retention_until`
+  com **desvinculação antes** da remoção do objeto físico.
+  `subject`/`canonical_address` têm ciclo próprio e **não** são removidos pela
+  retenção.
 
 ### Por que o batch e a retenção usam conexão admin
 
@@ -140,6 +146,60 @@ explicitamente (o contexto `withTenant` continua sendo aplicado). **Não** conce
 de worker (entre `app_user` e admin) é possível no futuro, mas exigiria migração de
 grants — não é necessário hoje.
 
+## Evidências: artefato, observação, avaliação e credencial
+
+A cadeia de responsabilidades é:
+
+```text
+Artifact      material bruto (PDF/imagem) em object storage privado
+   ↓
+Evidence      observação lógica ligada a um claim (claim_evidence + descritor)
+   ↓
+Assessment    avaliação/score/veredito explicável
+   ↓
+Credential    saída verificável e assinada
+```
+
+`artifact` **não** é `credential`: o primeiro é matéria-prima (PII, retenção
+curta, nunca público); a segunda é o resultado assinado da avaliação. Misturar os
+dois faria a credencial carregar o documento original ou o artefato virar prova
+de um veredito que ele não sustenta.
+
+Hoje a **única** fonte que materializa artefato em `evidence` é o street
+view/VLM no deep path (`apps/worker/src/modules/evidence/evidence.service.ts`);
+o fast path grava `claim_evidence` com `evidence_id = NULL`. **Não existe**
+endpoint de upload, OCR/PDF, nem consulta a fonte fiscal.
+
+A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
+
+```text
+validation → claim → claim_evidence → assessment → credential
+                     ├── evidence (legado; street view, global)
+                     └── evidence_artifact (PII; tenant-scoped, write-once)
+```
+
+`evidence_artifact` guarda somente metadados + `storage_key`
+(`tenants/<tenant>/evidence/<artifact>`), com RLS FORCE, FK composta
+`(claim_evidence_id, tenant_id)`, `sha256`/tamanho/content-type validados e
+`retention_until`. O binário fica no `ObjectStore` existente; nenhuma URL pública
+é persistida. O endpoint de upload, o sniffing de conteúdo e o OCR são F1.
+
+O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
+taxonomia de resultado e as extensões mínimas estão em
+[`arquitetura-evidencias.md`](arquitetura-evidencias.md). As decisões estão nos
+[ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md) (contrato),
+[ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md) (consulta a
+endpoints oficiais) e [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md)
+(artefato tenant-scoped). A ordem de execução está no [`roadmap.md`](roadmap.md).
+
+Dois pontos de atenção já visíveis:
+
+- **`evidence` continua global e sem RLS** — adequado para fachada pública;
+  inadequado para comprovante com PII, que agora tem tabela própria.
+- **`weightedScore` é aditivo e não deduplica fonte** — duas evidências do mesmo
+  fato podem somar como independentes; a correção é decisão de scoring
+  (`SCORER_VERSION`), não de schema.
+
 ## Políticas de scoring
 
 | Versão    | Mudanças                                                             |
@@ -150,6 +210,10 @@ grants — não é necessário hoje.
 | 2026.13.1 | - Hard rule cep-inexistente (era falso positivo); fix versão interna |
 
 Simulador: `pnpm --filter @comprova/ingestor start -- policy:simulate <versao> [--report]`
+
+Hoje existe **uma policy global** carregada no boot; `validation.policy_version`
+registra qual versão foi usada. Não há seleção de policy por cliente/caso — é
+uma decisão de produto em aberto no [`roadmap.md`](roadmap.md).
 
 ## Componentes
 
