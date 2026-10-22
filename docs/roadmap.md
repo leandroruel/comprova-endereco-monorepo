@@ -96,8 +96,10 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
   com bloqueio de faixas privadas/link-local/metadata, sem redirect, limites de
   tempo/tamanho/content-type, IP fixado na conexão).
 - ~~Decidir o escopo tenant de artefato enviado pelo cliente~~ **Entregue em
-  F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, FK composta e retenção
-  integrada (ADR-0035; migration 0039).
+  F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE e FK composta. A remoção
+  atual ocorre no fluxo de retenção após a expiração da validação;
+  `retention_until` ainda não define o prazo comercial do binário (ADR-0035;
+  migration 0039).
 - Definir o **evento faturável canônico** (uma validação nova = no máximo um
   evento; replay/retry = zero) antes de F3 implementar.
 
@@ -586,8 +588,9 @@ endereço e no recibo verificável, não em uma wallet.
 1. **Unidade de cobrança** e o que não é faturável.
 2. **Dashboard multi-tenant**: chave por tenant + sessão/BFF vs continuar
    single-tenant de dev.
-3. **Artefato**: por quanto tempo reter o binário no object storage privado
-   (o armazenamento do binário já foi decidido no ADR-0035)?
+3. **Artefato**: por quanto tempo reter o binário no object storage privado (o
+   armazenamento já foi decidido no ADR-0035). Hoje a remoção segue a expiração
+   da validação; `retention_until` ainda não controla o ciclo de vida do binário.
 4. **Policy por cliente**: necessária para o primeiro contrato ou pode ser
    global com contrato de versão?
 5. **Credencial**: recibo B2B ou credencial do titular?
