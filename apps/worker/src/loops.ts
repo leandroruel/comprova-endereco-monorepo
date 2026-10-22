@@ -14,6 +14,7 @@ const startLoop = (tick: () => Promise<unknown>, intervalMs: number, logger?: Lo
         {
           reason: 'WORKER_LOOP_TICK_FAILED',
           error_name: error instanceof Error ? error.name : 'unknown',
+          error_message: error instanceof Error ? error.message : String(error),
         },
         'worker loop tick failed',
       )

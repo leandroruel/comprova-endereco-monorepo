@@ -1,5 +1,5 @@
 import { and, eq, inArray, lte } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import type { ObjectStore } from '@comprova/providers'
@@ -9,8 +9,22 @@ interface ExpiredValidation {
   readonly tenantId: string
 }
 
-interface DeletionStats {
-  readonly artifactsByTenant: ReadonlyMap<string, number>
+const recordExpirationAudit = async (
+  tx: DbTx,
+  validation: ExpiredValidation,
+  artifactsRemoved: number,
+): Promise<void> => {
+  await tx.insert(t.auditLog).values({
+    tenantId: validation.tenantId,
+    actor: 'system:retention',
+    action: 'validation.expired',
+    targetType: 'validation',
+    targetId: validation.validationId,
+    details: {
+      removed: 1,
+      artifacts_removed: artifactsRemoved,
+    },
+  })
 }
 
 /**
@@ -27,10 +41,10 @@ interface DeletionStats {
  */
 const deleteValidationGraph = async (
   db: Db,
-  validationId: string,
+  validation: ExpiredValidation,
   store: ObjectStore,
-): Promise<DeletionStats> => {
-  const artifactsByTenant = new Map<string, number>()
+): Promise<void> => {
+  const { validationId } = validation
   const claims = await db
     .select({ claimId: t.claim.claimId })
     .from(t.claim)
@@ -43,7 +57,6 @@ const deleteValidationGraph = async (
           .select({
             artifactId: t.evidenceArtifact.artifactId,
             storageKey: t.evidenceArtifact.storageKey,
-            tenantId: t.evidenceArtifact.tenantId,
           })
           .from(t.evidenceArtifact)
           .innerJoin(
@@ -60,7 +73,6 @@ const deleteValidationGraph = async (
   // abaixo nem começa e a validation continua elegível para o próximo tick.
   for (const artifact of artifacts) {
     await store.delete(artifact.storageKey)
-    artifactsByTenant.set(artifact.tenantId, (artifactsByTenant.get(artifact.tenantId) ?? 0) + 1)
   }
 
   await db.transaction(async (tx) => {
@@ -86,30 +98,8 @@ const deleteValidationGraph = async (
     await tx.delete(t.signal).where(eq(t.signal.validationId, validationId))
     await tx.delete(t.validationIdempotency).where(eq(t.validationIdempotency.validationId, validationId))
     await tx.delete(t.validation).where(eq(t.validation.validationId, validationId))
+    await recordExpirationAudit(tx, validation, artifacts.length)
   })
-
-  return { artifactsByTenant }
-}
-
-const recordExpirationAudit = async (
-  db: Db,
-  expired: readonly ExpiredValidation[],
-  artifactsByTenant: ReadonlyMap<string, number>,
-): Promise<void> => {
-  const tenants = [...new Set(expired.map((row) => row.tenantId))]
-  await db.insert(t.auditLog).values(
-    tenants.map((tenantId) => ({
-      tenantId,
-      actor: 'system:retention',
-      action: 'validation.expired',
-      targetType: 'validation',
-      targetId: 'batch',
-      details: {
-        removed: expired.filter((row) => row.tenantId === tenantId).length,
-        artifacts_removed: artifactsByTenant.get(tenantId) ?? 0,
-      },
-    })),
-  )
 }
 
 export const validationRetentionTick = async (
@@ -129,16 +119,12 @@ export const validationRetentionTick = async (
 
   if (expired.length === 0) return 0
 
-  const removed: ExpiredValidation[] = []
-  const artifactsByTenant = new Map<string, number>()
+  let removed = 0
 
   for (const row of expired) {
     try {
-      const stats = await deleteValidationGraph(db, row.validationId, store)
-      removed.push(row)
-      for (const [tenantId, count] of stats.artifactsByTenant) {
-        artifactsByTenant.set(tenantId, (artifactsByTenant.get(tenantId) ?? 0) + count)
-      }
+      await deleteValidationGraph(db, row, store)
+      removed += 1
     } catch (error) {
       // A linha continua expirada e será tentada de novo no próximo tick. A
       // falha de uma validation não impede a remoção das demais.
@@ -147,14 +133,12 @@ export const validationRetentionTick = async (
           validation_id: row.validationId,
           reason: 'RETENTION_DELETE_FAILED',
           error_name: error instanceof Error ? error.name : 'unknown',
+          error_message: error instanceof Error ? error.message : String(error),
         },
         'validation retention failed; will retry next tick',
       )
     }
   }
 
-  if (removed.length > 0) {
-    await recordExpirationAudit(db, removed, artifactsByTenant)
-  }
-  return removed.length
+  return removed
 }
