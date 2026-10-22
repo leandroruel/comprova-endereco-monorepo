@@ -4,6 +4,7 @@ import { makeT0Checkers } from '@comprova/checkers'
 import { systemClock } from '@comprova/core'
 import { type Logger, type Metrics } from '@comprova/observability'
 import {
+  EVIDENCE_ARTIFACT_MAX_BYTES,
   makeCepReader,
   makeCnaeCategoriaReader,
   makeCnefeReader,
@@ -12,8 +13,10 @@ import {
   makeRegistryReader,
   type Db,
 } from '@comprova/db'
+import { makeS3ObjectStore, makeUnavailableObjectStore, type ObjectStore } from '@comprova/providers'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
+import multipart from '@fastify/multipart'
 import swagger from '@fastify/swagger'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import {
@@ -80,7 +83,27 @@ export interface AppDeps {
   readonly redis: Redis
   readonly logger: Logger
   readonly metrics: Metrics
+  /**
+   * ObjectStore privado do intake. Testes injetam um fake; em produção o
+   * `server.ts`/config resolve S3. Sem store configurado a rota falha fechado
+   * com 503, nunca grava em memória silenciosamente.
+   */
+  readonly objectStore?: ObjectStore
 }
+
+const resolveObjectStore = (config: AppConfig): ObjectStore =>
+  config.S3_ENDPOINT !== undefined &&
+  config.S3_ACCESS_KEY_ID !== undefined &&
+  config.S3_SECRET_ACCESS_KEY !== undefined &&
+  config.S3_BUCKET !== undefined
+    ? makeS3ObjectStore({
+        endpoint: config.S3_ENDPOINT,
+        region: config.S3_REGION ?? 'us-east-1',
+        bucket: config.S3_BUCKET,
+        accessKeyId: config.S3_ACCESS_KEY_ID,
+        secretAccessKey: config.S3_SECRET_ACCESS_KEY,
+      })
+    : makeUnavailableObjectStore()
 
 export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const app: FastifyInstance = Fastify({
@@ -91,8 +114,14 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
 
+  const evidenceMaxBytes = deps.config.EVIDENCE_MAX_BYTES ?? EVIDENCE_ARTIFACT_MAX_BYTES
+
   await app.register(helmet)
   await app.register(cors, { origin: true, credentials: true })
+  await app.register(multipart, {
+    limits: { fileSize: evidenceMaxBytes, files: 1, fields: 0, parts: 1 },
+    throwFileSizeLimit: true,
+  })
   await app.register(swagger, {
     openapi: {
       openapi: '3.1.0',
@@ -165,6 +194,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   const cache = makeRedisCache(deps.redis, deps.logger)
   const fastPath = buildFastPathDeps(deps.db, deps.config, cache)
+  const objectStore = deps.objectStore ?? resolveObjectStore(deps.config)
   const credentialIssuer = {
     issuerOrigin: deps.config.CREDENTIAL_ISSUER_ORIGIN,
     signingKeyProvider,
@@ -193,6 +223,9 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         deepTrigger,
         vlmEnabled: deps.config.VLM_ENABLED,
         credentialIssuer,
+        objectStore,
+        evidenceMaxBytes,
+        logger: deps.logger,
       })
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })

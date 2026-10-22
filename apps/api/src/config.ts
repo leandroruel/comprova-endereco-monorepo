@@ -1,4 +1,5 @@
 import { assertProductionIssuerOrigin, IssuerOriginSchema } from '@comprova/credential'
+import { EVIDENCE_ARTIFACT_MAX_BYTES } from '@comprova/db'
 import { z } from 'zod'
 
 const EnvSchema = z.object({
@@ -62,6 +63,22 @@ const EnvSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true'),
+  /**
+   * Object storage privado usado pelo intake de comprovantes. As quatro
+   * variáveis são opcionais no boot: sem elas a rota de upload falha fechado
+   * com 503 e nenhum objeto é aceito. O worker já usa as mesmas credenciais.
+   */
+  S3_ENDPOINT: z.string().min(1).optional(),
+  S3_REGION: z.string().min(1).optional(),
+  S3_BUCKET: z.string().min(1).optional(),
+  S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+  S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  /**
+   * Limite de upload do comprovante em bytes. O default é o limite que o
+   * banco já impõe em `evidence_artifact` (50 MiB). É configurável apenas
+   * para baixo, para testes e para políticas operacionais mais restritas.
+   */
+  EVIDENCE_MAX_BYTES: z.coerce.number().int().positive().max(EVIDENCE_ARTIFACT_MAX_BYTES).optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

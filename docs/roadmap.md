@@ -154,21 +154,54 @@ Esta é a fase do requisito de produto já confirmado ("upload de comprovante") 
 a que mais destrava valor: hoje o produto só valida endereço por registro
 público.
 
+### F1.1 — Intake seguro do comprovante (entregue em 2026-10-22)
+
+- `POST /v1/validations/:id/evidence`, multipart, `validate:write`; tenant só da
+  API key e validação de outro tenant responde `404`.
+- PDF/JPEG/PNG detectados por **magic bytes**; filename/extensão/`Content-Type`
+  não definem o tipo. Limite default de 50 MiB, configurável para baixo por
+  `EVIDENCE_MAX_BYTES`, aplicado durante o streaming.
+- Objeto privado no `ObjectStore` existente em
+  `tenants/<tenant>/evidence/<artifact-id>`, SHA-256 calculado no servidor e
+  conferido com o storage; nenhuma URL pública.
+- `validation → claim → claim_evidence → evidence_artifact` na mesma transação,
+  com `source = customer_submitted_document`, `stance = unknown`, `strength = 0`
+  e `detail.verification.status = "pending"` (documento recebido, não
+  autenticado). Claim ausente em validation legada é criada na transação.
+- Um documento do cliente por claim; mesmos bytes são replay `200`, bytes
+  diferentes são `409 EVIDENCE_ALREADY_EXISTS`. `Idempotency-Key` opcional
+  reutiliza `validation_idempotency` com namespace próprio.
+- Lock da validation + índice único parcial serializam concorrência. Falha de
+  DB/claim/artifact após o storage apaga o objeto (compensação); falha do
+  próprio delete é logada sem PII.
+- `retention_until`/`expires_at` derivam de `validation.expires_at`; o job de
+  retenção existente remove objeto e grafo.
+- Contrato detalhado em
+  [`arquitetura-evidencias.md`](arquitetura-evidencias.md#52-intake-do-comprovante-do-cliente-f11-implementado)
+  e [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md).
+
+**Ainda falta para concluir a Fase 1:** OCR/extração de campos, matching de
+documento/endereço/titular, resultado tipado na `claim_evidence` e atualização
+do detalhe no `GET` além de `evidence_summary.unknown`.
+
 ### Estado atual comprovado
 
-| Item                           | Evidência                                                                                        | Situação                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts`                                         | **Não existe**; só `POST /v1/validations`, `GET`, contest, credential |
-| Multipart / parsing de arquivo | dependências de `apps/api/package.json`                                                          | **Não existe**                                                        |
-| Extração OCR/PDF               | `packages/providers/src/vision-model.ts` (VLM de fachada)                                        | Existe para fachada, não para documento                               |
-| Persistência de evidência      | `packages/db/migrations/0005_validation.sql` (`evidence`), `0023` (`claim_evidence.evidence_id`) | Modelo suporta artefato + vínculo; escrita só via street view         |
-| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`, `evidence_id`)                   | **Suficiente** para representar a observação sem tabela nova          |
+| Item                           | Evidência                                                                                      | Situação                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant |
+| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming           |
+| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                      |
+| Extração OCR/PDF               | `packages/providers/src/vision-model.ts` (VLM de fachada)                                      | Existe para fachada, não para documento; F1.2                           |
+| Persistência de evidência      | `packages/db/migrations/0039_evidence_artifact.sql`, `0040_evidence_intake.sql`                | **Entregue em F1.1**: `claim_evidence` pendente + `evidence_artifact`   |
+| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`, `evidence_sha256`)             | **Entregue em F1.1**: observação `unknown`/pending, sem score           |
 
 ### Lacunas
 
-1. Não há caminho de entrada para documento do cliente (HTTP, storage, limites).
-2. Não há identificação de tipo de documento por **conteúdo** (só por intenção do
-   usuário). Nome de arquivo e `content-type` declarado não são confiáveis.
+1. ~~Não há caminho de entrada para documento do cliente (HTTP, storage,
+   limites).~~ **Entregue em F1.1**; a análise do documento continua pendente.
+2. ~~Não há identificação de tipo de documento por conteúdo~~ **Entregue em
+   F1.1 por assinatura de arquivo** (PDF/JPEG/PNG). Estrutura interna, OCR e
+   tipos fiscais (XML/QR) continuam em F1.2/F2.
 3. Não há extração de campos (titular, documento, endereço, competência) nem
    normalização contra `canonical_address`.
 4. Não há política de "documento autêntico ≠ titular mora aqui": o comprovante
@@ -178,19 +211,23 @@ público.
 
 ### Escopo
 
-- Endpoint autenticado e com scope, idempotente, com limite de tamanho e
-  allowlist de content-type **verificada por sniffing**, não por header.
-- Storage privado (S3/R2) com chave por tenant e retenção explícita; gravar
-  `sha256` e metadados.
-- Identificação de tipo por conteúdo (PDF: texto/estrutura; imagem: OCR).
+- ~~Endpoint autenticado e com scope, idempotente, com limite de tamanho e
+  allowlist de content-type **verificada por sniffing**, não por header.~~
+  **Entregue em F1.1.**
+- ~~Storage privado (S3/R2) com chave por tenant e retenção explícita; gravar
+  `sha256` e metadados.~~ **Entregue em F1.1**, reutilizando o `ObjectStore` e a
+  retenção da F0.1.
+- Identificação de tipo por conteúdo além da assinatura (PDF: texto/estrutura;
+  imagem: OCR). **F1.2.**
 - Extração e normalização: titular, documento do titular, endereço, data de
-  emissão/competência.
+  emissão/competência. **F1.2.**
 - Matching em **três dimensões independentes**: documento reconhecido, endereço
-  confere, titular confere.
-- Gravar **uma** observação por fonte em `claim_evidence`, com o detalhe
-  estruturado em `detail` (ver contrato em
-  [`arquitetura-evidencias.md`](arquitetura-evidencias.md)).
+  confere, titular confere. **F1.3.**
+- ~~Gravar **uma** observação por fonte em `claim_evidence`, com o detalhe
+  estruturado em `detail`.~~ **Estrutura entregue em F1.1** (uma observação
+  pendente por fonte); o preenchimento das dimensões é F1.2/F1.3.
 - Resultado tipado e explicação; nunca `contradicts` por falha de extração.
+  **F1.2/F1.3.**
 
 ### Fora de escopo
 
@@ -201,13 +238,18 @@ público.
 
 ### Critérios de conclusão
 
-- Fixtures sintéticas (não PII real) para PDF e imagem, com teste de tipo
-  errado, arquivo corrompido, acima do limite e cross-tenant.
-- Retry idempotente não cria `claim_evidence` duplicado.
-- Nenhum dado pessoal em log; `doc_hmac` continua sendo o identificador do
-  subject.
-- Resultado do upload aparece no `GET /v1/validations/:id` com o mesmo formato
-  já usado por `claim`/`evidence_summary`.
+- ~~Fixtures sintéticas (não PII real) para PDF e imagem, com teste de tipo
+  errado, arquivo corrompido, acima do limite e cross-tenant.~~ **Entregue em
+  F1.1** (`apps/api/tests/evidence-intake.int.test.ts`).
+- ~~Retry idempotente não cria `claim_evidence` duplicado.~~ **Entregue em
+  F1.1**, incluindo concorrência, `Idempotency-Key` e índice único parcial.
+- ~~Nenhum dado pessoal em log; `doc_hmac` continua sendo o identificador do
+  subject.~~ **Entregue em F1.1**: logs usam apenas ids técnicos/razões e o
+  teste cobre filename/conteúdo/API key.
+- ~~Resultado do upload aparece no `GET /v1/validations/:id` com o mesmo formato
+  já usado por `claim`/`evidence_summary`.~~ **Parcial em F1.1**: a observação
+  aparece em `evidence_summary.unknown`; o detalhe do documento entra em F1.2.
+- Extração/matching e resultado tipado completos (F1.2/F1.3).
 
 ### Riscos
 
@@ -217,11 +259,13 @@ público.
 
 ### Decisões abertas
 
-- Biblioteca de OCR/PDF (runtime dep só quando a fase começar).
-- Guardar binário ou apenas hash + campos? (mesma decisão de F0).
-- Upload cria validação nova ou anexa a uma validação existente? Recomendação:
-  anexar quando `validation` está `partial`/`completed`; criar nova quando o
-  pedido é uma atualização (F4).
+- Biblioteca de OCR/PDF (runtime dep só quando F1.2 começar).
+- ~~Guardar binário ou apenas hash + campos?~~ **Decidido em F0.1/F1.1:**
+  binário no `ObjectStore` privado + `sha256`/metadados; nenhum blob no Postgres.
+- ~~Upload cria validação nova ou anexa a uma validação existente?~~ **Decidido
+  em F1.1:** anexa à validation existente, um documento do cliente por claim;
+  troca/substituição exige nova validation ou decisão futura de supersessão
+  (F4).
 
 ---
 

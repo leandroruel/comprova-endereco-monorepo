@@ -120,6 +120,10 @@ Cada validação grava `user_id`. O endpoint `/v1/stats` filtra por user_id:
   **`evidence_artifact`** (F0.1/ADR-0035) é o artefato físico tenant-scoped para
   documentos de cliente: FK composta `(claim_evidence_id, tenant_id)`, RLS FORCE,
   sem `UPDATE`, `storage_key` no namespace do tenant e nenhum binário no Postgres.
+  A migração 0040 adiciona
+  `UNIQUE (claim_id) WHERE source = 'customer_submitted_document'`, limitando o
+  intake F1.1 a **um** documento do cliente por claim; outras fontes continuam
+  livres.
 - **Retenção** (matriz de TTL em ADR-0016): `validation` expira por `expires_at` e
   remove o grafo `evidence_artifact → claim_evidence → claim → signal →
 validation_idempotency`; o objeto do artefato é apagado **antes** da linha e a
@@ -165,10 +169,14 @@ curta, nunca público); a segunda é o resultado assinado da avaliação. Mistur
 dois faria a credencial carregar o documento original ou o artefato virar prova
 de um veredito que ele não sustenta.
 
-Hoje a **única** fonte que materializa artefato em `evidence` é o street
-view/VLM no deep path (`apps/worker/src/modules/evidence/evidence.service.ts`);
-o fast path grava `claim_evidence` com `evidence_id = NULL`. **Não existe**
-endpoint de upload, OCR/PDF, nem consulta a fonte fiscal.
+O street view/VLM do deep path
+(`apps/worker/src/modules/evidence/evidence.service.ts`) materializa artefato
+em `evidence`; o fast path grava `claim_evidence` com `evidence_id = NULL`.
+Desde a F1.1, o intake de comprovante (`POST /v1/validations/:id/evidence`)
+materializa `evidence_artifact` + `claim_evidence` com `stance = unknown` e
+verificação `pending` — o upload prova apresentação, não autenticidade nem
+endereço. **Ainda não existe** OCR/extração estruturada nem consulta à fonte
+fiscal.
 
 A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
 
@@ -182,15 +190,18 @@ validation → claim → claim_evidence → assessment → credential
 (`tenants/<tenant>/evidence/<artifact>`), com RLS FORCE, FK composta
 `(claim_evidence_id, tenant_id)`, `sha256`/tamanho/content-type validados e
 `retention_until`. O binário fica no `ObjectStore` existente; nenhuma URL pública
-é persistida. O endpoint de upload, o sniffing de conteúdo e o OCR são F1.
+é persistida. O endpoint de upload e o sniffing de conteúdo foram entregues em
+F1.1; OCR/extração estruturada e matching são F1.2/F1.3.
 
 O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
 taxonomia de resultado e as extensões mínimas estão em
 [`arquitetura-evidencias.md`](arquitetura-evidencias.md). As decisões estão nos
 [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md) (contrato),
 [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md) (consulta a
-endpoints oficiais) e [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md)
-(artefato tenant-scoped). A ordem de execução está no [`roadmap.md`](roadmap.md).
+endpoints oficiais), [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md)
+(artefato tenant-scoped) e
+[ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md) (intake F1.1). A ordem
+de execução está no [`roadmap.md`](roadmap.md).
 
 Dois pontos de atenção já visíveis:
 
