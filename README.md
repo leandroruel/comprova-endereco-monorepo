@@ -348,7 +348,7 @@ policies/          Políticas de scoring versionadas (YAML)
 docs/roadmap.md     Roadmap canônico (prioridades, fases, decisões)
 docs/architecture.md  Arquitetura atual
 docs/arquitetura-evidencias.md  Alvo de evidências e fontes fiscais
-docs/adr/           34 ADRs
+docs/adr/           36 ADRs
 docs/lgpd/          Mapa de dados, RIPD, retenção, LIA
 docs/runbooks/      6 runbooks operacionais
 infra/              Terraform + k8s como código-alvo documentado
@@ -361,10 +361,15 @@ load/               k6 scenarios
 - **RLS**: FORCE em todas as tabelas com tenant_id
 - **Logs**: redator central com testes anti-vazamento no CI
 - **API keys**: HMAC-SHA256 (sem argon2), prefix 12 chars
-- **Webhooks**: HTTPS only, HMAC-SHA256, timingSafeEqual, redirect: manual
-- **SSRF**: hoje só o cadastro de webhook valida HTTPS + bloqueio de host
-  privado por regex (`isSafeWebhookUrl`); **sem resolução de DNS**, sem IP
-  fixado e sem limite de resposta. Consulta a fonte fiscal exigirá uma guarda
-  mais forte ([ADR-0034](docs/adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md))
+- **Webhooks**: HTTPS only, HMAC-SHA256, timingSafeEqual; entrega via
+  `safeExternalFetch` (sem redirect)
+- **SSRF**: `safeExternalFetch` (`packages/providers/src/safe-fetch.ts`) é a
+  guarda única de saída: resolve todos os IPs, bloqueia loopback/RFC1918/
+  link-local/metadata/IPv6 local, fixa o IP validado na conexão (anti-rebinding),
+  exige HTTPS, não segue redirect e limita tempo/headers/corpo/content-type.
+  `isSafeWebhookUrl` é só UX no cadastro
+  ([ADR-0036](docs/adr/0036-guarda-de-fetch-externo.md)); a allowlist de
+  autorizador fiscal fica para F2
+  ([ADR-0034](docs/adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md))
 - **LGPD**: DELETE /v1/subjects/:id (eliminação transacional), contestação com reason cifrada
 - **pgfence**: gate de migrações no CI (lock analysis, risk scoring)

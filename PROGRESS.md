@@ -1,6 +1,39 @@
 # PROGRESS.md
 
-Estado: **Artefato de evidência tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
+Estado: **Guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
+
+## Guarda de fetch externo seguro (F0.2) (2026-10-22)
+
+Uma única primitiva de saída, `safeExternalFetch`
+(`packages/providers/src/safe-fetch.ts`), agora protege qualquer fetch externo
+iniciado pelo servidor. O envio real de webhook passou a usá-la; a validação de
+`isSafeWebhookUrl` no cadastro continua apenas como UX.
+
+- HTTPS obrigatório, sem credenciais na URL, `localhost`/`*.localhost`
+  bloqueados; `file:`, `ftp:`, `data:`, `javascript:` e desconhecidos falham.
+- Resolve o host com `dns.lookup(all: true)`, valida **todos** os IPs e rejeita
+  loopback, RFC1918, CGNAT, link-local, metadata de nuvem, IPv6
+  unique-local/link-local e faixas reservadas. Um host público que resolve para
+  IP privado falha.
+- Anti-DNS-rebinding: o IP validado é devolvido pelo `lookup` do
+  `https.request` (inclusive no formato `all: true` do `autoSelectFamily` do
+  Node 22); não há segunda resolução.
+- Redirects não são seguidos (3xx → `REDIRECT_BLOCKED`); limites de timeout
+  (8 s default), conexão (3 s), corpo (256 KiB default), headers (16 KiB) e
+  content-type opcional; resposta grande é interrompida.
+- `SafeFetchError` expõe `reason` estruturado. O webhook loga apenas
+  `reason`, `hostname` e `delivery_id` e grava o motivo em `last_error`; payload,
+  segredo, assinatura e `Authorization` não aparecem no log.
+- Dependência nova: `ipaddr.js` (classificação IPv4/IPv6). Nenhum segundo HTTP
+  client: `node:https` + `node:dns/promises`.
+- Testes: 58 casos da guarda (IP, DNS/rebinding, timeout de DNS, redirects,
+  limites, content-type, timeout, servidor HTTPS local com CA de teste) e 8 de
+  integração do webhook; cenário F2. Gates: `pnpm test` (73 arquivos, 689
+  testes),
+  `pnpm typecheck`, `pnpm lint`, `pnpm format` e `pnpm db:fence` (exit 0; sem
+  migration nova).
+- Decisão em [ADR-0036](docs/adr/0036-guarda-de-fetch-externo.md). Allowlist
+  por autorizador fiscal/NF3e, upload, OCR, billing e wallet continuam fora.
 
 ## Artefato de evidência tenant-scoped (F0.1) (2026-10-22)
 

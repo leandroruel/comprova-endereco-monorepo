@@ -7,6 +7,7 @@ import {
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
 import { createLogger, createMetrics } from '@comprova/observability'
+import type { SafeFetch } from '@comprova/providers'
 import { createDbPool, runMigrations, eq } from '@comprova/db'
 import * as t from '@comprova/db'
 import { buildFastPathDeps } from '../src/app.js'
@@ -128,19 +129,24 @@ describe('webhooks', () => {
     expect(validationRes.statusCode).toBe(200)
 
     const delivered: { body: string; headers: Record<string, string> }[] = []
-    const fakeFetch = (async (url: unknown, init?: { body?: string; headers?: Record<string, string> }) => {
+    const fakeSafeFetch: SafeFetch = async (_url, init) => {
       delivered.push({
-        body: init?.body ?? '',
+        body: typeof init?.body === 'string' ? init.body : '',
         headers: Object.fromEntries(Object.entries(init?.headers ?? {})) as Record<string, string>,
       })
-      return new Response('ok', { status: 200 })
-    }) as unknown as typeof fetch
+      return {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from('ok'),
+        address: '8.8.8.8',
+      }
+    }
 
     await publishTick({
       db: adminPool.db,
       pepper: PEPPER,
       logger: createLogger({ level: 'silent' }),
-      fetchImpl: fakeFetch,
+      safeFetch: fakeSafeFetch,
     })
 
     expect(delivered.length).toBe(1)
@@ -185,14 +191,14 @@ describe('webhooks', () => {
     })
     expect(validationRes.statusCode).toBe(200)
 
-    const failingFetch = (async () => {
+    const failingSafeFetch: SafeFetch = async () => {
       throw new Error('network down')
-    }) as unknown as typeof fetch
+    }
     const deps = {
       db: adminPool.db,
       pepper: PEPPER,
       logger: createLogger({ level: 'silent' }),
-      fetchImpl: failingFetch,
+      safeFetch: failingSafeFetch,
       now: () => new Date(),
       maxAttempts: 2,
     }

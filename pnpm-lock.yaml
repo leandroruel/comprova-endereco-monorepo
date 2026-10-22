@@ -533,6 +533,9 @@ importers:
       '@comprova/db':
         specifier: workspace:*
         version: link:../db
+      ipaddr.js:
+        specifier: ^2.5.0
+        version: 2.5.0
       zod:
         specifier: ^4.6.5
         version: 4.6.5

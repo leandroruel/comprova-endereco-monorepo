@@ -4,14 +4,20 @@ import { withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
+import { SafeFetchError, safeExternalFetch } from '@comprova/providers'
+import type { SafeFetch } from '@comprova/providers'
 import { decryptSecret } from '../../shared/secretbox.js'
 import { signWebhookPayload } from './webhook-crypto.js'
+
+/** Tipos de resposta aceitos no acknowledgement do webhook. */
+export const WEBHOOK_RESPONSE_CONTENT_TYPES = ['application/json', 'text/plain'] as const
 
 export interface PublisherDeps {
   readonly db: Db
   readonly pepper: string
   readonly logger: Logger
-  readonly fetchImpl?: typeof fetch
+  /** Injetável nos testes; produção usa a guarda compartilhada. */
+  readonly safeFetch?: SafeFetch
   readonly now?: () => Date
   readonly maxAttempts?: number
   readonly batchSize?: number
@@ -88,7 +94,7 @@ const createDeliveriesForNewEvents = async (deps: PublisherDeps): Promise<number
 
 const processDueDeliveries = async (deps: PublisherDeps): Promise<number> => {
   const now = (deps.now ?? (() => new Date()))()
-  const doFetch = deps.fetchImpl ?? fetch
+  const doFetch = deps.safeFetch ?? safeExternalFetch
   const maxAttempts = deps.maxAttempts ?? 5
 
   const due = (await deps.db
@@ -131,25 +137,39 @@ const processDueDeliveries = async (deps: PublisherDeps): Promise<number> => {
     )
     let status: 'delivered' | 'failed' = 'failed'
     let lastError: string | null = null
+    let hostname: string | null = null
     try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 8_000)
+      hostname = new URL(delivery.url).hostname
+    } catch {
+      hostname = null
+    }
+    try {
       const res = await doFetch(delivery.url, {
         method: 'POST',
-        redirect: 'manual',
         headers: {
           'Content-Type': 'application/json',
           'X-Signature': signature,
           'X-Timestamp': String(timestamp),
         },
         body,
-        signal: controller.signal,
+        allowedContentTypes: WEBHOOK_RESPONSE_CONTENT_TYPES,
       })
-      clearTimeout(timer)
       status = res.status >= 200 && res.status < 300 ? 'delivered' : 'failed'
       if (status === 'failed') lastError = `HTTP ${res.status}`
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err)
+      if (err instanceof SafeFetchError) {
+        lastError = err.reason
+        deps.logger.warn(
+          { reason: err.reason, hostname: err.hostname ?? hostname, delivery_id: delivery.deliveryId },
+          'webhook safe fetch blocked delivery',
+        )
+      } else {
+        lastError = 'REQUEST_FAILED'
+        deps.logger.warn(
+          { reason: 'REQUEST_FAILED', hostname, delivery_id: delivery.deliveryId },
+          'webhook delivery failed',
+        )
+      }
     }
 
     const nextAttempt = delivery.attempt + 1

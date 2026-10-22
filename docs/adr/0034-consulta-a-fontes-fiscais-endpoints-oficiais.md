@@ -2,8 +2,11 @@
 
 ## Status
 
-Proposto (2026-10-22). **Não implementado.** Pré-requisito da fase NF3e (F2) e
-consequência do [ADR-0033](0033-verificacao-de-evidencias-por-adaptadores.md).
+Proposto (2026-10-22). **Parcialmente implementado em F0.2:** a guarda única de
+fetch foi entregue no [ADR-0036](0036-guarda-de-fetch-externo.md); a allowlist
+por autorizador e o adaptador NF3e continuam **não implementados**. Pré-requisito
+da fase NF3e (F2) e consequência do
+[ADR-0033](0033-verificacao-de-evidencias-por-adaptadores.md).
 
 ## Contexto
 
@@ -11,12 +14,14 @@ A verificação fiscal recebe do usuário um **QR Code** (ou uma chave de acesso
 que aponta para um portal de autorizador. Esse dado é **controlado pelo
 atacante**: o QR pode conter qualquer URL.
 
-O guard existente hoje é `isSafeWebhookUrl`
+O guard anterior era `isSafeWebhookUrl`
 (`apps/api/src/modules/webhooks/webhook-crypto.ts`), usado apenas no cadastro de
-webhook. Ele verifica `https` e aplica uma regex de host privado. **Não**
-resolve DNS, **não** valida o IP conectado, **não** limita tamanho ou
-content-type e **não** cobre o momento do envio. Usá-lo como base para consulta
-fiscal daria falsa sensação de segurança.
+webhook. Ele verificava `https` e aplicava uma regex de host privado. **Não**
+resolvia DNS, **não** validava o IP conectado, **não** limitava tamanho ou
+content-type e **não** cobria o momento do envio. Usá-lo como base para consulta
+fiscal daria falsa sensação de segurança. Em F0.2 ele foi substituído no envio
+por `safeExternalFetch` (ADR-0036), mas a allowlist fiscal continua necessária
+porque a guarda genérica não sabe quais autorizadores são legítimos.
 
 A superfície é real: o servidor faria requisições de saída para hosts
 influenciados pelo input, exatamente o padrão de SSRF que permite alcançar
@@ -36,19 +41,21 @@ Assumir uma URL única nacional é incorreto.
    `(tipo de documento, autorizador, ambiente)`.
 2. **Se o host do QR não corresponder ao autorizador identificado, não há
    fetch.** O resultado é `unsupported`/`invalid`, com auditoria.
-3. **Toda consulta passa por uma guarda única de fetch**, que:
+3. **Toda consulta passa pela guarda única `safeExternalFetch`**
+   ([ADR-0036](0036-guarda-de-fetch-externo.md)), que:
    - resolve o host e rejeita loopback, RFC1918, link-local, metadata e IPv6
      privado;
    - conecta ao IP validado (proteção contra DNS rebinding);
    - **não segue redirect** (3xx é erro de fonte);
    - aplica timeout, limite de corpo e allowlist de content-type;
-   - não envia credenciais, cookies ou headers de sessão;
+   - não aceita credenciais embutidas na URL; o caller não deve enviar cookies
+     ou headers de sessão;
    - não executa JavaScript.
 4. **Auditoria mínima por consulta:** URL pedida, IP resolvido, status HTTP,
    sha256 da resposta e timestamp. A resposta bruta não vai para log.
 5. **Rate limit por tenant e por fonte**, além de cache por chave quando o
    documento for imutável.
-6. **A guarda é compartilhada** com o webhook (que hoje só valida no cadastro),
+6. **A guarda é compartilhada** com o webhook, que já a usa no envio desde F0.2,
    para não existirem duas políticas de saída divergentes.
 
 ## Consequências
@@ -81,7 +88,8 @@ Negativas / custos:
 
 ## Fora de escopo
 
-- Implementar a guarda, a allowlist ou o adaptador NF3e.
+- Implementar a allowlist por autorizador ou o adaptador NF3e. A guarda genérica
+  foi entregue em F0.2 (ADR-0036).
 - Definir UFs iniciais, cache TTL ou retenção da resposta bruta.
 - Consulta SOAP com certificado (avaliar em F2).
 - NFAg-e (F7).

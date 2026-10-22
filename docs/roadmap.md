@@ -66,23 +66,24 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 
 ### Estado atual comprovado
 
-| Item                      | Evidência                                                                                                        | Situação                                                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Idempotência de validação | `apps/api/src/services/fastpath.ts` (`findExistingIdempotency`, `requestHashOf`) + `validation_idempotency`      | Funciona; replay não reescreve e não reemite `usage_event`                                                                   |
-| RLS multi-tenant          | `packages/db/migrations/0007_rls.sql`, `withTenant`                                                              | FORCE em `subject`, `validation`, `claim`, `claim_evidence`, `usage_event`, `audit_log`, `webhook_*`, `batch*`               |
-| Retenção de validação     | `apps/worker/src/modules/retention/retention.service.ts` + loop em `apps/worker/src/loops.ts`                    | Job diário existe e apaga o grafo                                                                                            |
-| Guarda de URL de webhook  | `apps/api/src/modules/webhooks/webhook-crypto.ts` (`isSafeWebhookUrl`)                                           | Só `https` + regex de host privado; **sem DNS, sem IP resolvido, sem limite de tamanho/content-type**                        |
-| `evidence` global         | `packages/db/migrations/0005_validation.sql`, `0007_rls.sql`, `0008_grants.sql`                                  | **Sem `tenant_id`/RLS**; único escritor hoje é o VLM de street view (`apps/worker/src/modules/evidence/evidence.service.ts`) |
-| Artefato de PII           | `packages/db/migrations/0039_evidence_artifact.sql`, [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) | **Entregue em F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, write-once; sem upload/OCR                               |
-| Expiração de validação    | `fastpath.ts` (`expires_at = now + 30d`)                                                                         | 30 dias hardcoded, não vem da policy                                                                                         |
-| Dashboard e API key       | `apps/dashboard/src/api/client.ts`                                                                               | Chave de tenant vai no bundle do browser; o próprio código marca como "facilidade de desenvolvimento"                        |
+| Item                      | Evidência                                                                                                        | Situação                                                                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Idempotência de validação | `apps/api/src/services/fastpath.ts` (`findExistingIdempotency`, `requestHashOf`) + `validation_idempotency`      | Funciona; replay não reescreve e não reemite `usage_event`                                                                               |
+| RLS multi-tenant          | `packages/db/migrations/0007_rls.sql`, `withTenant`                                                              | FORCE em `subject`, `validation`, `claim`, `claim_evidence`, `usage_event`, `audit_log`, `webhook_*`, `batch*`                           |
+| Retenção de validação     | `apps/worker/src/modules/retention/retention.service.ts` + loop em `apps/worker/src/loops.ts`                    | Job diário existe e apaga o grafo                                                                                                        |
+| Guarda de fetch externo   | `packages/providers/src/safe-fetch.ts`, [ADR-0036](adr/0036-guarda-de-fetch-externo.md)                          | **Entregue em F0.2**: HTTPS, DNS resolvido, todos os IPs validados e fixados, sem redirect, limites e content-type; webhook usa no envio |
+| `evidence` global         | `packages/db/migrations/0005_validation.sql`, `0007_rls.sql`, `0008_grants.sql`                                  | **Sem `tenant_id`/RLS**; único escritor hoje é o VLM de street view (`apps/worker/src/modules/evidence/evidence.service.ts`)             |
+| Artefato de PII           | `packages/db/migrations/0039_evidence_artifact.sql`, [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) | **Entregue em F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, write-once; sem upload/OCR                                           |
+| Expiração de validação    | `fastpath.ts` (`expires_at = now + 30d`)                                                                         | 30 dias hardcoded, não vem da policy                                                                                                     |
+| Dashboard e API key       | `apps/dashboard/src/api/client.ts`                                                                               | Chave de tenant vai no bundle do browser; o próprio código marca como "facilidade de desenvolvimento"                                    |
 
 ### Lacunas
 
-1. **Não existe guarda de fetch genérica.** A proteção de SSRF cobre apenas o
-   cadastro do webhook e não resiste a DNS rebinding, IP literal privado,
-   redirect para rede interna, corpo gigante ou conteúdo inesperado. Qualquer
-   consulta a URL de fonte fiscal (F2) precisa de uma guarda única e testada.
+1. **Guarda de fetch genérica entregue em F0.2.** `safeExternalFetch`
+   (`packages/providers/src/safe-fetch.ts`) resolve/valida todos os IPs, fixa o
+   IP na conexão, exige HTTPS, não segue redirect e limita
+   tempo/corpo/content-type; o webhook já a usa no envio. A allowlist por
+   autorizador fiscal continua pendente para F2 (ADR-0034).
 2. **`evidence` é global por design**, o que é correto para imagem pública de
    street view e **incorreto** para comprovante com dado pessoal do cliente. A
    fundação tenant-scoped foi entregue em F0.1 (`evidence_artifact`, ADR-0035);
@@ -96,9 +97,11 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 
 ### Escopo
 
-- Desenhar e testar uma guarda de fetch reutilizável (allowlist, resolução DNS
-  com bloqueio de faixas privadas/link-local/metadata, sem redirect, limites de
-  tempo/tamanho/content-type, IP fixado na conexão).
+- ~~Desenhar e testar uma guarda de fetch reutilizável (resolução DNS com
+  bloqueio de faixas privadas/link-local/metadata, sem redirect, limites de
+  tempo/tamanho/content-type, IP fixado na conexão)~~ **Entregue em F0.2**:
+  `safeExternalFetch` no `packages/providers`, aplicada ao webhook no envio
+  (ADR-0036). A allowlist por autorizador fiscal fica em F2 (ADR-0034).
 - ~~Decidir o escopo tenant de artefato enviado pelo cliente~~ **Entregue em
   F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, FK composta e retenção
   integrada (ADR-0035; migration 0039).
@@ -113,9 +116,11 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 
 ### Critérios de conclusão
 
-- Testes negativos da guarda de fetch: `localhost`, `127.0.0.1`, `169.254.169.254`,
+- ~~Testes negativos da guarda de fetch: `localhost`, `127.0.0.1`, `169.254.169.254`,
   RFC1918, IPv6 loopback, host que resolve para IP privado, redirect para host
-  privado, corpo acima do limite, `content-type` fora da allowlist.
+  privado, corpo acima do limite, `content-type` fora da allowlist.~~
+  **Entregue em F0.2** (`packages/providers/src/safe-fetch.test.ts` e
+  `apps/api/tests/modules/webhooks/webhook-safe-fetch.int.test.ts`).
 - Teste provando que um artefato de um tenant não é legível por outro.
 - `docs/lgpd/retencao.md` e README alinhados ao código (verificação por revisão
   e por link).
@@ -125,7 +130,9 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 
 - Escolher errado o modelo de `evidence` contamina F1/F2 e gera migração
   dolorosa depois. **É a decisão mais importante desta fase.**
-- Guarda de fetch mal implementada dá falsa sensação de segurança.
+- Guarda de fetch mal implementada dá falsa sensação de segurança. Mitigação
+  F0.2: validação de todos os IPs, `lookup` fixado, testes de rebinding e
+  ausência de opção de bypass no caller.
 
 ### Decisões abertas
 
@@ -602,29 +609,30 @@ endereço e no recibo verificável, não em uma wallet.
 7. **UFs iniciais** de NF3e.
 8. **Consulta fiscal**: QR público apenas ou SOAP com certificado?
 
-## Próxima tarefa concreta de implementação (não executada)
+## F0.2 — entregue (2026-10-22)
 
-**F0.2 — Guarda de fetch compartilhada, com testes negativos, aplicada ao
-webhook e pronta para a fonte fiscal.**
+**Guarda de fetch compartilhada, com testes negativos, aplicada ao webhook e
+reutilizável pela fonte fiscal.**
 
-Entregável:
+Entregue:
 
-- um módulo único de fetch de saída (sem dependência nova de runtime, usando
-  `undici`/`fetch` nativo) que resolve o host, rejeita IP privado/loopback/
-  link-local/metadata, fixa o IP validado, não segue redirect, limita tempo e
-  tamanho e valida content-type;
-- `isSafeWebhookUrl` deixa de ser a única barreira: a entrega do webhook passa a
-  usar a guarda no momento do envio;
-- testes negativos listados em [F0](#fase-0--baseline-de-produção-e-integridade-p0);
-- métrica de bloqueio por motivo.
-
-Por que esta e não outra:
-
-- não depende do intake de artefato (F1); a fundação F0.1 já foi entregue;
-- não muda schema, endpoint público nem comportamento de produto;
-- é pré-requisito real de F2 e fecha uma lacuna de segurança já existente.
+- `safeExternalFetch` (`packages/providers/src/safe-fetch.ts`), usando
+  `node:https` e `node:dns/promises` (sem novo cliente HTTP) e `ipaddr.js` para
+  classificar faixas IPv4/IPv6. Resolve o host, rejeita IP privado/loopback/
+  link-local/metadata/reservado, fixa o IP validado no `lookup` da conexão, não
+  segue redirect, limita tempo/headers/corpo e valida content-type;
+- `isSafeWebhookUrl` continua apenas como validação de UX no cadastro; a entrega
+  do webhook usa a guarda no momento do envio;
+- testes negativos em `packages/providers/src/safe-fetch.test.ts` e
+  `apps/api/tests/modules/webhooks/webhook-safe-fetch.int.test.ts`, incluindo
+  DNS rebinding e log sem payload/segredo/assinatura;
+- motivo de bloqueio estruturado (`SafeFetchError.reason`) registrado no log do
+  webhook e em `webhook_delivery.last_error`. O contador Prometheus por motivo
+  fica para a observabilidade contínua (F6); F0.2 entrega o sinal estruturado.
 
 **F0.1 (entregue em 2026-10-22):** `evidence_artifact` tenant-scoped, RLS FORCE,
 FK composta, storage de objetos reutilizado, retenção integrada e testes de
-isolamento/integridade (ADR-0035; migration 0039). A decisão que faltava está
-tomada; o próximo passo é F0.2.
+isolamento/integridade (ADR-0035; migration 0039).
+
+**Próximo passo:** fechar o checklist de produção e o evento faturável canônico;
+a allowlist por autorizador fiscal e o adaptador NF3e são F2 (ADR-0034).
