@@ -53,6 +53,38 @@ export const FISCAL_SOURCE_KIND: Readonly<Record<FiscalSourceId, EvidenceSourceK
 /** Versão do contrato de resultado interpretado pelo materializador. */
 export const FISCAL_VERIFICATION_CONTRACT_VERSION = '1'
 
+/**
+ * Reason codes fiscais aceitos na persistência/log. O adapter é código interno,
+ * mas uma allowlist finita evita que um valor arbitrário (chave, documento ou
+ * segredo) seja propagado para `claim_evidence` ou log.
+ */
+export const FISCAL_REASON_CODES = [
+  'SOURCE_NOT_SUPPORTED',
+  'SOURCE_UNAVAILABLE',
+  'SEFAZ_TIMEOUT',
+  'ADAPTER_ERROR',
+  'ADAPTER_RESULT_INVALID',
+  'ADAPTER_RESULT_SOURCE_MISMATCH',
+  'ADAPTER_RESULT_VERSION_MISMATCH',
+  'ADAPTER_RESULT_DOCUMENT_MISMATCH',
+] as const
+
+export type FiscalReasonCode = (typeof FISCAL_REASON_CODES)[number]
+
+export const isFiscalReasonCode = (value: string): value is FiscalReasonCode =>
+  (FISCAL_REASON_CODES as readonly string[]).includes(value)
+
+/**
+ * Resultados terminais ocupam a chave estável da consulta. Resultados
+ * transitórios (`unavailable`, `inconclusive`, `unsupported`) recebem um
+ * discriminador na versão do checker, para que uma tentativa posterior bem-
+ * sucedida não seja descartada como duplicata.
+ */
+export const FISCAL_TERMINAL_DOCUMENT_OUTCOMES = ['authentic', 'not_found', 'invalid'] as const
+
+export const isFiscalTerminalDocumentOutcome = (document: DocumentOutcome): boolean =>
+  (FISCAL_TERMINAL_DOCUMENT_OUTCOMES as readonly string[]).includes(document)
+
 export interface FiscalArtifactRef {
   readonly artifactId: string
   readonly sha256: string
@@ -183,8 +215,25 @@ export const fiscalDocumentFingerprint = (input: FiscalLookupInput): string => {
 
 export const fiscalCheckerId = (source: FiscalSourceId): string => `${source}_verification`
 
-export const fiscalCheckerVersion = (adapterVersion: string, input: FiscalLookupInput): string =>
-  `${adapterVersion}+d${fiscalDocumentFingerprint(input)}+c${FISCAL_VERIFICATION_CONTRACT_VERSION}`
+export interface FiscalCheckerVersionOptions {
+  /** Fonte do adapter que executou (difere de `input.source` em `unsupported`). */
+  readonly adapterSource?: FiscalSourceId
+  /** Discrimina resultados transitórios na chave de idempotência. */
+  readonly documentOutcome?: DocumentOutcome
+}
+
+export const fiscalCheckerVersion = (
+  adapterVersion: string,
+  input: FiscalLookupInput,
+  options: FiscalCheckerVersionOptions = {},
+): string => {
+  const adapterSource = options.adapterSource === undefined ? '' : `+a${options.adapterSource}`
+  const transientOutcome =
+    options.documentOutcome !== undefined && !isFiscalTerminalDocumentOutcome(options.documentOutcome)
+      ? `+o${options.documentOutcome}`
+      : ''
+  return `${adapterVersion}${adapterSource}+d${fiscalDocumentFingerprint(input)}+c${FISCAL_VERIFICATION_CONTRACT_VERSION}${transientOutcome}`
+}
 
 /**
  * Estado neutro para fonte não suportada ou falha do adapter. Não contém

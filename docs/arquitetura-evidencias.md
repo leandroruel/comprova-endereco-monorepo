@@ -495,10 +495,19 @@ adapter determinístico em `packages/providers/src/fiscal/`. Decisão em
   fonte vira `unavailable`, nunca `invalid`.
 - **Idempotência e versão:** a chave natural é
   `(claim_id, source, checker, checker_version)`. `checker_version` combina a
-  versão do adapter, um hash estável da referência do documento
-  (`document_ref_hash`) e a versão do contrato fiscal. A mesma consulta não
-  duplica; dois documentos diferentes no mesmo claim não colidem; uma nova
-  versão do adapter cria outra linha e preserva a anterior.
+  versão do adapter, o adapter de origem, um hash estável da referência do
+  documento (`document_ref_hash`) e a versão do contrato fiscal. Resultados
+  transitórios (`unavailable`, `inconclusive`, `unsupported`) recebem um
+  discriminador `+o<outcome>`, então uma tentativa posterior terminal
+  (`authentic`/`not_found`/`invalid`) não é descartada como duplicata. A mesma
+  consulta não duplica; dois documentos diferentes no mesmo claim não colidem;
+  uma nova versão do adapter cria outra linha e preserva a anterior.
+- **Integridade do resultado:** um resultado de adapter cujo `documentId` não
+  nulo diverge do `documentId` do input vira `unavailable` com
+  `ADAPTER_RESULT_DOCUMENT_MISMATCH`; ele nunca é materializado como `authentic`.
+  `limitations`/`errorCodes` passam por uma allowlist finita
+  (`FISCAL_REASON_CODES`); valores desconhecidos viram `ADAPTER_ERROR` antes de
+  qualquer persistência ou log.
 - **Tenant e RLS:** a leitura do claim/validation/endereço/titular e a escrita
   da observação usam `withTenant`. Um input de tenant A apontando para claim de
   tenant B retorna `skipped` e não materializa nada.

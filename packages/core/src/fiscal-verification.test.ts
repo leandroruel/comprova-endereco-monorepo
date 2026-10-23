@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { stanceForDimensions } from './evidence-verification.js'
 import {
+  FISCAL_REASON_CODES,
   FISCAL_SOURCE_KIND,
   FISCAL_VERIFICATION_CONTRACT_VERSION,
   fiscalCheckerId,
@@ -8,6 +9,8 @@ import {
   fiscalDocumentFingerprint,
   fiscalEvidenceSourceRef,
   fiscalVerificationStatusOf,
+  isFiscalReasonCode,
+  isFiscalTerminalDocumentOutcome,
   unavailableFiscalVerification,
   unsupportedFiscalVerification,
   type FiscalLookupInput,
@@ -62,6 +65,49 @@ describe('contrato fiscal', () => {
     expect(fiscalCheckerVersion('1.0.0', { ...INPUT, documentId: 'outro' })).not.toBe(
       fiscalCheckerVersion('1.0.0', INPUT),
     )
+  })
+
+  it('distingue o adapter de origem e resultados transitórios na chave', () => {
+    expect(
+      fiscalCheckerVersion('1.0.0', INPUT, {
+        adapterSource: 'nf3e',
+        documentOutcome: 'authentic',
+      }),
+    ).toBe(`1.0.0+anf3e+d${fiscalDocumentFingerprint(INPUT)}+c${FISCAL_VERIFICATION_CONTRACT_VERSION}`)
+
+    const unavailable = fiscalCheckerVersion('1.0.0', INPUT, {
+      adapterSource: 'nf3e',
+      documentOutcome: 'unavailable',
+    })
+    expect(unavailable).toContain('+ounavailable')
+    expect(unavailable).not.toBe(
+      fiscalCheckerVersion('1.0.0', INPUT, { adapterSource: 'nf3e', documentOutcome: 'authentic' }),
+    )
+    expect(
+      fiscalCheckerVersion('1.0.0', INPUT, {
+        adapterSource: 'nf3e',
+        documentOutcome: 'unsupported',
+      }),
+    ).not.toBe(
+      fiscalCheckerVersion('1.0.0', INPUT, {
+        adapterSource: 'nfag-e',
+        documentOutcome: 'unsupported',
+      }),
+    )
+  })
+
+  it('tem allowlist finita de reason codes e classifica terminais', () => {
+    expect(FISCAL_REASON_CODES).toContain('SEFAZ_TIMEOUT')
+    expect(isFiscalReasonCode('SEFAZ_TIMEOUT')).toBe(true)
+    expect(isFiscalReasonCode('CPF_12345678900')).toBe(false)
+    expect(isFiscalReasonCode('SECRET_TOKEN')).toBe(false)
+
+    for (const outcome of ['authentic', 'not_found', 'invalid'] as const) {
+      expect(isFiscalTerminalDocumentOutcome(outcome)).toBe(true)
+    }
+    for (const outcome of ['unavailable', 'inconclusive', 'unsupported'] as const) {
+      expect(isFiscalTerminalDocumentOutcome(outcome)).toBe(false)
+    }
   })
 
   it('nunca transforma indisponibilidade/inconclusivo/unsupported em contradicts', () => {

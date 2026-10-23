@@ -12,10 +12,14 @@ SET application_name = 'comprova-migrations';
 -- `weightedScore` nem veredito.
 --
 -- A chave natural inclui `checker_version`, que combina a versão do adapter,
--- o hash estável da referência do documento e a versão do contrato. Assim:
+-- a fonte do adapter, o hash estável da referência do documento e a versão do
+-- contrato. Resultados transitórios (unavailable/inconclusive/unsupported)
+-- recebem um discriminador, para não bloquearem um resultado terminal
+-- posterior. Assim:
 --   - replay/retry da mesma consulta não duplica;
 --   - uma nova versão do adapter cria outra linha e preserva a anterior;
---   - dois documentos diferentes da mesma fonte no mesmo claim não colidem.
+--   - dois documentos diferentes da mesma fonte no mesmo claim não colidem;
+--   - unavailable seguido de authentic não é descartado como duplicata.
 CREATE UNIQUE INDEX idx_claim_evidence_fiscal_source_uq
   ON claim_evidence (claim_id, source, checker, checker_version)
   WHERE source IN ('fiscal_nf3e', 'fiscal_nfag');

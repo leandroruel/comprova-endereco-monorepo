@@ -234,7 +234,10 @@ describe('F2.1 — contrato e materialização de fonte fiscal', () => {
       tenantId: tenantA,
       source: 'fiscal_nf3e',
       checker: 'nf3e_verification',
-      checkerVersion: fiscalCheckerVersion('1.0.0', input),
+      checkerVersion: fiscalCheckerVersion('1.0.0', input, {
+        adapterSource: 'nf3e',
+        documentOutcome: 'authentic',
+      }),
       stance: 'supports',
       strength: 0,
       confidence: 0,
@@ -445,6 +448,89 @@ describe('F2.1 — contrato e materialização de fonte fiscal', () => {
       document: 'unavailable',
       error_codes: ['ADAPTER_ERROR'],
     })
+  })
+
+  it('não deixa unavailable bloquear um resultado terminal posterior', async () => {
+    const claim = await makeClaim(tenantA)
+    const input = inputFor(claim)
+    const unavailable = makeFakeFiscalAdapter({
+      version: '1.0.0',
+      unavailableReason: 'SEFAZ_TIMEOUT',
+    })
+    const success = makeFakeFiscalAdapter({
+      version: '1.0.0',
+      document: 'authentic',
+      address: 'matches',
+      holder: 'matches',
+    })
+
+    await expect(run(unavailable, input)).resolves.toBe('inserted')
+    await expect(run(success, input)).resolves.toBe('inserted')
+
+    const rows = await fiscalRowsOf(claim.claimId)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => verificationOf(row).document).sort()).toEqual(['authentic', 'unavailable'])
+    const terminal = rows.find((row) => verificationOf(row).document === 'authentic')
+    expect(terminal?.stance).toBe('supports')
+  })
+
+  it('rejeita resultado de adapter com documento diferente do input', async () => {
+    const claim = await makeClaim(tenantA)
+    const adapter = makeFakeFiscalAdapter({
+      document: 'authentic',
+      address: 'matches',
+      holder: 'matches',
+      documentId: 'outro-documento',
+    })
+
+    await expect(run(adapter, inputFor(claim))).resolves.toBe('inserted')
+
+    const row = (await fiscalRowsOf(claim.claimId))[0]
+    expect(row?.stance).toBe('unknown')
+    expect(verificationOf(row)).toMatchObject({
+      status: 'unavailable',
+      document: 'unavailable',
+      error_codes: ['ADAPTER_RESULT_DOCUMENT_MISMATCH'],
+    })
+  })
+
+  it('sanitiza reason codes desconhecidos antes de persistir', async () => {
+    const claim = await makeClaim(tenantA)
+    const adapter = makeFakeFiscalAdapter({
+      document: 'authentic',
+      address: 'matches',
+      holder: 'matches',
+      limitations: ['CPF_12345678900'],
+      errorCodes: ['SECRET_TOKEN'],
+    })
+
+    await expect(run(adapter, inputFor(claim))).resolves.toBe('inserted')
+
+    const row = (await fiscalRowsOf(claim.claimId))[0]
+    expect(verificationOf(row)).toMatchObject({
+      limitations: ['ADAPTER_ERROR'],
+      error_codes: ['ADAPTER_ERROR'],
+    })
+    expect(JSON.stringify(row?.detail)).not.toContain('CPF_12345678900')
+    expect(JSON.stringify(row?.detail)).not.toContain('SECRET_TOKEN')
+  })
+
+  it('não colide unsupported de um adapter com o adapter real da fonte', async () => {
+    const claim = await makeClaim(tenantA)
+    const input = inputFor(claim, { source: 'nfag-e' })
+    const nf3eAdapter = makeFakeFiscalAdapter({ source: 'nf3e', version: '1.0.0' })
+    const nfagAdapter = makeFakeFiscalAdapter({
+      source: 'nfag-e',
+      version: '1.0.0',
+      document: 'unsupported',
+    })
+
+    await expect(run(nf3eAdapter, input)).resolves.toBe('inserted')
+    await expect(run(nfagAdapter, input)).resolves.toBe('inserted')
+
+    const rows = await fiscalRowsOf(claim.claimId)
+    expect(rows).toHaveLength(2)
+    expect(rows.every((row) => verificationOf(row).document === 'unsupported')).toBe(true)
   })
 
   it('não duplica a mesma consulta e diferencia documentos/versões', async () => {

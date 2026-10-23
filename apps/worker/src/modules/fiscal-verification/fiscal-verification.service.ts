@@ -7,11 +7,13 @@ import {
   fiscalDocumentFingerprint,
   fiscalEvidenceSourceRef,
   fiscalVerificationStatusOf,
+  isFiscalReasonCode,
   stanceForDimensions,
   unavailableFiscalVerification,
   unsupportedFiscalVerification,
   type FiscalAdapter,
   type FiscalLookupInput,
+  type FiscalReasonCode,
   type FiscalVerificationResult,
 } from '@comprova/core'
 import { withTenant } from '@comprova/db'
@@ -55,9 +57,8 @@ export interface FiscalVerificationDeps {
 
 export type FiscalMaterializationOutcome = 'inserted' | 'duplicate' | 'skipped'
 
-const SAFE_REASON = /^[A-Z0-9_]{1,64}$/
-
-const safeReason = (reason: string): string => (SAFE_REASON.test(reason) ? reason : 'ADAPTER_ERROR')
+const safeReason = (reason: string): FiscalReasonCode =>
+  isFiscalReasonCode(reason) ? reason : 'ADAPTER_ERROR'
 
 const hashNullable = (value: string | null): string | null =>
   value === null ? null : createHash('sha256').update(value).digest('hex')
@@ -82,8 +83,8 @@ const verificationDetailOf = (
     contract_version: FISCAL_VERIFICATION_CONTRACT_VERSION,
     observed_at: result.observedAt.toISOString(),
     issued_at: result.issuedAt?.toISOString() ?? null,
-    limitations: [...result.limitations],
-    error_codes: [...result.errorCodes],
+    limitations: result.limitations.map(safeReason),
+    error_codes: result.errorCodes.map(safeReason),
     audit: {
       requested_url_sha256: hashNullable(result.audit.requestedUrl),
       resolved_ip: result.audit.resolvedIp,
@@ -163,6 +164,18 @@ const runAdapter = async (
       'ADAPTER_RESULT_VERSION_MISMATCH',
     )
   }
+  if (
+    input.documentId !== null &&
+    parsed.data.documentId !== null &&
+    parsed.data.documentId !== input.documentId
+  ) {
+    return unavailableFiscalVerification(
+      input,
+      deps.adapter.version,
+      now(),
+      'ADAPTER_RESULT_DOCUMENT_MISMATCH',
+    )
+  }
 
   return parsed.data
 }
@@ -196,7 +209,10 @@ export const verifyFiscalClaim = async (
         evidenceId: null,
         evidenceSha256,
         checker: fiscalCheckerId(result.source),
-        checkerVersion: fiscalCheckerVersion(result.adapterVersion, input),
+        checkerVersion: fiscalCheckerVersion(result.adapterVersion, input, {
+          adapterSource: deps.adapter.source,
+          documentOutcome: result.document,
+        }),
         stance: stanceForDimensions(result),
         // F2.1 não emite signal; a F3 decide peso/força da fonte fiscal.
         strength: 0,

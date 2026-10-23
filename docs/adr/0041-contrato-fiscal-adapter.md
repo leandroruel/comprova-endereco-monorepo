@@ -124,12 +124,21 @@ A chave natural é `(claim_id, source, checker, checker_version)`.
 `checker_version` combina:
 
 ```text
-<adapter_version>+d<document_ref_hash>+c<contract_version>
+<adapter_version>+a<adapter_source>+d<document_ref_hash>+c<contract_version>[+o<transient_outcome>]
 ```
+
+O adapter de origem entra na chave porque um adapter de outra fonte pode
+responder `unsupported` (por exemplo, o adapter NF3e consultado para um input
+NFAg-e). O discriminador `+o<transient_outcome>` só aparece para resultados não
+terminais (`unavailable`, `inconclusive`, `unsupported`); `authentic`,
+`not_found` e `invalid` usam a chave estável. Assim uma tentativa transitória
+não ocupa a chave que um resultado terminal posterior precisa.
 
 Consequências:
 
 - replay/retry da mesma consulta não duplica;
+- `unavailable` seguido de `authentic` materializa as duas observações, sem
+  descartar o resultado terminal como duplicata;
 - dois documentos diferentes no mesmo claim não colidem;
 - uma nova versão do adapter cria outra linha e preserva a anterior;
 - a versão do contrato entra na chave, então mudanças de interpretação também

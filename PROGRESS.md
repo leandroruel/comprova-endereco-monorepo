@@ -30,10 +30,15 @@ parsing) fica para F2.2. Decisão em
   status HTTP, hash do corpo e hash da URL pedida. A chave/URL crua não é
   copiada; logs usam apenas ids/status/reason codes.
 - Idempotência e versão: chave `(claim_id, source, checker, checker_version)`,
-  com `checker_version = <adapter_version>+d<document_ref_hash>+c<contrato>`.
-  Replay não duplica; documentos diferentes no mesmo claim não colidem; nova
-  versão preserva a anterior. Migração `0044_fiscal_evidence.sql` cria os
-  índices parciais.
+  com
+  `checker_version = <adapter_version>+a<adapter_source>+d<document_ref_hash>+c<contrato>[+o<transient_outcome>]`.
+  Replay não duplica; `unavailable`/`inconclusive`/`unsupported` não bloqueiam
+  um resultado terminal posterior; documentos diferentes no mesmo claim não
+  colidem; nova versão preserva a anterior. Migração
+  `0044_fiscal_evidence.sql` cria os índices parciais.
+- Integridade: resultado de adapter com `documentId` divergente do input vira
+  `unavailable` (`ADAPTER_RESULT_DOCUMENT_MISMATCH`); `limitations`/`errorCodes`
+  usam allowlist finita e valores desconhecidos viram `ADAPTER_ERROR`.
 - Tenant/RLS: leitura do claim/validation/endereço/titular e escrita usam
   `withTenant`; input de tenant A com claim de tenant B retorna `skipped` sem
   materializar. O loader de contexto foi extraído da F1.3 para
@@ -44,9 +49,11 @@ parsing) fica para F2.2. Decisão em
   nem chega ao fetch; metadata/RFC1918 continuam bloqueados pela guarda. A URL
   do QR nunca é usada como destino.
 - `FakeFiscalAdapter` determinístico (`packages/providers/src/fiscal/`) exercita
-  o pipeline sem I/O. Testes: 7 no core, 10 em providers e 12 de integração
+  o pipeline sem I/O. Testes: 9 no core, 10 em providers e 16 de integração
   (todos os status, endereço/titular independentes, SSRF/allowlist, timeout como
-  `unavailable`, remoção de scoring, idempotência, versionamento e cross-tenant).
+  `unavailable`, remoção de scoring, documento divergente, sanitização de
+  reason codes, idempotência/transição para terminal, versionamento e
+  cross-tenant).
 - Fora de escopo (F2.2): parsing de QR NF3e, autorizadores/UF reais, HTTP/SOAP,
   certificado, cache/rate limit por fonte, descoberta de autorizador, detalhe
   fiscal no `GET` e NFAg-e.
