@@ -331,6 +331,57 @@ describe('F1.2 — análise do comprovante', () => {
     expect(evidence[0]?.stance).toBe('unknown')
   })
 
+  it('falha transitória de leitura deixa a análise em analyzing para retry', async () => {
+    const validationId = await makeValidation(tenantA)
+    await upload(validationId, keyA, pdfWithText(fullBill))
+    const failingStore = {
+      ...store,
+      get: async () => {
+        throw new Error('timeout')
+      },
+    }
+
+    await runTick({ store: failingStore })
+
+    const { analyses } = await graphOf(validationId)
+    expect(analyses[0]?.status).toBe('analyzing')
+    expect(analyses[0]?.result).toBeNull()
+    expect(analyses[0]?.attempts).toBe(1)
+    expect(analyses[0]?.lastError).toBe('OBJECT_UNAVAILABLE')
+  })
+
+  it('limita tentativas e terminaliza como failed após esgotar', async () => {
+    const validationId = await makeValidation(tenantA)
+    await upload(validationId, keyA, pdfWithText(fullBill))
+    const failingStore = {
+      ...store,
+      get: async () => {
+        throw new Error('timeout')
+      },
+    }
+
+    await runTick({ store: failingStore, maxAttempts: 1 })
+    const first = (await graphOf(validationId)).analyses[0]
+    expect(first?.status).toBe('analyzing')
+    if (first === undefined) return
+
+    await adminPool.db
+      .update(t.evidenceAnalysis)
+      .set({ updatedAt: new Date(Date.now() - 600_000) })
+      .where(eq(t.evidenceAnalysis.analysisId, first.analysisId))
+
+    await runTick({ store: failingStore, maxAttempts: 1 })
+
+    const after = (await graphOf(validationId)).analyses[0]
+    expect(after?.status).toBe('failed')
+    expect(after?.result).toMatchObject({
+      status: 'failed',
+      errorCodes: ['ANALYSIS_ATTEMPTS_EXCEEDED'],
+    })
+    expect(after?.lastError).toBe('ANALYSIS_ATTEMPTS_EXCEEDED')
+    expect(after?.attempts).toBe(2)
+  })
+
   it('saída inválida do analisador vira failed, sem ficar presa em analyzing', async () => {
     const validationId = await makeValidation(tenantA)
     await upload(validationId, keyA, pdfWithText(fullBill))

@@ -121,7 +121,10 @@ const addressFromText = (text: string, labels: ReadonlyMap<string, LabeledLine>)
   }
 
   const cepLabel = pickLabel(labels, ['CEP'])
-  const cepMatch = (cepLabel?.value ?? text).match(CEP_RE)
+  // Nunca varrer o texto inteiro: o cabeçalho costuma trazer o CEP da
+  // distribuidora. Só aceitamos CEP rotulado ou dentro da linha de endereço.
+  const cepSource = cepLabel?.value ?? labeled?.value ?? null
+  const cepMatch = cepSource === null ? null : cepSource.match(CEP_RE)
   const cep = cepMatch === null ? null : normalizeCep(`${cepMatch[1] ?? ''}${cepMatch[2] ?? ''}`)
 
   const bairroLabel = pickLabel(labels, ['BAIRRO', 'DISTRITO'])
@@ -172,7 +175,7 @@ interface HolderExtraction {
   readonly taxIdInvalid: boolean
 }
 
-const holderFromText = (text: string, labels: ReadonlyMap<string, LabeledLine>): HolderExtraction => {
+const holderFromText = (labels: ReadonlyMap<string, LabeledLine>): HolderExtraction => {
   const nameLabel = pickLabel(labels, ['TITULAR', 'NOMEDOTITULAR', 'NOME', 'CLIENTE', 'RAZAOSOCIAL'])
   const rawName = nameLabel?.value ?? null
   const name =
@@ -188,8 +191,11 @@ const holderFromText = (text: string, labels: ReadonlyMap<string, LabeledLine>):
 
   const cnpjLabel = pickLabel(labels, ['CNPJ'])
   const cpfLabel = pickLabel(labels, ['CPF'])
-  const cnpjRaw = cnpjLabel !== undefined ? cnpjLabel.value : (text.match(CNPJ_RE)?.[0] ?? null)
-  const cpfRaw = cpfLabel !== undefined ? cpfLabel.value : (text.match(CPF_RE)?.[0] ?? null)
+  // Apenas valores rotulados. O cabeçalho pode trazer o CNPJ da distribuidora
+  // (ou um número de 11 dígitos que passa no checksum de CPF), que não é o
+  // titular do comprovante.
+  const cnpjRaw = cnpjLabel?.value ?? null
+  const cpfRaw = cpfLabel?.value ?? null
 
   if (cnpjRaw !== null && isValidCnpj(cnpjRaw)) {
     return {
@@ -267,7 +273,7 @@ export interface PdfFields {
 export const fieldsFromPdfText = (text: string): PdfFields => {
   const labels = labeledLines(text)
   const address = addressFromText(text, labels)
-  const { holder, taxIdInvalid } = holderFromText(text, labels)
+  const { holder, taxIdInvalid } = holderFromText(labels)
   const issuedLabel = pickLabel(labels, ['EMISSAO', 'COMPETENCIA', 'REFERENCIA', 'MESREFERENCIA', 'PERIODO'])
   const issuedAt = issuedLabel === undefined ? null : dateFromText(issuedLabel.value)
   return {

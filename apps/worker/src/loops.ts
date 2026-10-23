@@ -51,8 +51,22 @@ export const startEvidenceAnalysisLoop = (
   maxBytes: number,
   logger: Logger,
   intervalMs = 2_000,
-): (() => void) =>
-  startLoop(() => analyzeEvidenceTick({ db, store, analyzer, maxBytes, logger }), intervalMs, logger)
+): (() => void) => {
+  let running = false
+  return startLoop(
+    async () => {
+      if (running) return
+      running = true
+      try {
+        await analyzeEvidenceTick({ db, store, analyzer, maxBytes, logger })
+      } finally {
+        running = false
+      }
+    },
+    intervalMs,
+    logger,
+  )
+}
 
 export const startPartitionLoop = (db: Db, intervalMs = DAY_MS): (() => void) =>
   startLoop(() => ensurePartitions(db), intervalMs)

@@ -6,7 +6,7 @@ import { Worker } from '@temporalio/worker'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { workerEnvFromProcess } from './config.js'
-import { buildWorkerContext, makeObjectStore } from './context.js'
+import { buildWorkerContext, hasS3Config, makeObjectStore } from './context.js'
 import {
   startEvidenceAnalysisLoop,
   startEvidenceRetentionLoop,
@@ -49,8 +49,9 @@ const stopValidationRetention =
 // manutenção. Sem `DATABASE_ADMIN_URL`, a RLS esconderia as linhas `pending`:
 // o worker avisa e não sobe o loop, em vez de falhar silenciosamente.
 const documentAnalyzer = makeDocumentAnalyzer()
+const s3Configured = hasS3Config(env)
 const stopEvidenceAnalysis =
-  adminRetentionPool !== null
+  adminRetentionPool !== null && s3Configured
     ? startEvidenceAnalysisLoop(
         adminRetentionPool.db,
         retentionStore,
@@ -60,10 +61,18 @@ const stopEvidenceAnalysis =
       )
     : null
 if (stopEvidenceAnalysis === null) {
-  logger.warn(
-    { reason: 'EVIDENCE_ANALYSIS_ADMIN_URL_MISSING' },
-    'evidence analysis loop disabled: DATABASE_ADMIN_URL not configured',
-  )
+  if (adminRetentionPool === null) {
+    logger.warn(
+      { reason: 'EVIDENCE_ANALYSIS_ADMIN_URL_MISSING' },
+      'evidence analysis loop disabled: DATABASE_ADMIN_URL not configured',
+    )
+  }
+  if (!s3Configured) {
+    logger.warn(
+      { reason: 'EVIDENCE_ANALYSIS_S3_MISSING' },
+      'evidence analysis loop disabled: S3 settings not configured',
+    )
+  }
 }
 
 const worker = await Worker.create({

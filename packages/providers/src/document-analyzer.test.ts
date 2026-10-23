@@ -106,6 +106,51 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     expect(result.address.value?.uf).toBeNull()
   })
 
+  it('não usa o CEP do cabeçalho quando não há CEP rotulado', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Distribuidora CEMIG - CEP 30110-000',
+        'Endereço: Rua das Flores, 123',
+        'Bairro: Centro',
+        'Cidade: São Paulo',
+        'UF: SP',
+      ]),
+      contentType: 'application/pdf',
+    })
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value?.cep).toBeNull()
+  })
+
+  it('extrai CEP da linha de endereço quando não há CEP rotulado', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText(['CONTA DE ENERGIA', 'Endereço: Rua das Flores, 123 - CEP 01001-000']),
+      contentType: 'application/pdf',
+    })
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value?.cep).toBe('01001000')
+  })
+
+  it('não usa CNPJ da distribuidora como titular quando não há rótulo', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Distribuidora CEMIG - CNPJ 11.222.333/0001-81',
+        'Titular: Maria da Silva',
+        'CPF: 529.982.247-25',
+        'Endereço: Rua das Flores, 123',
+        'CEP: 01001-000',
+      ]),
+      contentType: 'application/pdf',
+    })
+    expect(result.holder.status).toBe('extracted')
+    expect(result.holder.value).toMatchObject({
+      name: 'Maria da Silva',
+      taxId: '52998224725',
+      taxIdType: 'CPF',
+    })
+  })
+
   it('marca address = not_extracted quando o documento não traz endereço', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
       data: pdfWithText(['CONTA DE ENERGIA', 'Titular: Maria da Silva', 'CPF: 529.982.247-25']),

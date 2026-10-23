@@ -32,11 +32,21 @@ export interface WorkerContext {
   readonly signalCache: SignalCacheReader
 }
 
-export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore =>
+type S3ConfiguredEnv = WorkerEnv & {
+  readonly s3Endpoint: string
+  readonly s3Bucket: string
+  readonly s3AccessKeyId: string
+  readonly s3SecretAccessKey: string
+}
+
+export const hasS3Config = (env: WorkerEnv): env is S3ConfiguredEnv =>
   env.s3Endpoint !== undefined &&
   env.s3AccessKeyId !== undefined &&
   env.s3SecretAccessKey !== undefined &&
   env.s3Bucket !== undefined
+
+export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore =>
+  hasS3Config(env)
     ? makeS3ObjectStore({
         endpoint: env.s3Endpoint,
         region: env.s3Region ?? 'us-east-1',

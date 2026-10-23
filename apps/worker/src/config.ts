@@ -48,7 +48,9 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     s3SecretAccessKey: nonEmpty(env.S3_SECRET_ACCESS_KEY),
   }
 
-  const parsedAnalysisMaxBytes = Number(env.EVIDENCE_ANALYSIS_MAX_BYTES ?? EVIDENCE_ARTIFACT_MAX_BYTES)
+  const parsedAnalysisMaxBytes = Number(
+    nonEmpty(env.EVIDENCE_ANALYSIS_MAX_BYTES) ?? EVIDENCE_ARTIFACT_MAX_BYTES,
+  )
   if (
     !Number.isInteger(parsedAnalysisMaxBytes) ||
     parsedAnalysisMaxBytes <= 0 ||

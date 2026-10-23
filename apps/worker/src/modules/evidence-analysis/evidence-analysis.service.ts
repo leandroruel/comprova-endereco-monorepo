@@ -34,6 +34,8 @@ export interface EvidenceAnalysisDeps {
   readonly maxBytes: number
   readonly batchSize?: number
   readonly claimStaleMs?: number
+  /** Execuções antes de terminalizar como `failed`. Default: 5. */
+  readonly maxAttempts?: number
   readonly now?: () => Date
 }
 
@@ -54,6 +56,7 @@ interface ArtifactMetadata {
 
 const DEFAULT_BATCH_SIZE = 10
 const DEFAULT_CLAIM_STALE_MS = 5 * 60_000
+const DEFAULT_MAX_ATTEMPTS = 5
 
 const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
 
@@ -133,10 +136,21 @@ const loadArtifact = async (
     return rows[0]
   })
 
+const recordLastError = async (deps: EvidenceAnalysisDeps, job: ClaimedJob, reason: string): Promise<void> =>
+  withTenant(deps.db, job.tenantId, async (tx) => {
+    await tx
+      .update(t.evidenceAnalysis)
+      .set({ lastError: reason })
+      .where(
+        and(eq(t.evidenceAnalysis.analysisId, job.analysisId), eq(t.evidenceAnalysis.tenantId, job.tenantId)),
+      )
+  })
+
 const persistResult = async (
   deps: EvidenceAnalysisDeps,
   job: ClaimedJob,
   result: DocumentAnalysisResult,
+  lastError: string | null = null,
 ): Promise<void> =>
   withTenant(deps.db, job.tenantId, async (tx) => {
     await tx
@@ -146,7 +160,7 @@ const persistResult = async (
         result,
         errorCodes: [...result.errorCodes],
         attempts: job.attempts,
-        lastError: null,
+        lastError,
         updatedAt: (deps.now ?? (() => new Date()))(),
         analyzedAt: new Date(result.analyzedAt),
       })
@@ -181,7 +195,10 @@ const analyzeJob = async (deps: EvidenceAnalysisDeps, job: ClaimedJob): Promise<
       },
       'evidence analysis object read failed',
     )
-    await persistResult(deps, job, documentAnalysisUnavailableResult(runAt(), 'OBJECT_UNAVAILABLE'))
+    // Falha transitória: a linha continua `analyzing` e é reivindicada de novo
+    // após `claimStaleMs`. O cap de tentativas em `analyzeEvidenceTick` impede
+    // retry indefinido e terminaliza como `failed`.
+    await recordLastError(deps, job, 'OBJECT_UNAVAILABLE')
     return
   }
   if (data === null) {
@@ -271,12 +288,32 @@ const analyzeJob = async (deps: EvidenceAnalysisDeps, job: ClaimedJob): Promise<
  */
 export const analyzeEvidenceTick = async (deps: EvidenceAnalysisDeps): Promise<number> => {
   const batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE
+  const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
+  const runAt = deps.now ?? (() => new Date())
   let processed = 0
   while (processed < batchSize) {
     const job = await claimNext(deps)
     if (job === null) break
     try {
-      await analyzeJob(deps, job)
+      if (job.attempts > maxAttempts) {
+        deps.logger.warn(
+          {
+            analysis_id: job.analysisId,
+            artifact_id: job.artifactId,
+            attempts: job.attempts,
+            reason: 'ANALYSIS_ATTEMPTS_EXCEEDED',
+          },
+          'evidence analysis attempts exceeded; terminalizing',
+        )
+        await persistResult(
+          deps,
+          job,
+          documentAnalysisFailedResult(runAt(), 'ANALYSIS_ATTEMPTS_EXCEEDED'),
+          'ANALYSIS_ATTEMPTS_EXCEEDED',
+        )
+      } else {
+        await analyzeJob(deps, job)
+      }
     } catch (error) {
       deps.logger.error(
         {

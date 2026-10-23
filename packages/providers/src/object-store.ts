@@ -47,19 +47,23 @@ export const makeS3ObjectStore = (options: S3ObjectStoreOptions): EvidenceObject
         secretAccessKey: options.secretAccessKey,
       },
     })
-    await client.send(
-      new PutObjectCommand({
-        Bucket: options.bucket,
-        Key: key,
-        Body: data,
-        ContentType: contentType,
-      }),
-    )
-    return {
-      key,
-      uri: `${options.endpoint}/${options.bucket}/${key}`,
-      sha256: sha256Of(data),
-      bytes: data.byteLength,
+    try {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: options.bucket,
+          Key: key,
+          Body: data,
+          ContentType: contentType,
+        }),
+      )
+      return {
+        key,
+        uri: `${options.endpoint}/${options.bucket}/${key}`,
+        sha256: sha256Of(data),
+        bytes: data.byteLength,
+      }
+    } finally {
+      client.destroy()
     }
   },
   get: async (key) => {
@@ -80,6 +84,8 @@ export const makeS3ObjectStore = (options: S3ObjectStoreOptions): EvidenceObject
     } catch (error) {
       if ((error as { name?: unknown }).name === 'NoSuchKey') return null
       throw error
+    } finally {
+      client.destroy()
     }
   },
   delete: async (key) => {
@@ -93,7 +99,11 @@ export const makeS3ObjectStore = (options: S3ObjectStoreOptions): EvidenceObject
         secretAccessKey: options.secretAccessKey,
       },
     })
-    await client.send(new DeleteObjectCommand({ Bucket: options.bucket, Key: key }))
+    try {
+      await client.send(new DeleteObjectCommand({ Bucket: options.bucket, Key: key }))
+    } finally {
+      client.destroy()
+    }
   },
 })
 
