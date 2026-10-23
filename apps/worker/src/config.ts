@@ -1,3 +1,4 @@
+import { EVIDENCE_ARTIFACT_MAX_BYTES } from '@comprova/db'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 
@@ -16,6 +17,8 @@ export interface WorkerEnv {
   readonly s3AccessKeyId?: string
   readonly s3SecretAccessKey?: string
   readonly storeStreetViewImages?: boolean
+  /** Limite de bytes que o analisador F1.2 carrega em memória. */
+  readonly evidenceAnalysisMaxBytes: number
 }
 
 export const findRepoRoot = (startDir: string): string => {
@@ -45,10 +48,22 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     s3SecretAccessKey: nonEmpty(env.S3_SECRET_ACCESS_KEY),
   }
 
+  const parsedAnalysisMaxBytes = Number(env.EVIDENCE_ANALYSIS_MAX_BYTES ?? EVIDENCE_ARTIFACT_MAX_BYTES)
+  if (
+    !Number.isInteger(parsedAnalysisMaxBytes) ||
+    parsedAnalysisMaxBytes <= 0 ||
+    parsedAnalysisMaxBytes > EVIDENCE_ARTIFACT_MAX_BYTES
+  ) {
+    throw new Error(
+      `EVIDENCE_ANALYSIS_MAX_BYTES must be an integer between 1 and ${EVIDENCE_ARTIFACT_MAX_BYTES}`,
+    )
+  }
+
   return {
     databaseUrl,
     policyVersion: env.POLICY_VERSION ?? '2026.13.1',
     repoRoot: findRepoRoot(process.cwd()),
+    evidenceAnalysisMaxBytes: parsedAnalysisMaxBytes,
     vlmEnabled: env.VLM_ENABLED === 'true',
     ...Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined)),
     ...(env.STORE_STREET_VIEW_IMAGES === 'true' ? { storeStreetViewImages: true } : {}),

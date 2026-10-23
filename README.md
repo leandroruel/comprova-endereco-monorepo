@@ -57,6 +57,11 @@ Tudo vem do `.env` na raiz — `.env.example` documenta as variáveis e o
   só pode reduzi-lo. Como o arquivo é bufferizado antes do storage, um semáforo
   por processo limita uploads em voo com `EVIDENCE_MAX_CONCURRENCY` (default
   **4**, máximo **16**); o limite é por processo, então cada réplica tem o seu.
+- **`EVIDENCE_ANALYSIS_MAX_BYTES`** limita os bytes que o worker carrega para a
+  análise F1.2 (default 50 MiB). A análise consome `evidence_analysis` com o
+  pool de manutenção e roda com PDF textual; imagem retorna `unsupported` até
+  existir OCR. Sem `DATABASE_ADMIN_URL` o loop não sobe e o worker registra um
+  aviso.
 - **`CREDENTIAL_ISSUER_ORIGIN`** é a origem HTTPS **controlada pelo projeto**
   que serve de base para o `issuer` e para o `credentialSubject.id` das
   credenciais verificáveis (ADR-0024). Não há default e a biblioteca não

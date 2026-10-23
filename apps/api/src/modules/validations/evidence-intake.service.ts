@@ -1,5 +1,5 @@
 import { problem, problems, type Problem } from '@comprova/contracts'
-import { and, eq, withTenant } from '@comprova/db'
+import { and, eq, insertPendingEvidenceAnalysis, withTenant } from '@comprova/db'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
@@ -232,8 +232,20 @@ const matches = (
   existing.contentType === contentType &&
   existing.sha256.equals(sha256)
 
-const replayOf = (existing: ExistingEvidence): EvidenceIntakeResult => {
+const replayOf = async (
+  tx: DbTx,
+  input: EvidenceIntakeInput,
+  existing: ExistingEvidence,
+): Promise<EvidenceIntakeResult> => {
   if (existing.artifactId === null) throw persistenceFailed()
+  // Replay do mesmo conteúdo também garante uma linha de análise para a
+  // versão corrente. `ON CONFLICT DO NOTHING` preserva a análise terminal da
+  // mesma versão e permite que uma nova versão do analisador seja aplicada a
+  // um artefato já existente.
+  await insertPendingEvidenceAnalysis(tx, {
+    tenantId: input.tenantId,
+    artifactId: existing.artifactId,
+  })
   return {
     evidenceId: existing.claimEvidenceId,
     artifactId: existing.artifactId,
@@ -332,14 +344,14 @@ const preflight = async (
       if (existing === undefined || !matches(existing, contentType, sha256)) {
         throw persistenceFailed()
       }
-      return { kind: 'replay' as const, result: replayOf(existing) }
+      return { kind: 'replay' as const, result: await replayOf(tx, input, existing) }
     }
     if (existing === undefined) return { kind: 'upload' as const }
     if (matches(existing, contentType, sha256)) {
       // Replay por conteúdo com uma key nova: registra o alias para que um
       // reuso dessa key com outro conteúdo seja detectado como mismatch.
       await recordIdempotency(tx, input, requestHash)
-      return { kind: 'replay' as const, result: replayOf(existing) }
+      return { kind: 'replay' as const, result: await replayOf(tx, input, existing) }
     }
     throw new EvidenceIntakeError(problems.evidenceAlreadyExists())
   })
@@ -474,14 +486,14 @@ export const uploadEvidence = async (
         if (existing === undefined || !matches(existing, contentType, sha256)) {
           throw persistenceFailed()
         }
-        return replayOf(existing)
+        return replayOf(tx, input, existing)
       }
       if (existing !== undefined) {
         if (!matches(existing, contentType, sha256)) {
           throw new EvidenceIntakeError(problems.evidenceAlreadyExists())
         }
         await recordIdempotency(tx, input, requestHash)
-        return replayOf(existing)
+        return replayOf(tx, input, existing)
       }
 
       const now = new Date()
@@ -497,9 +509,10 @@ export const uploadEvidence = async (
         evidenceSha256: sha256,
         checker: EVIDENCE_INTAKE_CHECKER,
         checkerVersion: EVIDENCE_INTAKE_CHECKER_VERSION,
-        // O upload só prova que um documento foi apresentado. Não há stance
-        // de endereço/titular até F1.2/F1.3; `confidence` é NOT NULL, então o
-        // valor neutro 0 expressa ausência de avaliação, não negação.
+        // O upload só prova que um documento foi apresentado. Mesmo após a
+        // extração da F1.2, não há stance de endereço/titular até F1.3;
+        // `confidence` é NOT NULL, então o valor neutro 0 expressa ausência de
+        // avaliação, não negação.
         stance: 'unknown',
         strength: 0,
         confidence: 0,
@@ -527,6 +540,13 @@ export const uploadEvidence = async (
         claimEvidenceId,
         object,
         retentionUntil: validation.expiresAt,
+      })
+      // F1.2: enfileira a análise na MESMA transação do intake. A análise não
+      // altera a observação `unknown`/`pending` da F1.1; o verificador F1.3
+      // consumirá a linha de `evidence_analysis`.
+      await insertPendingEvidenceAnalysis(tx, {
+        tenantId: input.tenantId,
+        artifactId: object.artifactId,
       })
       await recordIdempotency(tx, input, requestHash)
 

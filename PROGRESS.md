@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **Intake de comprovante (F1.1) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
+Estado: **Intake de comprovante (F1.1) + análise/extração do comprovante (F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
 
 ## Intake de comprovante do cliente (F1.1) (2026-10-22)
 
@@ -44,8 +44,53 @@ em [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md).
   falha de storage/DB/claim, compensação sem PII e retenção). Migração
   `0040_evidence_intake.sql`.
 
-Ainda falta da Fase 1: OCR/extração de campos, matching de documento/endereço/
-titular e detalhe completo no `GET` (F1.2/F1.3).
+Ainda falta da Fase 1: matching de documento/endereço/titular, mapeamento para
+`claim_evidence`/`stance`, detalhe completo no `GET` e OCR de imagem
+(F1.3/F2).
+
+## Análise do comprovante do cliente (F1.2) (2026-10-22)
+
+O intake F1.1 passou a enfileirar `evidence_analysis` (`pending`) na mesma
+transação do artefato; o worker extrai uma observação não confiável do PDF e
+grava o resultado terminal. Upload, análise e verificação continuam etapas
+distintas: a F1.2 **não** autentica o documento, **não** compara com o endereço
+do claim e **não** altera `claim_evidence` nem o score. Contrato e decisão em
+[ADR-0038](docs/adr/0038-analise-de-documento-do-cliente.md) e em
+[`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#53-análise-do-documento-do-cliente-f12-implementado).
+
+- Contrato `DocumentAnalysisResult` separa `document`, `address` e `holder`.
+  Documento: `analyzed | invalid | inconclusive | unsupported | unavailable`;
+  endereço/titular: `extracted | not_extracted | unknown`; análise:
+  `completed | inconclusive | unsupported | unavailable | failed`.
+  `authentic`, `matches` e `differs` são reservados ao verificador.
+- Endereço extraído e normalizado (`logradouro`, `numero`, `complemento`,
+  `bairro`, `cidade`, `uf`, `cep`) com `raw` mínimo da região para auditoria.
+  Ausência de endereço é `not_extracted`, não falha.
+- O nome do titular só é extraído quando rotulado; CPF/CNPJ só é persistido
+  quando o checksum é válido e é tratado como PII. Não se infere CPF/CNPJ,
+  relação familiar, propriedade ou residência.
+- MVP sem OCR/VLM externo: PDF textual extraído localmente (streams simples e
+  `FlateDecode`, `Tj`/`TJ`, strings literais/hex). Imagem retorna
+  `unsupported`/`OCR_NOT_IMPLEMENTED`; PDFs escaneados/fontes CID sem
+  `ToUnicode` retornam `inconclusive`/`NO_TEXT_LAYER`.
+- Idempotência por `artifact_id`, `analyzer`, `analyzer_version` e
+  `contract_version`: replay do upload não duplica; retry não reescreve
+  resultado terminal; nova versão preserva a anterior. Concorrência usa
+  `FOR UPDATE SKIP LOCKED` + chave única, sem Redis/Temporal/endpoint novo.
+- `evidence_analysis` é append-only, tenant-scoped com RLS FORCE, FK composta
+  `(artifact_id, tenant_id)` e `ON DELETE CASCADE` na retenção. O worker lê o
+  objeto pelo `storage_key` opaco, confere tamanho/SHA-256 e nunca usa URL.
+  Logs contêm apenas ids e razões técnicas; `result`/PII não são logados.
+- `unavailable`, `inconclusive` e `unsupported` nunca viram `address=differs`
+  nem `stance=contradicts`; `GET /v1/validations/:id` continua em
+  `evidence_summary.unknown` (expor detalhe é decisão da F1.3).
+- Testes: `apps/api/tests/evidence-analysis.int.test.ts` (13 casos: suporte,
+  ausências, inválido, unsupported, unavailable, saída inválida do analisador,
+  retry, replay, concorrência, cross-tenant, PII, retenção) e
+  `packages/providers/src/document-analyzer.test.ts` (10 casos). Migração
+  `0041_evidence_analysis.sql`. Gates: `pnpm test` (77 arquivos, 744 testes),
+  `pnpm typecheck`, `pnpm lint`, `pnpm format` e `pnpm db:fence` (exit 0;
+  warnings de lock/analisador dinâmico).
 
 ## Guarda de fetch externo seguro (F0.2) (2026-10-22)
 

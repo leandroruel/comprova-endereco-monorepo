@@ -15,7 +15,7 @@ import {
   makeOverpassPlaces,
   makeS3ObjectStore,
   makeStubVisionModel,
-  type ObjectStore,
+  type EvidenceObjectStore,
 } from '@comprova/providers'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -32,7 +32,7 @@ export interface WorkerContext {
   readonly signalCache: SignalCacheReader
 }
 
-export const makeObjectStore = (env: WorkerEnv): ObjectStore =>
+export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore =>
   env.s3Endpoint !== undefined &&
   env.s3AccessKeyId !== undefined &&
   env.s3SecretAccessKey !== undefined &&

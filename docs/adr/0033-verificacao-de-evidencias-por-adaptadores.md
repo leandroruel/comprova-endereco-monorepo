@@ -2,8 +2,14 @@
 
 ## Status
 
-Proposto (2026-10-22). **Não implementado.** Depende da decisão de escopo de
-artefato (F0) e precede o adaptador NF3e (F2).
+Proposto (2026-10-22). **Verificação ainda não implementada.** Depende da
+decisão de escopo de artefato (F0) e precede o adaptador NF3e (F2).
+
+> **Emenda F1.2:** a etapa anterior à verificação — análise/extração do
+> documento do cliente — foi implementada e persistida em `evidence_analysis`,
+> com contrato próprio, no [ADR-0038](0038-analise-de-documento-do-cliente.md).
+> Esta ADR continua sendo o contrato do **verificador**; `authentic`, `matches`
+> e `differs` não são produzidos pela análise.
 
 Relaciona-se com o [ADR-0016](0016-claim-evidence-assessment.md) (claim como
 objeto de domínio) e com o [ADR-0034](0034-consulta-a-fontes-fiscais-endpoints-oficiais.md)
@@ -57,10 +63,12 @@ EvidenceVerificationResult
 
 Regras vinculantes:
 
-1. **Persistência não muda de dono.** O resultado é gravado como **uma** linha
-   em `claim_evidence` (com as dimensões em `detail`), opcionalmente vinculada a
-   `evidence` por `evidence_id`. Não se cria tabela de documento nem de
-   tentativa.
+1. **Persistência não muda de dono.** O resultado **da verificação** é gravado
+   como **uma** linha em `claim_evidence` (com as dimensões em `detail`),
+   opcionalmente vinculada a `evidence` por `evidence_id`. Não se cria tabela de
+   documento nem de tentativa de verificação. A observação intermediária de
+   extração da F1.2 é anterior e vive em `evidence_analysis` (ADR-0038); ela não
+   é uma segunda verificação e não entra no score.
 2. **`unavailable`, `inconclusive` e `unsupported` mapeiam para `unknown`.**
    Nunca para `contradicts`. Teste obrigatório.
 3. **`invalid` só contradiz quando a invalidade é definitiva.** Estrutura,

@@ -73,7 +73,7 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 | Retenção de validação     | `apps/worker/src/modules/retention/retention.service.ts` + loop em `apps/worker/src/loops.ts`                    | Job diário existe e apaga o grafo                                                                                                        |
 | Guarda de fetch externo   | `packages/providers/src/safe-fetch.ts`, [ADR-0036](adr/0036-guarda-de-fetch-externo.md)                          | **Entregue em F0.2**: HTTPS, DNS resolvido, todos os IPs validados e fixados, sem redirect, limites e content-type; webhook usa no envio |
 | `evidence` global         | `packages/db/migrations/0005_validation.sql`, `0007_rls.sql`, `0008_grants.sql`                                  | **Sem `tenant_id`/RLS**; único escritor hoje é o VLM de street view (`apps/worker/src/modules/evidence/evidence.service.ts`)             |
-| Artefato de PII           | `packages/db/migrations/0039_evidence_artifact.sql`, [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) | **Entregue em F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, write-once; sem upload/OCR                                           |
+| Artefato de PII           | `packages/db/migrations/0039_evidence_artifact.sql`, [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) | **Entregue em F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, write-once; upload em F1.1 e análise em F1.2                         |
 | Expiração de validação    | `fastpath.ts` (`expires_at = now + 30d`)                                                                         | 30 dias hardcoded, não vem da policy                                                                                                     |
 | Dashboard e API key       | `apps/dashboard/src/api/client.ts`                                                                               | Chave de tenant vai no bundle do browser; o próprio código marca como "facilidade de desenvolvimento"                                    |
 
@@ -181,34 +181,68 @@ público.
   [`arquitetura-evidencias.md`](arquitetura-evidencias.md#52-intake-do-comprovante-do-cliente-f11-implementado)
   e [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md).
 
-**Ainda falta para concluir a Fase 1:** OCR/extração de campos, matching de
-documento/endereço/titular, resultado tipado na `claim_evidence` e atualização
-do detalhe no `GET` além de `evidence_summary.unknown`.
+### F1.2 — Análise e extração do comprovante (entregue em 2026-10-22)
+
+- O intake enfileira `evidence_analysis` (`pending`) na mesma transação do
+  artefato. O worker consome a fila com `FOR UPDATE SKIP LOCKED`, sem Redis,
+  Temporal ou endpoint público de análise.
+- Contrato `DocumentAnalysisResult` separa `document`, `address` e `holder` e
+  produz apenas observações não confiáveis. Para `document`:
+  `analyzed | invalid | inconclusive | unsupported | unavailable`; para
+  `address`/`holder`: `extracted | not_extracted | unknown`. Nunca produz
+  `authentic`, `matches` ou `differs`.
+- Endereço extraído/normalizado (`logradouro`, `numero`, `complemento`,
+  `bairro`, `cidade`, `uf`, `cep`) com `raw` mínimo para auditoria. Titular só
+  quando rotulado; CPF/CNPJ só quando válido, tratado como PII.
+- MVP sem provider externo: PDF textual extraído localmente (streams
+  simples/`FlateDecode`); imagem retorna `unsupported`/`OCR_NOT_IMPLEMENTED`.
+  A interface `DocumentAnalyzer` permite OCR/VLM futuro.
+- Idempotência por
+  `(artifact_id, analyzer, analyzer_version, contract_version)`: replay/retry
+  não duplica e não reescreve resultado terminal; nova versão preserva a
+  anterior. Concorrência usa lock de linha + chave única.
+- `evidence_analysis` é append-only, tenant-scoped (RLS FORCE), com FK composta
+  e `ON DELETE CASCADE` na retenção. Logs não incluem conteúdo/PII.
+- `unavailable`, `inconclusive` e `unsupported` nunca viram `address=differs`
+  ou `stance=contradicts`; testes cobrem documento inválido, formato não
+  suportado, analisador indisponível, retry, concorrência, cross-tenant, PII e
+  retenção.
+- Contrato em [ADR-0038](adr/0038-analise-de-documento-do-cliente.md) e
+  [`arquitetura-evidencias.md`](arquitetura-evidencias.md#53-análise-do-documento-do-cliente-f12-implementado).
+
+**Ainda falta para concluir a Fase 1:** matching nas três dimensões
+(documento/endereço/titular), mapeamento do resultado para `claim_evidence`/
+`stance`, detalhe no `GET` e OCR de imagem. A F1.3/F2 decide como consumir
+`evidence_analysis` sem contar a mesma prova duas vezes.
 
 ### Estado atual comprovado
 
-| Item                           | Evidência                                                                                      | Situação                                                                |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant |
-| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming           |
-| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                      |
-| Extração OCR/PDF               | `packages/providers/src/vision-model.ts` (VLM de fachada)                                      | Existe para fachada, não para documento; F1.2                           |
-| Persistência de evidência      | `packages/db/migrations/0039_evidence_artifact.sql`, `0040_evidence_intake.sql`                | **Entregue em F1.1**: `claim_evidence` pendente + `evidence_artifact`   |
-| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`, `evidence_sha256`)             | **Entregue em F1.1**: observação `unknown`/pending, sem score           |
+| Item                           | Evidência                                                                                      | Situação                                                                   |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant    |
+| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming              |
+| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                         |
+| Extração PDF                   | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local; imagem `unsupported` (OCR futuro) |
+| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                  |
+| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score       |
+| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única        |
 
 ### Lacunas
 
 1. ~~Não há caminho de entrada para documento do cliente (HTTP, storage,
-   limites).~~ **Entregue em F1.1**; a análise do documento continua pendente.
+   limites).~~ **Entregue em F1.1**; a extração foi entregue em F1.2. Falta o
+   matching/verificação (F1.3).
 2. ~~Não há identificação de tipo de documento por conteúdo~~ **Entregue em
-   F1.1 por assinatura de arquivo** (PDF/JPEG/PNG). Estrutura interna, OCR e
-   tipos fiscais (XML/QR) continuam em F1.2/F2.
-3. Não há extração de campos (titular, documento, endereço, competência) nem
-   normalização contra `canonical_address`.
+   F1.1 por assinatura de arquivo** (PDF/JPEG/PNG) e em F1.2 para PDF textual.
+   OCR de imagem e tipos fiscais (XML/QR) continuam pendentes.
+3. ~~Não há extração de campos (titular, documento, endereço, competência) nem
+   normalização.~~ **Parcial em F1.2**: PDF textual extrai/normaliza endereço,
+   titular e competência; comparar contra `canonical_address` é F1.3.
 4. Não há política de "documento autêntico ≠ titular mora aqui": o comprovante
    pode confirmar a existência do endereço sem confirmar o vínculo com o titular.
-5. `evidence.kind` é texto livre; não há vocabulário controlado de tipo de
-   documento.
+   A análise mantém as dimensões separadas; a política é F1.3/F2.
+5. `evidence.kind` legado continua texto livre; a análise nova usa vocabulário
+   controlado em `evidence_analysis.result.document.kind`.
 
 ### Escopo
 
@@ -218,17 +252,20 @@ do detalhe no `GET` além de `evidence_summary.unknown`.
 - ~~Storage privado (S3/R2) com chave por tenant e retenção explícita; gravar
   `sha256` e metadados.~~ **Entregue em F1.1**, reutilizando o `ObjectStore` e a
   retenção da F0.1.
-- Identificação de tipo por conteúdo além da assinatura (PDF: texto/estrutura;
-  imagem: OCR). **F1.2.**
-- Extração e normalização: titular, documento do titular, endereço, data de
-  emissão/competência. **F1.2.**
+- ~~Identificação de tipo por conteúdo além da assinatura (PDF: texto/estrutura;
+  imagem: OCR).~~ **Parcial em F1.2**: PDF textual local; imagem segue
+  `unsupported` até OCR.
+- ~~Extração e normalização: titular, documento do titular, endereço, data de
+  emissão/competência.~~ **Entregue em F1.2** para PDF textual, com resultado
+  não confiável e `not_extracted` quando ausente.
 - Matching em **três dimensões independentes**: documento reconhecido, endereço
   confere, titular confere. **F1.3.**
 - ~~Gravar **uma** observação por fonte em `claim_evidence`, com o detalhe
-  estruturado em `detail`.~~ **Estrutura entregue em F1.1** (uma observação
-  pendente por fonte); o preenchimento das dimensões é F1.2/F1.3.
-- Resultado tipado e explicação; nunca `contradicts` por falha de extração.
-  **F1.2/F1.3.**
+  estruturado em `detail`.~~ **Estrutura entregue em F1.1**; a extração F1.2
+  fica em `evidence_analysis` e **não** entra no score até a F1.3 decidir o
+  mapeamento.
+- ~~Resultado tipado e explicação; nunca `contradicts` por falha de extração.~~
+  **Contrato tipado entregue em F1.2**; a decisão de stance/explicação é F1.3.
 
 ### Fora de escopo
 
@@ -249,8 +286,14 @@ do detalhe no `GET` além de `evidence_summary.unknown`.
   teste cobre filename/conteúdo/API key.
 - ~~Resultado do upload aparece no `GET /v1/validations/:id` com o mesmo formato
   já usado por `claim`/`evidence_summary`.~~ **Parcial em F1.1**: a observação
-  aparece em `evidence_summary.unknown`; o detalhe do documento entra em F1.2.
-- Extração/matching e resultado tipado completos (F1.2/F1.3).
+  aparece em `evidence_summary.unknown`. A F1.2 não altera o GET; expor o
+  detalhe é decisão da F1.3.
+- ~~Extração e resultado tipado completos.~~ **Entregue em F1.2**: PDF textual,
+  endereço/titular/competência, `evidence_analysis` idempotente, testes de
+  inválido/unsupported/unavailable/retry/concorrência/cross-tenant/PII/retenção
+  (`apps/api/tests/evidence-analysis.int.test.ts`).
+- Matching nas três dimensões e mapeamento para `claim_evidence`/`stance`
+  (F1.3).
 
 ### Riscos
 
@@ -260,7 +303,14 @@ do detalhe no `GET` além de `evidence_summary.unknown`.
 
 ### Decisões abertas
 
-- Biblioteca de OCR/PDF (runtime dep só quando F1.2 começar).
+- **F1.3:** como consumir `evidence_analysis` e materializar a verificação em
+  `claim_evidence` sem duplicar a observação F1.1 nem contar a mesma prova duas
+  vezes; como lidar com múltiplas versões de análise.
+- **OCR de imagem:** provider/limites/consentimento de PII continuam em aberto.
+- ~~Biblioteca de OCR/PDF.~~ **Decidido em F1.2:** MVP sem dependência externa
+  de PDF; o parser local cobre PDF textual simples. PDFs complexos retornam
+  `inconclusive` e uma biblioteca pode substituir a implementação atrás de
+  `DocumentAnalyzer` quando houver necessidade comprovada.
 - ~~Guardar binário ou apenas hash + campos?~~ **Decidido em F0.1/F1.1:**
   binário no `ObjectStore` privado + `sha256`/metadados; nenhum blob no Postgres.
 - ~~Upload cria validação nova ou anexa a uma validação existente?~~ **Decidido

@@ -106,8 +106,8 @@ Cada validação grava `user_id`. O endpoint `/v1/stats` filtra por user_id:
 
 - **RLS FORCE por tenant** em `subject`, `validation`, `validation_idempotency`,
   `usage_event`, `webhook_*`, `audit_log`, `batch`, `batch_item`, `claim`,
-  `claim_evidence`, `evidence_artifact`. O runtime sempre acessa via `withTenant`
-  (`SET LOCAL app.tenant_id`).
+  `claim_evidence`, `evidence_artifact`, `evidence_analysis`. O runtime sempre
+  acessa via `withTenant` (`SET LOCAL app.tenant_id`).
 - **Integridade relacional** (migrações 0024–0027): unicidade
   `claim_evidence (claim_id, signal_id)`; FK composta
   `claim (subject_id, tenant_id) → subject (subject_id, tenant_id)`; constraint
@@ -123,11 +123,14 @@ Cada validação grava `user_id`. O endpoint `/v1/stats` filtra por user_id:
   A migração 0040 adiciona
   `UNIQUE (claim_id) WHERE source = 'customer_submitted_document'`, limitando o
   intake F1.1 a **um** documento do cliente por claim; outras fontes continuam
-  livres.
+  livres. **`evidence_analysis`** (F1.2/ADR-0038) guarda a extração append-only,
+  versionada por analisador/contrato, com RLS FORCE e FK composta
+  `(artifact_id, tenant_id) → evidence_artifact`, também sem `UPDATE` em
+  resultado terminal.
 - **Retenção** (matriz de TTL em ADR-0016): `validation` expira por `expires_at` e
-  remove o grafo `evidence_artifact → claim_evidence → claim → signal →
-validation_idempotency`; o objeto do artefato é apagado **antes** da linha e a
-  auditoria registra `artifacts_removed`. `evidence` expira por `retention_until`
+  remove o grafo `evidence_analysis → evidence_artifact → claim_evidence → claim
+→ signal → validation_idempotency`; o objeto do artefato é apagado **antes** da
+  linha e a auditoria registra `artifacts_removed`. `evidence` expira por `retention_until`
   com **desvinculação antes** da remoção do objeto físico.
   `subject`/`canonical_address` têm ciclo próprio e **não** são removidos pela
   retenção.
@@ -175,8 +178,10 @@ em `evidence`; o fast path grava `claim_evidence` com `evidence_id = NULL`.
 Desde a F1.1, o intake de comprovante (`POST /v1/validations/:id/evidence`)
 materializa `evidence_artifact` + `claim_evidence` com `stance = unknown` e
 verificação `pending` — o upload prova apresentação, não autenticidade nem
-endereço. **Ainda não existe** OCR/extração estruturada nem consulta à fonte
-fiscal.
+endereço. A F1.2 adiciona a extração estruturada de PDF textual em
+`evidence_analysis`, ainda **não confiável**: não autentica o documento, não
+compara com o endereço e não altera o score. **Ainda não existem** OCR de
+imagem, matching nem consulta à fonte fiscal.
 
 A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
 
@@ -184,6 +189,7 @@ A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
 validation → claim → claim_evidence → assessment → credential
                      ├── evidence (legado; street view, global)
                      └── evidence_artifact (PII; tenant-scoped, write-once)
+                              └── evidence_analysis (extração; append-only)
 ```
 
 `evidence_artifact` guarda somente metadados + `storage_key`
@@ -191,7 +197,8 @@ validation → claim → claim_evidence → assessment → credential
 `(claim_evidence_id, tenant_id)`, `sha256`/tamanho/content-type validados e
 `retention_until`. O binário fica no `ObjectStore` existente; nenhuma URL pública
 é persistida. O endpoint de upload e o sniffing de conteúdo foram entregues em
-F1.1; OCR/extração estruturada e matching são F1.2/F1.3.
+F1.1; a extração de PDF textual foi entregue em F1.2. OCR de imagem e matching
+são F1.3/F2.
 
 O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
 taxonomia de resultado e as extensões mínimas estão em
@@ -199,9 +206,9 @@ taxonomia de resultado e as extensões mínimas estão em
 [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md) (contrato),
 [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md) (consulta a
 endpoints oficiais), [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md)
-(artefato tenant-scoped) e
-[ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md) (intake F1.1). A ordem
-de execução está no [`roadmap.md`](roadmap.md).
+(artefato tenant-scoped), [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md)
+(intake F1.1) e [ADR-0038](adr/0038-analise-de-documento-do-cliente.md)
+(análise F1.2). A ordem de execução está no [`roadmap.md`](roadmap.md).
 
 Dois pontos de atenção já visíveis:
 

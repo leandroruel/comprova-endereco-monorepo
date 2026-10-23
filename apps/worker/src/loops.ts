@@ -1,7 +1,8 @@
 import type { Db } from '@comprova/db'
 import type { Logger } from '@comprova/observability'
-import type { ObjectStore } from '@comprova/providers'
+import type { DocumentAnalyzer, ObjectStore, ObjectStoreReader } from '@comprova/providers'
 import { retentionTick } from './modules/evidence/evidence-retention.service.js'
+import { analyzeEvidenceTick } from './modules/evidence-analysis/evidence-analysis.service.js'
 import { validationRetentionTick } from './modules/retention/retention.service.js'
 import { ensurePartitions } from './modules/partitions/partitions.service.js'
 
@@ -36,6 +37,22 @@ export const startValidationRetentionLoop = (
   logger?: Logger,
   intervalMs = DAY_MS,
 ): (() => void) => startLoop(() => validationRetentionTick(db, store, 200, logger), intervalMs, logger)
+
+/**
+ * F1.2: consome as linhas `pending` de `evidence_analysis` criadas pelo intake.
+ * Roda no pool de manutenção (admin) porque atravessa tenants; cada item é
+ * processado com `withTenant`, então a RLS continua valendo no acesso ao
+ * artefato. O loop é curto (2s) e não depende de Redis/Temporal.
+ */
+export const startEvidenceAnalysisLoop = (
+  db: Db,
+  store: ObjectStoreReader,
+  analyzer: DocumentAnalyzer,
+  maxBytes: number,
+  logger: Logger,
+  intervalMs = 2_000,
+): (() => void) =>
+  startLoop(() => analyzeEvidenceTick({ db, store, analyzer, maxBytes, logger }), intervalMs, logger)
 
 export const startPartitionLoop = (db: Db, intervalMs = DAY_MS): (() => void) =>
   startLoop(() => ensurePartitions(db), intervalMs)

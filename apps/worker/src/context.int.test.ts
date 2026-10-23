@@ -3,7 +3,7 @@ import type { EvidenceWriter } from '@comprova/checkers'
 import { buildT2Checkers } from './context.js'
 import type { WorkerEnv } from './config.js'
 import { makeEvidenceWriter } from './modules/evidence/evidence.service.js'
-import { createDbPool } from '@comprova/db'
+import { createDbPool, EVIDENCE_ARTIFACT_MAX_BYTES } from '@comprova/db'
 import { createTenant, startTestDb, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import { runMigrations } from '@comprova/db'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -18,6 +18,7 @@ const envWith = (vlmEnabled: boolean): WorkerEnv => ({
   policyVersion: '2026.12.1',
   repoRoot: process.cwd(),
   vlmEnabled,
+  evidenceAnalysisMaxBytes: EVIDENCE_ARTIFACT_MAX_BYTES,
 })
 
 afterAll(async () => {
