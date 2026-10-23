@@ -10,6 +10,7 @@ import { buildWorkerContext, hasS3Config, makeObjectStore } from './context.js'
 import {
   startEvidenceAnalysisLoop,
   startEvidenceRetentionLoop,
+  startEvidenceVerificationLoop,
   startValidationRetentionLoop,
 } from './loops.js'
 import { makeDeepEnrichActivity } from './modules/deep-enrich/deep-enrich.activity.js'
@@ -75,6 +76,18 @@ if (stopEvidenceAnalysis === null) {
   }
 }
 
+// A verificação só depende do banco: lê a análise terminal e materializa a
+// observação. Se não houver pool de manutenção, a RLS esconderia as linhas de
+// outros tenants, então o loop não sobe.
+const stopEvidenceVerification =
+  adminRetentionPool !== null ? startEvidenceVerificationLoop(adminRetentionPool.db, logger) : null
+if (stopEvidenceVerification === null) {
+  logger.warn(
+    { reason: 'EVIDENCE_VERIFICATION_ADMIN_URL_MISSING' },
+    'evidence verification loop disabled: DATABASE_ADMIN_URL not configured',
+  )
+}
+
 const worker = await Worker.create({
   taskQueue,
   workflowsPath,
@@ -88,4 +101,5 @@ try {
   stopEvidenceRetention()
   stopValidationRetention?.()
   stopEvidenceAnalysis?.()
+  stopEvidenceVerification?.()
 }

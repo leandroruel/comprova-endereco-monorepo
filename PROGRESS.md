@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **Intake de comprovante (F1.1) + análise/extração do comprovante (F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-22)
+Estado: **Intake de comprovante (F1.1) + análise/extração do comprovante (F1.2) + verificação do documento enviado (F1.3) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-23)
 
 ## Intake de comprovante do cliente (F1.1) (2026-10-22)
 
@@ -44,9 +44,9 @@ em [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md).
   falha de storage/DB/claim, compensação sem PII e retenção). Migração
   `0040_evidence_intake.sql`.
 
-Ainda falta da Fase 1: matching de documento/endereço/titular, mapeamento para
-`claim_evidence`/`stance`, detalhe completo no `GET` e OCR de imagem
-(F1.3/F2).
+O matching de documento/endereço/titular e o detalhe no `GET` foram entregues
+na F1.3. Ainda faltam OCR de imagem e fontes fiscais (F2); a F1.1 continua sendo
+o recibo imutável do upload.
 
 ## Análise do comprovante do cliente (F1.2) (2026-10-22)
 
@@ -94,8 +94,8 @@ do claim e **não** altera `claim_evidence` nem o score. Contrato e decisão em
   objeto pelo `storage_key` opaco, confere tamanho/SHA-256 e nunca usa URL.
   Logs contêm apenas ids e razões técnicas; `result`/PII não são logados.
 - `unavailable`, `inconclusive` e `unsupported` nunca viram `address=differs`
-  nem `stance=contradicts`; `GET /v1/validations/:id` continua em
-  `evidence_summary.unknown` (expor detalhe é decisão da F1.3).
+  nem `stance=contradicts`; desde a F1.3, o `GET /v1/validations/:id` expõe
+  `evidence_verification` (ver seção F1.3).
 - Testes: `apps/api/tests/evidence-analysis.int.test.ts` (15 casos: suporte,
   ausências, PDF inválido/sem texto, unsupported, unavailable, saída inválida do
   analisador, retry, replay, concorrência, cross-tenant, PII, retenção) e
@@ -106,6 +106,71 @@ do claim e **não** altera `claim_evidence` nem o score. Contrato e decisão em
   755 testes), `pnpm typecheck`, `pnpm lint`, `pnpm format` e `pnpm db:fence`
   (exit 0; warnings de lock/analisador dinâmico). `pnpm why unpdf` mostra uma
   única dependência direta em `@comprova/providers`.
+
+## Verificação do documento enviado (F1.3) (2026-10-23)
+
+O resultado da análise F1.2 agora é consumido e materializado como uma
+observação de verificação em `claim_evidence`, sem alterar o score. O contrato
+puro está em `packages/core/src/evidence-verification.ts`; a materialização
+roda no worker (`apps/worker/src/modules/evidence-verification/`). Decisão em
+[ADR-0040](docs/adr/0040-verificacao-do-documento-enviado.md) e em
+[`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#54-verificação-do-documento-enviado-f13-implementado).
+
+- A linha F1.1 (`source = customer_submitted_document`,
+  `checker = customer_document_intake`, `detail.verification.status = pending`)
+  permanece **imutável** como recibo do intake. A F1.3 cria uma linha distinta
+  com `source = uploaded_document`,
+  `checker = document_upload_verification`, `stance = unknown`,
+  `strength = 0`, `confidence = 0`, `evidence_sha256` do artefato e as três
+  dimensões em `detail.verification`.
+- `document` fica `inconclusive` quando a extração termina (um PDF legível não
+  prova autenticidade); `invalid`, `unsupported` e `unavailable` são
+  preservados. `address`/`holder` são `matches`, `differs` ou `not_extracted`.
+  A política F1.3 mantém `stance = unknown`; `unavailable`, `inconclusive` e
+  `unsupported` nunca viram `contradicts`.
+- Endereço: CEP/UF/logradouro/número são fortes; bairro/cidade/complemento são
+  de apoio. Igualdade exata após normalização, sem substring. Sem campo forte
+  comparável ou sem `canonical_address`, `not_extracted`.
+- Titular: igualdade exata após normalização e remoção de sufixos societários;
+  sem nome extraído ou sem referência, `not_extracted`. Com razão social, nome
+  diferente vira `differs`; com apenas nome fantasia, vira `not_extracted`
+  (`HOLDER_REFERENCE_WEAK`), pois pode ser a razão social ausente. Não há
+  inferência de sócio nem CPF/CNPJ.
+- **Sem `signal`:** `weightedScore`, `score`, `confidence` e veredito da
+  validation não mudam. A F3 decide se um match de conteúdo pode virar
+  `supports`; a F2 traz `document = authentic` de fonte oficial.
+- Idempotência por `(claim_id, checker, checker_version)` parcial para
+  `source = uploaded_document`; `checker_version` inclui política +
+  `analyzer_version` + `contract_version`. Replay não duplica; nova versão cria
+  outra linha e preserva a anterior. A leitura corrente no `GET` é a verificação
+  com `observed_at` mais recente (desempate `created_at`).
+- Falha/skip não bloqueia outros tenants: o candidato é excluído do restante do
+  tick e recebe backoff exponencial persistente (60 s → 1 h) em
+  `evidence_verification_attempt` (`analysis_id`, tenant, tentativas e próxima
+  tentativa; sem PII, admin-only). Sucesso remove a tentativa; a retenção apaga
+  a análise e a tentativa em cascata.
+- `GET /v1/validations/:id` passou a expor `evidence_verification` (objeto ou
+  `null`) com status, método, fonte, `document`, `address`, `holder`,
+  `analysis_id`, analisador/contrato, `observed_at`, limitações, erros e códigos
+  de comparação. Não expõe nome, endereço, CEP, CPF/CNPJ nem `storage_key`.
+- Tenant/RLS: a fila atravessa tenants com o pool admin, mas a leitura/escrita
+  do claim usa `withTenant`; o candidato exige igualdade de tenant entre
+  análise, artefato, intake e claim. Logs usam ids/status/razões; `detail` não
+  copia PII.
+- Testes: `packages/core/src/evidence-verification.test.ts` (21 casos de
+  comparadores/mapeamento) e
+  `apps/api/tests/evidence-verification.int.test.ts` (8 casos: matches,
+  differs de endereço/titular, titular ausente, PDF sem texto, documento
+  inválido, replay/nova versão, cross-tenant/RLS e PII, e skip/backoff sem
+  bloquear outro tenant). Migrações `0042_evidence_verification.sql` e
+  `0043_evidence_verification_attempt.sql`.
+- Limitações: sem OCR de imagem (permanece `unsupported`), sem autenticação
+  oficial do upload e sem retry de resultado terminal antigo. A F1.3 não
+  implementa NF3e/NFAg-e, billing, link do titular nem wallet.
+- Gates: `pnpm test` (81 arquivos, 784 testes), `pnpm typecheck`, `pnpm lint`,
+  `pnpm format` e `pnpm db:fence` (exit 0; `0042_evidence_verification.sql`
+  SAFE; `0043_evidence_verification_attempt.sql` MEDIUM por policy/lock de
+  criação, dentro do limite; warnings legados de lock/analisador dinâmico).
 
 ## Guarda de fetch externo seguro (F0.2) (2026-10-22)
 

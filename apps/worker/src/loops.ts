@@ -3,6 +3,7 @@ import type { Logger } from '@comprova/observability'
 import type { DocumentAnalyzer, ObjectStore, ObjectStoreReader } from '@comprova/providers'
 import { retentionTick } from './modules/evidence/evidence-retention.service.js'
 import { analyzeEvidenceTick } from './modules/evidence-analysis/evidence-analysis.service.js'
+import { verifyEvidenceTick } from './modules/evidence-verification/evidence-verification.service.js'
 import { validationRetentionTick } from './modules/retention/retention.service.js'
 import { ensurePartitions } from './modules/partitions/partitions.service.js'
 
@@ -59,6 +60,29 @@ export const startEvidenceAnalysisLoop = (
       running = true
       try {
         await analyzeEvidenceTick({ db, store, analyzer, maxBytes, logger })
+      } finally {
+        running = false
+      }
+    },
+    intervalMs,
+    logger,
+  )
+}
+
+/**
+ * F1.3: consome análises terminais e materializa a verificação em
+ * `claim_evidence`. Também atravessa tenants (fila global) e usa o pool de
+ * manutenção; o acesso aos dados do claim é feito com `withTenant`. Não emite
+ * signal e, portanto, não altera o score.
+ */
+export const startEvidenceVerificationLoop = (db: Db, logger: Logger, intervalMs = 2_000): (() => void) => {
+  let running = false
+  return startLoop(
+    async () => {
+      if (running) return
+      running = true
+      try {
+        await verifyEvidenceTick({ db, logger })
       } finally {
         running = false
       }

@@ -1,4 +1,5 @@
-import { eq, sql, withTenant } from '@comprova/db'
+import { UPLOADED_DOCUMENT_CHECKER, UPLOADED_DOCUMENT_SOURCE } from '@comprova/core'
+import { and, desc, eq, sql, withTenant } from '@comprova/db'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { encryptSecret } from '../../shared/secretbox.js'
@@ -107,9 +108,29 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
     const claim = claimRows[0] ?? null
     const evidenceSummary = claim === null ? null : await evidenceSummaryForClaim(tx, claim.claimId)
 
+    // F1.3: a leitura corrente é a verificação materializada mais recente.
+    // Versões anteriores permanecem no banco para auditoria, mas não são
+    // sobrescritas (claim_evidence é imutável).
+    const verificationRows =
+      claim === null
+        ? []
+        : await tx
+            .select({ detail: t.claimEvidence.detail })
+            .from(t.claimEvidence)
+            .where(
+              and(
+                eq(t.claimEvidence.claimId, claim.claimId),
+                eq(t.claimEvidence.source, UPLOADED_DOCUMENT_SOURCE),
+                eq(t.claimEvidence.checker, UPLOADED_DOCUMENT_CHECKER),
+              ),
+            )
+            .orderBy(desc(t.claimEvidence.observedAt), desc(t.claimEvidence.createdAt))
+            .limit(1)
+    const evidenceVerification = verificationRows[0]?.detail.verification ?? null
+
     const address = validation.addressId === null ? null : await loadAddressSummary(tx, validation.addressId)
 
-    return { validation, signals, claim, evidenceSummary, address }
+    return { validation, signals, claim, evidenceSummary, evidenceVerification, address }
   })
 
 export const setWorkflowId = async (

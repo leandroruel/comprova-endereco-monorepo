@@ -9,6 +9,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 import type { DocumentAnalysisResult } from '@comprova/core'
@@ -60,6 +61,8 @@ export const evidenceAnalysis = pgTable(
       t.analyzerVersion,
       t.contractVersion,
     ),
+    // Chave de apoio para a FK composta de `evidence_verification_attempt`.
+    uniqueIndex('evidence_analysis_id_tenant_uq').on(t.analysisId, t.tenantId),
     index('evidence_analysis_status_idx').on(t.status, t.updatedAt),
     index('evidence_analysis_tenant_artifact_idx').on(t.tenantId, t.artifactId),
     check(
