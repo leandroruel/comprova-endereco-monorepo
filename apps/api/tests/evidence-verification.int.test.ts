@@ -668,6 +668,19 @@ describe('F1.3 — verificação do documento enviado', () => {
       .where(eq(t.evidenceVerificationAttempt.analysisId, orphan.analysisId))
     expect(afterRetry).toEqual([{ attempts: 1 }])
 
+    // Vencido o backoff, a próxima falha incrementa a tentativa e dobra o prazo.
+    await adminPool.db
+      .update(t.evidenceVerificationAttempt)
+      .set({ nextAttemptAt: new Date(Date.now() - 60_000) })
+      .where(eq(t.evidenceVerificationAttempt.analysisId, orphan.analysisId))
+    await runVerification({ batchSize: 10 })
+    const [secondAttempt] = await adminPool.db
+      .select()
+      .from(t.evidenceVerificationAttempt)
+      .where(eq(t.evidenceVerificationAttempt.analysisId, orphan.analysisId))
+    expect(secondAttempt).toMatchObject({ attempts: 2, lastErrorCode: 'CONTEXT_MISSING' })
+    expect(secondAttempt?.nextAttemptAt.getTime()).toBeGreaterThan(Date.now() + 60_000)
+
     const newLogs = logLines.slice(before).join('\n')
     expect(newLogs).not.toContain('Empresa Exemplo')
     expect(newLogs).not.toContain('Rua das Flores')
