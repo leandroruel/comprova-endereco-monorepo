@@ -1,12 +1,17 @@
 import { systemClock } from '@comprova/core'
 import { createDbPool } from '@comprova/db'
 import { createCLILogger } from '@comprova/observability'
+import { makeDocumentAnalyzer } from '@comprova/providers'
 import { Worker } from '@temporalio/worker'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { workerEnvFromProcess } from './config.js'
-import { buildWorkerContext, makeObjectStore } from './context.js'
-import { startEvidenceRetentionLoop, startValidationRetentionLoop } from './loops.js'
+import { buildWorkerContext, hasS3Config, makeObjectStore } from './context.js'
+import {
+  startEvidenceAnalysisLoop,
+  startEvidenceRetentionLoop,
+  startValidationRetentionLoop,
+} from './loops.js'
 import { makeDeepEnrichActivity } from './modules/deep-enrich/deep-enrich.activity.js'
 import type { DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
 
@@ -40,6 +45,36 @@ const stopValidationRetention =
     ? startValidationRetentionLoop(adminRetentionPool.db, retentionStore, logger)
     : null
 
+// A análise atravessa tenants (fila global) e por isso usa o pool de
+// manutenção. Sem `DATABASE_ADMIN_URL`, a RLS esconderia as linhas `pending`:
+// o worker avisa e não sobe o loop, em vez de falhar silenciosamente.
+const documentAnalyzer = makeDocumentAnalyzer()
+const s3Configured = hasS3Config(env)
+const stopEvidenceAnalysis =
+  adminRetentionPool !== null && s3Configured
+    ? startEvidenceAnalysisLoop(
+        adminRetentionPool.db,
+        retentionStore,
+        documentAnalyzer,
+        env.evidenceAnalysisMaxBytes,
+        logger,
+      )
+    : null
+if (stopEvidenceAnalysis === null) {
+  if (adminRetentionPool === null) {
+    logger.warn(
+      { reason: 'EVIDENCE_ANALYSIS_ADMIN_URL_MISSING' },
+      'evidence analysis loop disabled: DATABASE_ADMIN_URL not configured',
+    )
+  }
+  if (!s3Configured) {
+    logger.warn(
+      { reason: 'EVIDENCE_ANALYSIS_S3_MISSING' },
+      'evidence analysis loop disabled: S3 settings not configured',
+    )
+  }
+}
+
 const worker = await Worker.create({
   taskQueue,
   workflowsPath,
@@ -52,4 +87,5 @@ try {
 } finally {
   stopEvidenceRetention()
   stopValidationRetention?.()
+  stopEvidenceAnalysis?.()
 }

@@ -2,12 +2,17 @@
 
 **Status:** aceita em 2026-10-22.
 
+> **Emenda F1.2:** a extração/entrada em `evidence_analysis` foi implementada no
+> [ADR-0038](0038-analise-de-documento-do-cliente.md). O intake desta ADR
+> continua sendo só recebimento/armazenamento; ele não autentica nem compara
+> endereço.
+
 ## Contexto
 
 A F1.1 precisa receber um comprovante de endereço enviado pelo cliente, guardar
 o binário em storage privado e registrar que o documento foi **apresentado**.
 Autenticidade do documento, correspondência de endereço e vínculo com o titular
-são fases posteriores (F1.2/F1.3). O modelo existente já tem
+são fases posteriores (extração F1.2; matching/verificação F1.3/F2). O modelo existente já tem
 `validation → claim → claim_evidence` e o artefato tenant-scoped da F0.1
 ([ADR-0035](0035-artefato-de-evidencia-tenant-scoped.md)).
 
@@ -82,8 +87,9 @@ criar uma hierarquia/tabela paralela que duplique o grafo de evidência.
 ## Consequências
 
 - O `GET /v1/validations/:id` existente passa a mostrar a observação pendente
-  em `evidence_summary.unknown`; não há detalhe do documento na resposta até a
-  extração de F1.2.
+  em `evidence_summary.unknown`. A F1.2 persiste a extração em
+  `evidence_analysis`, mas o detalhe do documento continua fora da resposta;
+  expor isso é decisão da F1.3.
 - Para trocar o documento, o cliente precisa de uma nova validation (ou de uma
   decisão futura que permita supersessão); não se sobrescreve evidência.
 - O endpoint falha fechado (`503`) quando o storage não está configurado; não há
@@ -99,8 +105,9 @@ criar uma hierarquia/tabela paralela que duplique o grafo de evidência.
   privado e da retenção existente.
 - **Usar `stance = 'supports'`:** confundiria "documento recebido" com
   "endereço confirmado".
-- **Criar `document`/`document_field`/`verification_attempt`:** schema sem
-  segunda implementação e antes de existir extração real.
+- **Criar `document`/`document_field`/`verification_attempt`:** duplicaria o
+  grafo; a extração real da F1.2 usa `evidence_analysis` (ADR-0038), uma linha
+  append-only por versão.
 - **Confiar em filename/extensão/header:** permite spoofing e path traversal.
 - **Criar outbox/fila de compensação:** operação síncrona simples; o padrão
   existente já registra a falha e permite reconciliação pelo par

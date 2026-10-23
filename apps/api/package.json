@@ -24,7 +24,7 @@
     "@node-rs/argon2": "^2.2.2",
     "@temporalio/client": "^1.24.0",
     "better-auth": "^1.7.10",
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.7",
     "ioredis": "^6.0.0",
     "postgres": "^3.4.9",
     "zod": "^4.6.5"

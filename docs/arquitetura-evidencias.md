@@ -1,14 +1,16 @@
 # Arquitetura de evidências e verificação fiscal (alvo)
 
 > **Status:** proposta de arquitetura, 2026-10-22. **F0.1 (artefato
-> tenant-scoped) e F1.1 (intake do comprovante) estão implementados**; OCR,
-> extração, matching, contrato de verificador e consulta fiscal continuam não
-> implementados.
+> tenant-scoped), F1.1 (intake do comprovante) e F1.2 (análise/extração do
+> documento) estão implementados**; OCR de imagem, matching, contrato de
+> verificador e consulta fiscal continuam não implementados.
 > Este documento descreve o alvo e o que já existe para reaproveitar. As decisões
 > estão registradas em [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md),
 > [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md),
-> [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) e
-> [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md).
+> [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md),
+> [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md),
+> [ADR-0038](adr/0038-analise-de-documento-do-cliente.md) e
+> [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md).
 > **Estado atual:** [`architecture.md`](architecture.md).
 > **Prioridades:** [`roadmap.md`](roadmap.md).
 
@@ -26,14 +28,18 @@ duas famílias de evidência:
 O ponto central: **essas duas famílias não são um novo domínio**. Elas produzem
 observações que se encaixam no modelo existente `validation → claim →
 claim_evidence → evidence`. O que falta é um **contrato de verificação** e uma
-taxonomia de resultado — não tabelas novas.
+taxonomia de resultado. A análise intermediária da F1.2 precisou de uma única
+tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
+`evidence_artifact` é write-once; a decisão e o contrato estão no
+[ADR-0038](adr/0038-analise-de-documento-do-cliente.md).
 
 ## 2. Princípios
 
 1. **Fonte é fonte; evidência é evidência.** O adaptador fala com o mundo e
    devolve um resultado tipado. A persistência continua sendo `claim_evidence`
-   (observação) + o material: `evidence` para captura pública e
-   `evidence_artifact` para PII tenant-scoped (F0.1).
+   (observação de verificação) + o material: `evidence` para captura pública,
+   `evidence_artifact` para PII tenant-scoped (F0.1) e `evidence_analysis` para
+   a extração intermediária da F1.2 (append-only, uma linha por versão).
 2. **Autenticidade do documento ≠ correspondência do endereço ≠ vínculo com o
    titular.** São três dimensões independentes; colapsar em um booleano produz
    conclusão errada.
@@ -48,23 +54,24 @@ taxonomia de resultado — não tabelas novas.
 
 ## 3. Responsabilidades e onde vivem
 
-| Responsabilidade      | Hoje                                                             | Alvo                                         |
-| --------------------- | ---------------------------------------------------------------- | -------------------------------------------- |
-| Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker | Igual                                        |
-| Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                      | Estrutura/OCR e XML/QR (F1.2/F2)             |
-| Extração de campos    | VLM de fachada                                                   | OCR/PDF no intake; parse no adaptador fiscal |
-| Consulta externa      | Providers de endereço com URL fixa                               | Adaptadores com allowlist (F2)               |
-| Normalização          | Checkers T0/T1/T2                                                | Normalizador por fonte                       |
-| Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` (F0.1/F1.1)    | Igual + evidência de fonte fiscal (F2)       |
-| Avaliação             | `evaluateClaim` / `weightedScore`                                | Igual + metadados de independência           |
-| Explicação            | `assessment` / `explanation_detail`                              | Igual                                        |
-| Credencial            | `@comprova/credential`                                           | Igual (credencial é saída, não evidência)    |
+| Responsabilidade      | Hoje                                                                                     | Alvo                                      |
+| --------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker                         | Igual                                     |
+| Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                                              | Estrutura/OCR e XML/QR (F1.2/F2)          |
+| Extração de campos    | PDF via `unpdf`/PDF.js no worker (F1.2); campos só por rótulo explícito; VLM só fachada  | OCR de imagem; parse no adaptador fiscal  |
+| Consulta externa      | Providers de endereço com URL fixa                                                       | Adaptadores com allowlist (F2)            |
+| Normalização          | Checkers T0/T1/T2 + normalização de endereço/titular (F1.2)                              | Normalizador por fonte                    |
+| Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` + `evidence_analysis` (F0.1/F1.1/F1.2) | Igual + evidência de fonte fiscal (F2)    |
+| Avaliação             | `evaluateClaim` / `weightedScore`                                                        | Igual + metadados de independência        |
+| Explicação            | `assessment` / `explanation_detail`                                                      | Igual                                     |
+| Credencial            | `@comprova/credential`                                                                   | Igual (credencial é saída, não evidência) |
 
 ## 4. Contrato conceitual do verificador
 
-> Esboço de contrato. **Não implementar nesta tarefa.** A forma exata (nomes,
-> módulo, assinatura) é decidida na F2, com o adaptador NF3e como primeira
-> implementação.
+> Esboço de contrato **do verificador**. A análise F1.2 tem contrato próprio
+> (`DocumentAnalysisResult`, ADR-0038) e nunca produz `authentic`, `matches` ou
+> `differs`. A forma exata do verificador (nomes, módulo, assinatura) é decidida
+> na F2, com o adaptador NF3e como primeira implementação.
 
 ```ts
 type EvidenceSourceKind = 'uploaded_document' | 'fiscal_nf3e' | 'fiscal_nfag' | 'public_registry'
@@ -161,6 +168,11 @@ endereço, titular) porque:
 - `claim_evidence` é imutável e auditável por linha;
 - o peso por checker já existe em `policies/*.yaml` (`weights`).
 
+Isso vale para a **verificação**. A extração F1.2 não é uma segunda observação
+de `claim_evidence`: é uma linha em `evidence_analysis`, consumida pelo
+verificador depois. Ela não entra no score enquanto a F1.3/F2 não decidir o
+mapeamento para `stance`.
+
 Se um dia for necessário ponderar endereço e titular separadamente, isso é uma
 mudança de **scoring** (`SCORER_VERSION`), não de schema.
 
@@ -168,7 +180,8 @@ mudança de **scoring** (`SCORER_VERSION`), não de schema.
 
 | Necessidade                 | Onde cabe hoje                                                       | Extensão mínima                            |
 | --------------------------- | -------------------------------------------------------------------- | ------------------------------------------ |
-| Tipo de documento           | `evidence.kind` + `claim_evidence.detail`                            | Vocabulário controlado (sem migração)      |
+| Extração intermediária      | `evidence_analysis.result` (F1.2)                                    | Tabela append-only por versão (ADR-0038)   |
+| Tipo de documento           | `evidence_analysis.result.document.kind` + `claim_evidence.detail`   | Vocabulário controlado (sem migração)      |
 | Fonte/autorizador           | `claim_evidence.source` + `detail`                                   | Convenção de nome (`nf3e:svrs`)            |
 | Método                      | `detail.verification.method`                                         | Sem migração                               |
 | Resultado por dimensão      | `detail.verification.*`                                              | Sem migração                               |
@@ -181,7 +194,10 @@ mudança de **scoring** (`SCORER_VERSION`), não de schema.
 
 **Não criar** `document`, `document_field`, `verification_attempt` ou
 `fiscal_source` antes de existir consulta real e necessidade de query. O
-`detail` jsonb é o lugar de evolução; ele já é usado pelos checkers.
+`detail` jsonb continua sendo o lugar de evolução da **verificação**; ele já é
+usado pelos checkers. A exceção mínima é `evidence_analysis` (F1.2), justificada
+no ADR-0038: a extração precisa ser versionada e não pode reescrever
+`claim_evidence` nem `evidence_artifact`.
 
 ### 5.1 O `evidence` global e o artefato de PII (decidido)
 
@@ -212,11 +228,13 @@ referência cross-tenant, porque `evidence` é global).
 A cadeia conceitual fica explícita:
 
 ```text
-Artifact (bruto) → Evidence (observação) → Assessment (avaliação) → Credential (assinada)
+Artifact (bruto) → Analysis (extração não confiável) → Evidence (observação de verificação)
+                 → Assessment (avaliação) → Credential (assinada)
 ```
 
-`artifact` não é `credential`: o primeiro é matéria-prima com retenção curta; a
-segunda é a saída verificável da avaliação.
+`artifact` não é `analysis` nem `credential`: o primeiro é matéria-prima com
+retenção curta; a segunda é uma leitura versionada e não confiável; a última é a
+saída verificável da avaliação.
 
 ### 5.2 Intake do comprovante do cliente (F1.1, implementado)
 
@@ -249,8 +267,9 @@ Contrato entregue em
   `confidence = 0` e
   `detail.verification = { status: 'pending', method: 'content_intake', document: null, address: null, holder: null }`.
   `confidence` é `NOT NULL`; **0** expressa ausência de avaliação de
-  verificação, não negação do documento. Não há score nem afirmação de
-  endereço/titular enquanto F1.2/F1.3 não rodarem.
+  verificação, não negação do documento. A F1.2 extrai campos, mas não há score
+  nem afirmação de endereço/titular enquanto a F1.3 não materializar a
+  verificação.
 - **Cardinalidade:** no máximo **um** documento do cliente por claim
   (`UNIQUE (claim_id) WHERE source = 'customer_submitted_document'`). Outras
   fontes usam `source` diferente e podem coexistir. Mesmos bytes são replay
@@ -279,8 +298,73 @@ Contrato entregue em
   `Idempotent-Replayed: true`; criação devolve `201`.
 
 O `GET /v1/validations/:id` existente reflete a observação em
-`evidence_summary.unknown`. Detalhe do documento e resultado de verificação
-continuam fora do payload até a extração de F1.2.
+`evidence_summary.unknown`. A F1.2 persiste a extração em `evidence_analysis`,
+mas o detalhe do documento continua **fora** do payload: expor isso é uma
+decisão de contrato público da F1.3 (ou posterior), não um efeito automático da
+extração. O resultado de verificação também continua fora.
+
+### 5.3 Análise do documento do cliente (F1.2, implementado)
+
+Contrato e decisão completos no
+[ADR-0038](adr/0038-analise-de-documento-do-cliente.md); a escolha da
+biblioteca de PDF está no [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md).
+A cadeia de responsabilidades é:
+
+```text
+DocumentAnalyzer
+       ↓
+extraction / observation   (PDF via unpdf/PDF.js + rótulos explícitos)
+       ↓
+Verification adapters      (F1.3/F2)
+       ↓
+verification result        (authentic/matches/differs pertencem ao verificador)
+```
+
+O analyzer **não** declara autenticidade nem correspondência de endereço/titular.
+
+- **Fluxo:** intake F1.1 grava `evidence_artifact` e enfileira
+  `evidence_analysis` (`pending`) na mesma transação. Replay do mesmo conteúdo
+  também garante a linha da versão corrente para um artefato já existente. O
+  worker consome a fila com `FOR UPDATE SKIP LOCKED`, lê o objeto privado pelo
+  `storage_key` opaco, confere tamanho/SHA-256, executa o `DocumentAnalyzer` e
+  grava o resultado terminal.
+- **Contrato:** `DocumentAnalysisResult` separa `document`, `address` e
+  `holder`. Para `document`, a análise produz `analyzed`, `invalid`,
+  `inconclusive`, `unsupported` ou `unavailable`; para endereço/titular,
+  `extracted`, `not_extracted` ou `unknown`. `authentic`, `matches` e `differs`
+  **não existem** neste contrato; pertencem ao verificador.
+- **Endereço:** só campos de linhas `Rótulo: valor` explícitas
+  (`Endereço`/`Logradouro`, `Número`, `Complemento`, `Bairro`,
+  `Cidade`/`Município`, `UF`/`Estado`, `CEP`) são normalizados; a região bruta
+  mínima fica em `raw`. Rótulo ausente, ambíguo ou inválido vira
+  `null`/`not_extracted`; não há varredura de texto livre.
+- **Titular:** nome só quando rotulado. **CPF/CNPJ não são persistidos nesta
+  etapa** (minimização de PII); a necessidade do identificador fiscal será
+  decidida na verificação F1.3/F2. Não se infere relação familiar, propriedade
+  ou residência.
+- **Tipo e data:** `kind` fica `unknown`; não há lista de concessionárias.
+  `issuedAt` é apenas uma observação de `Emissão`/`Competência` com data
+  completa, não uma regra de validade.
+- **MVP sem provider externo:** o parsing de PDF fica com `unpdf`/PDF.js
+  (streams, fontes, encoding, compressão); o Comprova orquestra e aplica
+  limites (50 páginas, 1.000.000 caracteres). Imagem retorna
+  `unsupported`/`OCR_NOT_IMPLEMENTED`. O protocolo `DocumentAnalyzer` permite
+  trocar por OCR/VLM no futuro. A saída é validada por schema e identidade;
+  saída inválida vira `failed`, não fica presa em `analyzing`.
+- **Idempotência:** chave única
+  `(artifact_id, analyzer, analyzer_version, contract_version)`. Replay do
+  upload não cria segunda linha; retry não reescreve resultado terminal; uma
+  nova versão cria nova linha. Concorrência usa lock de linha + chave única.
+- **Erro nunca vira contradição:** `unavailable`, `inconclusive` e `unsupported`
+  deixam `address`/`holder` em `unknown` e não geram `stance=contradicts`.
+- **PII e retenção:** CPF/CNPJ não entram no `result` desta etapa.
+  `evidence_analysis` tem RLS FORCE, FK composta com o artefato e
+  `ON DELETE CASCADE`. Logs usam apenas ids/razões técnicas; o `result` não é
+  logado. O binário continua no ObjectStore privado, sem URL.
+- **Limitação conhecida:** PDFs escaneados ou com fontes sem `ToUnicode` podem
+  retornar `inconclusive`/`NO_TEXT_LAYER` ou campos `null`; não há OCR nesta
+  etapa. Não há retry automático de resultado terminal; uma nova tentativa exige
+  nova versão de analisador/contrato (ou operação explícita).
 
 ## 6. Segurança das consultas externas
 
@@ -319,14 +403,14 @@ testada em F2.
 
 ## 7. Confiança, atualidade e divergência
 
-| Dimensão               | Campo hoje                                                                          | Semântica                             |
-| ---------------------- | ----------------------------------------------------------------------------------- | ------------------------------------- |
-| Quando foi observado   | `claim_evidence.observed_at`                                                        | Momento da coleta (consulta/extração) |
-| Validade da evidência  | `claim_evidence.ttl_seconds` + `decayOf`                                            | Quanto o sinal decai no score         |
-| Validade do artefato   | `evidence_artifact.retention_until` (cliente) / `evidence.retention_until` (legado) | Quanto o binário é retido (LGPD)      |
-| Emissão do documento   | `detail.issued_at` (proposto)                                                       | Competência do comprovante            |
-| Retenção da validação  | `validation.expires_at`                                                             | 30 dias hoje, hardcoded               |
-| Validade da credencial | `validFrom` / `validUntil`                                                          | Derivada do completion + TTL          |
+| Dimensão               | Campo hoje                                                                                 | Semântica                             |
+| ---------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------- |
+| Quando foi observado   | `claim_evidence.observed_at`                                                               | Momento da coleta (consulta/extração) |
+| Validade da evidência  | `claim_evidence.ttl_seconds` + `decayOf`                                                   | Quanto o sinal decai no score         |
+| Validade do artefato   | `evidence_artifact.retention_until` (cliente) / `evidence.retention_until` (legado)        | Quanto o binário é retido (LGPD)      |
+| Emissão do documento   | `evidence_analysis.result.document.issuedAt` (extração) / `detail.issued_at` (verificação) | Competência do comprovante            |
+| Retenção da validação  | `validation.expires_at`                                                                    | 30 dias hoje, hardcoded               |
+| Validade da credencial | `validFrom` / `validUntil`                                                                 | Derivada do completion + TTL          |
 
 Regras:
 

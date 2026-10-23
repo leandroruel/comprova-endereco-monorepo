@@ -56,6 +56,10 @@ export const evidenceArtifact = pgTable(
       name: 'evidence_artifact_claim_evidence_tenant_fk',
     }).onDelete('restrict'),
     uniqueIndex('evidence_artifact_tenant_storage_key_uq').on(t.tenantId, t.storageKey),
+    // Chave de apoio para a FK composta de `evidence_analysis`
+    // (artifact_id, tenant_id): a análise só pode apontar para um artefato do
+    // MESMO tenant.
+    uniqueIndex('evidence_artifact_id_tenant_uq').on(t.artifactId, t.tenantId),
     index('evidence_artifact_tenant_claim_idx').on(t.tenantId, t.claimEvidenceId),
     index('evidence_artifact_retention_idx').on(t.retentionUntil),
     check('evidence_artifact_size_ck', sql`${t.sizeBytes} BETWEEN 1 AND 52428800`),
