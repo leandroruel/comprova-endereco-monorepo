@@ -145,7 +145,24 @@ A fila do worker atravessa tenants com o pool de manutenção, mas a leitura e a
 escrita do claim usam `withTenant`. O candidato exige igualdade de tenant entre
 `evidence_analysis`, `evidence_artifact`, `claim_evidence` (intake) e `claim`.
 
-### 6. Sem `signal` nesta etapa
+### 6. Retry e backoff
+
+Quando `materialize` retorna `skipped` (claim/validation ausente) ou lança erro,
+nenhuma linha de `claim_evidence` é criada. Sem estado adicional, o candidato
+mais antigo globalmente seria escolhido novamente em cada tick e poderia
+atrasar candidatos de outros tenants. A F1.3 mantém:
+
+- `evidence_verification_attempt` (`analysis_id` PK, tenant-scoped) com
+  `attempts`, `last_attempt_at`, `next_attempt_at` e `last_error_code`;
+- o candidato que falha é excluído do restante do tick e recebe backoff
+  exponencial (60 s até 1 h); `findNext` só o reconsidera após
+  `next_attempt_at`;
+- sucesso/duplicata remove a tentativa; a retenção do artefato apaga a análise
+  e, em cascata, a tentativa;
+- a tabela é operacional, sem PII nem resultado extraído, e é acessada somente
+  pelo worker com o pool administrativo.
+
+### 7. Sem `signal` nesta etapa
 
 A linha F1.3 **não** insere `signal`. Portanto:
 
@@ -163,8 +180,10 @@ A linha F1.3 **não** insere `signal`. Portanto:
 2. **Guardar a verificação apenas em `evidence_analysis`.** A análise é uma
    etapa intermediária; a conclusão não entraria no modelo de evidências nem no
    `GET`. A F1.3 precisa de uma observação de `claim_evidence`.
-3. **Criar uma tabela nova (`document_verification`, `verification_attempt`).**
-   Duplicaria `claim_evidence`, o vínculo com o claim e a RLS sem necessidade.
+3. **Criar uma tabela nova para a observação de verificação
+   (`document_verification`).** Duplicaria `claim_evidence`, o vínculo com o
+   claim e a RLS sem necessidade. A `evidence_verification_attempt` não é uma
+   observação: guarda apenas o backoff operacional por `analysis_id` (seção 6).
 4. **Inserir `signal` junto da linha.** Alteraria o score e anteciparia a
    decisão de scoring da F3; a F1.3 não tem fonte autenticada para justificar
    `supports`/`contradicts`.
@@ -217,4 +236,6 @@ cobre:
 - reprocessamento não duplica;
 - nova versão cria nova linha e preserva a anterior;
 - cross-tenant/RLS e `GET` sem vazamento;
+- candidato sem contexto não bloqueia outro tenant e recebe backoff
+  persistente;
 - logs e `detail` sem PII.

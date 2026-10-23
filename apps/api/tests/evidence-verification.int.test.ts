@@ -1,4 +1,11 @@
-import { UPLOADED_DOCUMENT_SOURCE } from '@comprova/core'
+import {
+  CUSTOMER_DOCUMENT_INTAKE_SOURCE,
+  DOCUMENT_ANALYSIS_CONTRACT_VERSION,
+  DOCUMENT_ANALYZER_ID,
+  DOCUMENT_ANALYZER_VERSION,
+  UPLOADED_DOCUMENT_SOURCE,
+  type DocumentAnalysisResult,
+} from '@comprova/core'
 import { and, createDbPool, eq, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
@@ -298,6 +305,85 @@ const uploadedAndAnalyzed = async (
   return validationId
 }
 
+/**
+ * Cria uma análise terminal cujo claim aponta para uma validation inexistente.
+ * O claim não tem FK para `validation` (por desenho), então o worker seleciona
+ * o candidato e `loadContext` retorna `null` — o caso `skipped` do CodeRabbit.
+ */
+const createOrphanAnalysis = async (tenantId: string, analyzedAt: Date) => {
+  const subjectId = await createSubject(adminPool.db, tenantId, 'CNPJ')
+  const claimId = randomUUID()
+  const intakeId = randomUUID()
+  const artifactId = randomUUID()
+
+  await adminPool.db.insert(t.claim).values({
+    claimId,
+    tenantId,
+    validationId: randomUUID(),
+    subjectId,
+    addressId: null,
+    type: 'business_registered_address',
+    subjectType: 'organization',
+    targetType: 'address',
+  })
+
+  await adminPool.db.insert(t.claimEvidence).values({
+    claimEvidenceId: intakeId,
+    tenantId,
+    claimId,
+    signalId: null,
+    evidenceId: null,
+    evidenceSha256: null,
+    checker: 'customer_document_intake',
+    checkerVersion: '1.0.0',
+    stance: 'unknown',
+    strength: 0,
+    confidence: 0,
+    source: CUSTOMER_DOCUMENT_INTAKE_SOURCE,
+    observedAt: analyzedAt,
+    ttlSeconds: 3600,
+    expiresAt: new Date(analyzedAt.getTime() + 3_600_000),
+    detail: { verification: { status: 'pending' } },
+  })
+
+  await adminPool.db.insert(t.evidenceArtifact).values({
+    artifactId,
+    tenantId,
+    claimEvidenceId: intakeId,
+    storageKey: `tenants/${tenantId}/evidence/${artifactId}.pdf`,
+    contentType: 'application/pdf',
+    sizeBytes: 1,
+    sha256: randomBytes(32),
+    retentionUntil: new Date(analyzedAt.getTime() + 86_400_000),
+  })
+
+  const result: DocumentAnalysisResult = {
+    contractVersion: DOCUMENT_ANALYSIS_CONTRACT_VERSION,
+    analyzer: { id: DOCUMENT_ANALYZER_ID, version: DOCUMENT_ANALYZER_VERSION },
+    status: 'completed',
+    document: { status: 'analyzed', kind: 'unknown', issuedAt: null, issuedRaw: null },
+    address: { status: 'not_extracted', value: null, raw: null },
+    holder: { status: 'not_extracted', value: null, raw: null },
+    limitations: [],
+    errorCodes: [],
+    analyzedAt: analyzedAt.toISOString(),
+  }
+  const analysisId = randomUUID()
+  await adminPool.db.insert(t.evidenceAnalysis).values({
+    analysisId,
+    tenantId,
+    artifactId,
+    analyzer: DOCUMENT_ANALYZER_ID,
+    analyzerVersion: DOCUMENT_ANALYZER_VERSION,
+    contractVersion: DOCUMENT_ANALYSIS_CONTRACT_VERSION,
+    status: 'completed',
+    result,
+    analyzedAt,
+  })
+
+  return { analysisId, claimId, artifactId }
+}
+
 interface PersistedVerification {
   readonly status: string
   readonly method: string
@@ -551,5 +637,40 @@ describe('F1.3 — verificação do documento enviado', () => {
         ),
     )
     expect(visibleToB).toHaveLength(0)
+  })
+
+  it('não deixa um candidato sem contexto bloquear outro tenant', async () => {
+    const orphan = await createOrphanAnalysis(tenantA, new Date('2026-10-22T10:00:00.000Z'))
+    const validationId = await uploadedAndAnalyzed(tenantB, keyB, bill('Empresa Exemplo Ltda'))
+    const before = logLines.length
+
+    const processed = await runVerification({ batchSize: 10 })
+    expect(processed).toBeGreaterThanOrEqual(2)
+    expect(await verificationRowsOf(validationId)).toHaveLength(1)
+
+    const attempts = await adminPool.db
+      .select()
+      .from(t.evidenceVerificationAttempt)
+      .where(eq(t.evidenceVerificationAttempt.analysisId, orphan.analysisId))
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0]).toMatchObject({
+      tenantId: tenantA,
+      attempts: 1,
+      lastErrorCode: 'CONTEXT_MISSING',
+    })
+    expect(attempts[0]?.nextAttemptAt.getTime()).toBeGreaterThan(Date.now())
+
+    // O backoff persistente impede que o próximo tick volte ao mesmo candidato.
+    await runVerification({ batchSize: 10 })
+    const afterRetry = await adminPool.db
+      .select({ attempts: t.evidenceVerificationAttempt.attempts })
+      .from(t.evidenceVerificationAttempt)
+      .where(eq(t.evidenceVerificationAttempt.analysisId, orphan.analysisId))
+    expect(afterRetry).toEqual([{ attempts: 1 }])
+
+    const newLogs = logLines.slice(before).join('\n')
+    expect(newLogs).not.toContain('Empresa Exemplo')
+    expect(newLogs).not.toContain('Rua das Flores')
+    expect(newLogs).not.toContain('01001-000')
   })
 })

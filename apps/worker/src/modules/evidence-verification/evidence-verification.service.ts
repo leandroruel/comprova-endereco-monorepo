@@ -72,6 +72,10 @@ interface VerificationContext {
 }
 
 const DEFAULT_BATCH_SIZE = 20
+const ATTEMPT_BACKOFF_BASE_SECONDS = 60
+const ATTEMPT_BACKOFF_MAX_SECONDS = 3600
+const ATTEMPT_BACKOFF_EXPONENT_CAP = 10
+const CONTEXT_MISSING_CODE = 'CONTEXT_MISSING'
 
 const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
 
@@ -83,9 +87,19 @@ const versionsOf = (deps: EvidenceVerificationDeps) => ({
   contractVersion: deps.contractVersion ?? DOCUMENT_ANALYSIS_CONTRACT_VERSION,
 })
 
-const findNext = async (deps: EvidenceVerificationDeps): Promise<VerificationCandidate | null> => {
+const findNext = async (
+  deps: EvidenceVerificationDeps,
+  excluded: ReadonlySet<string>,
+): Promise<VerificationCandidate | null> => {
   const { analyzerId, analyzerVersion, contractVersion } = versionsOf(deps)
   const checkerVersion = uploadedDocumentCheckerVersion(analyzerVersion, contractVersion)
+  const excludedClause =
+    excluded.size === 0
+      ? sql.empty()
+      : sql`AND ea.analysis_id NOT IN (${sql.join(
+          [...excluded].map((analysisId) => sql`${analysisId}`),
+          sql`, `,
+        )})`
   const rows = (await deps.db.execute(sql`
     SELECT ea.analysis_id,
            ea.tenant_id,
@@ -109,6 +123,9 @@ const findNext = async (deps: EvidenceVerificationDeps): Promise<VerificationCan
     JOIN claim c
       ON c.claim_id = ce.claim_id
      AND c.tenant_id = ea.tenant_id
+    LEFT JOIN evidence_verification_attempt eva
+      ON eva.analysis_id = ea.analysis_id
+     AND eva.tenant_id = ea.tenant_id
     WHERE ea.analyzer = ${analyzerId}
       AND ea.analyzer_version = ${analyzerVersion}
       AND ea.contract_version = ${contractVersion}
@@ -116,6 +133,7 @@ const findNext = async (deps: EvidenceVerificationDeps): Promise<VerificationCan
       AND ea.result IS NOT NULL
       AND ea.analyzed_at IS NOT NULL
       AND ce.source = ${CUSTOMER_DOCUMENT_INTAKE_SOURCE}
+      AND (eva.next_attempt_at IS NULL OR eva.next_attempt_at <= now())
       AND NOT EXISTS (
         SELECT 1
         FROM claim_evidence v
@@ -124,6 +142,7 @@ const findNext = async (deps: EvidenceVerificationDeps): Promise<VerificationCan
           AND v.checker = ${UPLOADED_DOCUMENT_CHECKER}
           AND v.checker_version = ${checkerVersion}
       )
+      ${excludedClause}
     ORDER BY ea.analyzed_at, ea.analysis_id
     LIMIT 1
   `)) as unknown as readonly {
@@ -343,16 +362,70 @@ const materialize = async (
 }
 
 /**
+ * Persiste o backoff exponencial da análise que falhou ou ficou sem contexto.
+ * O estado é administrativo (sem PII) e a próxima tentativa fica no futuro,
+ * para que o candidate mais antigo não monopolize todos os ticks.
+ */
+const recordAttempt = async (
+  deps: EvidenceVerificationDeps,
+  candidate: VerificationCandidate,
+  errorCode: string,
+): Promise<void> => {
+  await deps.db.execute(sql`
+    INSERT INTO evidence_verification_attempt
+      (analysis_id, tenant_id, attempts, last_attempt_at, next_attempt_at, last_error_code)
+    VALUES (
+      ${candidate.analysisId},
+      ${candidate.tenantId},
+      1,
+      now(),
+      now() + make_interval(secs => ${ATTEMPT_BACKOFF_BASE_SECONDS}::double precision),
+      ${errorCode}
+    )
+    ON CONFLICT (analysis_id) DO UPDATE
+    SET attempts = evidence_verification_attempt.attempts + 1,
+        last_attempt_at = now(),
+        next_attempt_at = now() + make_interval(
+          secs => LEAST(
+            ${ATTEMPT_BACKOFF_MAX_SECONDS}::double precision,
+            ${ATTEMPT_BACKOFF_BASE_SECONDS}::double precision * POWER(
+              2::double precision,
+              LEAST(
+                evidence_verification_attempt.attempts,
+                ${ATTEMPT_BACKOFF_EXPONENT_CAP}
+              )::double precision
+            )
+          )
+        ),
+        last_error_code = EXCLUDED.last_error_code
+  `)
+}
+
+const clearAttempt = async (
+  deps: EvidenceVerificationDeps,
+  candidate: VerificationCandidate,
+): Promise<void> => {
+  await deps.db.execute(sql`
+    DELETE FROM evidence_verification_attempt
+    WHERE analysis_id = ${candidate.analysisId}
+      AND tenant_id = ${candidate.tenantId}
+  `)
+}
+
+/**
  * Processa até `batchSize` análises terminais ainda não materializadas.
- * Erros são logados sem PII e interrompem o tick; a próxima execução retenta.
+ * Candidatos que falham ou ficam sem contexto são excluídos do restante do tick
+ * e recebem backoff persistente; assim um tenant não bloqueia os demais. Erros
+ * continuam sendo logados sem PII.
  */
 export const verifyEvidenceTick = async (deps: EvidenceVerificationDeps): Promise<number> => {
   const batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE
   const runAt = deps.now ?? (() => new Date())
+  const excluded = new Set<string>()
   let processed = 0
 
   while (processed < batchSize) {
-    const candidate = await findNext(deps)
+    const candidate = await findNext(deps, excluded)
     if (candidate === null) break
 
     try {
@@ -372,8 +445,13 @@ export const verifyEvidenceTick = async (deps: EvidenceVerificationDeps): Promis
           'evidence verification materialized',
         )
       }
+      if (outcome === 'skipped') {
+        await recordAttempt(deps, candidate, CONTEXT_MISSING_CODE)
+        excluded.add(candidate.analysisId)
+      } else {
+        await clearAttempt(deps, candidate)
+      }
       processed += 1
-      if (outcome === 'skipped') break
     } catch (error) {
       deps.logger.error(
         {
@@ -385,7 +463,22 @@ export const verifyEvidenceTick = async (deps: EvidenceVerificationDeps): Promis
         },
         'evidence verification materialization failed',
       )
-      break
+      try {
+        await recordAttempt(deps, candidate, errorNameOf(error))
+      } catch (attemptError) {
+        deps.logger.error(
+          {
+            analysis_id: candidate.analysisId,
+            artifact_id: candidate.artifactId,
+            claim_id: candidate.claimId,
+            reason: 'EVIDENCE_VERIFICATION_ATTEMPT_RECORD_FAILED',
+            error_name: errorNameOf(attemptError),
+          },
+          'evidence verification attempt record failed',
+        )
+      }
+      excluded.add(candidate.analysisId)
+      processed += 1
     }
   }
 

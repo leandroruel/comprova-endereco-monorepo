@@ -56,18 +56,18 @@ tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
 
 ## 3. Responsabilidades e onde vivem
 
-| Responsabilidade      | Hoje                                                                                          | Alvo                                      |
-| --------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker                              | Igual                                     |
-| Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                                                   | Estrutura/OCR e XML/QR (F1.2/F2)          |
-| Extração de campos    | PDF via `unpdf`/PDF.js no worker (F1.2); campos só por rótulo explícito; VLM só fachada       | OCR de imagem; parse no adaptador fiscal  |
-| Verificação do upload | Comparadores puros + worker (`evidence-verification.ts`, F1.3)                                | Igual                                     |
-| Consulta externa      | Providers de endereço com URL fixa                                                            | Adaptadores com allowlist (F2)            |
-| Normalização          | Checkers T0/T1/T2 + normalização de endereço/titular (F1.2/F1.3)                              | Normalizador por fonte                    |
-| Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` + `evidence_analysis` (F0.1/F1.1/F1.2/F1.3) | Igual + evidência de fonte fiscal (F2)    |
-| Avaliação             | `evaluateClaim` / `weightedScore`                                                             | Igual + metadados de independência        |
-| Explicação            | `assessment` / `explanation_detail`                                                           | Igual                                     |
-| Credencial            | `@comprova/credential`                                                                        | Igual (credencial é saída, não evidência) |
+| Responsabilidade      | Hoje                                                                                                                            | Alvo                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker                                                                | Igual                                     |
+| Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                                                                                     | Estrutura/OCR e XML/QR (F1.2/F2)          |
+| Extração de campos    | PDF via `unpdf`/PDF.js no worker (F1.2); campos só por rótulo explícito; VLM só fachada                                         | OCR de imagem; parse no adaptador fiscal  |
+| Verificação do upload | Comparadores puros + worker (`evidence-verification.ts`, F1.3)                                                                  | Igual                                     |
+| Consulta externa      | Providers de endereço com URL fixa                                                                                              | Adaptadores com allowlist (F2)            |
+| Normalização          | Checkers T0/T1/T2 + normalização de endereço/titular (F1.2/F1.3)                                                                | Normalizador por fonte                    |
+| Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` + `evidence_analysis` + `evidence_verification_attempt` (F0.1/F1.1/F1.2/F1.3) | Igual + evidência de fonte fiscal (F2)    |
+| Avaliação             | `evaluateClaim` / `weightedScore`                                                                                               | Igual + metadados de independência        |
+| Explicação            | `assessment` / `explanation_detail`                                                                                             | Igual                                     |
+| Credencial            | `@comprova/credential`                                                                                                          | Igual (credencial é saída, não evidência) |
 
 ## 4. Contrato conceitual do verificador
 
@@ -446,6 +446,12 @@ ANONIMA`, `MICROEMPRESA`, `EMPRESARIO INDIVIDUAL`). Sem nome extraído ou sem
   reason codes. O `detail` não copia nome, endereço, CEP nem CPF/CNPJ; os campos
   extraídos continuam em `evidence_analysis`, que é apagada em cascata com o
   artefato.
+- **Falha e retry:** `skipped` (claim/validation ausente) ou erro de
+  materialização não cria evidência e não interrompe o tick; o candidato é
+  excluído do restante do tick e recebe backoff exponencial persistente
+  (60 s → 1 h) em `evidence_verification_attempt`, por `analysis_id` e tenant.
+  Sucesso remove a tentativa. Assim um candidato sem contexto não bloqueia
+  candidatos de outros tenants; a tabela não contém PII e é admin-only.
 - **Contrato público:** `GET /v1/validations/:id` expõe
   `evidence_verification` (objeto ou `null`) com as três dimensões, status,
   método, fonte, `analysis_id`, analisador/contrato, `observed_at`, limitações,
@@ -453,7 +459,7 @@ ANONIMA`, `MICROEMPRESA`, `EMPRESARIO INDIVIDUAL`). Sem nome extraído ou sem
 - **Teste:** `apps/api/tests/evidence-verification.int.test.ts` cobre
   endereço/titular extraídos, `matches`/`differs`/`not_extracted`, PDF sem
   camada textual, documento inválido, reprocessamento, nova versão,
-  cross-tenant/RLS e logs sem PII.
+  cross-tenant/RLS, logs sem PII e skip/backoff sem bloquear outro tenant.
 
 ## 6. Segurança das consultas externas
 

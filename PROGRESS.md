@@ -144,6 +144,11 @@ roda no worker (`apps/worker/src/modules/evidence-verification/`). Decisão em
   `analyzer_version` + `contract_version`. Replay não duplica; nova versão cria
   outra linha e preserva a anterior. A leitura corrente no `GET` é a verificação
   com `observed_at` mais recente (desempate `created_at`).
+- Falha/skip não bloqueia outros tenants: o candidato é excluído do restante do
+  tick e recebe backoff exponencial persistente (60 s → 1 h) em
+  `evidence_verification_attempt` (`analysis_id`, tenant, tentativas e próxima
+  tentativa; sem PII, admin-only). Sucesso remove a tentativa; a retenção apaga
+  a análise e a tentativa em cascata.
 - `GET /v1/validations/:id` passou a expor `evidence_verification` (objeto ou
   `null`) com status, método, fonte, `document`, `address`, `holder`,
   `analysis_id`, analisador/contrato, `observed_at`, limitações, erros e códigos
@@ -154,16 +159,18 @@ roda no worker (`apps/worker/src/modules/evidence-verification/`). Decisão em
   copia PII.
 - Testes: `packages/core/src/evidence-verification.test.ts` (21 casos de
   comparadores/mapeamento) e
-  `apps/api/tests/evidence-verification.int.test.ts` (7 casos: matches,
+  `apps/api/tests/evidence-verification.int.test.ts` (8 casos: matches,
   differs de endereço/titular, titular ausente, PDF sem texto, documento
-  inválido, replay/nova versão, cross-tenant/RLS e PII). Migração
-  `0042_evidence_verification.sql`.
+  inválido, replay/nova versão, cross-tenant/RLS e PII, e skip/backoff sem
+  bloquear outro tenant). Migrações `0042_evidence_verification.sql` e
+  `0043_evidence_verification_attempt.sql`.
 - Limitações: sem OCR de imagem (permanece `unsupported`), sem autenticação
   oficial do upload e sem retry de resultado terminal antigo. A F1.3 não
   implementa NF3e/NFAg-e, billing, link do titular nem wallet.
-- Gates: `pnpm test` (81 arquivos, 783 testes), `pnpm typecheck`, `pnpm lint`,
+- Gates: `pnpm test` (81 arquivos, 784 testes), `pnpm typecheck`, `pnpm lint`,
   `pnpm format` e `pnpm db:fence` (exit 0; `0042_evidence_verification.sql`
-  SAFE; warnings legados de lock/analisador dinâmico).
+  SAFE; `0043_evidence_verification_attempt.sql` MEDIUM por policy/lock de
+  criação, dentro do limite; warnings legados de lock/analisador dinâmico).
 
 ## Guarda de fetch externo seguro (F0.2) (2026-10-22)
 
