@@ -105,6 +105,15 @@ export const claimEvidence = pgTable(
     index('idx_claim_evidence_uploaded_verification_read_idx')
       .on(t.claimId, t.observedAt, t.createdAt)
       .where(sql`source = 'uploaded_document'`),
+    // F2.1: uma observação por claim + fonte + documento + versão. A versão
+    // inclui o adapter de origem, o hash da referência do documento, a versão
+    // do contrato e um discriminador para resultados transitórios.
+    uniqueIndex('idx_claim_evidence_fiscal_source_uq')
+      .on(t.claimId, t.source, t.checker, t.checkerVersion)
+      .where(sql`source IN ('fiscal_nf3e', 'fiscal_nfag')`),
+    index('idx_claim_evidence_fiscal_read_idx')
+      .on(t.claimId, t.source, t.observedAt, t.createdAt)
+      .where(sql`source IN ('fiscal_nf3e', 'fiscal_nfag')`),
     unique('claim_evidence_id_tenant_uq').on(t.claimEvidenceId, t.tenantId),
   ],
 )

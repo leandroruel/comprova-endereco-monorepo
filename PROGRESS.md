@@ -1,6 +1,62 @@
 # PROGRESS.md
 
-Estado: **Intake de comprovante (F1.1) + análise/extração do comprovante (F1.2) + verificação do documento enviado (F1.3) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-23)
+Estado: **Contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-23)
+
+## Contrato fiscal e materialização da observação (F2.1) (2026-10-23)
+
+A F2.1 prepara a primeira fonte fiscal **sem executar nenhuma consulta real**.
+Ela entrega o contrato `FiscalAdapter`, a normalização do resultado e a
+materialização em `claim_evidence`; a NF3e real (allowlist preenchida, fetch e
+parsing) fica para F2.2. Decisão em
+[ADR-0041](docs/adr/0041-contrato-fiscal-adapter.md) e detalhes em
+[`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#55-contrato-fiscal-e-materialização-f21-implementado).
+
+- Contrato puro em `packages/core/src/fiscal-verification.ts`: `FiscalAdapter`
+  (`source`, `version`, `supports`, `verify`), `FiscalLookupInput` e
+  `FiscalVerificationResult`. A entrada cobre `source` (`nf3e`/`nfag-e`),
+  tenant, claim, chave/documento, QR (referência **não confiável**), autorizador,
+  UF e artefato; **não** expõe endpoint, cookie, credencial HTTP ou fetch.
+- Resultado separa `document`/fonte, `address` e `holder`. Reutiliza a taxonomia
+  existente: `authentic` é o estado “verified” da fonte; não há valor paralelo.
+  Timeout/indisponibilidade é `unavailable`, nunca `invalid`;
+  `unavailable`/`inconclusive`/`unsupported` nunca viram `contradicts`.
+- Materialização em `apps/worker/src/modules/fiscal-verification/fiscal-verification.service.ts`:
+  uma linha em `claim_evidence` (`source = fiscal_nf3e`/`fiscal_nfag`) com as três
+  dimensões em `detail.verification`, `strength = 0`, `confidence = 0` e **sem
+  `signal`**. O score/veredito não mudam; a F3 decide peso e hard rules.
+- O schema de saída remove `trust_score`, `final_score`, `approved` e `rejected`
+  emitidos por um adapter. Nenhuma resposta bruta é persistida: só outcomes,
+  `document_ref_hash`, versões, limitações, `uf`/`qr_present`, IP resolvido,
+  status HTTP, hash do corpo e hash da URL pedida. A chave/URL crua não é
+  copiada; logs usam apenas ids/status/reason codes.
+- Idempotência e versão: chave `(claim_id, source, checker, checker_version)`,
+  com
+  `checker_version = <adapter_version>+a<adapter_source>+d<document_ref_hash>+c<contrato>[+o<transient_outcome>]`.
+  Replay não duplica; `unavailable`/`inconclusive`/`unsupported` não bloqueiam
+  um resultado terminal posterior; documentos diferentes no mesmo claim não
+  colidem; nova versão preserva a anterior. Migração
+  `0044_fiscal_evidence.sql` cria os índices parciais.
+- Integridade: resultado de adapter com `documentId` divergente do input vira
+  `unavailable` (`ADAPTER_RESULT_DOCUMENT_MISMATCH`); `limitations`/`errorCodes`
+  usam allowlist finita e valores desconhecidos viram `ADAPTER_ERROR`.
+- Tenant/RLS: leitura do claim/validation/endereço/titular e escrita usam
+  `withTenant`; input de tenant A com claim de tenant B retorna `skipped` sem
+  materializar. O loader de contexto foi extraído da F1.3 para
+  `apps/worker/src/modules/evidence-verification/claim-context.ts`.
+- SSRF: `packages/providers/src/fiscal/endpoint.ts` tem allowlist server-side
+  por `(source, issuer, environment)`, **vazia por decisão**, e delega a chamada
+  para a guarda única `safeExternalFetch` (ADR-0036). Endpoint fora da allowlist
+  nem chega ao fetch; metadata/RFC1918 continuam bloqueados pela guarda. A URL
+  do QR nunca é usada como destino.
+- `FakeFiscalAdapter` determinístico (`packages/providers/src/fiscal/`) exercita
+  o pipeline sem I/O. Testes: 9 no core, 10 em providers e 16 de integração
+  (todos os status, endereço/titular independentes, SSRF/allowlist, timeout como
+  `unavailable`, remoção de scoring, documento divergente, sanitização de
+  reason codes, idempotência/transição para terminal, versionamento e
+  cross-tenant).
+- Fora de escopo (F2.2): parsing de QR NF3e, autorizadores/UF reais, HTTP/SOAP,
+  certificado, cache/rate limit por fonte, descoberta de autorizador, detalhe
+  fiscal no `GET` e NFAg-e.
 
 ## Intake de comprovante do cliente (F1.1) (2026-10-22)
 

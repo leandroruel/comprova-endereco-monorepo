@@ -2,8 +2,9 @@
 
 > **Status:** proposta de arquitetura, 2026-10-22, atualizada em 2026-10-23.
 > **F0.1 (artefato tenant-scoped), F1.1 (intake do comprovante), F1.2
-> (análise/extração do documento) e F1.3 (verificação do documento enviado)
-> estão implementados**; OCR de imagem, consulta fiscal e as demais fontes
+> (análise/extração do documento), F1.3 (verificação do documento enviado) e
+> F2.1 (contrato `FiscalAdapter` e materialização da observação fiscal) estão
+> implementados**; a consulta fiscal real, OCR de imagem e as demais fontes
 > continuam não implementados.
 > Este documento descreve o alvo e o que já existe para reaproveitar. As decisões
 > estão registradas em [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md),
@@ -11,8 +12,9 @@
 > [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md),
 > [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md),
 > [ADR-0038](adr/0038-analise-de-documento-do-cliente.md),
-> [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md) e
-> [ADR-0040](adr/0040-verificacao-do-documento-enviado.md).
+> [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md),
+> [ADR-0040](adr/0040-verificacao-do-documento-enviado.md) e
+> [ADR-0041](adr/0041-contrato-fiscal-adapter.md).
 > **Estado atual:** [`architecture.md`](architecture.md).
 > **Prioridades:** [`roadmap.md`](roadmap.md).
 
@@ -74,8 +76,9 @@ tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
 > Contrato **do verificador**. A análise F1.2 tem contrato próprio
 > (`DocumentAnalysisResult`, ADR-0038) e nunca produz `authentic`, `matches` ou
 > `differs`. O contrato puro e a implementação para `uploaded_document` estão na
-> F1.3 (`packages/core/src/evidence-verification.ts`); o adaptador NF3e e as
-> demais fontes fiscais são F2.
+> F1.3 (`packages/core/src/evidence-verification.ts`). A F2.1 adiciona o
+> contrato `FiscalAdapter` (`packages/core/src/fiscal-verification.ts`) e a
+> materialização em `claim_evidence`; nenhuma consulta fiscal real existe ainda.
 
 ```ts
 type EvidenceSourceKind = 'uploaded_document' | 'fiscal_nf3e' | 'fiscal_nfag' | 'public_registry'
@@ -461,16 +464,86 @@ ANONIMA`, `MICROEMPRESA`, `EMPRESARIO INDIVIDUAL`). Sem nome extraído ou sem
   camada textual, documento inválido, reprocessamento, nova versão,
   cross-tenant/RLS, logs sem PII e skip/backoff sem bloquear outro tenant.
 
+### 5.5 Contrato fiscal e materialização (F2.1, implementado)
+
+A F2.1 prepara a primeira fonte externa **sem executar consulta fiscal real**.
+Contrato puro em `packages/core/src/fiscal-verification.ts`; materialização em
+`apps/worker/src/modules/fiscal-verification/fiscal-verification.service.ts`;
+adapter determinístico em `packages/providers/src/fiscal/`. Decisão em
+[ADR-0041](adr/0041-contrato-fiscal-adapter.md).
+
+- **Adapter:** `FiscalAdapter` tem `source`, `version`, `supports(input)` e
+  `verify(input, context)`. A entrada (`FiscalLookupInput`) carrega `source`
+  (`nf3e` ou `nfag-e`), `tenantId`, `claimId`, `documentId`, `qrCodeUrl`,
+  `issuer`, `uf` e referência de artefato. **Não há endpoint, credencial HTTP,
+  cookie ou função de fetch no contrato.** O contexto (`FiscalAdapterContext`)
+  leva o tenant, o endereço/titular de comparação e um `now()` injetado.
+- **Resultado:** `FiscalVerificationResult` separa `document`, `address` e
+  `holder`, além de `method`, `environment`, `issuer`, `documentId`, `issuedAt`,
+  `observedAt`, `limitations`, `errorCodes`, `artifact` e `audit`. A taxonomia é
+  a existente (ADR-0033): `authentic` é o estado **verified** da fonte oficial,
+  e não criamos um vocabulário paralelo. Não existem `trust_score`,
+  `final_score`, `approved` ou `rejected`; a validação por schema remove
+  qualquer campo extra emitido por um adapter.
+- **Sem scoring:** a materialização grava **uma** linha em `claim_evidence`
+  (`source = 'fiscal_nf3e'`/`'fiscal_nfag'`,
+  `checker = 'nf3e_verification'`/`'nfag-e_verification'`) com as três dimensões
+  em `detail.verification`. `stance` usa a política compartilhada
+  `stanceForDimensions`; `strength = 0`, `confidence = 0` e **nenhum `signal`**
+  é inserido. Portanto o `weightedScore` e o veredito não mudam nesta etapa.
+  `unavailable`, `inconclusive` e `unsupported` permanecem `unknown`; timeout da
+  fonte vira `unavailable`, nunca `invalid`.
+- **Idempotência e versão:** a chave natural é
+  `(claim_id, source, checker, checker_version)`. `checker_version` combina a
+  versão do adapter, o adapter de origem, um hash estável da referência do
+  documento (`document_ref_hash`) e a versão do contrato fiscal. Resultados
+  transitórios (`unavailable`, `inconclusive`, `unsupported`) recebem um
+  discriminador `+o<outcome>`, então uma tentativa posterior terminal
+  (`authentic`/`not_found`/`invalid`) não é descartada como duplicata. A mesma
+  consulta não duplica; dois documentos diferentes no mesmo claim não colidem;
+  uma nova versão do adapter cria outra linha e preserva a anterior.
+- **Integridade do resultado:** um resultado de adapter cujo `documentId` não
+  nulo diverge do `documentId` do input vira `unavailable` com
+  `ADAPTER_RESULT_DOCUMENT_MISMATCH`; ele nunca é materializado como `authentic`.
+  `limitations`/`errorCodes` passam por uma allowlist finita
+  (`FISCAL_REASON_CODES`); valores desconhecidos viram `ADAPTER_ERROR` antes de
+  qualquer persistência ou log.
+- **Tenant e RLS:** a leitura do claim/validation/endereço/titular e a escrita
+  da observação usam `withTenant`. Um input de tenant A apontando para claim de
+  tenant B retorna `skipped` e não materializa nada.
+- **Minimização:** a resposta externa bruta não é persistida. O `detail` guarda
+  outcomes, `document_ref_hash`, versão, limitações, códigos, `uf`,
+  `qr_present`, IP resolvido, status HTTP, hash do corpo e hash da URL pedida.
+  A chave de acesso/URL do QR não é copiada; logs usam apenas ids, status e
+  reason codes.
+- **SSRF:** a URL do QR nunca é buscada. `packages/providers/src/fiscal/endpoint.ts`
+  define a allowlist server-side por `(source, issuer, environment)`, nasce
+  **vazia** e delega a chamada para a guarda única `safeExternalFetch`
+  (ADR-0036). Um endpoint fora da allowlist nem chega ao fetch; mesmo uma
+  allowlist mal configurada para metadata/RFC1918 é barrada pela guarda.
+- **Fora desta etapa (F2.2):** parsing de QR NF3e, autorizadores/UF reais,
+  consulta HTTP/SOAP, certificado, cache, rate limit por fonte, métricas,
+  exposição do detalhe fiscal no `GET`, NFAg-e e qualquer chamada de rede.
+
+Testes: `packages/core/src/fiscal-verification.test.ts` (taxonomia, fingerprint,
+versão, stance), `packages/providers/src/fiscal/fiscal.test.ts` (fake adapter,
+schema, allowlist e SSRF) e
+`apps/api/tests/fiscal-verification.int.test.ts` (todos os status, dimensões,
+idempotência, versionamento, cross-tenant, ausência de `signal` e de PII/bruto).
+
 ## 6. Segurança das consultas externas
 
 A guarda genérica `safeExternalFetch` foi entregue em F0.2 (ADR-0036) e já é
 usada no envio de webhook. Ela cobre resolução/fixação de IP, HTTPS, ausência de
-redirect e limites de tempo/corpo/content-type. Para fonte fiscal ainda falta a
-**allowlist por autorizador** e o adaptador (ADR-0034). Requisitos:
+redirect e limites de tempo/corpo/content-type. A F2.1 entregou o **contrato** do
+adaptador e o **esqueleto da allowlist server-side**, ainda vazio; os
+autorizadores reais e o adaptador NF3e são F2.2 (ADR-0034, ADR-0041). Requisitos:
 
 1. **Allowlist server-side** por `(tipo de documento, autorizador, ambiente)`.
    A URL do QR é usada apenas para **identificar** o autorizador — nunca para
-   fetch. **Ainda não implementado (F2).**
+   fetch. **Esqueleto implementado em F2.1**
+   (`packages/providers/src/fiscal/endpoint.ts`), **vazio por decisão**;
+   autorizadores reais entram em F2.2.
 2. **Resolução e fixação de IP:** resolver o host, rejeitar loopback, RFC1918,
    link-local (`169.254.0.0/16`), metadata (`169.254.169.254`), IPv6
    `::1`/`fc00::/7`/`fe80::/10`, e conectar ao IP validado (evita DNS
@@ -481,20 +554,25 @@ redirect e limites de tempo/corpo/content-type. Para fonte fiscal ainda falta a
    `text/html`, `application/xml`, `application/json`).
 5. **Sem credenciais/cookies** e sem executar JavaScript. A guarda rejeita
    credenciais embutidas na URL (F0.2); cookies e headers de sessão são proibidos
-   por política do caller fiscal, que ainda será implementado em F2.
+   por política do caller fiscal. O contrato F2.1 não expõe cookies nem
+   credenciais; o adapter concreto (F2.2) deve continuar sem eles.
 6. **Auditoria:** gravar IP resolvido (`SafeFetchResponse.address`), status HTTP
    e sha256 da resposta, não a resposta inteira em log. **O IP/status são
-   expostos pela guarda;** o hash e a URL ficam para o caller fiscal (F2).
+   expostos pela guarda;** a F2.1 persiste IP, status, hash do corpo e hash da
+   URL pedida, nunca a URL crua.
 7. **Rate limit** por tenant e por fonte, além do cache por chave. **Ainda não
-   implementado (F2).**
+   implementado (F2.2).**
 
 `isSafeWebhookUrl` continua apenas no cadastro como validação de UX; ela não
 resolve DNS e não substitui a guarda no envio.
 
 Testes obrigatórios já cobertos para a guarda: host privado literal, host que
 resolve para privado, redirect para privado/HTTP/outro host, corpo grande,
-content-type inesperado, timeout e rebinding. A URL de QR fora da allowlist será
-testada em F2.
+content-type inesperado, timeout e rebinding. Em F2.1,
+`packages/providers/src/fiscal/fiscal.test.ts` cobre endpoint fora da allowlist
+(sem chamar o fetch), URL de QR hostil que nunca é usada e allowlist mal
+configurada para metadata/RFC1918 barrada pela guarda. A consulta real continua
+fora de escopo.
 
 ## 7. Confiança, atualidade e divergência
 
@@ -604,16 +682,17 @@ definitivo + demanda.
 
 ## 10. Extensões mínimas recomendadas
 
-| Necessidade                 | Mudança mínima                                     | Quando                      |
-| --------------------------- | -------------------------------------------------- | --------------------------- |
-| Escopo tenant de PII        | `evidence_artifact` (entregue em F0.1)             | F0.1                        |
-| Guarda de fetch             | Módulo único testado, reusado por webhook e fiscal | F0                          |
-| Contrato de verificador     | Módulo puro + tipos + testes                       | F1.3 (upload) / F2 (fiscal) |
-| Allowlist de autorizadores  | Tabela versionada em código                        | F2                          |
-| Evento faturável            | `usage_event` com unique/idempotência              | F3                          |
-| Supersessão                 | `validation.supersedes_validation_id`              | F4                          |
-| Status padrão de credencial | Decisão; sem migração até decidir                  | F5                          |
-| Policy por cliente          | Decisão; sem schema até decidir                    | F3/F5                       |
+| Necessidade                 | Mudança mínima                                          | Quando                        |
+| --------------------------- | ------------------------------------------------------- | ----------------------------- |
+| Escopo tenant de PII        | `evidence_artifact` (entregue em F0.1)                  | F0.1                          |
+| Guarda de fetch             | Módulo único testado, reusado por webhook e fiscal      | F0                            |
+| Contrato de verificador     | Módulo puro + tipos + testes                            | F1.3 (upload) / F2.1 (fiscal) |
+| Observação fiscal           | Linha em `claim_evidence` sem `signal` + índice parcial | F2.1 (entregue)               |
+| Allowlist de autorizadores  | Tabela versionada em código                             | F2.1 (esqueleto vazio) / F2.2 |
+| Evento faturável            | `usage_event` com unique/idempotência                   | F3                            |
+| Supersessão                 | `validation.supersedes_validation_id`                   | F4                            |
+| Status padrão de credencial | Decisão; sem migração até decidir                       | F5                            |
+| Policy por cliente          | Decisão; sem schema até decidir                         | F3/F5                         |
 
 Nenhuma dessas mudanças é pré-requisito para as outras fases além do indicado.
 **Não implementar todas de uma vez.**
@@ -626,9 +705,11 @@ Nenhuma dessas mudanças é pré-requisito para as outras fases além do indicad
    privado + metadados; prazo comercial de retenção permanece aberto.**
 3. ~~Uma observação por fonte ou por dimensão?~~ **Decidido na F1.3: uma linha
    por fonte/versão de verificação, com as três dimensões no `detail`; o
-   upload não emite `signal` (ADR-0040).**
-4. NF3e por QR público ou SOAP com certificado? (F2)
-5. UFs iniciais? (F2)
+   upload não emite `signal` (ADR-0040). A F2.1 aplica a mesma regra à fonte
+   fiscal, incluindo o hash do documento na versão do checker (ADR-0041).**
+4. NF3e por QR público ou SOAP com certificado? **O contrato F2.1 aceita ambos
+   (`method`); a escolha real e o parsing ficam para F2.2.**
+5. UFs iniciais? (F2.2)
 6. Credencial: recibo B2B ou credencial do titular? (F5)
 7. Policy por cliente é requisito do primeiro contrato? (F3/F5)
 8. Como o titular se autentica no link? (F4)
@@ -642,7 +723,9 @@ Nenhuma dessas mudanças é pré-requisito para as outras fases além do indicad
 - [ADR-0033 — Verificação por adaptadores](adr/0033-verificacao-de-evidencias-por-adaptadores.md)
 - [ADR-0034 — Consulta a endpoints oficiais](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md)
 - [ADR-0035 — Artefato de evidência tenant-scoped](adr/0035-artefato-de-evidencia-tenant-scoped.md)
+- [ADR-0036 — Guarda de fetch externo](adr/0036-guarda-de-fetch-externo.md)
 - [ADR-0040 — Verificação do documento enviado](adr/0040-verificacao-do-documento-enviado.md)
+- [ADR-0041 — Contrato FiscalAdapter e materialização fiscal](adr/0041-contrato-fiscal-adapter.md)
 - [NF3e — FAQ SVRS](https://dfe-portal.svrs.rs.gov.br/Nf3e/Faq)
 - [NF3e — Serviços SVRS](https://dfe-portal.svrs.rs.gov.br/Nf3e/Servicos)
 - [NFAg — portal SVRS](https://dfe-portal.svrs.rs.gov.br/Nfag)
