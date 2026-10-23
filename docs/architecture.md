@@ -180,8 +180,12 @@ materializa `evidence_artifact` + `claim_evidence` com `stance = unknown` e
 verificação `pending` — o upload prova apresentação, não autenticidade nem
 endereço. A F1.2 adiciona a extração estruturada de PDF textual em
 `evidence_analysis`, ainda **não confiável**: não autentica o documento, não
-compara com o endereço e não altera o score. **Ainda não existem** OCR de
-imagem, matching nem consulta à fonte fiscal.
+compara com o endereço e não altera o score. A F1.3 materializa a verificação do
+documento enviado (endereço/titular) em uma observação própria, ainda sem
+autenticar o documento. A F2.1 adiciona o **contrato** `FiscalAdapter` e a
+materialização de uma fonte fiscal, **sem nenhuma consulta real**: a allowlist
+server-side nasce vazia e não há `signal`. **Ainda não existem** OCR de imagem,
+consulta fiscal real nem NFAg-e.
 
 A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
 
@@ -197,8 +201,18 @@ validation → claim → claim_evidence → assessment → credential
 `(claim_evidence_id, tenant_id)`, `sha256`/tamanho/content-type validados e
 `retention_until`. O binário fica no `ObjectStore` existente; nenhuma URL pública
 é persistida. O endpoint de upload e o sniffing de conteúdo foram entregues em
-F1.1; a extração de texto de PDF (via `unpdf`/PDF.js) foi entregue em F1.2. OCR
-de imagem e matching são F1.3/F2.
+F1.1; a extração de texto de PDF (via `unpdf`/PDF.js) foi entregue em F1.2; o
+matching do upload foi F1.3. OCR de imagem e consulta fiscal real continuam
+pendentes (F2.2+).
+
+A F2.1 não cria um novo modelo de evidência: o adapter fiscal devolve uma
+observação normalizada que vira **uma linha** em `claim_evidence`
+(`source = fiscal_nf3e`/`fiscal_nfag`), com `strength = 0`, `confidence = 0` e
+sem `signal`. O resultado não pode emitir `trust_score`/`approved`; a policy
+continua dona do score. A idempotência usa a versão do adapter + hash do
+documento + versão do contrato. O endpoint de consulta vem de allowlist
+server-side vazia e, quando existir, passa por `safeExternalFetch`. Detalhes em
+[ADR-0041](adr/0041-contrato-fiscal-adapter.md).
 
 O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
 taxonomia de resultado e as extensões mínimas estão em
@@ -208,8 +222,10 @@ taxonomia de resultado e as extensões mínimas estão em
 endpoints oficiais), [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md)
 (artefato tenant-scoped), [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md)
 (intake F1.1), [ADR-0038](adr/0038-analise-de-documento-do-cliente.md)
-(análise F1.2) e [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md) (parsing de
-PDF). A ordem de execução está no [`roadmap.md`](roadmap.md).
+(análise F1.2), [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md) (parsing de
+PDF), [ADR-0040](adr/0040-verificacao-do-documento-enviado.md) (verificação
+F1.3) e [ADR-0041](adr/0041-contrato-fiscal-adapter.md) (contrato fiscal F2.1).
+A ordem de execução está no [`roadmap.md`](roadmap.md).
 
 Dois pontos de atenção já visíveis:
 

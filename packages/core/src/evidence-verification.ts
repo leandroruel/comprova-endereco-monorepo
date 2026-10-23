@@ -532,18 +532,34 @@ export const verifyUploadedDocument = (input: VerifyUploadedDocumentInput): Uplo
 }
 
 /**
+ * Mapeamento de política das três dimensões para `claim_evidence.stance`.
+ *
+ * A decisão é de policy, não do adapter. `unavailable`, `inconclusive` e
+ * `unsupported` nunca viram `contradicts`. `invalid`/`not_found` também ficam
+ * `unknown` nesta política conservadora: a F3 decide quando a invalidade ou a
+ * ausência é definitiva. Compartilhada pela verificação do upload (F1.3) e pela
+ * fonte fiscal (F2.1).
+ */
+export const stanceForDimensions = (dimensions: {
+  readonly document: DocumentOutcome
+  readonly address: MatchOutcome
+  readonly holder: MatchOutcome
+}): EvidenceStance => {
+  if (dimensions.document !== 'authentic') return 'unknown'
+  if (dimensions.address === 'matches' && dimensions.holder !== 'differs') return 'supports'
+  if (dimensions.address === 'differs' && dimensions.holder === 'matches') return 'contradicts'
+  return 'unknown'
+}
+
+/**
  * Mapeamento de política do resultado para `claim_evidence.stance`.
  *
  * F1.3 não produz `authentic` (o upload não é autenticado), então o retorno é
  * sempre `unknown`. A função existe separada para que a F2 possa mapear fontes
  * oficiais sem alterar o contrato de comparação.
  */
-export const stanceForVerification = (verification: EvidenceVerificationResult): EvidenceStance => {
-  if (verification.document !== 'authentic') return 'unknown'
-  if (verification.address === 'matches' && verification.holder !== 'differs') return 'supports'
-  if (verification.address === 'differs' && verification.holder === 'matches') return 'contradicts'
-  return 'unknown'
-}
+export const stanceForVerification = (verification: EvidenceVerificationResult): EvidenceStance =>
+  stanceForDimensions(verification)
 
 /**
  * Chave estável da materialização: uma linha por claim + versão do checker.
