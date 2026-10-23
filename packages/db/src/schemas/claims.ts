@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   foreignKey,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -95,6 +96,15 @@ export const claimEvidence = pgTable(
     uniqueIndex('idx_claim_evidence_customer_document_uq')
       .on(t.claimId)
       .where(sql`source = 'customer_submitted_document'`),
+    // F1.3: uma verificação por claim + checker + versão. A versão inclui
+    // analyzer_version/contract_version; nova versão não sobrescreve a antiga.
+    uniqueIndex('idx_claim_evidence_uploaded_verification_uq')
+      .on(t.claimId, t.checker, t.checkerVersion)
+      .where(sql`source = 'uploaded_document'`),
+    // Leitura corrente do GET (verificação mais recente do claim).
+    index('idx_claim_evidence_uploaded_verification_read_idx')
+      .on(t.claimId, t.observedAt, t.createdAt)
+      .where(sql`source = 'uploaded_document'`),
     unique('claim_evidence_id_tenant_uq').on(t.claimEvidenceId, t.tenantId),
   ],
 )

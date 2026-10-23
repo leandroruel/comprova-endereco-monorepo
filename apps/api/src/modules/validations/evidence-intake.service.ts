@@ -1,4 +1,5 @@
 import { problem, problems, type Problem } from '@comprova/contracts'
+import { CUSTOMER_DOCUMENT_INTAKE_SOURCE } from '@comprova/core'
 import { and, eq, insertPendingEvidenceAnalysis, withTenant } from '@comprova/db'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -21,7 +22,7 @@ import {
  * A análise/verificação é F1.2/F1.3.
  */
 
-export const EVIDENCE_INTAKE_SOURCE = 'customer_submitted_document'
+export const EVIDENCE_INTAKE_SOURCE = CUSTOMER_DOCUMENT_INTAKE_SOURCE
 export const EVIDENCE_INTAKE_CHECKER = 'customer_document_intake'
 export const EVIDENCE_INTAKE_CHECKER_VERSION = '1.0.0'
 export const EVIDENCE_INTAKE_STATUS = 'pending'
@@ -509,10 +510,10 @@ export const uploadEvidence = async (
         evidenceSha256: sha256,
         checker: EVIDENCE_INTAKE_CHECKER,
         checkerVersion: EVIDENCE_INTAKE_CHECKER_VERSION,
-        // O upload só prova que um documento foi apresentado. Mesmo após a
-        // extração da F1.2, não há stance de endereço/titular até F1.3;
-        // `confidence` é NOT NULL, então o valor neutro 0 expressa ausência de
-        // avaliação, não negação.
+        // O upload só prova que um documento foi apresentado. A F1.2 extrai
+        // campos e a F1.3 materializa a verificação em OUTRA linha; esta linha
+        // continua `unknown` como recibo do intake. `confidence` é NOT NULL,
+        // então o valor neutro 0 expressa ausência de avaliação, não negação.
         stance: 'unknown',
         strength: 0,
         confidence: 0,

@@ -1,16 +1,18 @@
 # Arquitetura de evidências e verificação fiscal (alvo)
 
-> **Status:** proposta de arquitetura, 2026-10-22. **F0.1 (artefato
-> tenant-scoped), F1.1 (intake do comprovante) e F1.2 (análise/extração do
-> documento) estão implementados**; OCR de imagem, matching, contrato de
-> verificador e consulta fiscal continuam não implementados.
+> **Status:** proposta de arquitetura, 2026-10-22, atualizada em 2026-10-23.
+> **F0.1 (artefato tenant-scoped), F1.1 (intake do comprovante), F1.2
+> (análise/extração do documento) e F1.3 (verificação do documento enviado)
+> estão implementados**; OCR de imagem, consulta fiscal e as demais fontes
+> continuam não implementados.
 > Este documento descreve o alvo e o que já existe para reaproveitar. As decisões
 > estão registradas em [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md),
 > [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md),
 > [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md),
 > [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md),
-> [ADR-0038](adr/0038-analise-de-documento-do-cliente.md) e
-> [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md).
+> [ADR-0038](adr/0038-analise-de-documento-do-cliente.md),
+> [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md) e
+> [ADR-0040](adr/0040-verificacao-do-documento-enviado.md).
 > **Estado atual:** [`architecture.md`](architecture.md).
 > **Prioridades:** [`roadmap.md`](roadmap.md).
 
@@ -54,24 +56,26 @@ tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
 
 ## 3. Responsabilidades e onde vivem
 
-| Responsabilidade      | Hoje                                                                                     | Alvo                                      |
-| --------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------- |
-| Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker                         | Igual                                     |
-| Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                                              | Estrutura/OCR e XML/QR (F1.2/F2)          |
-| Extração de campos    | PDF via `unpdf`/PDF.js no worker (F1.2); campos só por rótulo explícito; VLM só fachada  | OCR de imagem; parse no adaptador fiscal  |
-| Consulta externa      | Providers de endereço com URL fixa                                                       | Adaptadores com allowlist (F2)            |
-| Normalização          | Checkers T0/T1/T2 + normalização de endereço/titular (F1.2)                              | Normalizador por fonte                    |
-| Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` + `evidence_analysis` (F0.1/F1.1/F1.2) | Igual + evidência de fonte fiscal (F2)    |
-| Avaliação             | `evaluateClaim` / `weightedScore`                                                        | Igual + metadados de independência        |
-| Explicação            | `assessment` / `explanation_detail`                                                      | Igual                                     |
-| Credencial            | `@comprova/credential`                                                                   | Igual (credencial é saída, não evidência) |
+| Responsabilidade      | Hoje                                                                                          | Alvo                                      |
+| --------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker                              | Igual                                     |
+| Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                                                   | Estrutura/OCR e XML/QR (F1.2/F2)          |
+| Extração de campos    | PDF via `unpdf`/PDF.js no worker (F1.2); campos só por rótulo explícito; VLM só fachada       | OCR de imagem; parse no adaptador fiscal  |
+| Verificação do upload | Comparadores puros + worker (`evidence-verification.ts`, F1.3)                                | Igual                                     |
+| Consulta externa      | Providers de endereço com URL fixa                                                            | Adaptadores com allowlist (F2)            |
+| Normalização          | Checkers T0/T1/T2 + normalização de endereço/titular (F1.2/F1.3)                              | Normalizador por fonte                    |
+| Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` + `evidence_analysis` (F0.1/F1.1/F1.2/F1.3) | Igual + evidência de fonte fiscal (F2)    |
+| Avaliação             | `evaluateClaim` / `weightedScore`                                                             | Igual + metadados de independência        |
+| Explicação            | `assessment` / `explanation_detail`                                                           | Igual                                     |
+| Credencial            | `@comprova/credential`                                                                        | Igual (credencial é saída, não evidência) |
 
 ## 4. Contrato conceitual do verificador
 
-> Esboço de contrato **do verificador**. A análise F1.2 tem contrato próprio
+> Contrato **do verificador**. A análise F1.2 tem contrato próprio
 > (`DocumentAnalysisResult`, ADR-0038) e nunca produz `authentic`, `matches` ou
-> `differs`. A forma exata do verificador (nomes, módulo, assinatura) é decidida
-> na F2, com o adaptador NF3e como primeira implementação.
+> `differs`. O contrato puro e a implementação para `uploaded_document` estão na
+> F1.3 (`packages/core/src/evidence-verification.ts`); o adaptador NF3e e as
+> demais fontes fiscais são F2.
 
 ```ts
 type EvidenceSourceKind = 'uploaded_document' | 'fiscal_nf3e' | 'fiscal_nfag' | 'public_registry'
@@ -157,6 +161,13 @@ Regra dura: **`unavailable`, `inconclusive` e `unsupported` não podem virar
 `contradicts` em nenhuma policy.** Isso deve ser garantido por teste, não por
 convenção.
 
+Na F1.3, o documento enviado não é autenticado: quando a extração termina, a
+dimensão `document` fica `inconclusive` (um PDF legível não prova autenticidade)
+e a política mantém `stance = unknown`, mesmo que `address`/`holder` sejam
+`matches` ou `differs`. A comparação continua observável no `detail` e no
+`GET`, mas não vira `supports`/`contradicts` até existir uma fonte que autentique
+o documento (F2) ou uma decisão de scoring (F3).
+
 ### 4.3 Uma observação por fonte
 
 Recomendação: **uma linha em `claim_evidence` por consulta a uma fonte**, com as
@@ -170,8 +181,15 @@ endereço, titular) porque:
 
 Isso vale para a **verificação**. A extração F1.2 não é uma segunda observação
 de `claim_evidence`: é uma linha em `evidence_analysis`, consumida pelo
-verificador depois. Ela não entra no score enquanto a F1.3/F2 não decidir o
-mapeamento para `stance`.
+verificador. Na F1.3, a verificação é materializada em uma **linha própria** de
+`claim_evidence` (`source = uploaded_document`), enquanto a linha F1.1
+(`customer_submitted_document`) permanece como recibo imutável do intake.
+
+A linha de verificação **não emite `signal`** nesta etapa. Portanto a mesma
+prova não é contada duas vezes no `weightedScore` e o veredito não muda. A
+leitura corrente é a verificação mais recente; versões antigas continuam
+disponíveis para auditoria. A decisão completa está no
+[ADR-0040](adr/0040-verificacao-do-documento-enviado.md).
 
 Se um dia for necessário ponderar endereço e titular separadamente, isso é uma
 mudança de **scoring** (`SCORER_VERSION`), não de schema.
@@ -267,9 +285,9 @@ Contrato entregue em
   `confidence = 0` e
   `detail.verification = { status: 'pending', method: 'content_intake', document: null, address: null, holder: null }`.
   `confidence` é `NOT NULL`; **0** expressa ausência de avaliação de
-  verificação, não negação do documento. A F1.2 extrai campos, mas não há score
-  nem afirmação de endereço/titular enquanto a F1.3 não materializar a
-  verificação.
+  verificação, não negação do documento. A F1.2 extrai campos e a F1.3
+  materializa a verificação em **outra linha**; esta linha de intake continua
+  `pending` como recibo imutável do upload.
 - **Cardinalidade:** no máximo **um** documento do cliente por claim
   (`UNIQUE (claim_id) WHERE source = 'customer_submitted_document'`). Outras
   fontes usam `source` diferente e podem coexistir. Mesmos bytes são replay
@@ -297,11 +315,13 @@ Contrato entregue em
   `storage_key`, URL, filename ou bytes. Replay devolve `200` e o header
   `Idempotent-Replayed: true`; criação devolve `201`.
 
-O `GET /v1/validations/:id` existente reflete a observação em
-`evidence_summary.unknown`. A F1.2 persiste a extração em `evidence_analysis`,
-mas o detalhe do documento continua **fora** do payload: expor isso é uma
-decisão de contrato público da F1.3 (ou posterior), não um efeito automático da
-extração. O resultado de verificação também continua fora.
+O `GET /v1/validations/:id` existente reflete as observações em
+`evidence_summary` e, desde a F1.3, expõe `evidence_verification` — a
+verificação corrente do documento enviado — com as três dimensões, status,
+método, fonte, `analysis_id`, analisador/contrato, `observed_at`, limitações e
+códigos de comparação. O payload **não** expõe o texto, o nome, o endereço, o
+CEP nem o `storage_key` extraídos; esses valores continuam apenas em
+`evidence_analysis`/ObjectStore privado. Detalhe completo na seção 5.4.
 
 ### 5.3 Análise do documento do cliente (F1.2, implementado)
 
@@ -315,7 +335,7 @@ DocumentAnalyzer
        ↓
 extraction / observation   (PDF via unpdf/PDF.js + rótulos explícitos)
        ↓
-Verification adapters      (F1.3/F2)
+Verification adapters      (F1.3 upload; F2 fontes fiscais)
        ↓
 verification result        (authentic/matches/differs pertencem ao verificador)
 ```
@@ -339,9 +359,9 @@ O analyzer **não** declara autenticidade nem correspondência de endereço/titu
   mínima fica em `raw`. Rótulo ausente, ambíguo ou inválido vira
   `null`/`not_extracted`; não há varredura de texto livre.
 - **Titular:** nome só quando rotulado. **CPF/CNPJ não são persistidos nesta
-  etapa** (minimização de PII); a necessidade do identificador fiscal será
-  decidida na verificação F1.3/F2. Não se infere relação familiar, propriedade
-  ou residência.
+  etapa** (minimização de PII); a F1.3 manteve a decisão e compara apenas o nome
+  normalizado. A necessidade do identificador fiscal continua aberta para
+  F2/F3. Não se infere relação familiar, propriedade ou residência.
 - **Tipo e data:** `kind` fica `unknown`; não há lista de concessionárias.
   `issuedAt` é apenas uma observação de `Emissão`/`Competência` com data
   completa, não uma regra de validade.
@@ -365,6 +385,75 @@ O analyzer **não** declara autenticidade nem correspondência de endereço/titu
   retornar `inconclusive`/`NO_TEXT_LAYER` ou campos `null`; não há OCR nesta
   etapa. Não há retry automático de resultado terminal; uma nova tentativa exige
   nova versão de analisador/contrato (ou operação explícita).
+
+### 5.4 Verificação do documento enviado (F1.3, implementado)
+
+Contrato puro em `packages/core/src/evidence-verification.ts`; materialização
+em `apps/worker/src/modules/evidence-verification/evidence-verification.service.ts`.
+A decisão e as alternativas estão no
+[ADR-0040](adr/0040-verificacao-do-documento-enviado.md).
+
+- **Entrada:** uma linha **terminal** de `evidence_analysis` da versão corrente
+  (`analyzer`, `analyzer_version`, `contract_version`), o `claim`/`validation`,
+  o `canonical_address` do alvo e, quando o `subject` é CNPJ com
+  `deep_context.record`, a razão social (`ref_receita_empresa`) e o nome
+  fantasia. A verificação não lê bytes nem chama provider externo.
+- **Saída:** uma linha em `claim_evidence` com
+  `source = 'uploaded_document'`, `checker = 'document_upload_verification'`,
+  `stance` da política, `strength = 0`, `confidence = 0`,
+  `evidence_sha256` do artefato e `detail.verification` contendo `status`,
+  `method = 'content_extraction'`, `source`, `document`, `address`, `holder`,
+  `analysis_id`, `artifact_id`, `analyzer`, `contract_version`, `observed_at`,
+  `limitations`, `error_codes` e `comparison.{address,holder}`.
+- **Três dimensões independentes:** `document` é `inconclusive` quando a
+  extração termina porque o upload não tem consulta oficial nem assinatura;
+  `invalid`, `unsupported` e `unavailable` são preservados. `address` e
+  `holder` são `matches`, `differs` ou `not_extracted`.
+- **Stance e score:** a política da F1.3 mantém `stance = 'unknown'` para o
+  upload e **não insere `signal`**. `weightedScore`, `score`, `confidence` e
+  veredito da validation não mudam. A F3 pode decidir se um match de conteúdo
+  passa a `supports`; a F2 traz `authentic` de fonte oficial. A regra dura
+  permanece: `unavailable`, `inconclusive` e `unsupported` nunca viram
+  `contradicts`.
+- **Endereço:** CEP, UF, logradouro e número são campos fortes; bairro, cidade e
+  complemento são de apoio e não produzem `differs` sozinhos. A comparação é
+  igualdade exata após `normalizeCep`, `normalizeUf`, `normalizeLogradouro`,
+  `normalizeNumero` e `normalizeText` — nunca `includes`/substring. Sem campo
+  forte comparável, o resultado é `not_extracted`; sem `canonical_address`,
+  também.
+- **Titular:** igualdade exata após normalização e remoção de sufixos
+  societários (`LTDA`, `ME`, `EPP`, `EIRELI`, `S/A`, `SA`, `SOCIEDADE
+ANONIMA`, `MICROEMPRESA`, `EMPRESARIO INDIVIDUAL`). Sem nome extraído ou sem
+  referência, `not_extracted`. Com razão social de referência, um nome diferente
+  produz `differs`; com **apenas** nome fantasia, um nome diferente produz
+  `not_extracted` (`HOLDER_REFERENCE_WEAK`), pois o nome extraído pode ser a
+  razão social ausente. Não há similaridade difusa, iniciais nem inferência de
+  sócio.
+- **Idempotência e versão:** índice único parcial
+  `(claim_id, checker, checker_version) WHERE source = 'uploaded_document'`,
+  com `checker_version = política + analyzer_version + contract_version`.
+  Replay/retry da mesma versão não duplica; nova versão de política, analisador
+  ou contrato cria outra linha e preserva a anterior. A leitura corrente no
+  `GET` é a linha de `uploaded_document` com `observed_at` mais recente
+  (desempate `created_at`); as anteriores ficam para auditoria.
+- **Imutabilidade:** a linha F1.1 (`customer_submitted_document`) continua
+  intocada como recibo do intake. A linha F1.3 é uma observação separada;
+  `claim_evidence` segue append-only e a única transição permitida continua
+  sendo `evidence_id X → NULL` na retenção.
+- **Tenant e PII:** a fila atravessa tenants com o pool de manutenção, mas toda
+  leitura/escrita do claim usa `withTenant`; o candidato exige igualdade de
+  tenant entre análise, artefato, intake e claim. Logs usam apenas ids, status e
+  reason codes. O `detail` não copia nome, endereço, CEP nem CPF/CNPJ; os campos
+  extraídos continuam em `evidence_analysis`, que é apagada em cascata com o
+  artefato.
+- **Contrato público:** `GET /v1/validations/:id` expõe
+  `evidence_verification` (objeto ou `null`) com as três dimensões, status,
+  método, fonte, `analysis_id`, analisador/contrato, `observed_at`, limitações,
+  erros e códigos de comparação. Não expõe valores extraídos nem `storage_key`.
+- **Teste:** `apps/api/tests/evidence-verification.int.test.ts` cobre
+  endereço/titular extraídos, `matches`/`differs`/`not_extracted`, PDF sem
+  camada textual, documento inválido, reprocessamento, nova versão,
+  cross-tenant/RLS e logs sem PII.
 
 ## 6. Segurança das consultas externas
 
@@ -509,16 +598,16 @@ definitivo + demanda.
 
 ## 10. Extensões mínimas recomendadas
 
-| Necessidade                 | Mudança mínima                                     | Quando |
-| --------------------------- | -------------------------------------------------- | ------ |
-| Escopo tenant de PII        | `evidence_artifact` (entregue em F0.1)             | F0.1   |
-| Guarda de fetch             | Módulo único testado, reusado por webhook e fiscal | F0     |
-| Contrato de verificador     | Módulo puro + tipos + testes                       | F2     |
-| Allowlist de autorizadores  | Tabela versionada em código                        | F2     |
-| Evento faturável            | `usage_event` com unique/idempotência              | F3     |
-| Supersessão                 | `validation.supersedes_validation_id`              | F4     |
-| Status padrão de credencial | Decisão; sem migração até decidir                  | F5     |
-| Policy por cliente          | Decisão; sem schema até decidir                    | F3/F5  |
+| Necessidade                 | Mudança mínima                                     | Quando                      |
+| --------------------------- | -------------------------------------------------- | --------------------------- |
+| Escopo tenant de PII        | `evidence_artifact` (entregue em F0.1)             | F0.1                        |
+| Guarda de fetch             | Módulo único testado, reusado por webhook e fiscal | F0                          |
+| Contrato de verificador     | Módulo puro + tipos + testes                       | F1.3 (upload) / F2 (fiscal) |
+| Allowlist de autorizadores  | Tabela versionada em código                        | F2                          |
+| Evento faturável            | `usage_event` com unique/idempotência              | F3                          |
+| Supersessão                 | `validation.supersedes_validation_id`              | F4                          |
+| Status padrão de credencial | Decisão; sem migração até decidir                  | F5                          |
+| Policy por cliente          | Decisão; sem schema até decidir                    | F3/F5                       |
 
 Nenhuma dessas mudanças é pré-requisito para as outras fases além do indicado.
 **Não implementar todas de uma vez.**
@@ -529,7 +618,9 @@ Nenhuma dessas mudanças é pré-requisito para as outras fases além do indicad
    `evidence_artifact` tenant-scoped (ADR-0035).**
 2. ~~Reter binário ou hash + campos?~~ **Decidido na fundação: objeto no storage
    privado + metadados; prazo comercial de retenção permanece aberto.**
-3. Uma observação por fonte ou por dimensão? (recomendado: por fonte)
+3. ~~Uma observação por fonte ou por dimensão?~~ **Decidido na F1.3: uma linha
+   por fonte/versão de verificação, com as três dimensões no `detail`; o
+   upload não emite `signal` (ADR-0040).**
 4. NF3e por QR público ou SOAP com certificado? (F2)
 5. UFs iniciais? (F2)
 6. Credencial: recibo B2B ou credencial do titular? (F5)
@@ -545,6 +636,7 @@ Nenhuma dessas mudanças é pré-requisito para as outras fases além do indicad
 - [ADR-0033 — Verificação por adaptadores](adr/0033-verificacao-de-evidencias-por-adaptadores.md)
 - [ADR-0034 — Consulta a endpoints oficiais](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md)
 - [ADR-0035 — Artefato de evidência tenant-scoped](adr/0035-artefato-de-evidencia-tenant-scoped.md)
+- [ADR-0040 — Verificação do documento enviado](adr/0040-verificacao-do-documento-enviado.md)
 - [NF3e — FAQ SVRS](https://dfe-portal.svrs.rs.gov.br/Nf3e/Faq)
 - [NF3e — Serviços SVRS](https://dfe-portal.svrs.rs.gov.br/Nf3e/Servicos)
 - [NFAg — portal SVRS](https://dfe-portal.svrs.rs.gov.br/Nfag)

@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto'
-import { PROBLEM_CONTENT_TYPE, problem, problems, type ValidationDto } from '@comprova/contracts'
+import {
+  EvidenceVerificationDtoSchema,
+  PROBLEM_CONTENT_TYPE,
+  problem,
+  problems,
+  type ValidationDto,
+} from '@comprova/contracts'
 import { isValidDocument, type AddressComponents } from '@comprova/core'
 import type { Db } from '@comprova/db'
 import type { FastifyReply } from 'fastify'
@@ -141,7 +147,9 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     if (result === null) {
       return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('validation'))
     }
-    const { validation, signals, claim, evidenceSummary, address } = result
+    const { validation, signals, claim, evidenceSummary, evidenceVerification, address } = result
+    const parsedVerification =
+      evidenceVerification === null ? null : EvidenceVerificationDtoSchema.safeParse(evidenceVerification)
 
     const body: ValidationDto = {
       validation_id: validation.validationId,
@@ -182,6 +190,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
               target: { type: 'address', id: claim.addressId },
             },
       evidence_summary: evidenceSummary,
+      evidence_verification: parsedVerification?.success === true ? parsedVerification.data : null,
       explanation: summaryOf(validation.explanation),
       explanation_detail: explanationDetailFromStored(validation.explanation),
       created_at: validation.createdAt.toISOString(),

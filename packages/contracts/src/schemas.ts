@@ -95,6 +95,66 @@ export const EvidenceSummaryDtoSchema = z.object({
   unknown: z.number().int(),
 })
 
+export const EvidenceSourceKindSchema = z.enum([
+  'uploaded_document',
+  'fiscal_nf3e',
+  'fiscal_nfag',
+  'public_registry',
+])
+
+export const VerificationMethodSchema = z.enum([
+  'content_extraction',
+  'official_qr_consultation',
+  'official_xml_signature',
+  'manual_review',
+])
+
+export const DocumentOutcomeSchema = z.enum([
+  'authentic',
+  'not_found',
+  'invalid',
+  'inconclusive',
+  'unavailable',
+  'unsupported',
+])
+
+export const MatchOutcomeSchema = z.enum(['matches', 'differs', 'not_extracted'])
+
+export const EvidenceVerificationDtoSchema = z.object({
+  status: z.enum(['completed', 'invalid', 'inconclusive', 'unsupported', 'unavailable']),
+  method: VerificationMethodSchema,
+  source: z.object({
+    kind: EvidenceSourceKindSchema,
+    id: z.string(),
+    authority: z.string().nullable(),
+    environment: z.enum(['production', 'homologation', 'local']),
+  }),
+  document: DocumentOutcomeSchema,
+  address: MatchOutcomeSchema,
+  holder: MatchOutcomeSchema,
+  analysis_id: z.uuid(),
+  analyzer: z.object({
+    id: z.string(),
+    version: z.string(),
+  }),
+  contract_version: z.string(),
+  observed_at: z.iso.datetime(),
+  limitations: z.array(z.string()),
+  error_codes: z.array(z.string()),
+  comparison: z.object({
+    address: z.object({
+      compared_fields: z.array(
+        z.enum(['cep', 'uf', 'logradouro', 'numero', 'bairro', 'cidade', 'complemento']),
+      ),
+      reason_codes: z.array(z.string()),
+    }),
+    holder: z.object({
+      reference: z.enum(['legal_name', 'trade_name', 'none']),
+      reason_codes: z.array(z.string()),
+    }),
+  }),
+})
+
 export const AssessmentExplanationDtoSchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -113,6 +173,7 @@ export const ValidationDtoSchema = z.object({
   signals: z.array(SignalDtoSchema),
   claim: ClaimDtoSchema.nullable().optional(),
   evidence_summary: EvidenceSummaryDtoSchema.nullable().optional(),
+  evidence_verification: EvidenceVerificationDtoSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
   created_at: z.string(),
@@ -149,3 +210,4 @@ export type Stance = z.infer<typeof StanceSchema>
 export type CreateValidationRequest = z.infer<typeof CreateValidationRequestSchema>
 export type ValidationDto = z.infer<typeof ValidationDtoSchema>
 export type SignalDto = z.infer<typeof SignalDtoSchema>
+export type EvidenceVerificationDto = z.infer<typeof EvidenceVerificationDtoSchema>
