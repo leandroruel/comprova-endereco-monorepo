@@ -8,8 +8,9 @@
 > estão registradas em [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md),
 > [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md),
 > [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md),
-> [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md) e
-> [ADR-0038](adr/0038-analise-de-documento-do-cliente.md).
+> [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md),
+> [ADR-0038](adr/0038-analise-de-documento-do-cliente.md) e
+> [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md).
 > **Estado atual:** [`architecture.md`](architecture.md).
 > **Prioridades:** [`roadmap.md`](roadmap.md).
 
@@ -57,7 +58,7 @@ tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
 | --------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------- |
 | Entrada de evidência  | HTTP autenticado + storage privado (F1.1); street view no worker                         | Igual                                     |
 | Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                                              | Estrutura/OCR e XML/QR (F1.2/F2)          |
-| Extração de campos    | PDF textual local no worker (F1.2); VLM continua só fachada                              | OCR de imagem; parse no adaptador fiscal  |
+| Extração de campos    | PDF via `unpdf`/PDF.js no worker (F1.2); campos só por rótulo explícito; VLM só fachada  | OCR de imagem; parse no adaptador fiscal  |
 | Consulta externa      | Providers de endereço com URL fixa                                                       | Adaptadores com allowlist (F2)            |
 | Normalização          | Checkers T0/T1/T2 + normalização de endereço/titular (F1.2)                              | Normalizador por fonte                    |
 | Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` + `evidence_analysis` (F0.1/F1.1/F1.2) | Igual + evidência de fonte fiscal (F2)    |
@@ -305,7 +306,21 @@ extração. O resultado de verificação também continua fora.
 ### 5.3 Análise do documento do cliente (F1.2, implementado)
 
 Contrato e decisão completos no
-[ADR-0038](adr/0038-analise-de-documento-do-cliente.md). Em resumo:
+[ADR-0038](adr/0038-analise-de-documento-do-cliente.md); a escolha da
+biblioteca de PDF está no [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md).
+A cadeia de responsabilidades é:
+
+```text
+DocumentAnalyzer
+       ↓
+extraction / observation   (PDF via unpdf/PDF.js + rótulos explícitos)
+       ↓
+Verification adapters      (F1.3/F2)
+       ↓
+verification result        (authentic/matches/differs pertencem ao verificador)
+```
+
+O analyzer **não** declara autenticidade nem correspondência de endereço/titular.
 
 - **Fluxo:** intake F1.1 grava `evidence_artifact` e enfileira
   `evidence_analysis` (`pending`) na mesma transação. Replay do mesmo conteúdo
@@ -318,30 +333,38 @@ Contrato e decisão completos no
   `inconclusive`, `unsupported` ou `unavailable`; para endereço/titular,
   `extracted`, `not_extracted` ou `unknown`. `authentic`, `matches` e `differs`
   **não existem** neste contrato; pertencem ao verificador.
-- **Endereço:** `logradouro`, `numero`, `complemento`, `bairro`, `cidade`, `uf`
-  e `cep` são normalizados; a região bruta mínima fica em `raw`. Ausência de
-  endereço é `not_extracted`, não falha.
-- **Titular:** nome só quando rotulado; CPF/CNPJ só quando claramente presente
-  e com checksum válido. Um CPF inválido gera `TAX_ID_INVALID` e não é
-  persistido. Não se infere relação familiar, propriedade ou residência.
-- **MVP sem provider externo:** PDF textual é extraído localmente (streams
-  simples/`FlateDecode`); imagem retorna `unsupported`/`OCR_NOT_IMPLEMENTED`.
-  O protocolo `DocumentAnalyzer` permite trocar por OCR/VLM no futuro. A saída
-  é validada por schema e identidade; saída inválida vira `failed`, não fica
-  presa em `analyzing`.
+- **Endereço:** só campos de linhas `Rótulo: valor` explícitas
+  (`Endereço`/`Logradouro`, `Número`, `Complemento`, `Bairro`,
+  `Cidade`/`Município`, `UF`/`Estado`, `CEP`) são normalizados; a região bruta
+  mínima fica em `raw`. Rótulo ausente, ambíguo ou inválido vira
+  `null`/`not_extracted`; não há varredura de texto livre.
+- **Titular:** nome só quando rotulado. **CPF/CNPJ não são persistidos nesta
+  etapa** (minimização de PII); a necessidade do identificador fiscal será
+  decidida na verificação F1.3/F2. Não se infere relação familiar, propriedade
+  ou residência.
+- **Tipo e data:** `kind` fica `unknown`; não há lista de concessionárias.
+  `issuedAt` é apenas uma observação de `Emissão`/`Competência` com data
+  completa, não uma regra de validade.
+- **MVP sem provider externo:** o parsing de PDF fica com `unpdf`/PDF.js
+  (streams, fontes, encoding, compressão); o Comprova orquestra e aplica
+  limites (50 páginas, 1.000.000 caracteres). Imagem retorna
+  `unsupported`/`OCR_NOT_IMPLEMENTED`. O protocolo `DocumentAnalyzer` permite
+  trocar por OCR/VLM no futuro. A saída é validada por schema e identidade;
+  saída inválida vira `failed`, não fica presa em `analyzing`.
 - **Idempotência:** chave única
   `(artifact_id, analyzer, analyzer_version, contract_version)`. Replay do
   upload não cria segunda linha; retry não reescreve resultado terminal; uma
   nova versão cria nova linha. Concorrência usa lock de linha + chave única.
 - **Erro nunca vira contradição:** `unavailable`, `inconclusive` e `unsupported`
   deixam `address`/`holder` em `unknown` e não geram `stance=contradicts`.
-- **PII e retenção:** `evidence_analysis` tem RLS FORCE, FK composta com o
-  artefato e `ON DELETE CASCADE`. Logs usam apenas ids/razões técnicas; o
-  `result` não é logado. O binário continua no ObjectStore privado, sem URL.
-- **Limitação conhecida:** o parser PDF é conservador; PDFs escaneados ou com
-  fontes CID/Type0 sem `ToUnicode` retornam `inconclusive`/`NO_TEXT_LAYER`.
-  Não há retry automático de resultado terminal; uma nova tentativa exige nova
-  versão de analisador/contrato (ou operação explícita).
+- **PII e retenção:** CPF/CNPJ não entram no `result` desta etapa.
+  `evidence_analysis` tem RLS FORCE, FK composta com o artefato e
+  `ON DELETE CASCADE`. Logs usam apenas ids/razões técnicas; o `result` não é
+  logado. O binário continua no ObjectStore privado, sem URL.
+- **Limitação conhecida:** PDFs escaneados ou com fontes sem `ToUnicode` podem
+  retornar `inconclusive`/`NO_TEXT_LAYER` ou campos `null`; não há OCR nesta
+  etapa. Não há retry automático de resultado terminal; uma nova tentativa exige
+  nova versão de analisador/contrato (ou operação explícita).
 
 ## 6. Segurança das consultas externas
 

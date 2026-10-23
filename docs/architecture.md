@@ -197,8 +197,8 @@ validation → claim → claim_evidence → assessment → credential
 `(claim_evidence_id, tenant_id)`, `sha256`/tamanho/content-type validados e
 `retention_until`. O binário fica no `ObjectStore` existente; nenhuma URL pública
 é persistida. O endpoint de upload e o sniffing de conteúdo foram entregues em
-F1.1; a extração de PDF textual foi entregue em F1.2. OCR de imagem e matching
-são F1.3/F2.
+F1.1; a extração de texto de PDF (via `unpdf`/PDF.js) foi entregue em F1.2. OCR
+de imagem e matching são F1.3/F2.
 
 O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
 taxonomia de resultado e as extensões mínimas estão em
@@ -207,8 +207,9 @@ taxonomia de resultado e as extensões mínimas estão em
 [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md) (consulta a
 endpoints oficiais), [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md)
 (artefato tenant-scoped), [ADR-0037](adr/0037-intake-de-comprovante-do-cliente.md)
-(intake F1.1) e [ADR-0038](adr/0038-analise-de-documento-do-cliente.md)
-(análise F1.2). A ordem de execução está no [`roadmap.md`](roadmap.md).
+(intake F1.1), [ADR-0038](adr/0038-analise-de-documento-do-cliente.md)
+(análise F1.2) e [ADR-0039](adr/0039-extracao-de-pdf-com-unpdf.md) (parsing de
+PDF). A ordem de execução está no [`roadmap.md`](roadmap.md).
 
 Dois pontos de atenção já visíveis:
 

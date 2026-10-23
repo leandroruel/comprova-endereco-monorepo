@@ -24,8 +24,6 @@ const extractedAddressSchema = z.object({
 
 const extractedHolderSchema = z.object({
   name: z.string().nullable(),
-  taxId: z.string().nullable(),
-  taxIdType: z.enum(['CPF', 'CNPJ']).nullable(),
   raw: z.string(),
 })
 

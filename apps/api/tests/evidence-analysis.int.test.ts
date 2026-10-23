@@ -18,7 +18,6 @@ import {
 } from '@comprova/testing'
 import Redis from 'ioredis'
 import { randomUUID } from 'node:crypto'
-import { deflateSync } from 'node:zlib'
 import { afterAll, describe, expect, it } from 'vitest'
 import { analyzeEvidenceTick } from '../../worker/src/modules/evidence-analysis/evidence-analysis.service.js'
 import { validationRetentionTick } from '../../worker/src/modules/retention/retention.service.js'
@@ -87,34 +86,38 @@ afterAll(async () => {
 const escapePdf = (value: string): string =>
   value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
 
-const pdfWithText = (lines: readonly string[], compressed = false): Buffer => {
+/** PDF mínimo válido, com xref e fonte WinAnsi, para exercitar o analyzer real. */
+const pdfWithText = (lines: readonly string[]): Buffer => {
   const content = `BT\n/F1 12 Tf\n72 720 Td\n${lines
     .map((line) => `(${escapePdf(line)}) Tj\n0 -20 Td\n`)
     .join('')}ET`
-  if (!compressed) {
-    return Buffer.from(
-      `%PDF-1.4\n` +
-        `1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n` +
-        `2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n` +
-        `3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n` +
-        `4 0 obj << /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n` +
-        `trailer << /Root 1 0 R >>\n%%EOF\n`,
-      'latin1',
-    )
+  const stream = Buffer.from(content, 'latin1')
+  const objects: readonly string[] = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${stream.length} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  ]
+
+  const chunks: Buffer[] = [Buffer.from('%PDF-1.4\n', 'latin1')]
+  const offsets: number[] = []
+  let size = chunks[0]?.length ?? 0
+  for (const [index, object] of objects.entries()) {
+    offsets.push(size)
+    const body = Buffer.from(`${index + 1} 0 obj\n${object}\nendobj\n`, 'latin1')
+    chunks.push(body)
+    size += body.length
   }
-  const body = deflateSync(Buffer.from(content, 'latin1'))
-  return Buffer.concat([
+  chunks.push(
     Buffer.from(
-      `%PDF-1.4\n` +
-        `1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n` +
-        `2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n` +
-        `3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n` +
-        `4 0 obj << /Length ${body.length} /Filter /FlateDecode >>\nstream\n`,
+      `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` +
+        offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('') +
+        `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${size}\n%%EOF\n`,
       'latin1',
     ),
-    body,
-    Buffer.from(`\nendstream\nendobj\ntrailer << /Root 1 0 R >>\n%%EOF\n`, 'latin1'),
-  ])
+  )
+  return Buffer.concat(chunks)
 }
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9])
@@ -227,13 +230,16 @@ describe('F1.2 — análise do comprovante', () => {
     expect(analysis?.status).toBe('completed')
     expect(analysis?.result).toMatchObject({
       status: 'completed',
-      document: { status: 'analyzed', kind: 'electricity_bill' },
+      document: { status: 'analyzed', kind: 'unknown' },
       address: {
         status: 'extracted',
         value: { logradouro: 'RUA DAS FLORES', numero: '123', uf: 'SP', cep: '01001000' },
       },
-      holder: { status: 'extracted', value: { name: 'Maria da Silva', taxIdType: 'CPF' } },
+      holder: { status: 'extracted', value: { name: 'Maria da Silva' } },
     })
+    // CPF/CNPJ não são persistidos nesta etapa (minimização de PII).
+    expect(JSON.stringify(analysis?.result)).not.toContain('529.982.247-25')
+    expect(JSON.stringify(analysis?.result)).not.toContain('52998224725')
     // A análise não reescreve a observação `unknown`/`pending` (F1.1).
     expect(after.evidence[0]?.stance).toBe('unknown')
     expect(after.evidence[0]?.strength).toBe(0)
@@ -484,8 +490,8 @@ describe('F1.2 — análise do comprovante', () => {
           tenantId: tenantA,
           artifactId: artifactB.artifactId,
           analyzer: 'cross_tenant',
-          analyzerVersion: '1',
-          contractVersion: '1',
+          analyzerVersion: '1.1.0',
+          contractVersion: '2',
           status: 'pending',
         }),
       ),

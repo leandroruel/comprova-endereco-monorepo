@@ -5,54 +5,80 @@ import { makeDocumentAnalyzer } from './document-analyzer/index.js'
 const escapePdf = (value: string): string =>
   value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
 
-const pdfWithText = (lines: readonly string[]): Buffer => {
-  const content = `BT\n/F1 12 Tf\n72 720 Td\n${lines
-    .map((line) => `(${escapePdf(line)}) Tj\n0 -20 Td\n`)
-    .join('')}ET`
-  return Buffer.from(
-    `%PDF-1.4\n` +
-      `1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n` +
-      `2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n` +
-      `3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n` +
-      `4 0 obj << /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n` +
-      `trailer << /Root 1 0 R >>\n%%EOF\n`,
-    'latin1',
-  )
+interface PdfOptions {
+  readonly compress?: boolean
+  readonly withContent?: boolean
 }
 
-const pdfWithCompressedText = (lines: readonly string[]): Buffer => {
+/**
+ * Gera um PDF mínimo válido (xref incluído). É fixture de teste, não um parser:
+ * o objetivo é exercitar o contrato do analyzer com um PDF que o PDF.js aceita.
+ */
+const pdfWithText = (lines: readonly string[], options: PdfOptions = {}): Buffer => {
   const content = `BT\n/F1 12 Tf\n72 720 Td\n${lines
     .map((line) => `(${escapePdf(line)}) Tj\n0 -20 Td\n`)
     .join('')}ET`
-  const compressed = deflateSync(Buffer.from(content, 'latin1'))
-  const header = Buffer.from(
-    `%PDF-1.4\n` +
-      `1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n` +
-      `2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n` +
-      `3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n` +
-      `4 0 obj << /Length ${compressed.length} /Filter /FlateDecode >>\nstream\n`,
+  const stream = options.compress
+    ? deflateSync(Buffer.from(content, 'latin1'))
+    : Buffer.from(content, 'latin1')
+  const filter = options.compress ? ' /Filter /FlateDecode' : ''
+  const withContent = options.withContent ?? true
+
+  const objects: readonly (string | Buffer)[] = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    withContent
+      ? '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>'
+      : '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>',
+    Buffer.concat([
+      Buffer.from(`<< /Length ${stream.length}${filter} >>\nstream\n`, 'latin1'),
+      stream,
+      Buffer.from('\nendstream', 'latin1'),
+    ]),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  ]
+
+  const chunks: Buffer[] = [Buffer.from('%PDF-1.4\n', 'latin1')]
+  const offsets: number[] = []
+  let size = chunks[0]?.length ?? 0
+
+  for (const [index, object] of objects.entries()) {
+    offsets.push(size)
+    const head = Buffer.from(`${index + 1} 0 obj\n`, 'latin1')
+    const body = typeof object === 'string' ? Buffer.from(object, 'latin1') : object
+    const tail = Buffer.from('\nendobj\n', 'latin1')
+    chunks.push(head, body, tail)
+    size += head.length + body.length + tail.length
+  }
+
+  const xref = Buffer.from(
+    `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` +
+      offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('') +
+      `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${size}\n%%EOF\n`,
     'latin1',
   )
-  const footer = Buffer.from(`\nendstream\nendobj\ntrailer << /Root 1 0 R >>\n%%EOF\n`, 'latin1')
-  return Buffer.concat([header, compressed, footer])
+  chunks.push(xref)
+  return Buffer.concat(chunks)
 }
 
 const analyzerAt = (iso: string) => makeDocumentAnalyzer({ now: () => new Date(iso) })
 
 const fullBill = [
   'CONTA DE ENERGIA',
-  'Titular: Maria da Silva',
+  'Distribuidora CEMIG - CNPJ 11.222.333/0001-81',
+  'Titular: Maria da Silva CPF: 529.982.247-25',
   'CPF: 529.982.247-25',
   'Endereço: Rua das Flores, 123, Apto 45',
   'Bairro: Centro',
   'Cidade: São Paulo',
   'UF: SP',
   'CEP: 01001-000',
-  'Vencimento: 10/11/2026',
+  'Data de emissão: 30/09/2026',
+  'Competência: 01/10/2026',
 ]
 
 describe('makeDocumentAnalyzer (F1.2)', () => {
-  it('extrai endereço e titular normalizados de PDF textual', async () => {
+  it('extrai endereço, titular e data de PDF textual', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
       data: pdfWithText(fullBill),
       contentType: 'application/pdf',
@@ -60,7 +86,10 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
 
     expect(result.status).toBe('completed')
     expect(result.document.status).toBe('analyzed')
-    expect(result.document.kind).toBe('electricity_bill')
+    expect(result.document.kind).toBe('unknown')
+    // Emissão tem prioridade sobre Competência; ambas são observações, não validade.
+    expect(result.document.issuedAt).toBe('2026-09-30')
+    expect(result.document.issuedRaw).toBe('Data de emissão: 30/09/2026')
     expect(result.address.status).toBe('extracted')
     expect(result.address.value).toMatchObject({
       logradouro: 'RUA DAS FLORES',
@@ -72,23 +101,30 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
       cep: '01001000',
     })
     expect(result.holder.status).toBe('extracted')
-    expect(result.holder.value).toMatchObject({
-      name: 'Maria da Silva',
-      taxId: '52998224725',
-      taxIdType: 'CPF',
-    })
+    expect(result.holder.value).toEqual({ name: 'Maria da Silva', raw: 'Titular: Maria da Silva' })
     expect(result.errorCodes).toEqual([])
     expect(result.analyzedAt).toBe('2026-10-22T12:00:00.000Z')
   })
 
-  it('extrai texto de stream FlateDecode', async () => {
+  it('extrai texto de PDF com stream comprimido', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
-      data: pdfWithCompressedText(fullBill),
+      data: pdfWithText(fullBill, { compress: true }),
       contentType: 'application/pdf',
     })
     expect(result.status).toBe('completed')
-    expect(result.address.status).toBe('extracted')
     expect(result.address.value?.cep).toBe('01001000')
+  })
+
+  it('não persiste CPF/CNPJ no resultado', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText(fullBill),
+      contentType: 'application/pdf',
+    })
+    const serialized = JSON.stringify(result)
+    expect(serialized).not.toContain('52998224725')
+    expect(serialized).not.toContain('529.982.247-25')
+    expect(serialized).not.toContain('11222333000181')
+    expect(serialized).not.toContain('11.222.333/0001-81')
   })
 
   it('não transforma nome de estado em UF de duas letras', async () => {
@@ -106,7 +142,7 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     expect(result.address.value?.uf).toBeNull()
   })
 
-  it('não usa o CEP do cabeçalho quando não há CEP rotulado', async () => {
+  it('não infere CEP sem rótulo', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
       data: pdfWithText([
         'CONTA DE ENERGIA',
@@ -122,38 +158,23 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     expect(result.address.value?.cep).toBeNull()
   })
 
-  it('extrai CEP da linha de endereço quando não há CEP rotulado', async () => {
-    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
-      data: pdfWithText(['CONTA DE ENERGIA', 'Endereço: Rua das Flores, 123 - CEP 01001-000']),
-      contentType: 'application/pdf',
-    })
-    expect(result.address.status).toBe('extracted')
-    expect(result.address.value?.cep).toBe('01001000')
-  })
-
-  it('não usa CNPJ da distribuidora como titular quando não há rótulo', async () => {
+  it('não extrai endereço quando o rótulo é ambíguo', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
       data: pdfWithText([
         'CONTA DE ENERGIA',
-        'Distribuidora CEMIG - CNPJ 11.222.333/0001-81',
-        'Titular: Maria da Silva',
-        'CPF: 529.982.247-25',
+        'Endereço: Rua da Distribuidora, 1',
         'Endereço: Rua das Flores, 123',
-        'CEP: 01001-000',
+        'Titular: Maria da Silva',
       ]),
       contentType: 'application/pdf',
     })
-    expect(result.holder.status).toBe('extracted')
-    expect(result.holder.value).toMatchObject({
-      name: 'Maria da Silva',
-      taxId: '52998224725',
-      taxIdType: 'CPF',
-    })
+    expect(result.address.status).toBe('not_extracted')
+    expect(result.address.value).toBeNull()
   })
 
   it('marca address = not_extracted quando o documento não traz endereço', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
-      data: pdfWithText(['CONTA DE ENERGIA', 'Titular: Maria da Silva', 'CPF: 529.982.247-25']),
+      data: pdfWithText(['CONTA DE ENERGIA', 'Titular: Maria da Silva']),
       contentType: 'application/pdf',
     })
     expect(result.status).toBe('completed')
@@ -171,17 +192,6 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     expect(result.holder.status).toBe('not_extracted')
     expect(result.holder.value).toBeNull()
     expect(result.address.status).toBe('extracted')
-  })
-
-  it('não transforma CPF inválido em titular diferente', async () => {
-    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
-      data: pdfWithText(['Titular: Maria da Silva', 'CPF: 111.111.111-11', 'CEP: 01001-000']),
-      contentType: 'application/pdf',
-    })
-    expect(result.holder.status).toBe('extracted')
-    expect(result.holder.value?.name).toBe('Maria da Silva')
-    expect(result.holder.value?.taxId).toBeNull()
-    expect(result.limitations).toContain('TAX_ID_INVALID')
   })
 
   it('não inventa competência quando a data é inválida', async () => {
@@ -212,7 +222,7 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
 
   it('PDF sem camada textual vira inconclusive', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
-      data: Buffer.from('%PDF-1.4\n1 0 obj <<>> endobj\n%%EOF\n'),
+      data: pdfWithText([], { withContent: false }),
       contentType: 'application/pdf',
     })
     expect(result.status).toBe('inconclusive')

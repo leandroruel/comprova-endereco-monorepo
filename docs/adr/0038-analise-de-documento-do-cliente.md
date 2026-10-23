@@ -2,15 +2,19 @@
 
 ## Status
 
-Aceito (2026-10-22). Implementa a etapa de **análise** entre o intake F1.1 e a
-verificação F1.3/F2. Não implementa matching, autenticidade, consulta fiscal,
-billing, wallet nem autenticação do titular.
+Aceito (2026-10-22). Emendado em 2026-10-23 pelo
+[ADR-0039](0039-extracao-de-pdf-com-unpdf.md): o parser PDF artesanal foi
+removido, a extração de texto passou a usar `unpdf`/PDF.js, o contrato subiu
+para a versão `2` e CPF/CNPJ deixaram de ser persistidos nesta etapa.
+Implementa a etapa de **análise** entre o intake F1.1 e a verificação F1.3/F2.
+Não implementa matching, autenticidade, consulta fiscal, billing, wallet nem
+autenticação do titular.
 
 Relaciona-se com o [ADR-0016](0016-claim-evidence-assessment.md) (observação e
 avaliação), [ADR-0033](0033-verificacao-de-evidencias-por-adaptadores.md)
 (contrato do verificador), [ADR-0035](0035-artefato-de-evidencia-tenant-scoped.md)
-(artefato de PII) e [ADR-0037](0037-intake-de-comprovante-do-cliente.md)
-(intake F1.1).
+(artefato de PII), [ADR-0037](0037-intake-de-comprovante-do-cliente.md)
+(intake F1.1) e [ADR-0039](0039-extracao-de-pdf-com-unpdf.md) (parsing de PDF).
 
 ## Contexto
 
@@ -131,16 +135,30 @@ e o worker registra um aviso — a RLS não é contornada silenciosamente.
 `DocumentAnalyzer` é um protocolo com `id`, `version`, `contractVersion` e
 `analyze({ data, contentType })`. O MVP:
 
-- PDF: extrai texto localmente de streams não comprimidos ou `FlateDecode`,
-  com operadores `Tj`/`TJ` e strings literais/hex. Não há provider externo.
+- PDF: usa `unpdf` (que empacota o PDF.js) para parsing de objetos, streams,
+  compressão, fontes, encoding e camada textual. O Comprova não mantém parser
+  PDF próprio; apenas orquestra a biblioteca e aplica limites (50 páginas,
+  1.000.000 caracteres, bytes do intake). PDF criptografado é `unsupported`;
+  PDF inválido é `invalid`; falha de extração/texto ausente é `inconclusive`.
 - Imagem JPEG/PNG: retorna `unsupported`/`OCR_NOT_IMPLEMENTED`. OCR/VLM fica
   para uma implementação futura do mesmo protocolo; nenhum PII é enviado para
   fora nesta etapa.
-- Endereço: extrai `logradouro`, `numero`, `complemento`, `bairro`, `cidade`,
-  `uf`, `cep`, normaliza e preserva um `raw` mínimo da região de endereço.
-- Titular: extrai nome apenas quando rotulado (`Titular`, `Nome do titular`,
-  `Cliente`, `Razão social`); CPF/CNPJ só é persistido se o checksum for válido.
-  Não infere relação familiar, propriedade, residência nem complete CPF/CNPJ.
+- Endereço: só extrai campos de linhas `Rótulo: valor` explícitas
+  (`Endereço`/`Logradouro`, `Número`, `Complemento`, `Bairro`,
+  `Cidade`/`Município`, `UF`/`Estado`, `CEP`), normaliza e preserva um `raw`
+  mínimo. Rótulo ausente, repetido com valores diferentes ou inválido vira
+  `null`/`not_extracted`; não há varredura de texto livre nem inferência de CEP.
+- Titular: extrai apenas o nome quando rotulado (`Titular`, `Nome do titular`,
+  `Nome`, `Cliente`, `Razão social`). **CPF/CNPJ não são persistidos** nesta
+  etapa: o identificador fiscal é PII e sua necessidade pertence à verificação
+  F1.3/F2. Um identificador na mesma linha do nome é descartado. Não se infere
+  relação familiar, propriedade nem residência.
+- Tipo de documento: `kind` fica `unknown`. Não há lista de CEMIG/ENEL/CPFL/
+  SABESP/Vivo/Claro/TIM; uma classificação confiável pertence a um adaptador de
+  fonte fiscal futuro.
+- Data: `issuedAt` é apenas uma observação extraída dos rótulos `Emissão`,
+  `Data de emissão` ou `Competência`, aceitando somente data completa. Não
+  define validade nem expiração do documento.
 - Documento sem endereço/titular retorna `not_extracted`, não falha.
 
 ### 5. Semântica de erro
@@ -150,6 +168,10 @@ e o worker registra um aviso — a RLS não é contornada silenciosamente.
 | PDF textual analisado           | `completed`       | `analyzed`        | `extracted`/`not_extracted` |
 | PDF estruturalmente inválido    | `inconclusive`    | `invalid`         | `unknown`                   |
 | PDF sem camada textual          | `inconclusive`    | `inconclusive`    | `unknown`                   |
+| PDF criptografado               | `unsupported`     | `unsupported`     | `unknown`                   |
+| PDF acima de 50 páginas         | `inconclusive`    | `inconclusive`    | `unknown`                   |
+| Texto acima de 1.000.000 chars  | `inconclusive`    | `inconclusive`    | `unknown`                   |
+| Falha de extração de texto      | `inconclusive`    | `inconclusive`    | `unknown`                   |
 | Imagem/tipo não suportado       | `unsupported`     | `unsupported`     | `unknown`                   |
 | Storage/analisador indisponível | `unavailable`     | `unavailable`     | `unknown`                   |
 | Erro interno inesperado         | `failed`          | `inconclusive`    | `unknown`                   |
@@ -166,12 +188,15 @@ persistência.
   `evidence_artifact` e retenção em cascata.
 - `result` e `last_error` não são logados. Os logs usam apenas `analysis_id`,
   `artifact_id`, `tenant_id`, status/razão técnica e nome da classe de erro.
-- `taxId` é PII: só é extraído se claramente presente e válido; não é inferido.
-  O `raw` guarda o mínimo necessário, não o texto inteiro do documento.
+- **CPF/CNPJ não são persistidos no F1.2.** O analyzer só extrai o nome do
+  titular; um identificador fiscal na mesma linha é descartado. A decisão de
+  guardar ou comparar o identificador fica para a verificação F1.3/F2. O `raw`
+  guarda o mínimo necessário, não o texto inteiro do documento.
 - Limite de bytes configurável (`EVIDENCE_ANALYSIS_MAX_BYTES`, default igual ao
-  limite do artefato) e conferência de SHA-256 antes da análise. O parser PDF
-  limita a expansão de streams (8 MiB por stream/total) e os campos `raw` são
-  truncados, evitando decompression bomb e amplificação de storage.
+  limite do artefato) e conferência de SHA-256 antes da análise. A extração de
+  texto usa `unpdf`/PDF.js e o analyzer limita páginas (50), texto
+  (1.000.000 caracteres) e tamanho dos campos `raw`, evitando amplificação de
+  storage. O parsing de streams/fontes fica na biblioteca (ADR-0039).
 
 ## Alternativas rejeitadas
 
@@ -187,18 +212,23 @@ persistência.
 4. **Tabela de documento/tentativa (`uploaded_document`,
    `verification_attempt`).** Duplicaria o artefato e o vínculo com o claim,
    sem necessidade nesta etapa.
-5. **Dependência de OCR/PDF ou VLM agora.** Aumentaria custo, superfície de PII
-   e variabilidade sem contrato de verificação. O protocolo permite trocar a
+5. **Dependência de OCR/VLM agora.** Aumentaria custo, superfície de PII e
+   variabilidade sem contrato de verificação. O protocolo permite trocar a
    implementação depois.
+6. **Manter um parser PDF próprio.** Rejeitado no ADR-0039: parsing é
+   commodity, o subconjunto caseiro era incompleto e aumentava a superfície de
+   segurança sem melhorar o contrato.
 
 ## Consequências
 
 - O `GET /v1/validations/:id` continua mostrando `evidence_summary.unknown`; o
   detalhe analisado **não** é exposto nesta etapa. Expor isso é uma decisão de
   contrato público da F1.3 (ou posterior), não um efeito colateral da F1.2.
-- O parser PDF é deliberadamente conservador. PDFs com fontes CID/Type0 sem
-  `ToUnicode`, layout complexo ou digitalizações retornam `inconclusive`/
-  `NO_TEXT_LAYER`; não inventamos campos.
+- A extração de texto é deliberadamente conservadora. PDFs com fontes sem
+  `ToUnicode`, layout não textual ou digitalizações podem retornar
+  `inconclusive`/`NO_TEXT_LAYER`; campos não rotulados ou ambíguos ficam
+  `null`/`not_extracted`. Não inventamos campos nem usamos lista de empresas
+  para classificar o documento.
 - Não há retry automático de resultado terminal `unavailable`/`failed`. Uma
   nova tentativa exige nova versão de analisador/contrato (ou intervenção
   operacional); isso preserva a imutabilidade do resultado. O retry seguro

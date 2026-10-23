@@ -19,11 +19,11 @@
  *   unknown/inconclusive/unavailable/unsupported -> unknown
  */
 
-export const DOCUMENT_ANALYSIS_CONTRACT_VERSION = '1'
+export const DOCUMENT_ANALYSIS_CONTRACT_VERSION = '2'
 
-/** Implementação MVP: extração de texto de PDF com camada textual. */
+/** Implementação MVP: extração de texto de PDF com biblioteca especializada. */
 export const DOCUMENT_ANALYZER_ID = 'text_document'
-export const DOCUMENT_ANALYZER_VERSION = '1.0.0'
+export const DOCUMENT_ANALYZER_VERSION = '1.1.0'
 
 export const DOCUMENT_ANALYSIS_STATUSES = [
   'pending',
@@ -91,16 +91,15 @@ export interface ExtractedAddress {
 }
 
 /**
- * Titular extraído. `name` só vem de um rótulo claro; `taxId` só é preenchido
- * quando o CPF/CNPJ tem checksum válido. Um documento com CPF/CNPJ explícito e
- * válido, mas sem nome, pode produzir `holder=extracted` com `name=null`. Um
- * número inválido não vira "titular diferente", apenas `TAX_ID_INVALID` em
- * `limitations`. `taxId` é PII e segue a retenção/RLS do artefato.
+ * Titular extraído. `name` só vem de um rótulo claro.
+ *
+ * O F1.2 **não persiste CPF/CNPJ**: o identificador fiscal é PII e a
+ * necessidade de armazená-lo pertence à verificação (F1.3/F2), que pode
+ * comparar com o `subject` ou decidir por uma representação derivada. O
+ * analyzer não valida nem guarda o número.
  */
 export interface ExtractedHolder {
   readonly name: string | null
-  readonly taxId: string | null
-  readonly taxIdType: 'CPF' | 'CNPJ' | null
   readonly raw: string
 }
 

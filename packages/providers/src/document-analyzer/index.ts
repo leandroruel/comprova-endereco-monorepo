@@ -51,7 +51,7 @@ export const makeDocumentAnalyzer = (options: DocumentAnalyzerOptions = {}): Doc
     analyze: async (input) => {
       let result: DocumentAnalysisResult
       try {
-        result = analyzeDocument(input, now())
+        result = await analyzeDocument(input, now())
       } catch (error) {
         if (error instanceof DocumentAnalyzerUnavailableError) throw error
         result = failedResult(now(), 'ANALYZER_FAILED')
