@@ -5,7 +5,8 @@
 Aceito (2026-10-23). Implementa o **contrato** de fonte fiscal e a
 materialização da observação em `claim_evidence`, **sem nenhuma consulta real a
 autorizador**. A execução NF3e (allowlist preenchida, fetch, parsing e
-credenciais, se necessárias) fica para F2.2.
+credenciais, se necessárias) fica para F2.2b; a F2.2a entrega apenas a
+extração/normalização da referência, sem rede.
 
 Relaciona-se com o [ADR-0033](0033-verificacao-de-evidencias-por-adaptadores.md)
 (verificador e taxonomia), [ADR-0034](0034-consulta-a-fontes-fiscais-endpoints-oficiais.md)
@@ -89,7 +90,9 @@ força e eventual hard rule da fonte fiscal. O schema de saída
 
 `nf3e` e `nfag-e` existem no contrato; apenas o adaptador **fake** NF3e é
 exercitado nesta etapa. Nenhuma chamada de rede é feita. A implementação NF3e
-real e a NFAg-e são F2.2/F7.
+real e a NFAg-e são F2.2b/F7. A F2.2a adiciona `FiscalReference` e
+`extractFiscalReference` para classificar uma referência já extraída, ainda sem
+rede.
 
 ### 5. QR não confiável, allowlist vazia e `safeExternalFetch`
 
@@ -208,11 +211,15 @@ Negativas / débito consciente:
   titular independentes, ausência de `signal`, remoção de scoring, timeout como
   `unavailable`, idempotência, versionamento e cross-tenant.
 
-## Fora de escopo (F2.2)
+## Fora de escopo desta etapa (F2.1/F2.2a)
 
-Parsing de QR NF3e, autorizadores/UF reais, consulta HTTP/SOAP, certificado
-digital, descoberta de autorizador, cache/rate limit por fonte, exposição do
-detalhe fiscal no `GET`, NFAg-e, OCR/VLM, wallet/SSI e billing.
+Decodificação física do QR, autorizadores/UF reais para consulta, consulta
+HTTP/SOAP, certificado digital, descoberta de autorizador, cache/rate limit por
+fonte, exposição do detalhe fiscal no `GET`, NFAg-e, OCR/VLM, wallet/SSI e
+billing. A **F2.2a** (implementada) entrega apenas a extração/normalização da
+referência (payload de QR, URL, chave ou texto) e a conversão para
+`FiscalLookupInput`, sem rede; a **F2.2b** fará a extração física do QR e a
+consulta real.
 
 ## Referências
 

@@ -1,6 +1,50 @@
 # PROGRESS.md
 
-Estado: **Contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-23)
+Estado: **Referência fiscal/QR (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-23)
+
+## Referência fiscal/QR: extração e normalização (F2.2a) (2026-10-23)
+
+A F2.2a faz a ponte entre o documento enviado e o `FiscalAdapter` sem nenhuma
+consulta fiscal real. Ela recebe uma referência **já extraída** (payload de QR,
+URL, chave de acesso ou texto) e devolve um `FiscalReference` normalizado; a
+extração física do QR (decodificar imagem) fica para a F2.2b.
+
+- Contrato puro em `packages/core/src/fiscal-reference.ts`:
+  `FiscalReference` (`status`, `source`, `issuer`, `uf`, `url`, `documentId`,
+  `method`, `limitations`, `errorCodes`, `fingerprint`). Não há score,
+  confiança, aprovação, autenticidade nem resultado de consulta.
+- `status` distingue `found` / `not_found` / `unsupported`. Ausência de QR vira
+  `not_found`, nunca documento inválido. `unsupported` cobre referência
+  encontrada que não se consegue reconhecer com segurança.
+- `toFiscalLookupInput(reference, context)` recebe tenant/claim/artefato do
+  **contexto confiável** do pipeline e só produz `FiscalLookupInput` quando
+  `status = found` e há fonte. A referência não pode alterar tenant/claim/
+  artefato.
+- Extractor em `packages/providers/src/fiscal/reference.ts`. Reutiliza
+  `isSafeExternalUrl` (F0.2) para rejeitar literalmente loopback/RFC1918/
+  link-local/metadata, IPv6 privado, credenciais embutidas e `http`. Não faz
+  fetch, HEAD, DNS lookup nem segue redirect.
+- NF3e é reconhecida por padrão estrutural: host de autorizador documentado com
+  o caminho esperado do endpoint de QR (`SVRS`/`SC`/`MG`/`MT`) **e/ou** chave de
+  acesso de 44 dígitos estritamente numérica com UF válida, modelo `66` e DV
+  módulo 11. Chave isolada válida produz `source = nf3e`, `uf` da chave e
+  `issuer = null` (`UNKNOWN_ISSUER`). Parâmetros de chave duplicados/conflitantes
+  retornam `AMBIGUOUS_REFERENCE`; valor não estrito retorna
+  `INVALID_DOCUMENT_ID`.
+- Allowlist de autorizadores continua vazia e server-side (F2.1); o extractor
+  não autoriza endpoint. Domínio ou caminho desconhecido não vira autorizador:
+  no máximo `issuer = null` quando há chave válida. NFAg-e é marcada
+  `unsupported` (`SOURCE_NOT_SUPPORTED`).
+- `limitations` registra condições informativas de uma referência `found`
+  (`UNKNOWN_ISSUER`, `DOCUMENT_ID_MISSING`); `errorCodes` fica vazio em `found` e
+  só recebe códigos em `unsupported`.
+- Normalização determinística de URL: host minúsculo, sem fragmento, query
+  ordenada. A mesma referência normalizada produz o mesmo `fingerprint` e o
+  mesmo `FiscalLookupInput`; a idempotência final continua em
+  `(claim_id, source, checker, checker_version)` (F2.1).
+- Nenhuma dependência nova. Testes: 5 no core, 31 em providers e 3 de
+  integração atravessando referência extraída → `FiscalLookupInput` →
+  `FakeFiscalAdapter` → `claim_evidence`, com tenant isolation e sem rede.
 
 ## Contrato fiscal e materialização da observação (F2.1) (2026-10-23)
 

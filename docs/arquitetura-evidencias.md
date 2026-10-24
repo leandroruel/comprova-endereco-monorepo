@@ -521,9 +521,10 @@ adapter determinístico em `packages/providers/src/fiscal/`. Decisão em
   **vazia** e delega a chamada para a guarda única `safeExternalFetch`
   (ADR-0036). Um endpoint fora da allowlist nem chega ao fetch; mesmo uma
   allowlist mal configurada para metadata/RFC1918 é barrada pela guarda.
-- **Fora desta etapa (F2.2):** parsing de QR NF3e, autorizadores/UF reais,
-  consulta HTTP/SOAP, certificado, cache, rate limit por fonte, métricas,
-  exposição do detalhe fiscal no `GET`, NFAg-e e qualquer chamada de rede.
+- **Fora da F2.1/F2.2a (F2.2b):** decodificação física do QR, seleção de
+  autorizador/UF para consulta, consulta HTTP/SOAP, certificado, cache, rate
+  limit por fonte, métricas, exposição do detalhe fiscal no `GET`, NFAg-e e
+  qualquer chamada de rede.
 
 Testes: `packages/core/src/fiscal-verification.test.ts` (taxonomia, fingerprint,
 versão, stance), `packages/providers/src/fiscal/fiscal.test.ts` (fake adapter,
@@ -531,13 +532,62 @@ schema, allowlist e SSRF) e
 `apps/api/tests/fiscal-verification.int.test.ts` (todos os status, dimensões,
 idempotência, versionamento, cross-tenant, ausência de `signal` e de PII/bruto).
 
+### 5.6 Referência fiscal/QR: extração e normalização (F2.2a, implementado)
+
+A F2.2a é a ponte entre o documento/artefato e o `FiscalAdapter`, ainda **sem
+consulta fiscal real**. Ela recebe uma referência **já extraída** — payload de
+QR, URL, chave de acesso ou texto — e devolve um `FiscalReference` normalizado.
+A decodificação física da imagem do QR fica para a F2.2b; por isso não há
+dependência nova. Contrato puro em `packages/core/src/fiscal-reference.ts`;
+extractor em `packages/providers/src/fiscal/reference.ts`.
+
+- **Contrato:** `FiscalReference` carrega `status`, `source`, `issuer`, `uf`,
+  `url`, `documentId`, `method`, `limitations`, `errorCodes` e `fingerprint`.
+  Não há score, confiança, aprovação, autenticidade nem decisão KYC. `status`
+  distingue `found` / `not_found` / `unsupported`; ausência de QR vira
+  `not_found` e nunca invalida o documento.
+- **Contexto confiável:** `toFiscalLookupInput(reference, context)` recebe
+  `tenantId`, `claimId` e `artifact` do pipeline. Só produz
+  `FiscalLookupInput` quando `status = found` e há fonte; a referência não pode
+  alterar tenant, claim ou artefato.
+- **Reconhecimento NF3e:** por padrão estrutural. Autorizador conhecido só
+  identifica a fonte com o caminho esperado do endpoint de QR (`SVRS`, `SC`,
+  `MG`, `MT`); host ou caminho desconhecido não vira autorizador. Uma chave de
+  44 dígitos estritamente numérica, com UF IBGE válida, modelo `66` e DV módulo
+  11, identifica NF3e mesmo sem autorizador (`issuer = null`,
+  `UNKNOWN_ISSUER`). Parâmetros de chave duplicados/conflitantes retornam
+  `AMBIGUOUS_REFERENCE`; valor não estrito retorna `INVALID_DOCUMENT_ID`.
+  NFAg-e permanece `unsupported` (`SOURCE_NOT_SUPPORTED`).
+- **Limitações x erros:** `limitations` registra condições informativas de uma
+  referência `found` (`UNKNOWN_ISSUER`, `DOCUMENT_ID_MISSING`); `errorCodes`
+  fica vazio em `found` e só recebe códigos em `unsupported`.
+- **URL não confiável:** o extractor **não faz fetch, HEAD, DNS lookup nem
+  segue redirect**. Reutiliza `isSafeExternalUrl` (F0.2) para rejeitar `http`,
+  credenciais embutidas, loopback, RFC1918, link-local/metadata e IPv6
+  privado. A URL é apenas normalizada (host minúsculo, sem fragmento, query
+  ordenada) e guardada como referência; a allowlist server-side e o fetch
+  continuam em F2.1/F2.2b.
+- **Minimização e determinismo:** a referência não persiste PII nem texto bruto;
+  o `fingerprint` SHA-256 truncado é calculado apenas sobre campos normalizados.
+  A idempotência final continua em
+  `(claim_id, source, checker, checker_version)` (F2.1).
+
+Testes: `packages/core/src/fiscal-reference.test.ts` (conversão para input,
+contexto confiável, fingerprint), `packages/providers/src/fiscal/reference.test.ts`
+(reconhecimento, URLs maliciosas, ambiguidade, chave inválida, ausência de PII) e
+`apps/api/tests/fiscal-verification.int.test.ts` (referência extraída →
+`FiscalLookupInput` → `FakeFiscalAdapter` → `claim_evidence`, idempotência e
+cross-tenant, sem rede).
+
 ## 6. Segurança das consultas externas
 
 A guarda genérica `safeExternalFetch` foi entregue em F0.2 (ADR-0036) e já é
 usada no envio de webhook. Ela cobre resolução/fixação de IP, HTTPS, ausência de
 redirect e limites de tempo/corpo/content-type. A F2.1 entregou o **contrato** do
-adaptador e o **esqueleto da allowlist server-side**, ainda vazio; os
-autorizadores reais e o adaptador NF3e são F2.2 (ADR-0034, ADR-0041). Requisitos:
+adaptador e o **esqueleto da allowlist server-side**, ainda vazio; a F2.2a
+entrega a **referência normalizada** (sem rede) e a F2.2b fará a decodificação
+física do QR, os autorizadores reais e a consulta NF3e (ADR-0034, ADR-0041).
+Requisitos:
 
 1. **Allowlist server-side** por `(tipo de documento, autorizador, ambiente)`.
    A URL do QR é usada apenas para **identificar** o autorizador — nunca para

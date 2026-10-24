@@ -638,12 +638,28 @@ Fontes: [FAQ NF3e SVRS](https://dfe-portal.svrs.rs.gov.br/Nf3e/Faq),
 consulta pública por QR, termos de uso de consulta automatizada e o autorizador
 efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
 
+### F2.2a — referência fiscal/QR (entregue)
+
+- `FiscalReference` em `packages/core/src/fiscal-reference.ts` descreve uma
+  referência **já extraída** com `found`/`not_found`/`unsupported`, fonte,
+  autorizador, UF, URL normalizada, chave, método, limitações e fingerprint. Não
+  há score, confiança, autenticidade nem decisão.
+- `extractFiscalReference` em `packages/providers/src/fiscal/reference.ts`
+  reconhece NF3e por estrutura: autorizador documentado com o caminho esperado
+  do endpoint de QR e/ou chave de 44 dígitos estritamente numérica com UF,
+  modelo `66` e DV módulo 11. Domínio ou caminho desconhecido não vira
+  autorizador; NFAg-e é `unsupported`.
+- `toFiscalLookupInput(reference, context)` usa tenant/claim/artefato do
+  contexto confiável e só emite input quando há fonte reconhecida.
+- Nenhum fetch, HEAD ou DNS lookup; URL do QR é apenas normalizada. A
+  decodificação física da imagem do QR fica para **F2.2b**.
+
 ### Escopo
 
 - Implementar o contrato de adaptador e o registro de fontes suportadas.
-- Adaptador NF3e: identificar o documento, extrair a chave de acesso, resolver o
-  autorizador **no servidor**, consultar somente URL da allowlist, normalizar a
-  resposta.
+- Adaptador NF3e: identificar o documento, extrair/normalizar a referência
+  (F2.2a, entregue) e, na F2.2b, decodificar o QR físico, resolver o autorizador
+  **no servidor**, consultar somente URL da allowlist e normalizar a resposta.
 - Tabela de autorizadores versionada em código (UF → autorizador → endpoint de
   consulta → ambiente), com testes por autorizador.
 - Estado da fonte (`available`, `degraded`, `unavailable`, `unsupported`) e
