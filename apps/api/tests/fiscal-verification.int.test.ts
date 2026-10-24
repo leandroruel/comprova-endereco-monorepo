@@ -627,6 +627,7 @@ describe('F2.2a — da referência extraída à observação fiscal', () => {
       document: 'authentic',
       document_ref_hash: fiscalDocumentFingerprint(lookup),
     })
+    expect(Buffer.from(rows[0]?.evidenceSha256 as Buffer).toString('hex')).toBe(ARTIFACT_SHA256)
   })
 
   it('não deixa a referência atravessar o tenant do contexto confiável', async () => {

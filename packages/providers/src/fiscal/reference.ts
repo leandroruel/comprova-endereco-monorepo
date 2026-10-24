@@ -338,12 +338,8 @@ const referenceFromText = (raw: string, method: FiscalReferenceMethod): FiscalRe
 }
 
 const detectMethod = (raw: string): FiscalReferenceMethod => {
-  try {
-    new URL(raw)
-    return 'url'
-  } catch {
-    return /^\d{44}$/.test(raw) ? 'access_key' : 'text'
-  }
+  if (/^https?:\/\/\S+$/i.test(raw)) return 'url'
+  return /^\d{44}$/.test(raw) ? 'access_key' : 'text'
 }
 
 /**

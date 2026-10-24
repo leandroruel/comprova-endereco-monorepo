@@ -67,6 +67,7 @@ describe('contrato de referência fiscal (F2.2a)', () => {
     const tampered = {
       ...foundReference(),
       tenantId: '00000000-0000-4000-8000-0000000000ff',
+      claimId: '00000000-0000-4000-8000-0000000000fe',
       artifact: { artifactId: 'x' },
     } as unknown as FiscalReference
     const input = toFiscalLookupInput(tampered, {
@@ -75,6 +76,7 @@ describe('contrato de referência fiscal (F2.2a)', () => {
       artifact: null,
     })
     expect(input?.tenantId).toBe('00000000-0000-4000-8000-000000000001')
+    expect(input?.claimId).toBe('00000000-0000-4000-8000-000000000002')
     expect(input?.artifact).toBeNull()
   })
 

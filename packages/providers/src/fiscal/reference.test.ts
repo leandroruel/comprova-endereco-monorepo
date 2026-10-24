@@ -64,6 +64,17 @@ describe('extractFiscalReference (F2.2a)', () => {
     expect(reference.errorCodes).toEqual([])
   })
 
+  it('não classifica texto com prefixo como URL', () => {
+    const reference = extractFiscalReference({ value: `Chave: ${NF3E_KEY}` })
+
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      documentId: NF3E_KEY,
+      method: 'text',
+    })
+  })
+
   it('normaliza query parameters de forma determinística', () => {
     const shuffled = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?tpAmb=1&nVersao=4&chNFe=${NF3E_KEY}`
     const first = extractFiscalReference({ value: NF3E_URL })

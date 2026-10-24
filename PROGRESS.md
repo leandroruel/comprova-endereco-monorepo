@@ -42,7 +42,7 @@ extração física do QR (decodificar imagem) fica para a F2.2b.
   ordenada. A mesma referência normalizada produz o mesmo `fingerprint` e o
   mesmo `FiscalLookupInput`; a idempotência final continua em
   `(claim_id, source, checker, checker_version)` (F2.1).
-- Nenhuma dependência nova. Testes: 5 no core, 30 em providers e 3 de
+- Nenhuma dependência nova. Testes: 5 no core, 31 em providers e 3 de
   integração atravessando referência extraída → `FiscalLookupInput` →
   `FakeFiscalAdapter` → `claim_evidence`, com tenant isolation e sem rede.
 
