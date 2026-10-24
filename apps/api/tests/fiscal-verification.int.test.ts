@@ -2,6 +2,7 @@ import {
   FISCAL_VERIFICATION_CONTRACT_VERSION,
   fiscalCheckerVersion,
   fiscalDocumentFingerprint,
+  toFiscalLookupInput,
   type FiscalAdapter,
   type FiscalLookupInput,
   type FiscalVerificationResult,
@@ -9,7 +10,7 @@ import {
 import { and, createDbPool, eq, inArray, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createLogger } from '@comprova/observability'
-import { makeFakeFiscalAdapter } from '@comprova/providers'
+import { extractFiscalReference, makeFakeFiscalAdapter } from '@comprova/providers'
 import {
   createSubject,
   createTenant,
@@ -579,5 +580,92 @@ describe('F2.1 — contrato e materialização de fonte fiscal', () => {
     const rowsB = await fiscalRowsOf(claimB.claimId)
     expect(rowsB).toHaveLength(1)
     expect(rowsB[0]?.tenantId).toBe(tenantB)
+  })
+})
+
+describe('F2.2a — da referência extraída à observação fiscal', () => {
+  const NF3E_ACCESS_KEY = '35261012345678000199660010000000011000000015'
+  const NF3E_QR = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_ACCESS_KEY}&nVersao=4&tpAmb=1`
+
+  it('extrai a referência do payload e materializa com o FakeFiscalAdapter', async () => {
+    const claim = await makeClaim(tenantA)
+    const artifact = { artifactId: randomUUID(), sha256: ARTIFACT_SHA256 }
+    const reference = extractFiscalReference({ value: NF3E_QR, method: 'qr_code' })
+
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer: 'SVRS',
+      uf: 'SP',
+      documentId: NF3E_ACCESS_KEY,
+    })
+
+    const lookup = toFiscalLookupInput(reference, {
+      tenantId: claim.tenantId,
+      claimId: claim.claimId,
+      artifact,
+    })
+    if (lookup === null) throw new Error('referência NF3e deveria produzir FiscalLookupInput')
+
+    const adapter = makeFakeFiscalAdapter({
+      document: 'authentic',
+      address: 'matches',
+      holder: 'matches',
+    })
+    await expect(run(adapter, lookup)).resolves.toBe('inserted')
+    // A mesma referência normalizada não duplica a observação.
+    await expect(run(adapter, lookup)).resolves.toBe('duplicate')
+
+    const rows = await fiscalRowsOf(claim.claimId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      source: 'fiscal_nf3e',
+      checker: 'nf3e_verification',
+      stance: 'supports',
+    })
+    expect(verificationOf(rows[0])).toMatchObject({
+      document: 'authentic',
+      document_ref_hash: fiscalDocumentFingerprint(lookup),
+    })
+  })
+
+  it('não deixa a referência atravessar o tenant do contexto confiável', async () => {
+    const claimB = await makeClaim(tenantB)
+    const reference = extractFiscalReference({ value: NF3E_QR, method: 'qr_code' })
+    const adapter = makeFakeFiscalAdapter({
+      document: 'authentic',
+      address: 'matches',
+      holder: 'matches',
+    })
+
+    // Contexto de tenant A com claim de tenant B: a referência não pode
+    // "arrastar" o claim. A materialização retorna skipped.
+    const spoofed = toFiscalLookupInput(reference, {
+      tenantId: tenantA,
+      claimId: claimB.claimId,
+      artifact: null,
+    })
+    if (spoofed === null) throw new Error('referência NF3e deveria produzir FiscalLookupInput')
+    await expect(run(adapter, spoofed)).resolves.toBe('skipped')
+    expect(await fiscalRowsOf(claimB.claimId)).toHaveLength(0)
+
+    const legitimate = toFiscalLookupInput(reference, {
+      tenantId: claimB.tenantId,
+      claimId: claimB.claimId,
+      artifact: null,
+    })
+    if (legitimate === null) throw new Error('referência NF3e deveria produzir FiscalLookupInput')
+    await expect(run(adapter, legitimate)).resolves.toBe('inserted')
+    const rowsB = await fiscalRowsOf(claimB.claimId)
+    expect(rowsB).toHaveLength(1)
+    expect(rowsB[0]?.tenantId).toBe(tenantB)
+  })
+
+  it('referência não reconhecida não gera consulta nem evidência', () => {
+    const reference = extractFiscalReference({ value: 'https://evil.example/comprovante.pdf' })
+    expect(reference.status).toBe('unsupported')
+    expect(
+      toFiscalLookupInput(reference, { tenantId: tenantA, claimId: randomUUID(), artifact: null }),
+    ).toBeNull()
   })
 })

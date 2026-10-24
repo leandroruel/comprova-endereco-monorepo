@@ -184,8 +184,11 @@ compara com o endereço e não altera o score. A F1.3 materializa a verificaçã
 documento enviado (endereço/titular) em uma observação própria, ainda sem
 autenticar o documento. A F2.1 adiciona o **contrato** `FiscalAdapter` e a
 materialização de uma fonte fiscal, **sem nenhuma consulta real**: a allowlist
-server-side nasce vazia e não há `signal`. **Ainda não existem** OCR de imagem,
-consulta fiscal real nem NFAg-e.
+server-side nasce vazia e não há `signal`. A F2.2a adiciona a
+extração/normalização da **referência fiscal** (payload de QR, URL, chave de
+acesso ou texto) e a conversão para `FiscalLookupInput`, ainda **sem rede**; a
+decodificação física do QR fica para F2.2b. **Ainda não existem** OCR de imagem,
+decodificação física de QR, consulta fiscal real nem NFAg-e.
 
 A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
 
@@ -202,8 +205,8 @@ validation → claim → claim_evidence → assessment → credential
 `retention_until`. O binário fica no `ObjectStore` existente; nenhuma URL pública
 é persistida. O endpoint de upload e o sniffing de conteúdo foram entregues em
 F1.1; a extração de texto de PDF (via `unpdf`/PDF.js) foi entregue em F1.2; o
-matching do upload foi F1.3. OCR de imagem e consulta fiscal real continuam
-pendentes (F2.2+).
+matching do upload foi F1.3. OCR de imagem, decodificação física do QR e consulta
+fiscal real continuam pendentes (F2.2b+).
 
 A F2.1 não cria um novo modelo de evidência: o adapter fiscal devolve uma
 observação normalizada que vira **uma linha** em `claim_evidence`
@@ -213,6 +216,14 @@ continua dona do score. A idempotência usa a versão do adapter + hash do
 documento + versão do contrato. O endpoint de consulta vem de allowlist
 server-side vazia e, quando existir, passa por `safeExternalFetch`. Detalhes em
 [ADR-0041](adr/0041-contrato-fiscal-adapter.md).
+
+A F2.2a também não cria modelo de evidência nem tabela: `FiscalReference` é um
+contrato em memória que classifica uma referência já extraída como `found`,
+`not_found` ou `unsupported`. Só `found` com fonte reconhecida vira
+`FiscalLookupInput`, sempre com tenant/claim/artefato vindos do contexto
+confiável. A URL do QR é normalizada e nunca buscada; a extração física da
+imagem fica para F2.2b. Detalhes em
+[`arquitetura-evidencias.md`](arquitetura-evidencias.md#56-referência-fiscalqr-extração-e-normalização-f22a-implementado).
 
 O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
 taxonomia de resultado e as extensões mínimas estão em
