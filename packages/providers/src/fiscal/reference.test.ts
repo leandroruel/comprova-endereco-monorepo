@@ -27,6 +27,7 @@ describe('extractFiscalReference (F2.2a)', () => {
     })
     expect(reference.url).toBe(NF3E_URL)
     expect(reference.fingerprint).toHaveLength(32)
+    expect(reference.errorCodes).toEqual([])
   })
 
   it('reconhece chave de acesso isolada como NF3e, sem inventar autorizador', () => {
@@ -42,6 +43,25 @@ describe('extractFiscalReference (F2.2a)', () => {
       limitations: ['UNKNOWN_ISSUER'],
     })
     expect(reference.url).toBeNull()
+    expect(reference.errorCodes).toEqual([])
+  })
+
+  it.each([
+    ['SVRS', 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode'],
+    ['SC', 'https://sat.sef.sc.gov.br/nf3e/consulta'],
+    ['MG', 'https://portalsped.fazenda.mg.gov.br/portalnf3e/sistema/qrcode.xhtml'],
+    ['MT', 'https://www.sefaz.mt.gov.br/nf3e/QRCode'],
+  ])('reconhece o endpoint NF3e do autorizador %s', (issuer, url) => {
+    const reference = extractFiscalReference({ value: `${url}?chNFe=${NF3E_KEY}` })
+
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer,
+      uf: 'SP',
+      documentId: NF3E_KEY,
+    })
+    expect(reference.errorCodes).toEqual([])
   })
 
   it('normaliza query parameters de forma determinística', () => {
@@ -90,7 +110,32 @@ describe('extractFiscalReference (F2.2a)', () => {
     expect(toFiscalLookupInput(reference, context)).toBeNull()
   })
 
-  it('não promove domínio desconhecido a autorizador, mesmo com path nf3e', () => {
+  it('não reconhece domínio desconhecido apenas pelo caminho nf3e', () => {
+    const reference = extractFiscalReference({
+      value: 'https://evil.example/nf3e/qrCode',
+    })
+    expect(reference).toMatchObject({
+      status: 'unsupported',
+      source: null,
+      issuer: null,
+      errorCodes: ['REFERENCE_NOT_RECOGNIZED'],
+    })
+    expect(toFiscalLookupInput(reference, context)).toBeNull()
+  })
+
+  it('não reconhece caminho inesperado em host de autorizador conhecido', () => {
+    const reference = extractFiscalReference({
+      value: 'https://dfe-portal.svrs.rs.gov.br/qualquer/nf3e',
+    })
+    expect(reference).toMatchObject({
+      status: 'unsupported',
+      source: null,
+      issuer: null,
+      errorCodes: ['REFERENCE_NOT_RECOGNIZED'],
+    })
+  })
+
+  it('reconhece chave válida em domínio desconhecido sem inventar autorizador', () => {
     const reference = extractFiscalReference({
       value: `https://evil.example/nf3e/qrCode?chNFe=${NF3E_KEY}`,
     })
@@ -101,6 +146,53 @@ describe('extractFiscalReference (F2.2a)', () => {
       limitations: ['UNKNOWN_ISSUER'],
     })
     expect(reference.issuer).toBeNull()
+    expect(reference.errorCodes).toEqual([])
+  })
+
+  it('marca URL de autorizador conhecida sem chave como referência incompleta', () => {
+    const reference = extractFiscalReference({
+      value: 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode',
+    })
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer: 'SVRS',
+      documentId: null,
+      limitations: ['DOCUMENT_ID_MISSING'],
+    })
+    expect(reference.errorCodes).toEqual([])
+  })
+
+  it('rejeita parâmetros de chave duplicados ou conflitantes', () => {
+    const duplicated = extractFiscalReference({
+      value: `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_KEY}&chNFe=${NF3E_KEY}`,
+    })
+    expect(duplicated).toMatchObject({
+      status: 'unsupported',
+      source: 'nf3e',
+      errorCodes: ['AMBIGUOUS_REFERENCE'],
+    })
+
+    const conflicting = extractFiscalReference({
+      value: `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_KEY}&chave=${SECOND_NF3E_KEY}`,
+    })
+    expect(conflicting).toMatchObject({
+      status: 'unsupported',
+      source: 'nf3e',
+      errorCodes: ['AMBIGUOUS_REFERENCE'],
+    })
+    expect(toFiscalLookupInput(conflicting, context)).toBeNull()
+  })
+
+  it('rejeita chave com caracteres inesperados', () => {
+    const malformed = extractFiscalReference({
+      value: `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_KEY.slice(0, 22)}.${NF3E_KEY.slice(22)}`,
+    })
+    expect(malformed).toMatchObject({
+      status: 'unsupported',
+      source: 'nf3e',
+      errorCodes: ['INVALID_DOCUMENT_ID'],
+    })
   })
 
   it('marca NFAg-e explicitamente como não suportada', () => {

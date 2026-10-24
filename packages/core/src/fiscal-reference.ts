@@ -69,7 +69,9 @@ export interface FiscalReference {
   /** Chave de acesso/identificador do documento, validada estruturalmente. */
   readonly documentId: string | null
   readonly method: FiscalReferenceMethod
+  /** Condições informativas da referência; não impedem `found`. */
   readonly limitations: readonly FiscalReferenceReason[]
+  /** Falhas reais de extração; vazio quando `status = found`. */
   readonly errorCodes: readonly FiscalReferenceReason[]
   /** Hash estável da referência normalizada; `null` quando não encontrada. */
   readonly fingerprint: string | null

@@ -645,9 +645,10 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
   autorizador, UF, URL normalizada, chave, método, limitações e fingerprint. Não
   há score, confiança, autenticidade nem decisão.
 - `extractFiscalReference` em `packages/providers/src/fiscal/reference.ts`
-  reconhece NF3e por estrutura (autorizador documentado com path `nf3e` e/ou
-  chave de 44 dígitos com UF, modelo `66` e DV módulo 11). Domínio desconhecido
-  não vira autorizador; NFAg-e é `unsupported`.
+  reconhece NF3e por estrutura: autorizador documentado com o caminho esperado
+  do endpoint de QR e/ou chave de 44 dígitos estritamente numérica com UF,
+  modelo `66` e DV módulo 11. Domínio ou caminho desconhecido não vira
+  autorizador; NFAg-e é `unsupported`.
 - `toFiscalLookupInput(reference, context)` usa tenant/claim/artefato do
   contexto confiável e só emite input quando há fonte reconhecida.
 - Nenhum fetch, HEAD ou DNS lookup; URL do QR é apenas normalizada. A

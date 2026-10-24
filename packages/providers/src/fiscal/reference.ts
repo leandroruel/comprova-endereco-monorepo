@@ -21,20 +21,27 @@ import { isSafeExternalUrl } from '../safe-fetch.js'
  * nova foi adicionada.
  */
 
-const NF3E_PATH_FRAGMENT = 'nf3e'
 const NFAG_PATH_FRAGMENT = 'nfag'
+
+interface Nf3eEndpoint {
+  readonly issuer: string
+  readonly path: RegExp
+}
 
 /**
  * Autorizadores NF3e cujo endpoint de QR é observado/documentado. NÃO é a
- * allowlist de consulta (essa nasce vazia em F2.1); é apenas o mapa
- * host → identificador do autorizador. Autorizador desconhecido vira
- * `issuer: null`, nunca um palpite.
+ * allowlist de consulta (essa nasce vazia em F2.1); é o mapa
+ * host + caminho esperado → identificador do autorizador. Host ou caminho
+ * desconhecido vira `issuer: null`, nunca um palpite.
  */
-const NF3E_ISSUER_BY_HOST: Readonly<Record<string, string>> = {
-  'dfe-portal.svrs.rs.gov.br': 'SVRS',
-  'sat.sef.sc.gov.br': 'SC',
-  'portalsped.fazenda.mg.gov.br': 'MG',
-  'www.sefaz.mt.gov.br': 'MT',
+const NF3E_ENDPOINTS: Readonly<Record<string, Nf3eEndpoint>> = {
+  'dfe-portal.svrs.rs.gov.br': { issuer: 'SVRS', path: /^\/nf3e\/qrcode\/?$/i },
+  'sat.sef.sc.gov.br': { issuer: 'SC', path: /^\/nf3e\/consulta\/?$/i },
+  'portalsped.fazenda.mg.gov.br': {
+    issuer: 'MG',
+    path: /^\/portalnf3e\/sistema\/qrcode\.xhtml\/?$/i,
+  },
+  'www.sefaz.mt.gov.br': { issuer: 'MT', path: /^\/nf3e\/qrcode\/?$/i },
 }
 
 /** Código IBGE da UF (2 primeiros dígitos da chave de acesso). */
@@ -134,7 +141,7 @@ const found = (input: FoundInput): FiscalReference => {
     documentId: input.documentId,
     method: input.method,
     limitations: input.limitations,
-    errorCodes: input.limitations,
+    errorCodes: [],
     fingerprint: null,
   }
   return { ...reference, fingerprint: fiscalReferenceFingerprint(reference) }
@@ -189,13 +196,24 @@ const invalidKeyReason = (key: string): FiscalReferenceReason => {
   return 'INVALID_DOCUMENT_ID'
 }
 
-const keyCandidateFromUrl = (url: URL): { readonly present: boolean; readonly key: string | null } => {
-  for (const [name, value] of url.searchParams.entries()) {
-    if (!KEY_PARAM_NAMES.has(name.toLowerCase())) continue
-    const digits = value.replace(/\D+/g, '')
-    return { present: true, key: /^\d{44}$/.test(digits) ? digits : null }
-  }
-  return { present: false, key: null }
+type KeyCandidate =
+  | { readonly status: 'absent' }
+  | { readonly status: 'ambiguous' }
+  | { readonly status: 'invalid' }
+  | { readonly status: 'valid'; readonly key: string }
+
+const keyCandidateFromUrl = (url: URL): KeyCandidate => {
+  const values = [...url.searchParams.entries()]
+    .filter(([name]) => KEY_PARAM_NAMES.has(name.toLowerCase()))
+    .map(([, value]) => value)
+
+  if (values.length === 0) return { status: 'absent' }
+  if (values.length > 1) return { status: 'ambiguous' }
+
+  const value = values[0]
+  return value !== undefined && /^\d{44}$/.test(value)
+    ? { status: 'valid', key: value }
+    : { status: 'invalid' }
 }
 
 const referenceFromUrl = (raw: string, method: FiscalReferenceMethod): FiscalReference => {
@@ -205,7 +223,6 @@ const referenceFromUrl = (raw: string, method: FiscalReferenceMethod): FiscalRef
   const normalizedUrl = url.toString()
   const host = url.hostname.toLowerCase()
   const path = url.pathname.toLowerCase()
-  const pathHasNf3e = path.includes(NF3E_PATH_FRAGMENT)
   const pathHasNfag = path.includes(NFAG_PATH_FRAGMENT)
 
   if (pathHasNfag) {
@@ -217,20 +234,32 @@ const referenceFromUrl = (raw: string, method: FiscalReferenceMethod): FiscalRef
     })
   }
 
-  const issuer = pathHasNf3e ? (NF3E_ISSUER_BY_HOST[host] ?? null) : null
-  const hasNf3eEvidence = pathHasNf3e || issuer !== null
+  const endpoint = NF3E_ENDPOINTS[host]
+  const issuer = endpoint !== undefined && endpoint.path.test(path) ? endpoint.issuer : null
+  const hasNf3eEvidence = issuer !== null
   const key = keyCandidateFromUrl(url)
 
-  if (key.present) {
-    if (key.key === null) {
-      return unsupported({
-        method,
-        url: normalizedUrl,
-        source: hasNf3eEvidence ? 'nf3e' : null,
-        issuer,
-        reasons: ['INVALID_DOCUMENT_ID'],
-      })
-    }
+  if (key.status === 'ambiguous') {
+    return unsupported({
+      method,
+      url: normalizedUrl,
+      source: hasNf3eEvidence ? 'nf3e' : null,
+      issuer,
+      reasons: ['AMBIGUOUS_REFERENCE'],
+    })
+  }
+
+  if (key.status === 'invalid') {
+    return unsupported({
+      method,
+      url: normalizedUrl,
+      source: hasNf3eEvidence ? 'nf3e' : null,
+      issuer,
+      reasons: ['INVALID_DOCUMENT_ID'],
+    })
+  }
+
+  if (key.status === 'valid') {
     const info = nf3eKeyInfo(key.key)
     if (info === null) {
       return unsupported({

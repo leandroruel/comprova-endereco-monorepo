@@ -550,13 +550,17 @@ extractor em `packages/providers/src/fiscal/reference.ts`.
   `tenantId`, `claimId` e `artifact` do pipeline. Só produz
   `FiscalLookupInput` quando `status = found` e há fonte; a referência não pode
   alterar tenant, claim ou artefato.
-- **Reconhecimento NF3e:** por padrão estrutural, não por lista de
-  concessionárias. URL de autorizador documentado (`SVRS`, `SC`, `MG`, `MT`) com
-  path `nf3e` e/ou chave de 44 dígitos com UF IBGE válida, modelo `66` e DV
-  módulo 11. Chave isolada válida produz `source = nf3e`, `uf` da chave e
-  `issuer = null` (`UNKNOWN_ISSUER`). Domínio desconhecido nunca vira
-  autorizador; no máximo fica `issuer = null`. NFAg-e é `unsupported`
-  (`SOURCE_NOT_SUPPORTED`).
+- **Reconhecimento NF3e:** por padrão estrutural. Autorizador conhecido só
+  identifica a fonte com o caminho esperado do endpoint de QR (`SVRS`, `SC`,
+  `MG`, `MT`); host ou caminho desconhecido não vira autorizador. Uma chave de
+  44 dígitos estritamente numérica, com UF IBGE válida, modelo `66` e DV módulo
+  11, identifica NF3e mesmo sem autorizador (`issuer = null`,
+  `UNKNOWN_ISSUER`). Parâmetros de chave duplicados/conflitantes retornam
+  `AMBIGUOUS_REFERENCE`; valor não estrito retorna `INVALID_DOCUMENT_ID`.
+  NFAg-e permanece `unsupported` (`SOURCE_NOT_SUPPORTED`).
+- **Limitações x erros:** `limitations` registra condições informativas de uma
+  referência `found` (`UNKNOWN_ISSUER`, `DOCUMENT_ID_MISSING`); `errorCodes`
+  fica vazio em `found` e só recebe códigos em `unsupported`.
 - **URL não confiável:** o extractor **não faz fetch, HEAD, DNS lookup nem
   segue redirect**. Reutiliza `isSafeExternalUrl` (F0.2) para rejeitar `http`,
   credenciais embutidas, loopback, RFC1918, link-local/metadata e IPv6

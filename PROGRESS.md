@@ -24,18 +24,25 @@ extração física do QR (decodificar imagem) fica para a F2.2b.
   `isSafeExternalUrl` (F0.2) para rejeitar literalmente loopback/RFC1918/
   link-local/metadata, IPv6 privado, credenciais embutidas e `http`. Não faz
   fetch, HEAD, DNS lookup nem segue redirect.
-- NF3e é reconhecida por padrão estrutural: URL de autorizador documentado
-  (`SVRS`/`SC`/`MG`/`MT`) com path `nf3e` **e/ou** chave de acesso de 44 dígitos
-  com UF válida, modelo `66` e DV módulo 11. Chave isolada válida produz
-  `source = nf3e`, `uf` da chave e `issuer = null` (`UNKNOWN_ISSUER`).
+- NF3e é reconhecida por padrão estrutural: host de autorizador documentado com
+  o caminho esperado do endpoint de QR (`SVRS`/`SC`/`MG`/`MT`) **e/ou** chave de
+  acesso de 44 dígitos estritamente numérica com UF válida, modelo `66` e DV
+  módulo 11. Chave isolada válida produz `source = nf3e`, `uf` da chave e
+  `issuer = null` (`UNKNOWN_ISSUER`). Parâmetros de chave duplicados/conflitantes
+  retornam `AMBIGUOUS_REFERENCE`; valor não estrito retorna
+  `INVALID_DOCUMENT_ID`.
 - Allowlist de autorizadores continua vazia e server-side (F2.1); o extractor
-  não autoriza endpoint. Domínio desconhecido não vira autorizador: no máximo
-  `issuer = null`. NFAg-e é marcada `unsupported` (`SOURCE_NOT_SUPPORTED`).
+  não autoriza endpoint. Domínio ou caminho desconhecido não vira autorizador:
+  no máximo `issuer = null` quando há chave válida. NFAg-e é marcada
+  `unsupported` (`SOURCE_NOT_SUPPORTED`).
+- `limitations` registra condições informativas de uma referência `found`
+  (`UNKNOWN_ISSUER`, `DOCUMENT_ID_MISSING`); `errorCodes` fica vazio em `found` e
+  só recebe códigos em `unsupported`.
 - Normalização determinística de URL: host minúsculo, sem fragmento, query
   ordenada. A mesma referência normalizada produz o mesmo `fingerprint` e o
   mesmo `FiscalLookupInput`; a idempotência final continua em
   `(claim_id, source, checker, checker_version)` (F2.1).
-- Nenhuma dependência nova. Testes: 5 no core, 21 em providers e 3 de
+- Nenhuma dependência nova. Testes: 5 no core, 30 em providers e 3 de
   integração atravessando referência extraída → `FiscalLookupInput` →
   `FakeFiscalAdapter` → `claim_evidence`, com tenant isolation e sem rede.
 
