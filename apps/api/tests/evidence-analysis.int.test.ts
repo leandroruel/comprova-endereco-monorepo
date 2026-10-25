@@ -1,3 +1,4 @@
+import { toFiscalLookupInput } from '@comprova/core'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { createDbPool, eq, inArray, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -17,6 +18,7 @@ import {
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
 import Redis from 'ioredis'
+import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { analyzeEvidenceTick } from '../../worker/src/modules/evidence-analysis/evidence-analysis.service.js'
@@ -402,6 +404,7 @@ describe('F1.2 — análise do comprovante', () => {
         document: { status: 'analyzed', kind: 'unknown', issuedAt: null, issuedRaw: null },
         address: { status: 'unknown', value: null, raw: null },
         holder: { status: 'unknown', value: null, raw: null },
+        fiscalReference: null,
         limitations: [],
         errorCodes: [],
         analyzedAt: 'not-a-date',
@@ -526,5 +529,160 @@ describe('F1.2 — análise do comprovante', () => {
     const removed = await validationRetentionTick(adminPool.db, store)
     expect(removed).toBeGreaterThanOrEqual(1)
     expect((await graphOf(validationId)).analyses).toHaveLength(0)
+  })
+})
+
+describe('F2.2b — referência fiscal extraída do artefato', () => {
+  const NF3E_KEY = '35261012345678000199660010000000011000000015'
+  const NF3E_URL = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_KEY}&nVersao=4&tpAmb=1`
+  // Fixture compartilhada com os testes do provider (PDF com QR raster embutido).
+  const nf3eQrPdf = readFileSync(
+    new URL('../../../packages/providers/src/fiscal/__fixtures__/nf3e-qr.pdf', import.meta.url),
+  )
+
+  it('persiste a referência do QR sem a URL e alimenta o FiscalLookupInput pelo contexto confiável', async () => {
+    const validationId = await makeValidation(tenantA)
+    const res = await upload(validationId, keyA, nf3eQrPdf, 'nf3e.pdf', 'application/pdf')
+    expect(res.statusCode).toBe(201)
+
+    const processed = await runTick()
+    expect(processed).toBeGreaterThanOrEqual(1)
+
+    const { claims, artifacts, analyses } = await graphOf(validationId)
+    const analysis = analyses[0]
+    const claimId = claims[0]?.claimId
+    const artifact = artifacts[0]
+    expect(claimId).toBeDefined()
+    expect(artifact).toBeDefined()
+    expect(analysis?.result).toMatchObject({
+      fiscalReference: {
+        status: 'found',
+        source: 'nf3e',
+        issuer: 'SVRS',
+        uf: 'SP',
+        documentId: NF3E_KEY,
+        method: 'qr_code',
+        url: null,
+      },
+    })
+
+    // A URL crua do QR nunca é persistida.
+    expect(JSON.stringify(analysis?.result)).not.toContain(NF3E_URL)
+    expect(JSON.stringify(analysis?.result)).not.toContain('dfe-portal.svrs.rs.gov.br')
+
+    const reference = (analysis?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    const input = toFiscalLookupInput(reference, {
+      tenantId: tenantA,
+      claimId: claimId as string,
+      artifact: { artifactId: artifact?.artifactId as string, sha256: 'ab'.repeat(32) },
+    })
+
+    // Tenant/claim/artifact vêm SEMPRE do contexto confiável; a URL some mas o
+    // documentId continua disponível para a consulta fiscal futura.
+    expect(input).toEqual({
+      source: 'nf3e',
+      tenantId: tenantA,
+      claimId,
+      documentId: NF3E_KEY,
+      qrCodeUrl: null,
+      issuer: 'SVRS',
+      uf: 'SP',
+      artifact: { artifactId: artifact?.artifactId, sha256: 'ab'.repeat(32) },
+    })
+    expect(input?.tenantId).not.toBe('tenant-from-qr')
+  })
+
+  it('isola a referência fiscal por tenant no upload, na leitura e no input', async () => {
+    const validationA = await makeValidation(tenantA)
+    const validationB = await makeValidation(tenantB)
+    await upload(validationA, keyA, nf3eQrPdf, 'nf3e-a.pdf')
+    await upload(validationB, keyB, nf3eQrPdf, 'nf3e-b.pdf')
+    await runTick()
+
+    const graphA = await graphOf(validationA)
+    const graphB = await graphOf(validationB)
+    const analysisA = graphA.analyses[0]
+    const analysisB = graphB.analyses[0]
+    const artifactA = graphA.artifacts[0]
+    const artifactB = graphB.artifacts[0]
+    const claimA = graphA.claims[0]
+    const claimB = graphB.claims[0]
+    expect(analysisA?.tenantId).toBe(tenantA)
+    expect(analysisB?.tenantId).toBe(tenantB)
+    expect(artifactA?.artifactId).not.toBe(artifactB?.artifactId)
+
+    const referenceA = (analysisA?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    const referenceB = (analysisB?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    // Mesmo conteúdo, mesma identidade de referência; o que muda é o contexto.
+    expect(referenceA.fingerprint).toBe(referenceB.fingerprint)
+    expect(referenceA.documentId).toBe(NF3E_KEY)
+
+    // RLS: o tenant A não enxerga a análise do artefato do tenant B.
+    const crossTenantRows = await withTenant(appPool.db, tenantA, async (tx) =>
+      tx
+        .select()
+        .from(t.evidenceAnalysis)
+        .where(eq(t.evidenceAnalysis.artifactId, artifactB?.artifactId as string)),
+    )
+    expect(crossTenantRows).toHaveLength(0)
+
+    const inputA = toFiscalLookupInput(referenceA, {
+      tenantId: tenantA,
+      claimId: claimA?.claimId as string,
+      artifact: {
+        artifactId: artifactA?.artifactId as string,
+        sha256: artifactA?.sha256.toString('hex') as string,
+      },
+    })
+    const inputB = toFiscalLookupInput(referenceB, {
+      tenantId: tenantB,
+      claimId: claimB?.claimId as string,
+      artifact: {
+        artifactId: artifactB?.artifactId as string,
+        sha256: artifactB?.sha256.toString('hex') as string,
+      },
+    })
+    expect(inputA).toMatchObject({
+      tenantId: tenantA,
+      claimId: claimA?.claimId,
+      artifact: { artifactId: artifactA?.artifactId },
+      documentId: NF3E_KEY,
+    })
+    expect(inputB).toMatchObject({
+      tenantId: tenantB,
+      claimId: claimB?.claimId,
+      artifact: { artifactId: artifactB?.artifactId },
+      documentId: NF3E_KEY,
+    })
+    expect(inputA?.tenantId).not.toBe(inputB?.tenantId)
+  })
+
+  it('replay do upload não reescreve a análise nem o fingerprint da referência', async () => {
+    const validationId = await makeValidation(tenantA)
+    expect((await upload(validationId, keyA, nf3eQrPdf, 'nf3e.pdf')).statusCode).toBe(201)
+    await runTick()
+
+    const first = (await graphOf(validationId)).analyses[0]
+    const firstReference = (first?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    expect(first?.status).toBe('inconclusive')
+    expect(firstReference.status).toBe('found')
+
+    const replay = await upload(validationId, keyA, nf3eQrPdf, 'nf3e.pdf')
+    expect(replay.statusCode).toBe(200)
+    expect(replay.headers['idempotent-replayed']).toBe('true')
+    await runTick()
+
+    const after = (await graphOf(validationId)).analyses
+    expect(after).toHaveLength(1)
+    expect(after[0]?.analysisId).toBe(first?.analysisId)
+    expect(after[0]?.analyzedAt?.toISOString()).toBe(first?.analyzedAt?.toISOString())
+    const afterReference = (
+      after[0]?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] }
+    ).fiscalReference
+    expect(afterReference).toEqual(firstReference)
   })
 })

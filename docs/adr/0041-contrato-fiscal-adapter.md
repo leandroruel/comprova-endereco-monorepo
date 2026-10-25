@@ -6,7 +6,9 @@ Aceito (2026-10-23). Implementa o **contrato** de fonte fiscal e a
 materialização da observação em `claim_evidence`, **sem nenhuma consulta real a
 autorizador**. A execução NF3e (allowlist preenchida, fetch, parsing e
 credenciais, se necessárias) fica para F2.2b; a F2.2a entrega apenas a
-extração/normalização da referência, sem rede.
+extração/normalização da referência, sem rede. Emendado em 2026-10-24 pela
+parte física da F2.2b: a decodificação local do QR foi entregue; a consulta
+real continua pendente.
 
 Relaciona-se com o [ADR-0033](0033-verificacao-de-evidencias-por-adaptadores.md)
 (verificador e taxonomia), [ADR-0034](0034-consulta-a-fontes-fiscais-endpoints-oficiais.md)
@@ -211,15 +213,50 @@ Negativas / débito consciente:
   titular independentes, ausência de `signal`, remoção de scoring, timeout como
   `unavailable`, idempotência, versionamento e cross-tenant.
 
-## Fora de escopo desta etapa (F2.1/F2.2a)
+## Emenda F2.2b — parte física (2026-10-24)
 
-Decodificação física do QR, autorizadores/UF reais para consulta, consulta
-HTTP/SOAP, certificado digital, descoberta de autorizador, cache/rate limit por
-fonte, exposição do detalhe fiscal no `GET`, NFAg-e, OCR/VLM, wallet/SSI e
-billing. A **F2.2a** (implementada) entrega apenas a extração/normalização da
-referência (payload de QR, URL, chave ou texto) e a conversão para
-`FiscalLookupInput`, sem rede; a **F2.2b** fará a extração física do QR e a
-consulta real.
+A parte física da F2.2b foi implementada sem consulta real. Decisões que
+complementam esta ADR:
+
+- O contrato `FiscalReference` subiu para `2` e ganhou o status `inconclusive`
+  (QR ilegível, decoder indisponível, PDF não inspecionável) e reason codes
+  físicos. `unsupported` continua para conteúdo reconhecido mas não suportado;
+  `not_found` só para ausência determinística.
+- `extractFiscalReferenceFromArtifact` decodifica PNG/JPEG e imagens raster
+  embutidas em PDF com `zxing-wasm`, carregando o WASM apenas do pacote local
+  (`wasmBinary`). Não há fetch, DNS, redirect nem CDN; a URL do QR continua
+  apenas uma referência não confiável.
+- PDF vetorial/desenhado não é renderizado (`PDF_QR_VECTOR_UNSUPPORTED`); não há
+  canvas nativo. A extração reaproveita o mesmo `PDFDocumentProxy` da análise de
+  texto. PDF com raster inspecionado sem QR também é
+  `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`: `not_found` fica reservado a
+  artefatos integralmente inspecionáveis (PNG/JPEG). O limite de páginas é
+  validado antes de qualquer decodificação de QR ou extração de texto.
+- Múltiplos QR: mesmo fingerprint vira `found`; referências fiscais distintas
+  viram `AMBIGUOUS_REFERENCE`; fiscal + não fiscal vira `found` com
+  `MULTIPLE_QR_CODES`. O decoder nunca escolhe arbitrariamente o primeiro. Ele
+  lê `maxSymbols + 1` apenas para detectar truncamento; exatamente `maxSymbols`
+  referências legíveis ainda passam pela política.
+- `DocumentAnalysisResult` subiu para o contrato `3` e o analyzer para
+  `text_document@1.2.0`; ambos carregam `fiscalReference`. A URL é removida
+  (`url = null`) antes da persistência em `evidence_analysis.result`; o
+  `fingerprint` e o `documentId` permanecem para auditoria/consulta futura. O
+  fingerprint inclui a URL normalizada e é preservado na redaction, portanto
+  não é recalculável a partir da projeção persistida; `documentId` é o
+  identificador fiscal estável e a URL é dado transitório.
+- A consulta NF3e real, a allowlist preenchida e o parsing da resposta continuam
+  fora desta entrega.
+
+## Fora de escopo desta etapa
+
+A consulta real (autorizadores/UF reais para consulta, HTTP/SOAP, certificado
+digital, descoberta de autorizador, cache/rate limit por fonte, exposição do
+detalhe fiscal no `GET`, NFAg-e, OCR/VLM, wallet/SSI e billing) continua fora
+desta etapa. A **F2.2a** (implementada) entrega apenas a extração/normalização
+da referência (payload de QR, URL, chave ou texto) e a conversão para
+`FiscalLookupInput`, sem rede; a **parte física da F2.2b** (implementada)
+entrega a decodificação local do QR, também sem rede. A consulta NF3e real
+continua pendente.
 
 ## Referências
 

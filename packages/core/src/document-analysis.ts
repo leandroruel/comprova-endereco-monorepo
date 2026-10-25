@@ -19,11 +19,13 @@
  *   unknown/inconclusive/unavailable/unsupported -> unknown
  */
 
-export const DOCUMENT_ANALYSIS_CONTRACT_VERSION = '2'
+import type { FiscalReference } from './fiscal-reference.js'
 
-/** Implementação MVP: extração de texto de PDF com biblioteca especializada. */
+export const DOCUMENT_ANALYSIS_CONTRACT_VERSION = '3'
+
+/** Implementação MVP: texto de PDF + QR/referência fiscal, sem OCR. */
 export const DOCUMENT_ANALYZER_ID = 'text_document'
-export const DOCUMENT_ANALYZER_VERSION = '1.1.0'
+export const DOCUMENT_ANALYZER_VERSION = '1.2.0'
 
 export const DOCUMENT_ANALYSIS_STATUSES = [
   'pending',
@@ -128,6 +130,17 @@ export interface DocumentAnalysisResult {
   readonly document: DocumentAnalysisDocument
   readonly address: DocumentAnalysisDimension<ExtractedAddress>
   readonly holder: DocumentAnalysisDimension<ExtractedHolder>
+  /**
+   * Referência fiscal extraída do QR do próprio artefato (F2.2b). É uma
+   * observação não confiável, não prova autenticidade e não autoriza fetch.
+   *
+   * O resultado persistido deve ter `url = null`: a URL do QR é removida antes
+   * de gravar (o `fingerprint` e o `documentId` permanecem). `null` significa
+   * que a extração física não foi executada (ex.: PDF inválido); os estados
+   * `not_found`/`inconclusive`/`unsupported` são explícitos no contrato da
+   * referência.
+   */
+  readonly fiscalReference: FiscalReference | null
   readonly limitations: readonly string[]
   readonly errorCodes: readonly string[]
   readonly analyzedAt: string

@@ -1,6 +1,85 @@
 # PROGRESS.md
 
-Estado: **Referência fiscal/QR (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-23)
+Estado: **Extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-24)
+
+## Extração física do QR a partir do artefato (F2.2b — parte física) (2026-10-24)
+
+A parte física da F2.2b liga o **artefato real** (o comprovante já guardado em
+`evidence_artifact`) ao `FiscalReference`/`FiscalLookupInput` da F2.2a. Ela
+decodifica o QR localmente e **não consulta** SEFAZ/autorizador: a resolução
+server-side do endpoint, a allowlist preenchida e o parsing da resposta
+continuam pendentes na segunda metade da F2.2b. O pedido original chamava esta
+etapa de "F2.2a"; no roadmap canônico a F2.2a é a normalização.
+
+- `extractFiscalReferenceFromArtifact` em
+  `packages/providers/src/fiscal/reference.ts` aceita
+  `{ data: Uint8Array, contentType }` e cobre PNG, JPEG e PDF. O payload
+  decodificado passa pelo mesmo `extractFiscalReference` da F2.2a, então não há
+  normalizador paralelo.
+- Decoder `zxing-wasm@3.1.6` (`reader`), com o WASM carregado do pacote local
+  via `createRequire(...).resolve('zxing-wasm/reader/zxing_reader.wasm')` e
+  `prepareZXingModule({ overrides: { wasmBinary } })`. **Sem CDN e sem fetch**;
+  um teste com `fetch` instrumentado comprova. `image-size@2.0.4` faz a
+  pré-checagem de dimensões (sem decodificar a imagem).
+- Limites: 16 MP e borda de 10.000 px por imagem, 8 símbolos QR, 50 páginas e
+  64 imagens por PDF. O decoder lê `maxSymbols + 1` apenas para detectar
+  truncamento; exatamente `maxSymbols` referências legíveis ainda passam pela
+  política de múltiplos QR (não viram `QR_TOO_MANY_SYMBOLS`). Estouro vira
+  `inconclusive` (`IMAGE_TOO_LARGE`, `PDF_TOO_MANY_PAGES`,
+  `PDF_TOO_MANY_IMAGES`, `QR_TOO_MANY_SYMBOLS`), nunca `found` incompleto.
+- PDF usa `unpdf.extractImages` + `getDocumentProxy({ maxImageSize })` e só lê
+  **raster embutido**. QR vetorial/desenhado não é renderizado: retorna
+  `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`, tanto quando não há raster quanto
+  quando o raster inspecionado não contém QR (não é possível afirmar ausência
+  absoluta). Nenhuma dependência nativa/canvas foi adicionada; o limite de
+  páginas é validado antes de qualquer decodificação de QR ou extração de texto.
+- Política determinística para múltiplos QR
+  (`extractFiscalReferenceFromPayloads`): payloads duplicados/mesmo fingerprint
+  → `found`; referências fiscais distintas → `unsupported`/`AMBIGUOUS_REFERENCE`
+  (nunca escolhe o primeiro QR); QR fiscal único + QR não fiscal → `found` com
+  `MULTIPLE_QR_CODES`. QR ilegível detectado (`returnErrors`) →
+  `inconclusive`/`QR_NOT_READABLE`.
+- `FiscalReference` ganhou `status = inconclusive` e os reason codes físicos
+  (`QR_*`, `IMAGE_*`, `PDF_*`, `UNSUPPORTED_ARTIFACT_TYPE`, `MULTIPLE_QR_CODES`);
+  `FISCAL_REFERENCE_CONTRACT_VERSION` subiu para `2`.
+- Integração no `DocumentAnalyzer`: `DocumentAnalysisResult` ganhou
+  `fiscalReference` (`DOCUMENT_ANALYSIS_CONTRACT_VERSION = '3'`,
+  `text_document@1.2.0`). A referência é anexada a PDFs (inclusive sem camada
+  textual) e a imagens (que continuam `unsupported` quanto a OCR, mas já trazem
+  o QR). `redactFiscalReference` remove a URL **antes** de persistir; o schema
+  do resultado exige `url = null` e valida os enums/reason codes.
+- Sem tabela/migration nova (`evidence_analysis.result` é JSONB), sem consulta
+  fiscal, sem alteração de scoring, `FiscalVerificationResult` ou allowlist.
+  Um teste de integração sobe um PDF com QR, roda o tick, confirma que a
+  referência persistida não contém a URL e que `toFiscalLookupInput` usa
+  tenant/claim/artefato do **contexto confiável**.
+- Dependências novas: `zxing-wasm@3.1.6` (MIT; `@types/emscripten`, `type-fest`)
+  e `image-size@2.0.4` (MIT; sem dependências). Ambas diretas em
+  `@comprova/providers`.
+- Limitações deliberadas: QR vetorial em PDF fica para uma etapa futura (se
+  houver canvas com limite de tempo/memória); artefatos antigos só ganham a
+  nova análise em replay/backfill (nova versão do analyzer); não há timeout
+  cooperativo no decoder WASM — o risco é limitado pelos tetos de pixels e
+  símbolos. O hardening futuro deve isolar o decoder (worker/limite de tempo)
+  antes de aumentar esses tetos; isso permanece no backlog operacional, não
+  neste PR.
+- Correções da revisão: o estado do decoder agora é resetado quando a
+  inicialização do WASM falha, então a chamada seguinte tenta de novo em vez de
+  ficar presa em `QR_DECODER_UNAVAILABLE` (regressão em
+  `reference-artifact.retry.test.ts`); `maxSymbols` ganhou piso 2, pois
+  `maxSymbols = 1` rejeitava um único QR como `QR_TOO_MANY_SYMBOLS`. O decoder
+  agora lê `maxSymbols + 1` e conta apenas referências legíveis: exatamente
+  `maxSymbols` QRs ainda passam pela política (dois iguais → `found`, dois
+  distintos → `AMBIGUOUS_REFERENCE`), com testes específicos em
+  `maxSymbols = 2`. PDF com raster inspecionado sem QR passou de `not_found`
+  para `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`; o limite de páginas é
+  validado antes de decodificar QR/texto (teste com `unpdf` mockado). O
+  fingerprint não recalculável após a redaction ganhou teste explícito. Os
+  testes de URL maliciosa passaram a usar QR real (a matriz loopback/localhost/
+  metadata/RFC1918 fica em `reference-artifact.network.test.ts`, com `fetch`
+  envenenado); a integração cobre cross-tenant e replay do fingerprint; os
+  limites de pixels/páginas foram exportados e reutilizados pelo analyzer, sem
+  duplicar constantes.
 
 ## Referência fiscal/QR: extração e normalização (F2.2a) (2026-10-23)
 
@@ -13,9 +92,11 @@ extração física do QR (decodificar imagem) fica para a F2.2b.
   `FiscalReference` (`status`, `source`, `issuer`, `uf`, `url`, `documentId`,
   `method`, `limitations`, `errorCodes`, `fingerprint`). Não há score,
   confiança, aprovação, autenticidade nem resultado de consulta.
-- `status` distingue `found` / `not_found` / `unsupported`. Ausência de QR vira
+- `status` distingue `found` / `not_found` / `inconclusive` / `unsupported`
+  (contrato `2`; `inconclusive` foi acrescentado na F2.2b). Ausência de QR vira
   `not_found`, nunca documento inválido. `unsupported` cobre referência
-  encontrada que não se consegue reconhecer com segurança.
+  encontrada que não se consegue reconhecer com segurança; `inconclusive` cobre
+  artefato que não foi possível analisar.
 - `toFiscalLookupInput(reference, context)` recebe tenant/claim/artefato do
   **contexto confiável** do pipeline e só produz `FiscalLookupInput` quando
   `status = found` e há fonte. A referência não pode alterar tenant/claim/

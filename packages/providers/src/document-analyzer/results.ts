@@ -11,10 +11,11 @@ import {
 
 export const baseResult = (
   now: Date,
-): Pick<DocumentAnalysisResult, 'contractVersion' | 'analyzer' | 'analyzedAt'> => ({
+): Pick<DocumentAnalysisResult, 'contractVersion' | 'analyzer' | 'analyzedAt' | 'fiscalReference'> => ({
   contractVersion: DOCUMENT_ANALYSIS_CONTRACT_VERSION,
   analyzer: { id: DOCUMENT_ANALYZER_ID, version: DOCUMENT_ANALYZER_VERSION },
   analyzedAt: now.toISOString(),
+  fiscalReference: null,
 })
 
 const unknownDimension = <T>(): DocumentAnalysisDimension<T> => ({

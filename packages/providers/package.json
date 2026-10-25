@@ -12,8 +12,10 @@
     "@aws-sdk/client-s3": "^3.1151.0",
     "@comprova/core": "workspace:*",
     "@comprova/db": "workspace:*",
+    "image-size": "2.0.4",
     "ipaddr.js": "^2.5.0",
     "unpdf": "^1.9.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "zxing-wasm": "3.1.6"
   }
 }
