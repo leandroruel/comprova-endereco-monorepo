@@ -9,6 +9,7 @@ import {
   SCORER_VERSION,
   weightedScore,
   type Checker,
+  type ClaimObservation,
   type ClaimType,
   type Clock,
   type Policy,
@@ -23,9 +24,11 @@ import {
   linkClaimEvidence,
   persistFreshSignals,
   readEvidenceSet,
+  readStandaloneEvidenceSet,
   resolveClaimId,
   supersedeIssuedCredentials,
   updateValidationOutcome,
+  type StandaloneEvidenceRow,
 } from './deep-enrich.persistence.js'
 import { runCheckersSequentially, signalFromRow } from './deep-enrich.signals.js'
 import { buildCheckContext, loadValidationState } from './deep-enrich.state.js'
@@ -50,6 +53,32 @@ const AMBIGUITY_THRESHOLD = 0.55
 
 const isAmbiguous = (decision: { readonly verdict: Verdict; readonly confidence: number }): boolean =>
   decision.verdict === 'INSUFFICIENT_EVIDENCE' || decision.confidence < AMBIGUITY_THRESHOLD
+
+/**
+ * Entrada do assessment: signals legados (com stance de 4 valores, preservando a
+ * fidelidade do ADR-0016) mais observações que não têm `signal` — recibo de
+ * intake (F1.1), verificação do documento enviado (F1.3) e consulta fiscal (F2).
+ * Estas últimas nunca tiveram `neutral` persistido, então entram direto de
+ * `claim_evidence`; as ligadas a `signal` ficam de fora para não duplicar o
+ * mesmo fato no score.
+ */
+export const assessmentObservationsOf = (
+  signals: readonly Signal[],
+  standalone: readonly StandaloneEvidenceRow[],
+): readonly ClaimObservation[] => [
+  ...signals.map(observationFromSignal),
+  ...standalone.map((row) => ({
+    checker: row.checker,
+    checkerVersion: row.checkerVersion,
+    stance: row.stance,
+    strength: row.strength,
+    confidence: row.confidence,
+    source: row.source,
+    observedAt: row.observedAt.toISOString(),
+    ttlSeconds: row.ttlSeconds,
+    detail: row.detail,
+  })),
+]
 
 const claimTypeOf = (docType: string): ClaimType =>
   docType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
@@ -165,9 +194,13 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       subjectType,
     })
 
+    // F1.3/F2: observações sem `signal` já persistidas no claim participam da
+    // avaliação existente. Com `strength`/`confidence` neutros (0), o score e o
+    // veredito não mudam; a F3 decide peso/força.
+    const standaloneEvidence = await readStandaloneEvidenceSet(tx, claimId)
     const { score, decision } = evaluateClaim({
       claim: { id: claimId ?? '', type: claimType },
-      evidence: [...signalsAfterT1, ...t2Signals].map(observationFromSignal),
+      evidence: assessmentObservationsOf([...signalsAfterT1, ...t2Signals], standaloneEvidence),
       policy: deps.policy,
       now: evaluatedAt,
     })

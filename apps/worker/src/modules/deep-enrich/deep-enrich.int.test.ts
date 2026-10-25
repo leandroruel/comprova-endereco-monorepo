@@ -10,6 +10,7 @@ import {
 import {
   createDbPool,
   eq,
+  and,
   makeCepReader,
   makeCnaeCategoriaReader,
   makeCnefeReader,
@@ -35,13 +36,20 @@ import {
   verifyCredentialIntegrity,
 } from '@comprova/credential'
 import { makePartnerGraph, makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
-import { makeFakeGeocoder, makeFailingGeocoder, makeFakePlaces, makeFailingPlaces } from '@comprova/providers'
+import {
+  makeFakeFiscalAdapter,
+  makeFakeGeocoder,
+  makeFailingGeocoder,
+  makeFakePlaces,
+  makeFailingPlaces,
+} from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { deepEnrich } from './deep-enrich.service.js'
+import { verifyFiscalClaim } from '../fiscal-verification/fiscal-verification.service.js'
 import { runFastPath } from '../../../../api/src/services/fastpath.js'
 import { issueCredential } from '../../../../api/src/services/credential-issuer.js'
 import { makeConfiguredSigningKeyProvider } from '../../../../api/src/services/signing-key-provider.js'
@@ -270,6 +278,96 @@ describe('deepEnrich (activity core)', () => {
     )
     const afterReplay = await snapshot()
     expect(afterReplay).toEqual(afterFirstDeep)
+  })
+
+  it('F2 — evidência fiscal persistida participa do assessment sem alterar score/veredito', async () => {
+    const created = await runFastPath(
+      fastPathDeps,
+      { tenantId: tenant, apiKeyId: null },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'auto',
+        idempotencyKey: 'fiscal-assessment-integration',
+      },
+    )
+
+    const claimRows = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, created.validationId))
+    const claimId = claimRows[0]?.claimId
+    if (claimId === undefined) throw new Error('claim nao criado pelo fast path')
+
+    // T1 desligado e relógio fixo: isola a avaliação das observações já
+    // persistidas e evita variação de decay entre as duas execuções. A policy
+    // de teste exige o checker fiscal apenas para tornar observável que a
+    // observação entrou no assessment; a policy de produção não o exige, então
+    // score/veredito/confiança ficam neutros nela.
+    const fixedNow = new Date('2026-10-23T12:00:00.000Z')
+    const assessmentPolicy = { ...policy, required_checkers: ['nf3e_verification'] }
+    const deps = {
+      db: adminPool.db,
+      t1Checkers: [],
+      policy: assessmentPolicy,
+      policyHash: 'f'.repeat(64),
+      clock: { now: () => fixedNow },
+    }
+    const before = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
+
+    const inserted = await verifyFiscalClaim(
+      {
+        db: adminPool.db,
+        adapter: makeFakeFiscalAdapter({
+          document: 'authentic',
+          address: 'matches',
+          holder: 'matches',
+          issuer: 'SVRS',
+          environment: 'production',
+        }),
+        now: () => fixedNow,
+      },
+      {
+        source: 'nf3e',
+        tenantId: tenant,
+        claimId,
+        documentId: '43191212345678000199660000000000101018342413',
+        qrCodeUrl:
+          'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=43191212345678000199660000000000101018342413&tpAmb=1',
+        issuer: 'SVRS',
+        uf: 'SP',
+        artifact: { artifactId: randomUUID(), sha256: 'ab'.repeat(32) },
+      },
+    )
+    expect(inserted).toBe('inserted')
+
+    const fiscalRows = await adminPool.db
+      .select({
+        claimEvidenceId: t.claimEvidence.claimEvidenceId,
+        stance: t.claimEvidence.stance,
+        strength: t.claimEvidence.strength,
+        confidence: t.claimEvidence.confidence,
+      })
+      .from(t.claimEvidence)
+      .where(and(eq(t.claimEvidence.claimId, claimId), eq(t.claimEvidence.source, 'fiscal_nf3e')))
+    expect(fiscalRows).toHaveLength(1)
+    expect(fiscalRows[0]).toMatchObject({ stance: 'supports', strength: 0, confidence: 0 })
+
+    const after = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
+    // A observação fiscal tem strength/confidence neutros: o assessment existente
+    // a enxerga (cobertura do checker exigido pela policy de teste) sem alterar
+    // score nem veredito.
+    expect(after.score).toBe(before.score)
+    expect(after.verdict).toBe(before.verdict)
+    expect(after.confidence).toBeGreaterThan(before.confidence)
+
+    const stored = await adminPool.db
+      .select({ explanation: t.validation.explanation })
+      .from(t.validation)
+      .where(eq(t.validation.validationId, created.validationId))
+    expect(stored[0]?.explanation?.supporting_evidence).toContain(fiscalRows[0]?.claimEvidenceId)
   })
 
   // FASE 7 — validação legada (signals já persistidos, sem claim) recebe claim e
