@@ -506,6 +506,9 @@ const instantiateQrReader = async (): Promise<void> => {
 const ensureQrReader = (): Promise<void> => {
   if (qrReaderReady === null) {
     qrReaderReady = instantiateQrReader().catch(() => {
+      // Não cacheia a falha: uma chamada posterior pode tentar inicializar de
+      // novo em vez de ficar presa em `QR_DECODER_UNAVAILABLE` até reiniciar.
+      qrReaderReady = null
       throw new QrDecoderUnavailableError()
     })
   }

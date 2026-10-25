@@ -81,7 +81,8 @@ export interface FiscalReference {
   /** UF normalizada de 2 letras; derivada da chave de acesso quando presente. */
   readonly uf: string | null
   /** URL normalizada (sem fragmento, query ordenada); nunca buscada. */
-  readonly url: string | null /** Chave de acesso/identificador do documento, validada estruturalmente. */
+  readonly url: string | null
+  /** Chave de acesso/identificador do documento, validada estruturalmente. */
   readonly documentId: string | null
   readonly method: FiscalReferenceMethod
   /** Condições informativas da referência; não impedem `found`. */
