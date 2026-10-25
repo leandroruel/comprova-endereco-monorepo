@@ -177,6 +177,13 @@ const inconclusive = (input: {
   fingerprint: null,
 })
 
+/**
+ * Referência inconclusiva para falhas de orquestração que acontecem antes da
+ * extração (ex.: PDF com páginas demais). Mantém o mesmo contrato do extractor.
+ */
+export const inconclusiveFiscalReference = (reason: FiscalReferenceReason): FiscalReference =>
+  inconclusive({ method: 'qr_code', reasons: [reason] })
+
 const found = (input: FoundInput): FiscalReference => {
   const reference: FiscalReference = {
     ...base,
@@ -527,9 +534,9 @@ const ensureQrReader = (): Promise<void> => {
   return qrReaderReady
 }
 
-const qrReaderOptions = (maxSymbols: number): ReaderOptions => ({
+const qrReaderOptions = (maxSymbolsToRead: number): ReaderOptions => ({
   formats: ['QRCode'],
-  maxNumberOfSymbols: maxSymbols,
+  maxNumberOfSymbols: maxSymbolsToRead,
   returnErrors: true,
   tryHarder: true,
   tryRotate: true,
@@ -538,8 +545,14 @@ const qrReaderOptions = (maxSymbols: number): ReaderOptions => ({
 
 interface SymbolPolicyOptions {
   readonly maxSymbols: number
-  readonly notFoundLimitations?: readonly FiscalReferenceReason[]
 }
+
+/**
+ * Resultado legível é o único que participa da política de referências.
+ * `returnErrors` pode acrescentar entradas inválidas (falso positivo/checksum),
+ * que não contam como um símbolo fiscal adicional.
+ */
+const isReadableResult = (result: ReadResult): boolean => result.isValid && result.text.trim().length > 0
 
 /**
  * Consolida os resultados do decoder. Um resultado inválido com `returnErrors`
@@ -549,16 +562,20 @@ const referenceFromSymbols = (
   results: readonly ReadResult[],
   options: SymbolPolicyOptions,
 ): FiscalReference => {
-  if (results.length >= options.maxSymbols) {
+  const readable = results.filter(isReadableResult)
+
+  // O decoder lê `maxSymbols + 1`; só há truncamento quando esse limite
+  // extra é atingido. Exatamente `maxSymbols` referências legíveis ainda
+  // passam pela política (duplicata vira found, distintas viram ambíguo).
+  if (readable.length > options.maxSymbols) {
     return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
   }
 
-  const readable = results.filter((result) => result.isValid && result.text.trim().length > 0)
   const unreadable = results.length - readable.length
 
   if (readable.length === 0) {
     if (unreadable > 0) return inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
-    return notFound('qr_code', options.notFoundLimitations ?? [])
+    return notFound('qr_code')
   }
 
   const reference = extractFiscalReferenceFromPayloads(readable.map((result) => result.text))
@@ -573,10 +590,10 @@ const referenceFromSymbols = (
 
 const readQrImage = async (
   input: Uint8Array | RgbaImage,
-  maxSymbols: number,
+  maxSymbolsToRead: number,
 ): Promise<readonly ReadResult[]> => {
   await ensureQrReader()
-  return readBarcodes(input as Parameters<typeof readBarcodes>[0], qrReaderOptions(maxSymbols))
+  return readBarcodes(input as Parameters<typeof readBarcodes>[0], qrReaderOptions(maxSymbolsToRead))
 }
 
 const isSafeDimension = (value: number): boolean => Number.isSafeInteger(value) && value > 0
@@ -637,6 +654,7 @@ export const extractFiscalReferenceFromPdf = async (
   const results: ReadResult[] = []
   const seenImageKeys = new Set<string>()
   let imageCount = 0
+  let readableCount = 0
   let extractionFailed = false
   let skippedOversized = false
 
@@ -674,10 +692,11 @@ export const extractFiscalReferenceFromPdf = async (
       try {
         const pageResults = await readQrImage(
           { data: rgba, width: image.width, height: image.height },
-          maxSymbols,
+          maxSymbols + 1,
         )
         results.push(...pageResults)
-        if (results.length >= maxSymbols) {
+        readableCount += pageResults.filter(isReadableResult).length
+        if (readableCount > maxSymbols) {
           return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
         }
       } catch (error) {
@@ -699,15 +718,20 @@ export const extractFiscalReferenceFromPdf = async (
   }
 
   if (results.length === 0) {
-    // Só inspecionamos raster; um QR vetorial no mesmo PDF continuaria fora do
-    // alcance. A limitação evita afirmar ausência absoluta.
-    return notFound('qr_code', ['PDF_QR_VECTOR_UNSUPPORTED'])
+    // Só inspecionamos raster; um QR vetorial no mesmo PDF continua fora do
+    // alcance. Como não é possível afirmar ausência absoluta, o resultado é
+    // inconclusivo, não `not_found`.
+    return inconclusive({ method: 'qr_code', reasons: ['PDF_QR_VECTOR_UNSUPPORTED'] })
   }
 
-  return referenceFromSymbols(results, {
-    maxSymbols,
-    notFoundLimitations: ['PDF_QR_VECTOR_UNSUPPORTED'],
-  })
+  const reference = referenceFromSymbols(results, { maxSymbols })
+  if (reference.status === 'not_found') {
+    return inconclusive({
+      method: 'qr_code',
+      reasons: unique([...reference.limitations, 'PDF_QR_VECTOR_UNSUPPORTED']),
+    })
+  }
+  return reference
 }
 
 const extractFromImage = async (
@@ -736,7 +760,7 @@ const extractFromImage = async (
 
   let results: readonly ReadResult[]
   try {
-    results = await readQrImage(data, maxSymbols)
+    results = await readQrImage(data, maxSymbols + 1)
   } catch (error) {
     if (error instanceof QrDecoderUnavailableError) {
       return inconclusive({ method: 'qr_code', reasons: ['QR_DECODER_UNAVAILABLE'] })

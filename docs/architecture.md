@@ -225,7 +225,7 @@ contrato em memória que classifica uma referência já extraída como `found`,
 `not_found`, `inconclusive` ou `unsupported`. Só `found` com fonte reconhecida
 vira `FiscalLookupInput`, sempre com tenant/claim/artefato vindos do contexto
 confiável. A URL do QR é normalizada e nunca buscada. Detalhes em
-[`arquitetura-evidencias.md`](arquitetura-evidencias.md#56-referência-fiscalqr-extração-e-normalização-f22a-implementado).
+[`arquitetura-evidencias.md`](arquitetura-evidencias.md).
 
 A parte física da F2.2b decodifica o QR localmente e não cria contrato paralelo:
 `extractFiscalReferenceFromArtifact` entrega o payload ao mesmo
@@ -238,17 +238,23 @@ A parte física da F2.2b decodifica o QR localmente e não cria contrato paralel
   decodificar.
 - **PDF sem canvas.** Só QR raster embutido é inspecionado via
   `unpdf.extractImages`. QR vetorial/desenhado não é renderizado
-  (`PDF_QR_VECTOR_UNSUPPORTED`); nada de dependência nativa. Se no futuro for
-  necessário renderizar, o requisito é limite explícito de páginas/tempo/memória.
+  (`PDF_QR_VECTOR_UNSUPPORTED`); raster inspecionado sem QR também é
+  `inconclusive`, pois não é possível afirmar ausência absoluta. `not_found`
+  fica para PNG/JPEG integralmente inspecionáveis. Nada de dependência nativa;
+  se no futuro for necessário renderizar, o requisito é limite explícito de
+  páginas/tempo/memória. O limite de páginas é validado antes de decodificar QR
+  ou texto.
 - **Múltiplos QR sem escolha arbitrária.** A consolidação é por fingerprint/
   identidade, não por posição: duplicatas → `found`; referências distintas →
   `AMBIGUOUS_REFERENCE`; fiscal único + não fiscal → `found` com
-  `MULTIPLE_QR_CODES`.
+  `MULTIPLE_QR_CODES`. O decoder lê `maxSymbols + 1` para detectar truncamento;
+  exatamente o teto ainda passa pela política.
 - **URL nunca persistida.** O `DocumentAnalysisResult` (contrato `3`,
   `text_document@1.2.0`) carrega `fiscalReference`; antes de gravar em
   `evidence_analysis.result`, `redactFiscalReference` zera `url` e o schema
   rejeita `url != null`. `fingerprint`/`documentId` permanecem para auditoria e
-  consulta futura.
+  consulta futura. O fingerprint inclui a URL e é preservado na redaction,
+  portanto não é recalculável a partir da projeção persistida.
 - **Sem novo modelo de evidência, score ou allowlist.** A referência continua
   sendo uma observação não confiável; a consulta real, a allowlist preenchida e
   o parsing da resposta seguem na segunda metade da F2.2b.

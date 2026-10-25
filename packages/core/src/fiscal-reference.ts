@@ -141,6 +141,11 @@ export const redactFiscalReference = (reference: FiscalReference): FiscalReferen
  * Fingerprint determinístico da referência normalizada. Diferente de
  * `fiscalDocumentFingerprint`, não depende de tenant/claim: é uma identidade
  * para logs/testes, não a chave de idempotência da consulta.
+ *
+ * A URL normalizada participa do hash quando existe. O fingerprint persistido
+ * é o da referência ORIGINAL (pré-redaction), portanto NÃO é recalculável a
+ * partir da projeção persistida, onde `url = null`. Use `documentId` como
+ * identificador fiscal estável e trate a URL como dado transitório.
  */
 export const fiscalReferenceFingerprint = (reference: FiscalReference): string | null => {
   if (reference.status !== 'found') return null

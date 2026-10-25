@@ -228,14 +228,22 @@ complementam esta ADR:
   apenas uma referência não confiável.
 - PDF vetorial/desenhado não é renderizado (`PDF_QR_VECTOR_UNSUPPORTED`); não há
   canvas nativo. A extração reaproveita o mesmo `PDFDocumentProxy` da análise de
-  texto.
+  texto. PDF com raster inspecionado sem QR também é
+  `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`: `not_found` fica reservado a
+  artefatos integralmente inspecionáveis (PNG/JPEG). O limite de páginas é
+  validado antes de qualquer decodificação de QR ou extração de texto.
 - Múltiplos QR: mesmo fingerprint vira `found`; referências fiscais distintas
   viram `AMBIGUOUS_REFERENCE`; fiscal + não fiscal vira `found` com
-  `MULTIPLE_QR_CODES`. O decoder nunca escolhe arbitrariamente o primeiro.
+  `MULTIPLE_QR_CODES`. O decoder nunca escolhe arbitrariamente o primeiro. Ele
+  lê `maxSymbols + 1` apenas para detectar truncamento; exatamente `maxSymbols`
+  referências legíveis ainda passam pela política.
 - `DocumentAnalysisResult` subiu para o contrato `3` e o analyzer para
   `text_document@1.2.0`; ambos carregam `fiscalReference`. A URL é removida
   (`url = null`) antes da persistência em `evidence_analysis.result`; o
-  `fingerprint` e o `documentId` permanecem para auditoria/consulta futura.
+  `fingerprint` e o `documentId` permanecem para auditoria/consulta futura. O
+  fingerprint inclui a URL normalizada e é preservado na redaction, portanto
+  não é recalculável a partir da projeção persistida; `documentId` é o
+  identificador fiscal estável e a URL é dado transitório.
 - A consulta NF3e real, a allowlist preenchida e o parsing da resposta continuam
   fora desta entrega.
 

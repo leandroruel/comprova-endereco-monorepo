@@ -129,6 +129,28 @@ describe('extractFiscalReferenceFromArtifact (F2.2b física)', () => {
     expect(reference.errorCodes).toEqual([])
   })
 
+  it('dois QR distintos com maxSymbols = 2 ainda aplicam a política de ambiguidade', async () => {
+    const reference = await extractFiscalReferenceFromArtifact(
+      { data: fixture('qr-two-different.png'), contentType: 'image/png' },
+      { maxSymbols: 2 },
+    )
+
+    expect(reference.status).toBe('unsupported')
+    expect(reference.errorCodes).toContain('AMBIGUOUS_REFERENCE')
+    expect(toFiscalLookupInput(reference, context)).toBeNull()
+  })
+
+  it('dois QR iguais com maxSymbols = 2 viram found', async () => {
+    const reference = await extractFiscalReferenceFromArtifact(
+      { data: fixture('qr-two-same.png'), contentType: 'image/png' },
+      { maxSymbols: 2 },
+    )
+
+    expect(reference.status).toBe('found')
+    expect(reference.documentId).toBe(NF3E_KEY)
+    expect(reference.errorCodes).toEqual([])
+  })
+
   it('respeita maxSymbols mínimo sem rejeitar um único QR válido', async () => {
     const reference = await extractFiscalReferenceFromArtifact(
       { data: fixture('qr-nf3e.png'), contentType: 'image/png' },

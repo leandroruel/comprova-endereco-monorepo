@@ -12,6 +12,7 @@ import {
   extractFiscalReferenceFromPdf,
   FISCAL_REFERENCE_MAX_IMAGE_PIXELS,
   FISCAL_REFERENCE_MAX_PDF_PAGES,
+  inconclusiveFiscalReference,
 } from '../fiscal/reference.js'
 import { fieldsFromPdfText } from './fields.js'
 import { baseResult, inconclusiveResult, invalidResult, unsupportedResult } from './results.js'
@@ -52,16 +53,22 @@ const analyzePdf = async (data: Uint8Array, now: Date): Promise<DocumentAnalysis
   }
 
   try {
+    // O limite de páginas é validado antes de qualquer decodificação de QR ou
+    // extração de texto: o artefato não confiável não deve entrar no pipeline
+    // de parsing apenas para ser descartado depois.
+    if (pdf.numPages > MAX_PAGES) {
+      return withFiscalReference(
+        inconclusiveResult(now, 'TOO_MANY_PAGES'),
+        inconclusiveFiscalReference('PDF_TOO_MANY_PAGES'),
+      )
+    }
+
     // A referência fiscal é extraída independentemente do texto: um PDF
     // escaneado pode não ter camada textual e ainda conter um QR raster.
     const fiscalReference = await extractFiscalReferenceFromPdf(pdf, {
       maxPdfPages: MAX_PAGES,
       maxImagePixels: MAX_IMAGE_PIXELS,
     })
-
-    if (pdf.numPages > MAX_PAGES) {
-      return withFiscalReference(inconclusiveResult(now, 'TOO_MANY_PAGES'), fiscalReference)
-    }
 
     let text: string
     try {

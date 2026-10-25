@@ -91,6 +91,11 @@ describe('contrato de referência fiscal (F2.2a)', () => {
     expect(fiscalReferenceFingerprint(foundReference({ documentId: NF3E_KEY.replace(/5$/, '6') }))).not.toBe(
       first.fingerprint,
     )
+    expect(
+      fiscalReferenceFingerprint(
+        foundReference({ url: 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?tpAmb=2' }),
+      ),
+    ).not.toBe(first.fingerprint)
     expect(fiscalReferenceFingerprint(foundReference({ status: 'unsupported' }))).toBeNull()
     expect(fiscalReferenceFingerprint(foundReference({ status: 'inconclusive' }))).toBeNull()
   })
@@ -102,8 +107,10 @@ describe('contrato de referência fiscal (F2.2a)', () => {
     expect(redacted.url).toBeNull()
     expect(redacted.documentId).toBe(NF3E_KEY)
     expect(redacted.fingerprint).toBe(original.fingerprint)
-    // Não recalcula o fingerprint: a identidade original é preservada.
+    // Não recalcula o fingerprint: a identidade original é preservada, mas
+    // não é derivável de volta a partir da projeção persistida (url = null).
     expect(redacted.fingerprint).toBe(fiscalReferenceFingerprint(original))
+    expect(fiscalReferenceFingerprint(redacted)).not.toBe(original.fingerprint)
     expect(JSON.stringify(redacted)).not.toContain('dfe-portal.svrs.rs.gov.br')
   })
 

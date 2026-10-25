@@ -22,14 +22,17 @@ etapa de "F2.2a"; no roadmap canônico a F2.2a é a normalização.
   um teste com `fetch` instrumentado comprova. `image-size@2.0.4` faz a
   pré-checagem de dimensões (sem decodificar a imagem).
 - Limites: 16 MP e borda de 10.000 px por imagem, 8 símbolos QR, 50 páginas e
-  64 imagens por PDF. Estouro vira `inconclusive` (`IMAGE_TOO_LARGE`,
-  `PDF_TOO_MANY_PAGES`, `PDF_TOO_MANY_IMAGES`, `QR_TOO_MANY_SYMBOLS`), nunca
-  `found` incompleto.
+  64 imagens por PDF. O decoder lê `maxSymbols + 1` apenas para detectar
+  truncamento; exatamente `maxSymbols` referências legíveis ainda passam pela
+  política de múltiplos QR (não viram `QR_TOO_MANY_SYMBOLS`). Estouro vira
+  `inconclusive` (`IMAGE_TOO_LARGE`, `PDF_TOO_MANY_PAGES`,
+  `PDF_TOO_MANY_IMAGES`, `QR_TOO_MANY_SYMBOLS`), nunca `found` incompleto.
 - PDF usa `unpdf.extractImages` + `getDocumentProxy({ maxImageSize })` e só lê
   **raster embutido**. QR vetorial/desenhado não é renderizado: retorna
-  `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED` (PDF sem raster) ou `not_found`
-  com a limitação `PDF_QR_VECTOR_UNSUPPORTED` (raster inspecionado sem QR).
-  Nenhuma dependência nativa/canvas foi adicionada.
+  `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`, tanto quando não há raster quanto
+  quando o raster inspecionado não contém QR (não é possível afirmar ausência
+  absoluta). Nenhuma dependência nativa/canvas foi adicionada; o limite de
+  páginas é validado antes de qualquer decodificação de QR ou extração de texto.
 - Política determinística para múltiplos QR
   (`extractFiscalReferenceFromPayloads`): payloads duplicados/mesmo fingerprint
   → `found`; referências fiscais distintas → `unsupported`/`AMBIGUOUS_REFERENCE`
@@ -57,13 +60,22 @@ etapa de "F2.2a"; no roadmap canônico a F2.2a é a normalização.
   houver canvas com limite de tempo/memória); artefatos antigos só ganham a
   nova análise em replay/backfill (nova versão do analyzer); não há timeout
   cooperativo no decoder WASM — o risco é limitado pelos tetos de pixels e
-  símbolos.
+  símbolos. O hardening futuro deve isolar o decoder (worker/limite de tempo)
+  antes de aumentar esses tetos; isso permanece no backlog operacional, não
+  neste PR.
 - Correções da revisão: o estado do decoder agora é resetado quando a
   inicialização do WASM falha, então a chamada seguinte tenta de novo em vez de
   ficar presa em `QR_DECODER_UNAVAILABLE` (regressão em
   `reference-artifact.retry.test.ts`); `maxSymbols` ganhou piso 2, pois
-  `maxSymbols = 1` rejeitava um único QR como `QR_TOO_MANY_SYMBOLS`; os testes
-  de URL maliciosa passaram a usar QR real (a matriz loopback/localhost/
+  `maxSymbols = 1` rejeitava um único QR como `QR_TOO_MANY_SYMBOLS`. O decoder
+  agora lê `maxSymbols + 1` e conta apenas referências legíveis: exatamente
+  `maxSymbols` QRs ainda passam pela política (dois iguais → `found`, dois
+  distintos → `AMBIGUOUS_REFERENCE`), com testes específicos em
+  `maxSymbols = 2`. PDF com raster inspecionado sem QR passou de `not_found`
+  para `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`; o limite de páginas é
+  validado antes de decodificar QR/texto (teste com `unpdf` mockado). O
+  fingerprint não recalculável após a redaction ganhou teste explícito. Os
+  testes de URL maliciosa passaram a usar QR real (a matriz loopback/localhost/
   metadata/RFC1918 fica em `reference-artifact.network.test.ts`, com `fetch`
   envenenado); a integração cobre cross-tenant e replay do fingerprint; os
   limites de pixels/páginas foram exportados e reutilizados pelo analyzer, sem

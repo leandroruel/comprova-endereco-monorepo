@@ -577,26 +577,37 @@ dependências em [`architecture.md`](architecture.md).
   pré-checagem de dimensões. Tetos: 16 MP e 10.000 px por imagem, 8 símbolos
   (mínimo 2), 50 páginas e 64 imagens por PDF. Estouro vira `inconclusive`.
 - **PDF sem canvas:** só raster embutido via `unpdf.extractImages`; QR
-  vetorial/desenhado retorna `PDF_QR_VECTOR_UNSUPPORTED`.
+  vetorial/desenhado retorna `PDF_QR_VECTOR_UNSUPPORTED`. PDF com raster
+  inspecionado sem QR também é `inconclusive`, pois não é possível afirmar
+  ausência absoluta; `not_found` fica para artefatos integralmente
+  inspecionáveis (PNG/JPEG). O limite de páginas é validado antes de decodificar
+  QR ou texto.
 - **Múltiplos QR:** mesmo fingerprint → `found`; referências fiscais distintas →
   `unsupported`/`AMBIGUOUS_REFERENCE`; fiscal + não fiscal → `found` com
-  `MULTIPLE_QR_CODES`. Nunca escolhe o primeiro QR.
+  `MULTIPLE_QR_CODES`. Nunca escolhe o primeiro QR. O decoder lê
+  `maxSymbols + 1` apenas para detectar truncamento; exatamente `maxSymbols`
+  referências legíveis ainda passam pela política.
 - **Persistência:** `DocumentAnalysisResult` (contrato `3`,
   `text_document@1.2.0`) carrega `fiscalReference`; a URL é removida antes de
   gravar em `evidence_analysis.result`, preservando `fingerprint` e
   `documentId`.
 - **Minimização e determinismo:** a referência não persiste PII nem texto bruto;
   o `fingerprint` SHA-256 truncado é calculado apenas sobre campos normalizados.
-  A idempotência final continua em
-  `(claim_id, source, checker, checker_version)` (F2.1).
+  Ele inclui a URL normalizada e é preservado na redaction, portanto não é
+  recalculável a partir da projeção persistida (`url = null`); `documentId` é o
+  identificador fiscal estável e a URL é dado transitório. A idempotência final
+  continua em `(claim_id, source, checker, checker_version)` (F2.1).
 
 Testes: `packages/core/src/fiscal-reference.test.ts` (conversão para input,
 contexto confiável, fingerprint), `packages/providers/src/fiscal/reference.test.ts`
 (reconhecimento, URLs maliciosas, ambiguidade, chave inválida, ausência de PII),
 `packages/providers/src/fiscal/reference-artifact.test.ts` (PNG/JPEG/PDF,
-limites, múltiplos QR), `reference-artifact.network.test.ts` (matriz
+limites, múltiplos QR inclusive com `maxSymbols = 2`),
+`reference-artifact.network.test.ts` (matriz
 loopback/localhost/metadata/RFC1918 com `fetch` envenenado),
-`reference-artifact.retry.test.ts` (retry após falha de inicialização do WASM) e
+`reference-artifact.retry.test.ts` (retry após falha de inicialização do WASM),
+`packages/providers/src/document-analyzer/analyze.pdf-limits.test.ts` (limite de
+páginas antes da decodificação e PDF raster sem QR → `inconclusive`) e
 `apps/api/tests/fiscal-verification.int.test.ts` +
 `apps/api/tests/evidence-analysis.int.test.ts` (referência extraída →
 `FiscalLookupInput` → `FakeFiscalAdapter` → `claim_evidence`, URL não
