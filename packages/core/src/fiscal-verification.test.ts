@@ -131,6 +131,20 @@ describe('contrato fiscal', () => {
     )
   })
 
+  it.each([
+    ['matches', 'matches', 'supports'],
+    ['matches', 'differs', 'unknown'],
+    ['matches', 'not_extracted', 'supports'],
+    ['differs', 'matches', 'contradicts'],
+    ['differs', 'differs', 'unknown'],
+    ['differs', 'not_extracted', 'unknown'],
+    ['not_extracted', 'matches', 'unknown'],
+    ['not_extracted', 'differs', 'unknown'],
+    ['not_extracted', 'not_extracted', 'unknown'],
+  ] as const)('mapeia address=%s e holder=%s para stance=%s', (address, holder, expected) => {
+    expect(stanceForDimensions({ document: 'authentic', address, holder })).toBe(expected)
+  })
+
   it('constrói estados neutros para fonte não suportada e indisponível', () => {
     const now = new Date('2026-10-23T12:00:00.000Z')
     const unsupported = unsupportedFiscalVerification(INPUT, '1.0.0', now, 'SOURCE_NOT_SUPPORTED')

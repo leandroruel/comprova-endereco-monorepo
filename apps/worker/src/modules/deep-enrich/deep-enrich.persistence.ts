@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from '@comprova/db'
+import { and, eq, inArray, isNull, sql } from '@comprova/db'
 import type { DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
@@ -233,6 +233,49 @@ export const readEvidenceSet = async (tx: DbTx, claimId: string | null) =>
         })
         .from(t.claimEvidence)
         .where(eq(t.claimEvidence.claimId, claimId))
+
+/** Observação materializada diretamente em `claim_evidence`, sem `signal`. */
+export interface StandaloneEvidenceRow {
+  readonly id: string
+  readonly checker: string
+  readonly checkerVersion: string
+  readonly stance: 'supports' | 'contradicts' | 'unknown'
+  readonly strength: number
+  readonly confidence: number
+  readonly source: string
+  readonly observedAt: Date
+  readonly ttlSeconds: number
+  readonly detail: Record<string, unknown>
+}
+
+/**
+ * Observações que NÃO vieram de um checker legado (`signal_id IS NULL`):
+ * recibo de intake (F1.1), verificação do documento enviado (F1.3) e consulta
+ * fiscal (F2). Elas já estão no conjunto durável (`readEvidenceSet`), mas
+ * precisam entrar também na avaliação, sem duplicar as observações ligadas a
+ * `signal`. Hoje todos esses produtores gravam `strength`/`confidence` neutros.
+ */
+export const readStandaloneEvidenceSet = async (
+  tx: DbTx,
+  claimId: string | null,
+): Promise<readonly StandaloneEvidenceRow[]> =>
+  claimId === null
+    ? []
+    : await tx
+        .select({
+          id: t.claimEvidence.claimEvidenceId,
+          checker: t.claimEvidence.checker,
+          checkerVersion: t.claimEvidence.checkerVersion,
+          stance: t.claimEvidence.stance,
+          strength: t.claimEvidence.strength,
+          confidence: t.claimEvidence.confidence,
+          source: t.claimEvidence.source,
+          observedAt: t.claimEvidence.observedAt,
+          ttlSeconds: t.claimEvidence.ttlSeconds,
+          detail: t.claimEvidence.detail,
+        })
+        .from(t.claimEvidence)
+        .where(and(eq(t.claimEvidence.claimId, claimId), isNull(t.claimEvidence.signalId)))
 
 export interface ValidationOutcomeWrite {
   readonly validationId: string

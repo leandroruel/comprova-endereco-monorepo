@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **Consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-25)
+Estado: **Integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-25)
 
 ## Consulta NF3e real SVRS/RS (F2.2b — primeira fatia) (2026-10-25)
 
@@ -43,6 +43,28 @@ consulta por QR. O escopo é deliberadamente pequeno; não há cobertura naciona
   PII/scoring), 32 na referência (inclui `chNF3e`), 10 na allowlist/schema e 23
   de integração (servidor HTTP local via guarda, idempotência, versionamento,
   cross-tenant e fixture estendida). O CI não chama o portal SVRS.
+
+## Integração da evidência fiscal ao assessment (F2.2b) (2026-10-25)
+
+A observação fiscal já materializada em `claim_evidence` agora entra na
+avaliação existente, sem criar um segundo pipeline nem alterar a policy.
+
+- `deepEnrich` lê, na mesma transação, as observações do claim com
+  `signal_id IS NULL` (recibo de intake F1.1, verificação do documento F1.3 e
+  consulta fiscal F2) e as passa para `evaluateClaim` junto dos signals. As
+  linhas ligadas a `signal` continuam vindo da tabela `signal`, preservando a
+  fidelidade de `neutral` do ADR-0016 e evitando dupla contagem.
+- Os produtores atuais gravam `strength = 0` e `confidence = 0`; por isso
+  `weightedScore`, veredito e confiança de produção não mudam. A F3 continua
+  responsável por peso, força e hard rule da fonte fiscal.
+- `inconclusive`, `unavailable` e `unsupported` seguem `unknown`; `not_found` e
+  `invalid` também não viram `contradicts` nesta política conservadora.
+- Sem tabela/migration, sem novo `signal`, sem mudança de RLS, idempotência ou
+  versionamento. O detalhe fiscal continua restrito a outcomes, hashes e
+  metadados, sem resposta bruta, URL arbitrária ou PII.
+- Testes: matriz completa de `stance` para endereço/titular, unidade do mapper
+  de observações e integração provando que a evidência fiscal participa do
+  assessment (cobertura) sem alterar score nem veredito.
 
 ## Extração física do QR a partir do artefato (F2.2b — parte física) (2026-10-24)
 
