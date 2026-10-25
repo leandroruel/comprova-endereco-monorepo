@@ -592,4 +592,97 @@ describe('F2.2b — referência fiscal extraída do artefato', () => {
     })
     expect(input?.tenantId).not.toBe('tenant-from-qr')
   })
+
+  it('isola a referência fiscal por tenant no upload, na leitura e no input', async () => {
+    const validationA = await makeValidation(tenantA)
+    const validationB = await makeValidation(tenantB)
+    await upload(validationA, keyA, nf3eQrPdf, 'nf3e-a.pdf')
+    await upload(validationB, keyB, nf3eQrPdf, 'nf3e-b.pdf')
+    await runTick()
+
+    const graphA = await graphOf(validationA)
+    const graphB = await graphOf(validationB)
+    const analysisA = graphA.analyses[0]
+    const analysisB = graphB.analyses[0]
+    const artifactA = graphA.artifacts[0]
+    const artifactB = graphB.artifacts[0]
+    const claimA = graphA.claims[0]
+    const claimB = graphB.claims[0]
+    expect(analysisA?.tenantId).toBe(tenantA)
+    expect(analysisB?.tenantId).toBe(tenantB)
+    expect(artifactA?.artifactId).not.toBe(artifactB?.artifactId)
+
+    const referenceA = (analysisA?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    const referenceB = (analysisB?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    // Mesmo conteúdo, mesma identidade de referência; o que muda é o contexto.
+    expect(referenceA.fingerprint).toBe(referenceB.fingerprint)
+    expect(referenceA.documentId).toBe(NF3E_KEY)
+
+    // RLS: o tenant A não enxerga a análise do artefato do tenant B.
+    const crossTenantRows = await withTenant(appPool.db, tenantA, async (tx) =>
+      tx
+        .select()
+        .from(t.evidenceAnalysis)
+        .where(eq(t.evidenceAnalysis.artifactId, artifactB?.artifactId as string)),
+    )
+    expect(crossTenantRows).toHaveLength(0)
+
+    const inputA = toFiscalLookupInput(referenceA, {
+      tenantId: tenantA,
+      claimId: claimA?.claimId as string,
+      artifact: {
+        artifactId: artifactA?.artifactId as string,
+        sha256: artifactA?.sha256.toString('hex') as string,
+      },
+    })
+    const inputB = toFiscalLookupInput(referenceB, {
+      tenantId: tenantB,
+      claimId: claimB?.claimId as string,
+      artifact: {
+        artifactId: artifactB?.artifactId as string,
+        sha256: artifactB?.sha256.toString('hex') as string,
+      },
+    })
+    expect(inputA).toMatchObject({
+      tenantId: tenantA,
+      claimId: claimA?.claimId,
+      artifact: { artifactId: artifactA?.artifactId },
+      documentId: NF3E_KEY,
+    })
+    expect(inputB).toMatchObject({
+      tenantId: tenantB,
+      claimId: claimB?.claimId,
+      artifact: { artifactId: artifactB?.artifactId },
+      documentId: NF3E_KEY,
+    })
+    expect(inputA?.tenantId).not.toBe(inputB?.tenantId)
+  })
+
+  it('replay do upload não reescreve a análise nem o fingerprint da referência', async () => {
+    const validationId = await makeValidation(tenantA)
+    expect((await upload(validationId, keyA, nf3eQrPdf, 'nf3e.pdf')).statusCode).toBe(201)
+    await runTick()
+
+    const first = (await graphOf(validationId)).analyses[0]
+    const firstReference = (first?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    expect(first?.status).toBe('inconclusive')
+    expect(firstReference.status).toBe('found')
+
+    const replay = await upload(validationId, keyA, nf3eQrPdf, 'nf3e.pdf')
+    expect(replay.statusCode).toBe(200)
+    expect(replay.headers['idempotent-replayed']).toBe('true')
+    await runTick()
+
+    const after = (await graphOf(validationId)).analyses
+    expect(after).toHaveLength(1)
+    expect(after[0]?.analysisId).toBe(first?.analysisId)
+    expect(after[0]?.analyzedAt?.toISOString()).toBe(first?.analyzedAt?.toISOString())
+    const afterReference = (
+      after[0]?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] }
+    ).fiscalReference
+    expect(afterReference).toEqual(firstReference)
+  })
 })

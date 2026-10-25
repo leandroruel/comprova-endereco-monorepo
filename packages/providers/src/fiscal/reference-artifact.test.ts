@@ -102,23 +102,15 @@ describe('extractFiscalReferenceFromArtifact (F2.2b física)', () => {
     expect(reference.errorCodes).toContain('IMAGE_DECODE_FAILED')
   })
 
-  it('não segue URL maliciosa nem fora da allowlist (normalização)', async () => {
-    const maliciousUrls = [
-      'http://127.0.0.1/nf3e/qrCode',
-      'https://localhost/nf3e/qrCode',
-      'https://169.254.169.254/latest/meta-data',
-      'https://10.0.0.1/nf3e/qrCode',
-    ]
+  it('não transforma QR com URL de loopback em referência', async () => {
+    // Fixture de QR real (não bytes de texto disfarçados de PNG). A matriz
+    // completa de loopback/localhost/metadata/RFC1918 está em
+    // reference-artifact.network.test.ts, que também envenena `fetch`.
+    const reference = await extractFrom('qr-loopback-http.png', 'image/png')
 
-    for (const url of maliciousUrls) {
-      const reference = await extractFiscalReferenceFromArtifact({
-        data: new TextEncoder().encode(url),
-        contentType: 'image/png',
-      })
-
-      expect(reference.status).not.toBe('found')
-      expect(toFiscalLookupInput(reference, context)).toBeNull()
-    }
+    expect(reference.status).toBe('unsupported')
+    expect(reference.errorCodes).toContain('UNSAFE_REFERENCE_URL')
+    expect(toFiscalLookupInput(reference, context)).toBeNull()
   })
 
   it('dois QR codes distintos na mesma imagem viram ambíguo', async () => {
@@ -135,6 +127,28 @@ describe('extractFiscalReferenceFromArtifact (F2.2b física)', () => {
     expect(reference.status).toBe('found')
     expect(reference.documentId).toBe(NF3E_KEY)
     expect(reference.errorCodes).toEqual([])
+  })
+
+  it('respeita maxSymbols mínimo sem rejeitar um único QR válido', async () => {
+    const reference = await extractFiscalReferenceFromArtifact(
+      { data: fixture('qr-nf3e.png'), contentType: 'image/png' },
+      { maxSymbols: 1 },
+    )
+
+    expect(reference.status).toBe('found')
+    expect(reference.documentId).toBe(NF3E_KEY)
+    expect(reference.errorCodes).toEqual([])
+  })
+
+  it('extrações concorrentes são determinísticas e compartilham o decoder', async () => {
+    const [first, second] = await Promise.all([
+      extractFrom('qr-nf3e.png', 'image/png'),
+      extractFrom('qr-nf3e.png', 'image/png'),
+    ])
+
+    expect(first.status).toBe('found')
+    expect(second.status).toBe('found')
+    expect(first.fingerprint).toBe(second.fingerprint)
   })
 
   it('um QR fiscal + imagem sem QR fica found (apenas o QR é decodificado)', async () => {

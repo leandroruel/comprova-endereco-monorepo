@@ -58,6 +58,16 @@ etapa de "F2.2a"; no roadmap canônico a F2.2a é a normalização.
   nova análise em replay/backfill (nova versão do analyzer); não há timeout
   cooperativo no decoder WASM — o risco é limitado pelos tetos de pixels e
   símbolos.
+- Correções da revisão: o estado do decoder agora é resetado quando a
+  inicialização do WASM falha, então a chamada seguinte tenta de novo em vez de
+  ficar presa em `QR_DECODER_UNAVAILABLE` (regressão em
+  `reference-artifact.retry.test.ts`); `maxSymbols` ganhou piso 2, pois
+  `maxSymbols = 1` rejeitava um único QR como `QR_TOO_MANY_SYMBOLS`; os testes
+  de URL maliciosa passaram a usar QR real (a matriz loopback/localhost/
+  metadata/RFC1918 fica em `reference-artifact.network.test.ts`, com `fetch`
+  envenenado); a integração cobre cross-tenant e replay do fingerprint; os
+  limites de pixels/páginas foram exportados e reutilizados pelo analyzer, sem
+  duplicar constantes.
 
 ## Referência fiscal/QR: extração e normalização (F2.2a) (2026-10-23)
 

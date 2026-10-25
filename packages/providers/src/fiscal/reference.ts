@@ -30,11 +30,23 @@ import { isSafeExternalUrl } from '../safe-fetch.js'
  * continua em `safeExternalFetch`/`safeFetchFiscalEndpoint` (F2.1).
  */
 
-const MAX_IMAGE_PIXELS = 16_000_000
+export const FISCAL_REFERENCE_MAX_IMAGE_PIXELS = 16_000_000
+export const FISCAL_REFERENCE_MAX_PDF_PAGES = 50
 const MAX_IMAGE_EDGE = 10_000
-const MAX_PDF_PAGES = 50
 const MAX_PDF_IMAGES = 64
 const MAX_QR_SYMBOLS = 8
+/**
+ * O mínimo é 2: com um único símbolo o decoder não consegue distinguir "um QR"
+ * de "mais de um QR truncado", e a política proíbe escolher arbitrariamente o
+ * primeiro. O teto é defensivo; na prática um comprovante tem 1 QR.
+ */
+const MIN_QR_SYMBOLS = 2
+const MAX_QR_SYMBOLS_CAP = 32
+
+const resolveMaxSymbols = (value: number | undefined): number => {
+  if (value === undefined || !Number.isSafeInteger(value)) return MAX_QR_SYMBOLS
+  return Math.min(MAX_QR_SYMBOLS_CAP, Math.max(MIN_QR_SYMBOLS, value))
+}
 
 const NFAG_PATH_FRAGMENT = 'nfag'
 
@@ -612,11 +624,11 @@ export const extractFiscalReferenceFromPdf = async (
   pdf: PdfProxy,
   options: FiscalReferenceArtifactOptions = {},
 ): Promise<FiscalReference> => {
-  const maxImagePixels = options.maxImagePixels ?? MAX_IMAGE_PIXELS
+  const maxImagePixels = options.maxImagePixels ?? FISCAL_REFERENCE_MAX_IMAGE_PIXELS
   const maxImageEdge = options.maxImageEdge ?? MAX_IMAGE_EDGE
-  const maxPages = options.maxPdfPages ?? MAX_PDF_PAGES
+  const maxPages = options.maxPdfPages ?? FISCAL_REFERENCE_MAX_PDF_PAGES
   const maxImages = options.maxPdfImages ?? MAX_PDF_IMAGES
-  const maxSymbols = options.maxSymbols ?? MAX_QR_SYMBOLS
+  const maxSymbols = resolveMaxSymbols(options.maxSymbols)
 
   if (pdf.numPages > maxPages) {
     return inconclusive({ method: 'qr_code', reasons: ['PDF_TOO_MANY_PAGES'] })
@@ -703,9 +715,9 @@ const extractFromImage = async (
   contentType: 'image/jpeg' | 'image/png',
   options: FiscalReferenceArtifactOptions,
 ): Promise<FiscalReference> => {
-  const maxImagePixels = options.maxImagePixels ?? MAX_IMAGE_PIXELS
+  const maxImagePixels = options.maxImagePixels ?? FISCAL_REFERENCE_MAX_IMAGE_PIXELS
   const maxImageEdge = options.maxImageEdge ?? MAX_IMAGE_EDGE
-  const maxSymbols = options.maxSymbols ?? MAX_QR_SYMBOLS
+  const maxSymbols = resolveMaxSymbols(options.maxSymbols)
 
   let dimensions: ReturnType<typeof imageSize>
   try {
@@ -744,7 +756,7 @@ const extractFromPdf = async (
     const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
     pdf = await getDocumentProxy(bytes, {
       verbosity: 0,
-      maxImageSize: options.maxImagePixels ?? MAX_IMAGE_PIXELS,
+      maxImageSize: options.maxImagePixels ?? FISCAL_REFERENCE_MAX_IMAGE_PIXELS,
     })
   } catch (error) {
     const encrypted = (error as { name?: unknown }).name === 'PasswordException'

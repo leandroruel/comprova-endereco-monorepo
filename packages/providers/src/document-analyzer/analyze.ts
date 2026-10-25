@@ -7,7 +7,12 @@ import {
   type FiscalReference,
 } from '@comprova/core'
 import { extractText, getDocumentProxy } from 'unpdf'
-import { extractFiscalReferenceFromArtifact, extractFiscalReferenceFromPdf } from '../fiscal/reference.js'
+import {
+  extractFiscalReferenceFromArtifact,
+  extractFiscalReferenceFromPdf,
+  FISCAL_REFERENCE_MAX_IMAGE_PIXELS,
+  FISCAL_REFERENCE_MAX_PDF_PAGES,
+} from '../fiscal/reference.js'
 import { fieldsFromPdfText } from './fields.js'
 import { baseResult, inconclusiveResult, invalidResult, unsupportedResult } from './results.js'
 import type { DocumentAnalyzerInput } from './types.js'
@@ -16,10 +21,10 @@ import type { DocumentAnalyzerInput } from './types.js'
  * Limites de orquestração, não de parsing. O PDF.js faz a leitura; o Comprova
  * apenas impede que um artefato grande demais consuma o worker sem limite.
  */
-const MAX_PAGES = 50
+const MAX_PAGES = FISCAL_REFERENCE_MAX_PDF_PAGES
 const MAX_TEXT_CHARS = 1_000_000
 const MIN_TEXT_CHARS = 8
-const MAX_IMAGE_PIXELS = 16_000_000
+const MAX_IMAGE_PIXELS = FISCAL_REFERENCE_MAX_IMAGE_PIXELS
 
 const withFiscalReference = (
   result: DocumentAnalysisResult,

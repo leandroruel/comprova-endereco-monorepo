@@ -1,11 +1,12 @@
 # Arquitetura de evidências e verificação fiscal (alvo)
 
-> **Status:** proposta de arquitetura, 2026-10-22, atualizada em 2026-10-23.
+> **Status:** proposta de arquitetura, 2026-10-22, atualizada em 2026-10-24.
 > **F0.1 (artefato tenant-scoped), F1.1 (intake do comprovante), F1.2
-> (análise/extração do documento), F1.3 (verificação do documento enviado) e
-> F2.1 (contrato `FiscalAdapter` e materialização da observação fiscal) estão
-> implementados**; a consulta fiscal real, OCR de imagem e as demais fontes
-> continuam não implementados.
+> (análise/extração do documento), F1.3 (verificação do documento enviado),
+> F2.1 (contrato `FiscalAdapter` e materialização da observação fiscal), F2.2a
+> (referência fiscal normalizada) e a parte física da F2.2b (decodificação
+> local do QR) estão implementados**; a consulta fiscal real, OCR de imagem e as
+> demais fontes continuam não implementados.
 > Este documento descreve o alvo e o que já existe para reaproveitar. As decisões
 > estão registradas em [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md),
 > [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md),
@@ -532,20 +533,24 @@ schema, allowlist e SSRF) e
 `apps/api/tests/fiscal-verification.int.test.ts` (todos os status, dimensões,
 idempotência, versionamento, cross-tenant, ausência de `signal` e de PII/bruto).
 
-### 5.6 Referência fiscal/QR: extração e normalização (F2.2a, implementado)
+### 5.6 Referência fiscal/QR: extração e normalização (F2.2a/F2.2b — parte física, implementado)
 
 A F2.2a é a ponte entre o documento/artefato e o `FiscalAdapter`, ainda **sem
 consulta fiscal real**. Ela recebe uma referência **já extraída** — payload de
 QR, URL, chave de acesso ou texto — e devolve um `FiscalReference` normalizado.
-A decodificação física da imagem do QR fica para a F2.2b; por isso não há
-dependência nova. Contrato puro em `packages/core/src/fiscal-reference.ts`;
-extractor em `packages/providers/src/fiscal/reference.ts`.
+A parte física da F2.2b decodifica o QR do próprio artefato (PNG/JPEG e raster
+embutido em PDF) e entrega o payload ao mesmo normalizador; **não há fetch**.
+Contrato puro em `packages/core/src/fiscal-reference.ts`; extractor em
+`packages/providers/src/fiscal/reference.ts`. Detalhes da parte física e das
+dependências em [`architecture.md`](architecture.md).
 
 - **Contrato:** `FiscalReference` carrega `status`, `source`, `issuer`, `uf`,
   `url`, `documentId`, `method`, `limitations`, `errorCodes` e `fingerprint`.
   Não há score, confiança, aprovação, autenticidade nem decisão KYC. `status`
-  distingue `found` / `not_found` / `unsupported`; ausência de QR vira
-  `not_found` e nunca invalida o documento.
+  distingue `found` / `not_found` / `inconclusive` / `unsupported`; ausência de
+  QR vira `not_found` e nunca invalida o documento. `inconclusive` cobre QR
+  ilegível, decoder indisponível e PDF não inspecionável; `unsupported` fica
+  para conteúdo reconhecido mas fora do suporte.
 - **Contexto confiável:** `toFiscalLookupInput(reference, context)` recebe
   `tenantId`, `claimId` e `artifact` do pipeline. Só produz
   `FiscalLookupInput` quando `status = found` e há fonte; a referência não pode
@@ -567,6 +572,19 @@ extractor em `packages/providers/src/fiscal/reference.ts`.
   privado. A URL é apenas normalizada (host minúsculo, sem fragmento, query
   ordenada) e guardada como referência; a allowlist server-side e o fetch
   continuam em F2.1/F2.2b.
+- **Decodificação local:** `zxing-wasm` carrega o WASM apenas do pacote
+  instalado (`wasmBinary`), sem CDN/fetch/DNS/redirect; `image-size` faz a
+  pré-checagem de dimensões. Tetos: 16 MP e 10.000 px por imagem, 8 símbolos
+  (mínimo 2), 50 páginas e 64 imagens por PDF. Estouro vira `inconclusive`.
+- **PDF sem canvas:** só raster embutido via `unpdf.extractImages`; QR
+  vetorial/desenhado retorna `PDF_QR_VECTOR_UNSUPPORTED`.
+- **Múltiplos QR:** mesmo fingerprint → `found`; referências fiscais distintas →
+  `unsupported`/`AMBIGUOUS_REFERENCE`; fiscal + não fiscal → `found` com
+  `MULTIPLE_QR_CODES`. Nunca escolhe o primeiro QR.
+- **Persistência:** `DocumentAnalysisResult` (contrato `3`,
+  `text_document@1.2.0`) carrega `fiscalReference`; a URL é removida antes de
+  gravar em `evidence_analysis.result`, preservando `fingerprint` e
+  `documentId`.
 - **Minimização e determinismo:** a referência não persiste PII nem texto bruto;
   o `fingerprint` SHA-256 truncado é calculado apenas sobre campos normalizados.
   A idempotência final continua em
@@ -574,10 +592,15 @@ extractor em `packages/providers/src/fiscal/reference.ts`.
 
 Testes: `packages/core/src/fiscal-reference.test.ts` (conversão para input,
 contexto confiável, fingerprint), `packages/providers/src/fiscal/reference.test.ts`
-(reconhecimento, URLs maliciosas, ambiguidade, chave inválida, ausência de PII) e
-`apps/api/tests/fiscal-verification.int.test.ts` (referência extraída →
-`FiscalLookupInput` → `FakeFiscalAdapter` → `claim_evidence`, idempotência e
-cross-tenant, sem rede).
+(reconhecimento, URLs maliciosas, ambiguidade, chave inválida, ausência de PII),
+`packages/providers/src/fiscal/reference-artifact.test.ts` (PNG/JPEG/PDF,
+limites, múltiplos QR), `reference-artifact.network.test.ts` (matriz
+loopback/localhost/metadata/RFC1918 com `fetch` envenenado),
+`reference-artifact.retry.test.ts` (retry após falha de inicialização do WASM) e
+`apps/api/tests/fiscal-verification.int.test.ts` +
+`apps/api/tests/evidence-analysis.int.test.ts` (referência extraída →
+`FiscalLookupInput` → `FakeFiscalAdapter` → `claim_evidence`, URL não
+persistida, idempotência/replay e cross-tenant, sem rede).
 
 ## 6. Segurança das consultas externas
 
@@ -585,8 +608,9 @@ A guarda genérica `safeExternalFetch` foi entregue em F0.2 (ADR-0036) e já é
 usada no envio de webhook. Ela cobre resolução/fixação de IP, HTTPS, ausência de
 redirect e limites de tempo/corpo/content-type. A F2.1 entregou o **contrato** do
 adaptador e o **esqueleto da allowlist server-side**, ainda vazio; a F2.2a
-entrega a **referência normalizada** (sem rede) e a F2.2b fará a decodificação
-física do QR, os autorizadores reais e a consulta NF3e (ADR-0034, ADR-0041).
+entrega a **referência normalizada** (sem rede) e a parte física da F2.2b
+entrega a **decodificação local do QR** (sem rede); os autorizadores reais e a
+consulta NF3e continuam pendentes (ADR-0034, ADR-0041).
 Requisitos:
 
 1. **Allowlist server-side** por `(tipo de documento, autorizador, ambiente)`.
