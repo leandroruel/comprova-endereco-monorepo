@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import {
   FISCAL_REFERENCE_CONTRACT_VERSION,
   fiscalReferenceFingerprint,
@@ -7,19 +9,32 @@ import {
   type FiscalReferenceReason,
   type FiscalSourceId,
 } from '@comprova/core'
+import { imageSize } from 'image-size'
+import { extractImages, getDocumentProxy } from 'unpdf'
+import { prepareZXingModule, readBarcodes, type ReadResult, type ReaderOptions } from 'zxing-wasm/reader'
 import { isSafeExternalUrl } from '../safe-fetch.js'
 
 /**
- * F2.2a — extractor de referência fiscal.
+ * F2.2a/F2.2b — extractor de referência fiscal.
  *
- * Recebe uma referência JÁ EXTRAÍDA (payload de QR, URL, chave de acesso ou
- * texto) e devolve um `FiscalReference` normalizado. Não faz I/O: não busca a
- * URL, não resolve DNS e não consulta autorizador. A segurança de rede continua
- * em `safeExternalFetch`/`safeFetchFiscalEndpoint` (F2.1).
+ * Duas entradas, o mesmo contrato:
  *
- * A extração física do QR (decodificar imagem) é F2.2b; nenhuma dependência
- * nova foi adicionada.
+ *   - `extractFiscalReference` recebe uma referência JÁ EXTRAÍDA (payload de
+ *     QR, URL, chave de acesso ou texto) e apenas normaliza/classifica;
+ *   - `extractFiscalReferenceFromArtifact` decodifica o QR de PNG/JPEG ou de
+ *     imagens raster embutidas em PDF e entrega o resultado ao normalizador.
+ *
+ * Nenhuma das funções faz rede: não busca a URL, não resolve DNS, não segue
+ * redirecionamento e não consulta autorizador. O payload do QR é entrada não
+ * confiável e nunca escolhe o destino de uma requisição. A segurança de rede
+ * continua em `safeExternalFetch`/`safeFetchFiscalEndpoint` (F2.1).
  */
+
+const MAX_IMAGE_PIXELS = 16_000_000
+const MAX_IMAGE_EDGE = 10_000
+const MAX_PDF_PAGES = 50
+const MAX_PDF_IMAGES = 64
+const MAX_QR_SYMBOLS = 8
 
 const NFAG_PATH_FRAGMENT = 'nfag'
 
@@ -94,7 +109,10 @@ const base = {
   contractVersion: FISCAL_REFERENCE_CONTRACT_VERSION,
 } as const
 
-const notFound = (method: FiscalReferenceMethod): FiscalReference => ({
+const notFound = (
+  method: FiscalReferenceMethod,
+  limitations: readonly FiscalReferenceReason[] = [],
+): FiscalReference => ({
   ...base,
   status: 'not_found',
   source: null,
@@ -103,7 +121,7 @@ const notFound = (method: FiscalReferenceMethod): FiscalReference => ({
   url: null,
   documentId: null,
   method,
-  limitations: [],
+  limitations,
   errorCodes: [],
   fingerprint: null,
 })
@@ -124,6 +142,23 @@ const unsupported = (input: {
   uf: input.uf ?? null,
   url: input.url ?? null,
   documentId: input.documentId ?? null,
+  method: input.method,
+  limitations: input.reasons,
+  errorCodes: input.reasons,
+  fingerprint: null,
+})
+
+const inconclusive = (input: {
+  readonly method: FiscalReferenceMethod
+  readonly reasons: readonly FiscalReferenceReason[]
+}): FiscalReference => ({
+  ...base,
+  status: 'inconclusive',
+  source: null,
+  issuer: null,
+  uf: null,
+  url: null,
+  documentId: null,
   method: input.method,
   limitations: input.reasons,
   errorCodes: input.reasons,
@@ -319,7 +354,7 @@ const referenceFromKey = (key: string, method: FiscalReferenceMethod): FiscalRef
   })
 }
 
-const unique = (values: readonly string[]): readonly string[] => [...new Set(values)]
+const unique = <T>(values: readonly T[]): readonly T[] => [...new Set(values)]
 
 const trimUrlPunctuation = (value: string): string => value.replace(/[.,;:!?]+$/, '')
 
@@ -361,4 +396,389 @@ export const extractFiscalReference = (input: FiscalReferenceExtractionInput): F
 
   if (/^\d{44}$/.test(raw)) return referenceFromKey(raw, resolvedMethod)
   return referenceFromText(raw, resolvedMethod)
+}
+
+/**
+ * Política determinística para vários símbolos QR na mesma imagem/PDF.
+ *
+ * - payloads duplicados ou referências com o mesmo fingerprint: `found`;
+ * - mais de uma referência fiscal reconhecida e distinta: `unsupported` /
+ *   `AMBIGUOUS_REFERENCE` (não escolhe o primeiro QR);
+ * - QR fiscal único + QR não fiscal: mantém a referência única e registra a
+ *   limitação `MULTIPLE_QR_CODES`;
+ * - nenhum QR fiscal: `not_found`; conteúdo fiscal não suportado: `unsupported`.
+ *
+ * A ordem dos símbolos nunca decide o resultado.
+ */
+export const extractFiscalReferenceFromPayloads = (payloads: readonly string[]): FiscalReference => {
+  const uniquePayloads = unique(
+    payloads.map((payload) => payload.trim()).filter((payload) => payload.length > 0),
+  )
+  if (uniquePayloads.length === 0) return notFound('qr_code')
+
+  const references = uniquePayloads.map((value) => extractFiscalReference({ value, method: 'qr_code' }))
+  const recognized = new Map<string, FiscalReference>()
+
+  for (const reference of references) {
+    const signature =
+      reference.status === 'found'
+        ? `found:${reference.fingerprint ?? ''}`
+        : reference.status === 'unsupported' && reference.source !== null
+          ? `unsupported:${reference.source}:${reference.documentId ?? ''}:${reference.url ?? ''}:${reference.errorCodes.join(',')}`
+          : null
+    if (signature !== null && !recognized.has(signature)) recognized.set(signature, reference)
+  }
+
+  if (recognized.size > 1) {
+    return unsupported({ method: 'qr_code', reasons: ['AMBIGUOUS_REFERENCE'] })
+  }
+
+  const single = recognized.values().next().value
+  if (single !== undefined) {
+    if (single.status !== 'found') return single
+    const multipleQr = uniquePayloads.length > 1 ? (['MULTIPLE_QR_CODES'] as const) : []
+    return { ...single, limitations: unique([...single.limitations, ...multipleQr]) }
+  }
+
+  const unsupportedReferences = references.filter((reference) => reference.status === 'unsupported')
+  if (unsupportedReferences.length > 0) {
+    return unsupported({
+      method: 'qr_code',
+      reasons: unique(unsupportedReferences.flatMap((reference) => reference.errorCodes)),
+    })
+  }
+
+  return notFound('qr_code', uniquePayloads.length > 1 ? ['MULTIPLE_QR_CODES'] : [])
+}
+
+type PdfProxy = Awaited<ReturnType<typeof getDocumentProxy>>
+type PdfImage = Awaited<ReturnType<typeof extractImages>>[number]
+
+interface RgbaImage {
+  readonly data: Uint8ClampedArray
+  readonly width: number
+  readonly height: number
+}
+
+export interface FiscalReferenceArtifactInput {
+  readonly data: Uint8Array
+  readonly contentType: string
+}
+
+/**
+ * Limites de segurança da extração física. São deliberadamente conservadores:
+ * um comprovante não precisa de uma imagem de dezenas de megapixels para ter
+ * um QR legível, e o decoder roda no mesmo processo do worker.
+ */
+export interface FiscalReferenceArtifactOptions {
+  readonly maxImagePixels?: number
+  readonly maxImageEdge?: number
+  readonly maxPdfPages?: number
+  readonly maxPdfImages?: number
+  readonly maxSymbols?: number
+}
+
+class QrDecoderUnavailableError extends Error {}
+
+const require = createRequire(import.meta.url)
+
+let qrReaderReady: Promise<void> | null = null
+
+/**
+ * Carrega o WASM do reader somente do pacote instalado. `wasmBinary` elimina
+ * qualquer fallback de rede do Emscripten (`locateFile`/fetch): o mesmo caminho
+ * funciona em CI, worker e teste, sem CDN.
+ */
+const instantiateQrReader = async (): Promise<void> => {
+  const wasmPath = require.resolve('zxing-wasm/reader/zxing_reader.wasm')
+  const wasmFile = readFileSync(wasmPath)
+  const wasmBinary = wasmFile.buffer.slice(
+    wasmFile.byteOffset,
+    wasmFile.byteOffset + wasmFile.byteLength,
+  ) as ArrayBuffer
+
+  await prepareZXingModule({
+    fireImmediately: true,
+    overrides: { wasmBinary },
+  })
+}
+
+const ensureQrReader = (): Promise<void> => {
+  if (qrReaderReady === null) {
+    qrReaderReady = instantiateQrReader().catch(() => {
+      throw new QrDecoderUnavailableError()
+    })
+  }
+  return qrReaderReady
+}
+
+const qrReaderOptions = (maxSymbols: number): ReaderOptions => ({
+  formats: ['QRCode'],
+  maxNumberOfSymbols: maxSymbols,
+  returnErrors: true,
+  tryHarder: true,
+  tryRotate: true,
+  tryInvert: false,
+})
+
+interface SymbolPolicyOptions {
+  readonly maxSymbols: number
+  readonly notFoundLimitations?: readonly FiscalReferenceReason[]
+}
+
+/**
+ * Consolida os resultados do decoder. Um resultado inválido com `returnErrors`
+ * indica um símbolo detectado mas ilegível; nesse caso não afirmamos `not_found`.
+ */
+const referenceFromSymbols = (
+  results: readonly ReadResult[],
+  options: SymbolPolicyOptions,
+): FiscalReference => {
+  if (results.length >= options.maxSymbols) {
+    return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
+  }
+
+  const readable = results.filter((result) => result.isValid && result.text.trim().length > 0)
+  const unreadable = results.length - readable.length
+
+  if (readable.length === 0) {
+    if (unreadable > 0) return inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
+    return notFound('qr_code', options.notFoundLimitations ?? [])
+  }
+
+  const reference = extractFiscalReferenceFromPayloads(readable.map((result) => result.text))
+  if (reference.status === 'not_found' && unreadable > 0) {
+    return inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
+  }
+  if ((reference.status === 'found' || reference.status === 'unsupported') && unreadable > 0) {
+    return { ...reference, limitations: unique([...reference.limitations, 'QR_NOT_READABLE']) }
+  }
+  return reference
+}
+
+const readQrImage = async (
+  input: Uint8Array | RgbaImage,
+  maxSymbols: number,
+): Promise<readonly ReadResult[]> => {
+  await ensureQrReader()
+  return readBarcodes(input as Parameters<typeof readBarcodes>[0], qrReaderOptions(maxSymbols))
+}
+
+const isSafeDimension = (value: number): boolean => Number.isSafeInteger(value) && value > 0
+
+const exceedsImageLimits = (width: number, height: number, maxPixels: number, maxEdge: number): boolean =>
+  !isSafeDimension(width) ||
+  !isSafeDimension(height) ||
+  width > maxEdge ||
+  height > maxEdge ||
+  !Number.isSafeInteger(width * height) ||
+  width * height > maxPixels
+
+const imageToRgba = (image: PdfImage): Uint8ClampedArray | null => {
+  const { width, height, channels, data } = image
+  if (!isSafeDimension(width) || !isSafeDimension(height)) return null
+  if (!Number.isSafeInteger(width * height)) return null
+  if (channels !== 1 && channels !== 3 && channels !== 4) return null
+  if (data.length !== width * height * channels) return null
+  if (channels === 4) return data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data)
+
+  const rgba = new Uint8ClampedArray(width * height * 4)
+  for (let pixel = 0, source = 0; pixel < width * height; pixel += 1, source += channels) {
+    const target = pixel * 4
+    if (channels === 1) {
+      const value = data[source] ?? 0
+      rgba[target] = value
+      rgba[target + 1] = value
+      rgba[target + 2] = value
+    } else {
+      rgba[target] = data[source] ?? 0
+      rgba[target + 1] = data[source + 1] ?? 0
+      rgba[target + 2] = data[source + 2] ?? 0
+    }
+    rgba[target + 3] = 255
+  }
+  return rgba
+}
+
+/**
+ * Extrai a referência de imagens raster embutidas no PDF. Não renderiza a
+ * página e não usa canvas: QR vetorial/desenhado é uma limitação explícita
+ * (`PDF_QR_VECTOR_UNSUPPORTED`). A URL nunca é acessada.
+ */
+export const extractFiscalReferenceFromPdf = async (
+  pdf: PdfProxy,
+  options: FiscalReferenceArtifactOptions = {},
+): Promise<FiscalReference> => {
+  const maxImagePixels = options.maxImagePixels ?? MAX_IMAGE_PIXELS
+  const maxImageEdge = options.maxImageEdge ?? MAX_IMAGE_EDGE
+  const maxPages = options.maxPdfPages ?? MAX_PDF_PAGES
+  const maxImages = options.maxPdfImages ?? MAX_PDF_IMAGES
+  const maxSymbols = options.maxSymbols ?? MAX_QR_SYMBOLS
+
+  if (pdf.numPages > maxPages) {
+    return inconclusive({ method: 'qr_code', reasons: ['PDF_TOO_MANY_PAGES'] })
+  }
+
+  const results: ReadResult[] = []
+  const seenImageKeys = new Set<string>()
+  let imageCount = 0
+  let extractionFailed = false
+  let skippedOversized = false
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    let images: readonly PdfImage[]
+    try {
+      images = await extractImages(pdf, pageNumber)
+    } catch {
+      extractionFailed = true
+      continue
+    }
+
+    for (const image of images) {
+      if (image.key.length > 0) {
+        if (seenImageKeys.has(image.key)) continue
+        seenImageKeys.add(image.key)
+      }
+
+      imageCount += 1
+      if (imageCount > maxImages) {
+        return inconclusive({ method: 'qr_code', reasons: ['PDF_TOO_MANY_IMAGES'] })
+      }
+
+      if (exceedsImageLimits(image.width, image.height, maxImagePixels, maxImageEdge)) {
+        skippedOversized = true
+        continue
+      }
+
+      const rgba = imageToRgba(image)
+      if (rgba === null) {
+        extractionFailed = true
+        continue
+      }
+
+      try {
+        const pageResults = await readQrImage(
+          { data: rgba, width: image.width, height: image.height },
+          maxSymbols,
+        )
+        results.push(...pageResults)
+        if (results.length >= maxSymbols) {
+          return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
+        }
+      } catch (error) {
+        if (error instanceof QrDecoderUnavailableError) {
+          return inconclusive({ method: 'qr_code', reasons: ['QR_DECODER_UNAVAILABLE'] })
+        }
+        extractionFailed = true
+      }
+    }
+  }
+
+  const failures: FiscalReferenceReason[] = []
+  if (skippedOversized) failures.push('IMAGE_TOO_LARGE')
+  if (extractionFailed) failures.push('PDF_IMAGE_EXTRACTION_FAILED')
+  if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })
+
+  if (imageCount === 0) {
+    return inconclusive({ method: 'qr_code', reasons: ['PDF_QR_VECTOR_UNSUPPORTED'] })
+  }
+
+  if (results.length === 0) {
+    // Só inspecionamos raster; um QR vetorial no mesmo PDF continuaria fora do
+    // alcance. A limitação evita afirmar ausência absoluta.
+    return notFound('qr_code', ['PDF_QR_VECTOR_UNSUPPORTED'])
+  }
+
+  return referenceFromSymbols(results, {
+    maxSymbols,
+    notFoundLimitations: ['PDF_QR_VECTOR_UNSUPPORTED'],
+  })
+}
+
+const extractFromImage = async (
+  data: Uint8Array,
+  contentType: 'image/jpeg' | 'image/png',
+  options: FiscalReferenceArtifactOptions,
+): Promise<FiscalReference> => {
+  const maxImagePixels = options.maxImagePixels ?? MAX_IMAGE_PIXELS
+  const maxImageEdge = options.maxImageEdge ?? MAX_IMAGE_EDGE
+  const maxSymbols = options.maxSymbols ?? MAX_QR_SYMBOLS
+
+  let dimensions: ReturnType<typeof imageSize>
+  try {
+    dimensions = imageSize(data)
+  } catch {
+    return inconclusive({ method: 'qr_code', reasons: ['IMAGE_DECODE_FAILED'] })
+  }
+
+  const expectedType = contentType === 'image/png' ? 'png' : 'jpg'
+  if (dimensions.type !== expectedType) {
+    return inconclusive({ method: 'qr_code', reasons: ['IMAGE_DECODE_FAILED'] })
+  }
+  if (exceedsImageLimits(dimensions.width, dimensions.height, maxImagePixels, maxImageEdge)) {
+    return inconclusive({ method: 'qr_code', reasons: ['IMAGE_TOO_LARGE'] })
+  }
+
+  let results: readonly ReadResult[]
+  try {
+    results = await readQrImage(data, maxSymbols)
+  } catch (error) {
+    if (error instanceof QrDecoderUnavailableError) {
+      return inconclusive({ method: 'qr_code', reasons: ['QR_DECODER_UNAVAILABLE'] })
+    }
+    return inconclusive({ method: 'qr_code', reasons: ['IMAGE_DECODE_FAILED'] })
+  }
+
+  return referenceFromSymbols(results, { maxSymbols })
+}
+
+const extractFromPdf = async (
+  data: Uint8Array,
+  options: FiscalReferenceArtifactOptions,
+): Promise<FiscalReference> => {
+  let pdf: PdfProxy
+  try {
+    const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    pdf = await getDocumentProxy(bytes, {
+      verbosity: 0,
+      maxImageSize: options.maxImagePixels ?? MAX_IMAGE_PIXELS,
+    })
+  } catch (error) {
+    const encrypted = (error as { name?: unknown }).name === 'PasswordException'
+    return inconclusive({
+      method: 'qr_code',
+      reasons: [encrypted ? 'PDF_ENCRYPTED' : 'PDF_INVALID'],
+    })
+  }
+
+  try {
+    return await extractFiscalReferenceFromPdf(pdf, options)
+  } catch {
+    return inconclusive({ method: 'qr_code', reasons: ['PDF_INVALID'] })
+  } finally {
+    await pdf.loadingTask.destroy().catch(() => undefined)
+  }
+}
+
+/**
+ * Extrai a referência fiscal do artefato físico. Suporta PNG/JPEG e imagens
+ * raster embutidas em PDF. O payload decodificado passa pelo mesmo
+ * `extractFiscalReference` usado em F2.2a; não há fetch, DNS nem consulta.
+ */
+export const extractFiscalReferenceFromArtifact = async (
+  input: FiscalReferenceArtifactInput,
+  options: FiscalReferenceArtifactOptions = {},
+): Promise<FiscalReference> => {
+  const contentType = (input.contentType.split(';')[0] ?? '').trim().toLowerCase()
+
+  if (input.data.byteLength === 0) {
+    return inconclusive({ method: 'qr_code', reasons: ['IMAGE_DECODE_FAILED'] })
+  }
+  if (contentType === 'application/pdf') return extractFromPdf(input.data, options)
+  if (contentType === 'image/png') return extractFromImage(input.data, 'image/png', options)
+  if (contentType === 'image/jpeg' || contentType === 'image/jpg') {
+    return extractFromImage(input.data, 'image/jpeg', options)
+  }
+
+  return unsupported({ method: 'unknown', reasons: ['UNSUPPORTED_ARTIFACT_TYPE'] })
 }

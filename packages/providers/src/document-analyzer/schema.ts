@@ -3,6 +3,11 @@ import {
   DOCUMENT_ANALYSIS_EXTRACTION_STATUSES,
   DOCUMENT_ANALYSIS_KINDS,
   DOCUMENT_ANALYSIS_TERMINAL_STATUSES,
+  FISCAL_REFERENCE_CONTRACT_VERSION,
+  FISCAL_REFERENCE_METHODS,
+  FISCAL_REFERENCE_REASONS,
+  FISCAL_REFERENCE_STATUSES,
+  FISCAL_SOURCE_IDS,
   type DocumentAnalysisResult,
 } from '@comprova/core'
 import { z } from 'zod'
@@ -27,6 +32,35 @@ const extractedHolderSchema = z.object({
   raw: z.string(),
 })
 
+/**
+ * Projeção persistida da referência fiscal. A URL normalizada do QR é
+ * deliberadamente proibida (`z.null()`): o worker só grava a referência depois
+ * da redaction. Fingerprint/documentId continuam disponíveis para auditoria e
+ * consulta.
+ */
+const fiscalReferenceSchema = z.object({
+  contractVersion: z.literal(FISCAL_REFERENCE_CONTRACT_VERSION),
+  status: z.enum(FISCAL_REFERENCE_STATUSES),
+  source: z.enum(FISCAL_SOURCE_IDS).nullable(),
+  issuer: z.string().min(1).max(64).nullable(),
+  uf: z
+    .string()
+    .regex(/^[A-Z]{2}$/)
+    .nullable(),
+  url: z.null(),
+  documentId: z
+    .string()
+    .regex(/^\d{44}$/)
+    .nullable(),
+  method: z.enum(FISCAL_REFERENCE_METHODS),
+  limitations: z.array(z.enum(FISCAL_REFERENCE_REASONS)),
+  errorCodes: z.array(z.enum(FISCAL_REFERENCE_REASONS)),
+  fingerprint: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/)
+    .nullable(),
+})
+
 export const documentAnalysisResultSchema = z
   .object({
     contractVersion: z.string().min(1),
@@ -48,6 +82,7 @@ export const documentAnalysisResultSchema = z
       value: extractedHolderSchema.nullable(),
       raw: z.string().nullable(),
     }),
+    fiscalReference: fiscalReferenceSchema.nullable(),
     limitations: z.array(z.string()),
     errorCodes: z.array(z.string()),
     analyzedAt: z.iso.datetime(),
@@ -55,6 +90,31 @@ export const documentAnalysisResultSchema = z
   .superRefine((result, ctx) => {
     const add = (path: readonly (string | number)[], message: string): void => {
       ctx.addIssue({ code: 'custom', path: [...path], message })
+    }
+
+    const reference = result.fiscalReference
+    if (reference !== null) {
+      if (reference.status === 'found') {
+        if (reference.source === null) {
+          add(['fiscalReference', 'source'], 'found reference requires a source')
+        }
+        if (reference.fingerprint === null) {
+          add(['fiscalReference', 'fingerprint'], 'found reference requires a fingerprint')
+        }
+        if (reference.errorCodes.length > 0) {
+          add(['fiscalReference', 'errorCodes'], 'found reference cannot have error codes')
+        }
+      } else {
+        if (reference.fingerprint !== null) {
+          add(['fiscalReference', 'fingerprint'], 'non-found reference cannot have a fingerprint')
+        }
+        if (reference.status === 'not_found' && reference.errorCodes.length > 0) {
+          add(['fiscalReference', 'errorCodes'], 'not_found reference cannot have error codes')
+        }
+        if (reference.status !== 'not_found' && reference.errorCodes.length === 0) {
+          add(['fiscalReference', 'errorCodes'], 'failed extraction requires an error code')
+        }
+      }
     }
 
     const dimensions = [

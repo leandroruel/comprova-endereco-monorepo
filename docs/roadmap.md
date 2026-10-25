@@ -638,12 +638,13 @@ Fontes: [FAQ NF3e SVRS](https://dfe-portal.svrs.rs.gov.br/Nf3e/Faq),
 consulta pública por QR, termos de uso de consulta automatizada e o autorizador
 efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
 
-### F2.2a — referência fiscal/QR (entregue)
+### F2.2a — normalização da referência fiscal/QR (entregue)
 
 - `FiscalReference` em `packages/core/src/fiscal-reference.ts` descreve uma
-  referência **já extraída** com `found`/`not_found`/`unsupported`, fonte,
-  autorizador, UF, URL normalizada, chave, método, limitações e fingerprint. Não
-  há score, confiança, autenticidade nem decisão.
+  referência **já extraída** com `found`/`not_found`/`inconclusive`/
+  `unsupported`, fonte, autorizador, UF, URL normalizada, chave, método,
+  limitações e fingerprint. Não há score, confiança, autenticidade nem decisão.
+  O contrato é `FISCAL_REFERENCE_CONTRACT_VERSION = '2'`.
 - `extractFiscalReference` em `packages/providers/src/fiscal/reference.ts`
   reconhece NF3e por estrutura: autorizador documentado com o caminho esperado
   do endpoint de QR e/ou chave de 44 dígitos estritamente numérica com UF,
@@ -651,15 +652,45 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
   autorizador; NFAg-e é `unsupported`.
 - `toFiscalLookupInput(reference, context)` usa tenant/claim/artefato do
   contexto confiável e só emite input quando há fonte reconhecida.
-- Nenhum fetch, HEAD ou DNS lookup; URL do QR é apenas normalizada. A
-  decodificação física da imagem do QR fica para **F2.2b**.
+- Nenhum fetch, HEAD ou DNS lookup; URL do QR é apenas normalizada.
+
+### F2.2b — extração física do QR (parte física entregue)
+
+> **Nota de sequenciamento:** o pedido original chamava esta etapa de "F2.2a".
+> No roadmap canônico a F2.2a é a normalização (já entregue); a decodificação
+> física da imagem/PDF é a **primeira metade da F2.2b**. A segunda metade
+> (consulta real ao autorizador) continua pendente.
+
+- `extractFiscalReferenceFromArtifact` em
+  `packages/providers/src/fiscal/reference.ts` decodifica QR de **PNG/JPEG** e
+  de **imagens raster embutidas em PDF**. O payload decodificado passa pelo
+  mesmo `extractFiscalReference`; nenhuma consulta externa é feita.
+- Decoder `zxing-wasm` com WASM carregado **do pacote local** (`wasmBinary`),
+  sem CDN/fetch; pré-checagem de dimensões com `image-size`. Limites: 16 MP,
+  borda 10.000 px, 8 símbolos, 50 páginas e 64 imagens.
+- Política determinística para múltiplos QR: duplicata/mesmo fingerprint →
+  `found`; referências fiscais distintas → `unsupported`/`AMBIGUOUS_REFERENCE`
+  (nunca "o primeiro QR"); QR fiscal único + QR não fiscal → `found` com
+  `MULTIPLE_QR_CODES`.
+- `inconclusive` cobre QR ilegível (`QR_NOT_READABLE`), imagem corrompida/
+  grande, PDF inválido/encriptado e decoder indisponível. PDF sem raster
+  inspecionável (ex.: QR vetorial) → `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`,
+  sem canvas nativo ou renderização de página.
+- O `DocumentAnalysisResult` (contrato `3`, analyzer `text_document@1.2.0`)
+  ganhou `fiscalReference`; a URL normalizada é **removida antes da
+  persistência** (`redactFiscalReference`), preservando `fingerprint` e
+  `documentId`. O schema do resultado proíbe `url != null`.
+- Pendente na F2.2b: resolver o autorizador **no servidor**, consultar somente
+  URL da allowlist e normalizar a resposta (com allowlist, cache, métricas e
+  fixtures de respostas gravadas).
 
 ### Escopo
 
 - Implementar o contrato de adaptador e o registro de fontes suportadas.
 - Adaptador NF3e: identificar o documento, extrair/normalizar a referência
-  (F2.2a, entregue) e, na F2.2b, decodificar o QR físico, resolver o autorizador
-  **no servidor**, consultar somente URL da allowlist e normalizar a resposta.
+  (F2.2a, entregue), decodificar o QR físico (parte física da F2.2b, entregue)
+  e, na sequência, resolver o autorizador **no servidor**, consultar somente URL
+  da allowlist e normalizar a resposta.
 - Tabela de autorizadores versionada em código (UF → autorizador → endpoint de
   consulta → ambiente), com testes por autorizador.
 - Estado da fonte (`available`, `degraded`, `unavailable`, `unsupported`) e
@@ -678,6 +709,9 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
 
 ### Critérios de conclusão
 
+- Fase física (entregue): QR válido em PNG/JPEG/PDF, QR ausente, QR ilegível,
+  conteúdo arbitrário, múltiplos/duplicados/conflitantes, prova de ausência de
+  network I/O e de que a referência não altera tenant/claim/artefato.
 - Para cada autorizador suportado, fixture → `outcome` correto.
 - Teste provando que URL de QR fora da allowlist não gera fetch.
 - Teste provando que `source_unavailable` mapeia para `unknown`.

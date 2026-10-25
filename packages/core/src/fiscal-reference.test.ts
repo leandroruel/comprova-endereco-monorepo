@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   FISCAL_REFERENCE_CONTRACT_VERSION,
+  FISCAL_REFERENCE_STATUSES,
   fiscalReferenceFingerprint,
+  redactFiscalReference,
   toFiscalLookupInput,
   type FiscalReference,
 } from './fiscal-reference.js'
@@ -50,8 +52,10 @@ describe('contrato de referência fiscal (F2.2a)', () => {
       artifact: null,
     }
     expect(toFiscalLookupInput(foundReference({ status: 'not_found' }), context)).toBeNull()
+    expect(toFiscalLookupInput(foundReference({ status: 'inconclusive' }), context)).toBeNull()
     expect(toFiscalLookupInput(foundReference({ status: 'unsupported' }), context)).toBeNull()
     expect(toFiscalLookupInput(foundReference({ source: null }), context)).toBeNull()
+    expect(FISCAL_REFERENCE_STATUSES).toContain('inconclusive')
   })
 
   it('exige contexto confiável não vazio', () => {
@@ -88,5 +92,26 @@ describe('contrato de referência fiscal (F2.2a)', () => {
       first.fingerprint,
     )
     expect(fiscalReferenceFingerprint(foundReference({ status: 'unsupported' }))).toBeNull()
+    expect(fiscalReferenceFingerprint(foundReference({ status: 'inconclusive' }))).toBeNull()
+  })
+
+  it('remove a URL do QR sem perder fingerprint nem documentId', () => {
+    const original = foundReference({ fingerprint: fiscalReferenceFingerprint(foundReference()) })
+    const redacted = redactFiscalReference(original)
+
+    expect(redacted.url).toBeNull()
+    expect(redacted.documentId).toBe(NF3E_KEY)
+    expect(redacted.fingerprint).toBe(original.fingerprint)
+    // Não recalcula o fingerprint: a identidade original é preservada.
+    expect(redacted.fingerprint).toBe(fiscalReferenceFingerprint(original))
+    expect(JSON.stringify(redacted)).not.toContain('dfe-portal.svrs.rs.gov.br')
+  })
+
+  it('é idempotente quando a URL já é nula', () => {
+    const already = foundReference({
+      url: null,
+      fingerprint: fiscalReferenceFingerprint(foundReference({ url: null })),
+    })
+    expect(redactFiscalReference(already)).toBe(already)
   })
 })

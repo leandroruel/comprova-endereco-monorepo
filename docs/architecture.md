@@ -186,9 +186,11 @@ autenticar o documento. A F2.1 adiciona o **contrato** `FiscalAdapter` e a
 materialização de uma fonte fiscal, **sem nenhuma consulta real**: a allowlist
 server-side nasce vazia e não há `signal`. A F2.2a adiciona a
 extração/normalização da **referência fiscal** (payload de QR, URL, chave de
-acesso ou texto) e a conversão para `FiscalLookupInput`, ainda **sem rede**; a
-decodificação física do QR fica para F2.2b. **Ainda não existem** OCR de imagem,
-decodificação física de QR, consulta fiscal real nem NFAg-e.
+acesso ou texto) e a conversão para `FiscalLookupInput`, ainda **sem rede**. A
+parte física da F2.2b decodifica o QR do artefato (PNG/JPEG e raster embutido em
+PDF) e o injeta no mesmo contrato, também **sem rede**. **Ainda não existem**
+OCR de imagem, consulta fiscal real nem NFAg-e; a consulta real é a segunda
+metade da F2.2b.
 
 A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
 
@@ -205,8 +207,9 @@ validation → claim → claim_evidence → assessment → credential
 `retention_until`. O binário fica no `ObjectStore` existente; nenhuma URL pública
 é persistida. O endpoint de upload e o sniffing de conteúdo foram entregues em
 F1.1; a extração de texto de PDF (via `unpdf`/PDF.js) foi entregue em F1.2; o
-matching do upload foi F1.3. OCR de imagem, decodificação física do QR e consulta
-fiscal real continuam pendentes (F2.2b+).
+matching do upload foi F1.3; a decodificação física do QR (raster em PDF e
+PNG/JPEG) foi entregue na parte física da F2.2b. OCR de imagem e a consulta
+fiscal real (segunda metade da F2.2b) continuam pendentes.
 
 A F2.1 não cria um novo modelo de evidência: o adapter fiscal devolve uma
 observação normalizada que vira **uma linha** em `claim_evidence`
@@ -219,11 +222,36 @@ server-side vazia e, quando existir, passa por `safeExternalFetch`. Detalhes em
 
 A F2.2a também não cria modelo de evidência nem tabela: `FiscalReference` é um
 contrato em memória que classifica uma referência já extraída como `found`,
-`not_found` ou `unsupported`. Só `found` com fonte reconhecida vira
-`FiscalLookupInput`, sempre com tenant/claim/artefato vindos do contexto
-confiável. A URL do QR é normalizada e nunca buscada; a extração física da
-imagem fica para F2.2b. Detalhes em
+`not_found`, `inconclusive` ou `unsupported`. Só `found` com fonte reconhecida
+vira `FiscalLookupInput`, sempre com tenant/claim/artefato vindos do contexto
+confiável. A URL do QR é normalizada e nunca buscada. Detalhes em
 [`arquitetura-evidencias.md`](arquitetura-evidencias.md#56-referência-fiscalqr-extração-e-normalização-f22a-implementado).
+
+A parte física da F2.2b decodifica o QR localmente e não cria contrato paralelo:
+`extractFiscalReferenceFromArtifact` entrega o payload ao mesmo
+`FiscalReference`. Decisões arquiteturais:
+
+- **Sem rede no extractor.** `zxing-wasm` é inicializado com `wasmBinary` lido do
+  pacote instalado (nunca o `locateFile`/CDN padrão). Nenhum `fetch`, DNS ou
+  redirect; a URL do QR continua apenas uma referência não confiável. O
+  `image-size` lê só o cabeçalho para barrar _decompression bombs_ antes de
+  decodificar.
+- **PDF sem canvas.** Só QR raster embutido é inspecionado via
+  `unpdf.extractImages`. QR vetorial/desenhado não é renderizado
+  (`PDF_QR_VECTOR_UNSUPPORTED`); nada de dependência nativa. Se no futuro for
+  necessário renderizar, o requisito é limite explícito de páginas/tempo/memória.
+- **Múltiplos QR sem escolha arbitrária.** A consolidação é por fingerprint/
+  identidade, não por posição: duplicatas → `found`; referências distintas →
+  `AMBIGUOUS_REFERENCE`; fiscal único + não fiscal → `found` com
+  `MULTIPLE_QR_CODES`.
+- **URL nunca persistida.** O `DocumentAnalysisResult` (contrato `3`,
+  `text_document@1.2.0`) carrega `fiscalReference`; antes de gravar em
+  `evidence_analysis.result`, `redactFiscalReference` zera `url` e o schema
+  rejeita `url != null`. `fingerprint`/`documentId` permanecem para auditoria e
+  consulta futura.
+- **Sem novo modelo de evidência, score ou allowlist.** A referência continua
+  sendo uma observação não confiável; a consulta real, a allowlist preenchida e
+  o parsing da resposta seguem na segunda metade da F2.2b.
 
 O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
 taxonomia de resultado e as extensões mínimas estão em

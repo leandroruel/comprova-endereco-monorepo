@@ -47,6 +47,7 @@ const completedResult = (overrides: Partial<DocumentAnalysisResult> = {}): Docum
   },
   address: { status: 'extracted', value: ADDRESS, raw: ADDRESS.raw },
   holder: { status: 'extracted', value: HOLDER, raw: HOLDER.raw },
+  fiscalReference: null,
   limitations: [],
   errorCodes: [],
   analyzedAt: '2026-10-22T12:00:00.000Z',

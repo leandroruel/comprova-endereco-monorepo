@@ -364,6 +364,7 @@ const createOrphanAnalysis = async (tenantId: string, analyzedAt: Date) => {
     document: { status: 'analyzed', kind: 'unknown', issuedAt: null, issuedRaw: null },
     address: { status: 'not_extracted', value: null, raw: null },
     holder: { status: 'not_extracted', value: null, raw: null },
+    fiscalReference: null,
     limitations: [],
     errorCodes: [],
     analyzedAt: analyzedAt.toISOString(),
@@ -448,8 +449,8 @@ describe('F1.3 — verificação do documento enviado', () => {
         document: 'inconclusive',
         address: 'matches',
         holder: 'matches',
-        analyzer: { id: 'text_document', version: '1.1.0' },
-        contract_version: '2',
+        analyzer: { id: DOCUMENT_ANALYZER_ID, version: DOCUMENT_ANALYZER_VERSION },
+        contract_version: DOCUMENT_ANALYSIS_CONTRACT_VERSION,
         limitations: expect.arrayContaining(['AUTHENTICITY_NOT_VERIFIED']),
       },
     })
@@ -562,7 +563,7 @@ describe('F1.3 — verificação do documento enviado', () => {
 
     const nextResult = {
       ...baseResult,
-      analyzer: { id: 'text_document', version: '1.2.0' },
+      analyzer: { id: DOCUMENT_ANALYZER_ID, version: '1.3.0' },
       analyzedAt: '2026-10-22T13:00:00.000Z',
       address: {
         status: 'extracted' as const,
@@ -584,15 +585,15 @@ describe('F1.3 — verificação do documento enviado', () => {
       analysisId: secondAnalysisId,
       tenantId: tenantA,
       artifactId: artifactId as string,
-      analyzer: 'text_document',
-      analyzerVersion: '1.2.0',
-      contractVersion: '2',
+      analyzer: DOCUMENT_ANALYZER_ID,
+      analyzerVersion: '1.3.0',
+      contractVersion: DOCUMENT_ANALYSIS_CONTRACT_VERSION,
       status: 'completed',
       result: nextResult,
       analyzedAt: new Date('2026-10-22T13:00:00.000Z'),
     })
 
-    await runVerification({ analyzerVersion: '1.2.0' })
+    await runVerification({ analyzerVersion: '1.3.0' })
     const rows = await verificationRowsOf(validationId)
     expect(rows).toHaveLength(2)
 
@@ -600,7 +601,7 @@ describe('F1.3 — verificação do documento enviado', () => {
     const newRow = rows.find((row) => verificationOf(row).analysis_id === secondAnalysisId)
     expect(verificationOf(oldRow).address).toBe('matches')
     expect(verificationOf(newRow).address).toBe('differs')
-    expect(newRow?.checkerVersion).toBe('1.0.0+1.2.0+c2')
+    expect(newRow?.checkerVersion).toBe('1.0.0+1.3.0+c3')
 
     const get = await getValidation(validationId, keyA)
     expect(get.json().evidence_verification.analysis_id).toBe(secondAnalysisId)

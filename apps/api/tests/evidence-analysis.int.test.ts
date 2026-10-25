@@ -1,3 +1,4 @@
+import { toFiscalLookupInput } from '@comprova/core'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { createDbPool, eq, inArray, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -17,6 +18,7 @@ import {
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
 import Redis from 'ioredis'
+import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { analyzeEvidenceTick } from '../../worker/src/modules/evidence-analysis/evidence-analysis.service.js'
@@ -402,6 +404,7 @@ describe('F1.2 — análise do comprovante', () => {
         document: { status: 'analyzed', kind: 'unknown', issuedAt: null, issuedRaw: null },
         address: { status: 'unknown', value: null, raw: null },
         holder: { status: 'unknown', value: null, raw: null },
+        fiscalReference: null,
         limitations: [],
         errorCodes: [],
         analyzedAt: 'not-a-date',
@@ -526,5 +529,67 @@ describe('F1.2 — análise do comprovante', () => {
     const removed = await validationRetentionTick(adminPool.db, store)
     expect(removed).toBeGreaterThanOrEqual(1)
     expect((await graphOf(validationId)).analyses).toHaveLength(0)
+  })
+})
+
+describe('F2.2b — referência fiscal extraída do artefato', () => {
+  const NF3E_KEY = '35261012345678000199660010000000011000000015'
+  const NF3E_URL = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_KEY}&nVersao=4&tpAmb=1`
+  // Fixture compartilhada com os testes do provider (PDF com QR raster embutido).
+  const nf3eQrPdf = readFileSync(
+    new URL('../../../packages/providers/src/fiscal/__fixtures__/nf3e-qr.pdf', import.meta.url),
+  )
+
+  it('persiste a referência do QR sem a URL e alimenta o FiscalLookupInput pelo contexto confiável', async () => {
+    const validationId = await makeValidation(tenantA)
+    const res = await upload(validationId, keyA, nf3eQrPdf, 'nf3e.pdf', 'application/pdf')
+    expect(res.statusCode).toBe(201)
+
+    const processed = await runTick()
+    expect(processed).toBeGreaterThanOrEqual(1)
+
+    const { claims, artifacts, analyses } = await graphOf(validationId)
+    const analysis = analyses[0]
+    const claimId = claims[0]?.claimId
+    const artifact = artifacts[0]
+    expect(claimId).toBeDefined()
+    expect(artifact).toBeDefined()
+    expect(analysis?.result).toMatchObject({
+      fiscalReference: {
+        status: 'found',
+        source: 'nf3e',
+        issuer: 'SVRS',
+        uf: 'SP',
+        documentId: NF3E_KEY,
+        method: 'qr_code',
+        url: null,
+      },
+    })
+
+    // A URL crua do QR nunca é persistida.
+    expect(JSON.stringify(analysis?.result)).not.toContain(NF3E_URL)
+    expect(JSON.stringify(analysis?.result)).not.toContain('dfe-portal.svrs.rs.gov.br')
+
+    const reference = (analysis?.result as { fiscalReference: Parameters<typeof toFiscalLookupInput>[0] })
+      .fiscalReference
+    const input = toFiscalLookupInput(reference, {
+      tenantId: tenantA,
+      claimId: claimId as string,
+      artifact: { artifactId: artifact?.artifactId as string, sha256: 'ab'.repeat(32) },
+    })
+
+    // Tenant/claim/artifact vêm SEMPRE do contexto confiável; a URL some mas o
+    // documentId continua disponível para a consulta fiscal futura.
+    expect(input).toEqual({
+      source: 'nf3e',
+      tenantId: tenantA,
+      claimId,
+      documentId: NF3E_KEY,
+      qrCodeUrl: null,
+      issuer: 'SVRS',
+      uf: 'SP',
+      artifact: { artifactId: artifact?.artifactId, sha256: 'ab'.repeat(32) },
+    })
+    expect(input?.tenantId).not.toBe('tenant-from-qr')
   })
 })
