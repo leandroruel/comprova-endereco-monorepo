@@ -102,7 +102,13 @@ const UF_BY_IBGE_CODE: Readonly<Record<string, string>> = {
   '53': 'DF',
 }
 
-const KEY_PARAM_NAMES: ReadonlySet<string> = new Set(['chnfe', 'chave', 'chaveacesso', 'chave_acesso'])
+const KEY_PARAM_NAMES: ReadonlySet<string> = new Set([
+  'chnfe',
+  'chnf3e',
+  'chave',
+  'chaveacesso',
+  'chave_acesso',
+])
 
 const URL_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>()]+/gi
 const ACCESS_KEY_IN_TEXT = /\b\d{44}\b/g

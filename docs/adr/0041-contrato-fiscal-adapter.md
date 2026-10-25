@@ -7,8 +7,9 @@ materialização da observação em `claim_evidence`, **sem nenhuma consulta rea
 autorizador**. A execução NF3e (allowlist preenchida, fetch, parsing e
 credenciais, se necessárias) fica para F2.2b; a F2.2a entrega apenas a
 extração/normalização da referência, sem rede. Emendado em 2026-10-24 pela
-parte física da F2.2b: a decodificação local do QR foi entregue; a consulta
-real continua pendente.
+parte física da F2.2b: a decodificação local do QR foi entregue. Emendado em
+2026-10-25 pela primeira fatia de consulta real: **NF3e/SVRS, UF RS, ambiente
+produção**, sem cobertura nacional.
 
 Relaciona-se com o [ADR-0033](0033-verificacao-de-evidencias-por-adaptadores.md)
 (verificador e taxonomia), [ADR-0034](0034-consulta-a-fontes-fiscais-endpoints-oficiais.md)
@@ -90,17 +91,18 @@ força e eventual hard rule da fonte fiscal. O schema de saída
 
 ### 4. Identificadores de fonte
 
-`nf3e` e `nfag-e` existem no contrato; apenas o adaptador **fake** NF3e é
-exercitado nesta etapa. Nenhuma chamada de rede é feita. A implementação NF3e
-real e a NFAg-e são F2.2b/F7. A F2.2a adiciona `FiscalReference` e
-`extractFiscalReference` para classificar uma referência já extraída, ainda sem
-rede.
+`nf3e` e `nfag-e` existem no contrato. A primeira fatia real implementa apenas
+`nf3e`/SVRS/RS/produção; o adaptador **fake** NF3e continua sendo usado nos
+testes de contrato. NFAg-e, outros autorizadores e outras UFs continuam fora.
+A F2.2a adiciona `FiscalReference` e `extractFiscalReference` para classificar
+uma referência já extraída, sem rede.
 
-### 5. QR não confiável, allowlist vazia e `safeExternalFetch`
+### 5. QR não confiável, allowlist server-side e `safeExternalFetch`
 
 O QR é usado apenas para **identificar** a fonte/autorizador. O endpoint de
 consulta vem de `packages/providers/src/fiscal/endpoint.ts`, uma allowlist
-server-side indexada por `(source, issuer, environment)`, que nasce **vazia**.
+server-side indexada por `(source, issuer, environment)`, que nesta fatia
+contém somente `(nf3e, SVRS, production)`.
 
 A função `safeFetchFiscalEndpoint` não aceita URL de entrada: ela resolve a URL
 na allowlist e delega para `safeExternalFetch` (ADR-0036), que aplica HTTPS,
@@ -186,20 +188,23 @@ Não é um mock sofisticado nem uma implementação parcial de NF3e.
 
 Positivas:
 
-- F2.2 pode implementar a NF3e sem refazer o modelo de evidência.
+- A F2.2 implementou a NF3e sem refazer o modelo de evidência.
 - O score e o veredito continuam sob controle da policy.
-- SSRF, tenant, idempotência e versionamento já têm testes antes da primeira
-  chamada real.
+- SSRF, tenant, idempotência e versionamento têm testes cobrindo também a
+  primeira chamada real.
 - O `GET` atual continua lendo apenas `uploaded_document`; nada muda para o
   cliente.
 
 Negativas / débito consciente:
 
-- A allowlist vazia significa que nenhuma fonte fiscal real funciona ainda.
+- A allowlist cobre apenas SVRS/RS/produção; outros autorizadores, UFs e
+  ambientes não funcionam.
 - O detalhe fiscal não é exposto no `GET` nesta etapa.
-- O `FakeFiscalAdapter` não valida parsing nem assinatura.
+- O `FakeFiscalAdapter` não valida parsing nem assinatura. O adapter real foi
+  validado com fixtures e sondagem do portal, não com uma chave de produção que
+  exponha endereço/titular completos.
 - Rate limit, cache por fonte, métricas e descoberta de autorizador ficam para
-  F2.2.
+  etapas posteriores.
 
 ## Testes
 
@@ -209,9 +214,14 @@ Negativas / débito consciente:
 - `packages/providers/src/fiscal/fiscal.test.ts`: fake adapter, schema que
   remove scoring, allowlist exata, endpoint fora da allowlist sem fetch e defesa
   de metadata/RFC1918.
+- `packages/providers/src/fiscal/nf3e-fiscal-adapter.test.ts`: escopo
+  SVRS/RS, allowlist, POST de formulário, timeout/HTTP/content-type/oversized,
+  found/not_found/invalid/inconclusive, ausência de PII/scoring e reuso de
+  `compareAddress`/`compareHolder`.
 - `apps/api/tests/fiscal-verification.int.test.ts`: todos os status, endereço e
   titular independentes, ausência de `signal`, remoção de scoring, timeout como
-  `unavailable`, idempotência, versionamento e cross-tenant.
+  `unavailable`, idempotência, versionamento, cross-tenant e a consulta real
+  SVRS/RS com servidor local determinístico.
 
 ## Emenda F2.2b — parte física (2026-10-24)
 
@@ -244,19 +254,68 @@ complementam esta ADR:
   fingerprint inclui a URL normalizada e é preservado na redaction, portanto
   não é recalculável a partir da projeção persistida; `documentId` é o
   identificador fiscal estável e a URL é dado transitório.
-- A consulta NF3e real, a allowlist preenchida e o parsing da resposta continuam
-  fora desta entrega.
+- Esta parte física não consulta a rede. A consulta real foi entregue na
+  emenda seguinte, restrita a SVRS/RS/produção.
+
+## Emenda F2.2b — primeira consulta real (SVRS/RS/produção) (2026-10-25)
+
+A primeira fatia de consulta real fica deliberadamente restrita a **um
+autorizador, uma UF e um ambiente**:
+
+- autorizador: SVRS;
+- UF: RS;
+- ambiente no default da allowlist: produção;
+- protocolo: formulário público de consulta por QR da NF3e.
+
+O endpoint é `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode`
+(`NF3E_SVRS_PRODUCTION_QR_ENDPOINT`), o formulário público de consulta por QR
+do portal SVRS. A decisão veio do próprio QR oficial
+(`.../nf3e/qrCode?chNF3e=<44 dígitos>&tpAmb=<1|2>`) e de sondagem manual do
+endpoint. A URL é fixa no código; não há descoberta automática, fallback para o
+host do QR nem endpoint vindo do cliente.
+
+O adapter `makeNf3eFiscalAdapter`
+(`packages/providers/src/fiscal/nf3e-fiscal-adapter.ts`):
+
+- só suporta `source=nf3e`, `issuer=SVRS`, `uf=RS`, chave de 44 dígitos com cUF
+  `43` e modelo `66`, e QR SVRS ou ausente;
+- resolve `(nf3e, SVRS, production)` na allowlist e chama
+  `safeFetchFiscalEndpoint` → `safeExternalFetch` (ADR-0036);
+- envia POST `application/x-www-form-urlencoded` com `pesq.Sistema=Nf3e`,
+  `pesq.tpAmb` vindo do ambiente server-side e a mesma chave em `pesq.chBpe`,
+  `pesq.chCte` e `pesq.chMdfe`, campos do formulário público observado;
+- limita a 5 s, 128 KiB e `content-type: text/html`;
+- parseia apenas a seção `destinatario` e reutiliza
+  `compareAddress`/`compareHolder`; não parseia emitente, eventos ou
+  cancelamento;
+- mapeia HTML encontrado → `authentic`; `205` → `not_found`; `201`–`204` →
+  `invalid`; 200 não reconhecido → `inconclusive`/`ADAPTER_ERROR`; não-200,
+  falha de fetch ou endpoint fora da allowlist → `unavailable`. Timeout vira
+  `SEFAZ_TIMEOUT`; nunca `invalid`.
+
+Limitações observadas e débito consciente:
+
+- a resposta pública testada em homologação expõe apenas `Município` no
+  destinatário; endereço e titular ficam `not_extracted` na prática;
+- a fixture com endereço/titular completos é **sintética** e só prova o caminho
+  de comparação caso o portal passe a expor esses campos;
+- não foi localizada chave de produção com endereço/titular completos;
+- o formulário é uma interface humana observada, não uma API máquina
+  formalmente especificada; mudanças no HTML podem virar `inconclusive`
+  (`ADAPTER_ERROR`), nunca `invalid`;
+- não há cache, rate limit por fonte, métrica nova, circuit breaker, scheduler
+  novo, descoberta de autorizador nem NFAg-e.
 
 ## Fora de escopo desta etapa
 
-A consulta real (autorizadores/UF reais para consulta, HTTP/SOAP, certificado
-digital, descoberta de autorizador, cache/rate limit por fonte, exposição do
-detalhe fiscal no `GET`, NFAg-e, OCR/VLM, wallet/SSI e billing) continua fora
-desta etapa. A **F2.2a** (implementada) entrega apenas a extração/normalização
-da referência (payload de QR, URL, chave ou texto) e a conversão para
-`FiscalLookupInput`, sem rede; a **parte física da F2.2b** (implementada)
-entrega a decodificação local do QR, também sem rede. A consulta NF3e real
-continua pendente.
+A consulta real foi implementada **somente** para SVRS/RS/produção. Outros
+autorizadores, outras UFs, outros ambientes, HTTP/SOAP genérico, certificado
+digital genérico, descoberta de autorizador, cache/rate limit por fonte,
+exposição do detalhe fiscal no `GET`, NFAg-e, OCR/VLM, wallet/SSI e billing
+continuam fora. A **F2.2a** (implementada) entrega apenas a
+extração/normalização da referência (payload de QR, URL, chave ou texto) e a
+conversão para `FiscalLookupInput`, sem rede; a **parte física da F2.2b**
+(implementada) entrega a decodificação local do QR, também sem rede.
 
 ## Referências
 

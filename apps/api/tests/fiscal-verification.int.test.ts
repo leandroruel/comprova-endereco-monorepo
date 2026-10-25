@@ -10,7 +10,12 @@ import {
 import { and, createDbPool, eq, inArray, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createLogger } from '@comprova/observability'
-import { extractFiscalReference, makeFakeFiscalAdapter } from '@comprova/providers'
+import {
+  extractFiscalReference,
+  makeFakeFiscalAdapter,
+  makeFiscalEndpointAllowlist,
+  makeNf3eFiscalAdapter,
+} from '@comprova/providers'
 import {
   createSubject,
   createTenant,
@@ -19,7 +24,11 @@ import {
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { createServer, request as httpRequest, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createSafeExternalFetch } from '../../../packages/providers/src/safe-fetch.js'
 import { verifyFiscalClaim } from '../../worker/src/modules/fiscal-verification/fiscal-verification.service.js'
 
 const FIXED_NOW = new Date('2026-10-23T12:00:00.000Z')
@@ -28,6 +37,22 @@ const MUNICIPIO_IBGE = 3550308
 const DOCUMENT_ID = '35261012345678000199660010000000011000000010'
 const QR_URL = 'https://169.254.169.254/latest/meta-data/iam/security-credentials/?token=qr-secret'
 const ARTIFACT_SHA256 = 'ab'.repeat(32)
+const RS_MUNICIPIO_IBGE = 4314902
+const RS_DOCUMENT_ID = '43191212345678000199660000000000101018342413'
+const RS_QR_URL = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=${RS_DOCUMENT_ID}&tpAmb=1`
+const SVRS_FIXTURE_MINIMAL = readFileSync(
+  new URL(
+    '../../../packages/providers/src/fiscal/__fixtures__/nf3e-svrs-found-minimal.html',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const SVRS_FIXTURE_FULL = readFileSync(
+  new URL('../../../packages/providers/src/fiscal/__fixtures__/nf3e-svrs-found-full.html', import.meta.url),
+  'utf8',
+)
+
+const sha256 = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex')
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })
@@ -53,12 +78,20 @@ await adminPool.db
   .onConflictDoNothing()
 await adminPool.db
   .insert(t.refReceitaMunicipio)
-  .values({
-    codigoReceita: 3550308,
-    codigoIbge: MUNICIPIO_IBGE,
-    nomeNorm: 'SAO PAULO',
-    uf: 'SP',
-  })
+  .values([
+    {
+      codigoReceita: 3550308,
+      codigoIbge: MUNICIPIO_IBGE,
+      nomeNorm: 'SAO PAULO',
+      uf: 'SP',
+    },
+    {
+      codigoReceita: RS_MUNICIPIO_IBGE,
+      codigoIbge: RS_MUNICIPIO_IBGE,
+      nomeNorm: 'PORTO ALEGRE',
+      uf: 'RS',
+    },
+  ])
   .onConflictDoNothing()
 
 afterAll(async () => {
@@ -75,10 +108,16 @@ interface ClaimFixture {
   readonly addressId: string
 }
 
-const makeClaim = async (
-  tenantId: string,
-  overrides: { readonly numero?: string; readonly cep?: string } = {},
-): Promise<ClaimFixture> => {
+interface ClaimOverrides {
+  readonly numero?: string
+  readonly cep?: string
+  readonly uf?: string
+  readonly municipioIbge?: number
+  readonly logradouroNorm?: string
+  readonly bairroNorm?: string
+}
+
+const makeClaim = async (tenantId: string, overrides: ClaimOverrides = {}): Promise<ClaimFixture> => {
   const subjectId = await createSubject(adminPool.db, tenantId, 'CNPJ')
   const validationId = await createValidation(adminPool.db, tenantId, subjectId)
   const addressId = randomUUID()
@@ -87,12 +126,12 @@ const makeClaim = async (
     addressId,
     buildingKey: randomBytes(32),
     countryCode: 'BR',
-    uf: 'SP',
-    municipioIbge: MUNICIPIO_IBGE,
+    uf: overrides.uf ?? 'SP',
+    municipioIbge: overrides.municipioIbge ?? MUNICIPIO_IBGE,
     cep: overrides.cep ?? '01001000',
-    logradouroNorm: 'RUA DAS FLORES',
+    logradouroNorm: overrides.logradouroNorm ?? 'RUA DAS FLORES',
     numero: overrides.numero ?? '123',
-    bairroNorm: 'CENTRO',
+    bairroNorm: overrides.bairroNorm ?? 'CENTRO',
   })
 
   await adminPool.db
@@ -668,5 +707,238 @@ describe('F2.2a — da referência extraída à observação fiscal', () => {
     expect(
       toFiscalLookupInput(reference, { tenantId: tenantA, claimId: randomUUID(), artifact: null }),
     ).toBeNull()
+  })
+})
+
+describe('F2.2b — primeira consulta real NF3e/SVRS/RS', () => {
+  const LOCAL_ALLOWLIST = makeFiscalEndpointAllowlist([
+    {
+      source: 'nf3e',
+      issuer: 'SVRS',
+      environment: 'local',
+      url: 'https://fiscal.test/nf3e/qrCode',
+    },
+  ])
+
+  const requests: { method: string; url: string; body: string }[] = []
+  let server: Server
+  let port = 0
+
+  beforeAll(async () => {
+    server = createServer((request, response) => {
+      const chunks: Buffer[] = []
+      request.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+      request.on('end', () => {
+        requests.push({
+          method: request.method ?? '',
+          url: request.url ?? '',
+          body: Buffer.concat(chunks).toString('utf8'),
+        })
+        if (request.method !== 'POST' || request.url !== '/nf3e/qrCode') {
+          response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end('not found')
+          return
+        }
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        response.end(SVRS_FIXTURE_MINIMAL)
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    port = (server.address() as AddressInfo).port
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error === undefined ? resolve() : reject(error)))
+    })
+  })
+
+  beforeEach(() => {
+    requests.length = 0
+  })
+
+  const localSafeFetch = () =>
+    createSafeExternalFetch({
+      resolve: async () => [{ address: '8.8.8.8', family: 4 }],
+      transport: (options) => {
+        const {
+          protocol: _protocol,
+          hostname: _hostname,
+          port: _port,
+          lookup: _lookup,
+          servername: _servername,
+          ...rest
+        } = options
+        void _protocol
+        void _hostname
+        void _port
+        void _lookup
+        void _servername
+        return httpRequest({ ...rest, protocol: 'http:', hostname: '127.0.0.1', port })
+      },
+    })
+
+  const localAdapter = (version = '1.0.0') =>
+    makeNf3eFiscalAdapter({
+      version,
+      environment: 'local',
+      allowlist: LOCAL_ALLOWLIST,
+      safeFetch: localSafeFetch(),
+    })
+
+  const rsClaim = (tenantId: string, overrides: ClaimOverrides = {}) =>
+    makeClaim(tenantId, {
+      uf: 'RS',
+      municipioIbge: RS_MUNICIPIO_IBGE,
+      cep: '90010150',
+      logradouroNorm: 'RUA DAS FLORES',
+      numero: '123',
+      bairroNorm: 'CENTRO',
+      ...overrides,
+    })
+
+  const rsInput = (claim: ClaimFixture): FiscalLookupInput => {
+    const reference = extractFiscalReference({ value: RS_QR_URL, method: 'qr_code' })
+    const input = toFiscalLookupInput(reference, {
+      tenantId: claim.tenantId,
+      claimId: claim.claimId,
+      artifact: { artifactId: randomUUID(), sha256: ARTIFACT_SHA256 },
+    })
+    if (input === null) throw new Error('QR SVRS/RS deveria produzir FiscalLookupInput')
+    return input
+  }
+
+  it('executa a consulta pela guarda de fetch e materializa a fixture observada', async () => {
+    const claim = await rsClaim(tenantA)
+    const input = rsInput(claim)
+    const before = logLines.length
+
+    await expect(run(localAdapter(), input)).resolves.toBe('inserted')
+
+    expect(requests).toHaveLength(1)
+    const request = requests[0]
+    expect(request).toMatchObject({ method: 'POST', url: '/nf3e/qrCode' })
+    const body = new URLSearchParams(request?.body ?? '')
+    expect(body.get('pesq.Sistema')).toBe('Nf3e')
+    expect(body.get('pesq.tpAmb')).toBe('2')
+    expect(body.get('pesq.chBpe')).toBe(RS_DOCUMENT_ID)
+    expect(body.get('pesq.chCte')).toBe(RS_DOCUMENT_ID)
+    expect(body.get('pesq.chMdfe')).toBe(RS_DOCUMENT_ID)
+
+    const rows = await fiscalRowsOf(claim.claimId)
+    expect(rows).toHaveLength(1)
+    const row = rows[0]
+    expect(row).toMatchObject({
+      tenantId: tenantA,
+      source: 'fiscal_nf3e',
+      checker: 'nf3e_verification',
+      stance: 'unknown',
+      strength: 0,
+      confidence: 0,
+      signalId: null,
+    })
+
+    const verification = verificationOf(row)
+    expect(verification).toMatchObject({
+      status: 'completed',
+      method: 'official_qr_consultation',
+      source: {
+        kind: 'fiscal_nf3e',
+        id: 'nf3e',
+        authority: 'SVRS',
+        environment: 'local',
+      },
+      document: 'authentic',
+      address: 'not_extracted',
+      holder: 'not_extracted',
+      document_ref_hash: fiscalDocumentFingerprint(input),
+      adapter_version: '1.0.0',
+      contract_version: FISCAL_VERIFICATION_CONTRACT_VERSION,
+      observed_at: FIXED_NOW.toISOString(),
+      issued_at: null,
+      limitations: [],
+      error_codes: [],
+      audit: {
+        requested_url_sha256: sha256('https://fiscal.test/nf3e/qrCode'),
+        resolved_ip: '8.8.8.8',
+        response_status: 200,
+        response_sha256: sha256(SVRS_FIXTURE_MINIMAL),
+      },
+      query: { uf: 'RS', qr_present: true },
+    })
+
+    const serialized = JSON.stringify(row?.detail)
+    expect(serialized).not.toContain(RS_DOCUMENT_ID)
+    expect(serialized).not.toContain('Porto Alegre')
+    expect(serialized).not.toContain('Empresa Exemplo')
+    expect(serialized).not.toContain('12.345.678/0001-99')
+    expect(serialized).not.toContain('<div')
+    expect(serialized).not.toContain('trust_score')
+    expect(serialized).not.toContain('approved')
+
+    const newLogs = logLines.slice(before).join('\n')
+    expect(newLogs).not.toContain(RS_DOCUMENT_ID)
+    expect(newLogs).not.toContain('Porto Alegre')
+    expect(newLogs).not.toContain('Empresa Exemplo')
+
+    const signals = await adminPool.db
+      .select({ signalId: t.signal.signalId })
+      .from(t.signal)
+      .where(eq(t.signal.validationId, claim.validationId))
+    expect(signals).toEqual([])
+  })
+
+  it('não duplica a mesma consulta e preserva histórico por versão do adapter', async () => {
+    const claim = await rsClaim(tenantA)
+    const input = rsInput(claim)
+
+    await expect(run(localAdapter('1.0.0'), input)).resolves.toBe('inserted')
+    await expect(run(localAdapter('1.0.0'), input)).resolves.toBe('duplicate')
+    expect(await fiscalRowsOf(claim.claimId)).toHaveLength(1)
+
+    await expect(run(localAdapter('1.0.1'), input)).resolves.toBe('inserted')
+    const rows = await fiscalRowsOf(claim.claimId)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => verificationOf(row).adapter_version).sort()).toEqual(['1.0.0', '1.0.1'])
+  })
+
+  it('não materializa consulta real em claim de outro tenant', async () => {
+    const claimB = await rsClaim(tenantB)
+    const spoofed = rsInput({ ...claimB, tenantId: tenantA })
+
+    await expect(run(localAdapter(), spoofed)).resolves.toBe('skipped')
+    expect(await fiscalRowsOf(claimB.claimId)).toHaveLength(0)
+    expect(requests).toHaveLength(0)
+  })
+
+  it('reutiliza as comparações quando a fixture estendida traz endereço/titular', async () => {
+    const claim = await rsClaim(tenantA)
+    const input = rsInput(claim)
+    const adapter = makeNf3eFiscalAdapter({
+      environment: 'local',
+      allowlist: LOCAL_ALLOWLIST,
+      safeFetch: async () => ({
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: Buffer.from(SVRS_FIXTURE_FULL),
+        address: '203.0.113.10',
+      }),
+    })
+
+    await expect(run(adapter, input)).resolves.toBe('inserted')
+
+    const row = (await fiscalRowsOf(claim.claimId))[0]
+    expect(row?.stance).toBe('supports')
+    expect(verificationOf(row)).toMatchObject({
+      document: 'authentic',
+      address: 'matches',
+      holder: 'matches',
+      limitations: [],
+      error_codes: [],
+    })
+    const serialized = JSON.stringify(row?.detail)
+    expect(serialized).not.toContain('Empresa Exemplo')
+    expect(serialized).not.toContain('Rua das Flores')
+    expect(serialized).not.toContain('90010-150')
   })
 })

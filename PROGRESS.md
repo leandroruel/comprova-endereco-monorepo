@@ -1,15 +1,57 @@
 # PROGRESS.md
 
-Estado: **Extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-24)
+Estado: **Consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-25)
+
+## Consulta NF3e real SVRS/RS (F2.2b — primeira fatia) (2026-10-25)
+
+A segunda metade da F2.2b habilita a primeira consulta fiscal real: **NF3e do
+autorizador SVRS, UF RS, ambiente produção**, pelo formulário público de
+consulta por QR. O escopo é deliberadamente pequeno; não há cobertura nacional.
+
+- Endpoint na allowlist:
+  `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode`
+  (`NF3E_SVRS_PRODUCTION_QR_ENDPOINT`), indexado por
+  `(nf3e, SVRS, production)`. A URL do QR nunca é destino: ela só confirma que a
+  referência é do autorizador suportado. `safeFetchFiscalEndpoint` →
+  `safeExternalFetch` (HTTPS, DNS/IP fixado, sem redirect, timeout de 5 s,
+  corpo máximo de 128 KiB e `content-type: text/html`).
+- `makeNf3eFiscalAdapter` em
+  `packages/providers/src/fiscal/nf3e-fiscal-adapter.ts` aceita somente
+  `source=nf3e`, `issuer=SVRS`, `uf=RS`, chave de 44 dígitos com cUF `43` e
+  modelo `66`, e QR SVRS (ou ausente). O POST envia
+  `pesq.Sistema=Nf3e`, `pesq.tpAmb=1|2`, `pesq.chBpe`, `pesq.chCte` e
+  `pesq.chMdfe`. O `tpAmb` vem do ambiente server-side, nunca do QR.
+- Resposta: HTML encontrado (`id="nf3eQrCode"`) → `document=authentic`; `205` →
+  `not_found`; `201`–`204` → `invalid`; 200 não reconhecido →
+  `inconclusive`/`ADAPTER_ERROR`; não-200, falha de fetch ou endpoint fora da
+  allowlist → `unavailable`. Timeout vira `SEFAZ_TIMEOUT`; nunca `invalid`.
+- Parser pequeno e específico da seção `destinatario`: reutiliza
+  `compareAddress`/`compareHolder`; não parseia emitente, eventos ou
+  cancelamento. **Limitação observada:** a resposta pública do portal expõe
+  apenas `Município`, então endereço/titular ficam `not_extracted` nessa fonte.
+  A fixture com endereço/titular completos é sintética e só prova o caminho de
+  comparação caso esses campos passem a existir.
+- O endpoint foi sondado manualmente em homologação: `found` com apenas
+  `Município`, `205` para ausência e `201`/`203` para chave inválida. Não foi
+  localizada chave de produção com endereço/titular completos; o default da
+  allowlist continua produção.
+- Sem tabela/migration, sem scoring/`signal`, sem cache/rate limit, sem
+  descoberta de autorizador e sem NFAg-e. O materializador continua persistindo
+  apenas outcomes, `document_ref_hash`, versões, limitações e auditoria mínima.
+- Testes: 19 no adapter (escopo, allowlist, POST, timeout/HTTP/content-type/
+  oversized, found/minimal/not_found/invalid/inconclusive, ausência de
+  PII/scoring), 32 na referência (inclui `chNF3e`), 10 na allowlist/schema e 23
+  de integração (servidor HTTP local via guarda, idempotência, versionamento,
+  cross-tenant e fixture estendida). O CI não chama o portal SVRS.
 
 ## Extração física do QR a partir do artefato (F2.2b — parte física) (2026-10-24)
 
 A parte física da F2.2b liga o **artefato real** (o comprovante já guardado em
 `evidence_artifact`) ao `FiscalReference`/`FiscalLookupInput` da F2.2a. Ela
 decodifica o QR localmente e **não consulta** SEFAZ/autorizador: a resolução
-server-side do endpoint, a allowlist preenchida e o parsing da resposta
-continuam pendentes na segunda metade da F2.2b. O pedido original chamava esta
-etapa de "F2.2a"; no roadmap canônico a F2.2a é a normalização.
+server-side do endpoint, a allowlist preenchida e o parsing da resposta foram
+entregues na segunda metade da F2.2b (seção acima). O pedido original chamava
+esta etapa de "F2.2a"; no roadmap canônico a F2.2a é a normalização.
 
 - `extractFiscalReferenceFromArtifact` em
   `packages/providers/src/fiscal/reference.ts` aceita
@@ -86,7 +128,7 @@ etapa de "F2.2a"; no roadmap canônico a F2.2a é a normalização.
 A F2.2a faz a ponte entre o documento enviado e o `FiscalAdapter` sem nenhuma
 consulta fiscal real. Ela recebe uma referência **já extraída** (payload de QR,
 URL, chave de acesso ou texto) e devolve um `FiscalReference` normalizado; a
-extração física do QR (decodificar imagem) fica para a F2.2b.
+extração física do QR (decodificar imagem) foi entregue na F2.2b.
 
 - Contrato puro em `packages/core/src/fiscal-reference.ts`:
   `FiscalReference` (`status`, `source`, `issuer`, `uf`, `url`, `documentId`,
@@ -112,9 +154,9 @@ extração física do QR (decodificar imagem) fica para a F2.2b.
   `issuer = null` (`UNKNOWN_ISSUER`). Parâmetros de chave duplicados/conflitantes
   retornam `AMBIGUOUS_REFERENCE`; valor não estrito retorna
   `INVALID_DOCUMENT_ID`.
-- Allowlist de autorizadores continua vazia e server-side (F2.1); o extractor
-  não autoriza endpoint. Domínio ou caminho desconhecido não vira autorizador:
-  no máximo `issuer = null` quando há chave válida. NFAg-e é marcada
+- A allowlist server-side (F2.1/F2.2b) é quem autoriza o endpoint; o extractor
+  não autoriza nem busca nada. Domínio ou caminho desconhecido não vira
+  autorizador: no máximo `issuer = null` quando há chave válida. NFAg-e é marcada
   `unsupported` (`SOURCE_NOT_SUPPORTED`).
 - `limitations` registra condições informativas de uma referência `found`
   (`UNKNOWN_ISSUER`, `DOCUMENT_ID_MISSING`); `errorCodes` fica vazio em `found` e
@@ -129,10 +171,10 @@ extração física do QR (decodificar imagem) fica para a F2.2b.
 
 ## Contrato fiscal e materialização da observação (F2.1) (2026-10-23)
 
-A F2.1 prepara a primeira fonte fiscal **sem executar nenhuma consulta real**.
-Ela entrega o contrato `FiscalAdapter`, a normalização do resultado e a
-materialização em `claim_evidence`; a NF3e real (allowlist preenchida, fetch e
-parsing) fica para F2.2. Decisão em
+A F2.1 preparou a primeira fonte fiscal **sem executar nenhuma consulta real**.
+Ela entregou o contrato `FiscalAdapter`, a normalização do resultado e a
+materialização em `claim_evidence`; a primeira consulta real NF3e/SVRS/RS foi
+entregue na F2.2b (seção acima). Decisão em
 [ADR-0041](docs/adr/0041-contrato-fiscal-adapter.md) e detalhes em
 [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#55-contrato-fiscal-e-materialização-f21-implementado).
 
@@ -169,8 +211,9 @@ parsing) fica para F2.2. Decisão em
   materializar. O loader de contexto foi extraído da F1.3 para
   `apps/worker/src/modules/evidence-verification/claim-context.ts`.
 - SSRF: `packages/providers/src/fiscal/endpoint.ts` tem allowlist server-side
-  por `(source, issuer, environment)`, **vazia por decisão**, e delega a chamada
-  para a guarda única `safeExternalFetch` (ADR-0036). Endpoint fora da allowlist
+  por `(source, issuer, environment)`, com somente SVRS/produção habilitado na
+  F2.2b, e delega a chamada para a guarda única `safeExternalFetch` (ADR-0036).
+  Endpoint fora da allowlist
   nem chega ao fetch; metadata/RFC1918 continuam bloqueados pela guarda. A URL
   do QR nunca é usada como destino.
 - `FakeFiscalAdapter` determinístico (`packages/providers/src/fiscal/`) exercita
