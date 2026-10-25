@@ -6,8 +6,8 @@ import type { SafeFetch, SafeFetchOptions, SafeFetchResponse } from '../safe-fet
  *
  * O adapter NUNCA busca a URL do QR fornecido pelo usuário. Ele identifica
  * `(source, issuer, environment)` e resolve a URL de consulta nesta allowlist,
- * versionada em código. A lista nasce vazia: nenhum autorizador real é
- * habilitado nesta etapa (F2.2).
+ * versionada em código. A F2.2b habilita apenas o autorizador SVRS em produção,
+ * no endpoint público de consulta por QR da NF3e.
  *
  * A chamada efetiva é delegada à guarda única `safeExternalFetch`, que valida
  * DNS/IP, bloqueia loopback/RFC1918/link-local/metadata, fixa o IP, recusa
@@ -80,8 +80,25 @@ export const makeFiscalEndpointAllowlist = (entries: readonly FiscalEndpoint[]):
   }
 }
 
-/** F2.1: allowlist vazia. Nenhuma consulta fiscal real é possível. */
-export const FISCAL_ENDPOINT_ALLOWLIST = makeFiscalEndpointAllowlist([])
+/**
+ * F2.2b: primeiro endpoint real. É o formulário público de consulta por QR da
+ * NF3e no portal SVRS. A URL é fixa e versionada aqui; a chave do documento vai
+ * no corpo POST, nunca na URL ou em um destino vindo do QR.
+ */
+export const NF3E_SVRS_PRODUCTION_QR_ENDPOINT = 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode'
+
+/**
+ * Allowlist server-side da primeira fatia real: somente SVRS em produção.
+ * Outros autorizadores, UFs e ambientes continuam explicitamente fora.
+ */
+export const FISCAL_ENDPOINT_ALLOWLIST = makeFiscalEndpointAllowlist([
+  {
+    source: 'nf3e',
+    issuer: 'SVRS',
+    environment: 'production',
+    url: NF3E_SVRS_PRODUCTION_QR_ENDPOINT,
+  },
+])
 
 export interface SafeFetchFiscalEndpointInput {
   readonly allowlist: FiscalEndpointAllowlist

@@ -9,6 +9,7 @@ import { safeExternalFetch } from '../safe-fetch.js'
 import {
   FISCAL_ENDPOINT_ALLOWLIST,
   FiscalEndpointNotAllowedError,
+  NF3E_SVRS_PRODUCTION_QR_ENDPOINT,
   makeFiscalEndpointAllowlist,
   safeFetchFiscalEndpoint,
   type FiscalEndpointRef,
@@ -219,7 +220,24 @@ describe('allowlist de endpoints fiscais', () => {
     ).rejects.toMatchObject({ reason: 'PRIVATE_IP' })
   })
 
-  it('nasce vazia: nenhuma fonte fiscal real está habilitada em F2.1', () => {
-    expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref('SVRS'))).toBeNull()
+  it('habilita somente o primeiro autorizador real: SVRS/RS em produção', () => {
+    expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref('SVRS'))?.url).toBe(NF3E_SVRS_PRODUCTION_QR_ENDPOINT)
+    expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref('svrs '))?.url).toBe(NF3E_SVRS_PRODUCTION_QR_ENDPOINT)
+    expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref('OUTRO'))).toBeNull()
+    expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref(null))).toBeNull()
+    expect(
+      FISCAL_ENDPOINT_ALLOWLIST.resolve({
+        source: 'nf3e',
+        issuer: 'SVRS',
+        environment: 'homologation',
+      }),
+    ).toBeNull()
+    expect(
+      FISCAL_ENDPOINT_ALLOWLIST.resolve({
+        source: 'nfag-e',
+        issuer: 'SVRS',
+        environment: 'production',
+      }),
+    ).toBeNull()
   })
 })
