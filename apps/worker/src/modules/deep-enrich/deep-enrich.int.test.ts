@@ -26,6 +26,7 @@ import {
   policyHashOf,
   systemClock,
   type Clock,
+  type FiscalLookupInput,
   type PartnerGraphReader,
 } from '@comprova/core'
 import {
@@ -496,6 +497,79 @@ describe('deepEnrich (activity core)', () => {
       expect(stance).toBe('contradicts')
       expect(after.score).toBe(before.score)
       expect(after.verdict).toBe(before.verdict)
+    })
+
+    it('duas versões do adapter para o mesmo documento somam 0.32 uma única vez', async () => {
+      const created = await runFastPath(
+        fastPathDeps,
+        { tenantId: tenant, apiKeyId: null },
+        {
+          documentType: 'CNPJ',
+          documentValue: '12345678000195',
+          addressInput: null,
+          legalBasis: 'FRAUD_PREVENTION',
+          mode: 'auto',
+          idempotencyKey: `f3-1-dedup-${randomUUID()}`,
+        },
+      )
+      const claimRows = await adminPool.db
+        .select({ claimId: t.claim.claimId })
+        .from(t.claim)
+        .where(eq(t.claim.validationId, created.validationId))
+      const claimId = claimRows[0]?.claimId
+      if (claimId === undefined) throw new Error('claim nao criado pelo fast path')
+
+      const fixedNow = new Date('2026-10-23T12:00:00.000Z')
+      const deps = {
+        db: adminPool.db,
+        t1Checkers: [],
+        policy: fiscalPolicy,
+        policyHash: fiscalPolicyHash,
+        clock: { now: () => fixedNow },
+      }
+      const before = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
+
+      const fiscalInput: FiscalLookupInput = {
+        source: 'nf3e',
+        tenantId: tenant,
+        claimId,
+        documentId: '43191212345678000199660000000000101018342413',
+        qrCodeUrl:
+          'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=43191212345678000199660000000000101018342413&tpAmb=1',
+        issuer: 'SVRS',
+        uf: 'SP',
+        artifact: { artifactId: randomUUID(), sha256: 'ab'.repeat(32) },
+      }
+      // Mesmo documento, duas versões do adapter → duas linhas, mas o score soma 0.32 só uma vez.
+      await verifyFiscalClaim(
+        {
+          db: adminPool.db,
+          adapter: makeFakeFiscalAdapter({
+            version: '1.0.0',
+            document: 'authentic',
+            address: 'matches',
+            holder: 'matches',
+          }),
+          now: () => fixedNow,
+        },
+        { ...fiscalInput },
+      )
+      await verifyFiscalClaim(
+        {
+          db: adminPool.db,
+          adapter: makeFakeFiscalAdapter({
+            version: '2.0.0',
+            document: 'authentic',
+            address: 'matches',
+            holder: 'matches',
+          }),
+          now: () => fixedNow,
+        },
+        { ...fiscalInput },
+      )
+      const after = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
+
+      expect(rawScore(after.score) - rawScore(before.score)).toBeCloseTo(0.32, 6)
     })
   })
 

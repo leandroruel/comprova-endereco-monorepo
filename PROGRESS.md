@@ -31,7 +31,10 @@ regra explícita, conservadora e versionada. Decisão em
   F1.3 e fica para depois; com a resposta pública atual da SVRS (apenas
   `Município`) o endereço fica `not_extracted` e a força tende a não se aplicar;
   o simulador de policy lê `signal`, não `claim_evidence`, e ainda não simula
-  esta força.
+  esta força. Duas versões do adapter para o mesmo documento contribuem no
+  máximo uma vez ao scoring (`canonicalStandaloneEvidence`: uma linha
+  `supports` por `document_ref_hash`); linhas históricas são preservadas para
+  auditoria.
 - Sem tabela/migration, sem `signal` novo, sem mudança de RLS/idempotência /
   versionamento e sem backfill. Assessments antigos mantêm
   `policy_version`/`policy_hash`.
@@ -39,7 +42,8 @@ regra explícita, conservadora e versionada. Decisão em
   força (`supports` só; no-op sem config; contribuição única 0.4 × 0.8) e
   integração (NF3e `authentic`+`address.matches` soma 0.32; `not_found`,
   `invalid`, `inconclusive`, `unavailable`, `unsupported` e `differs` não mudam
-  score/veredito).
+  score/veredito; duas versões do adapter para o mesmo documento somam 0.32
+  uma única vez).
 
 ## Consulta NF3e real SVRS/RS (F2.2b — primeira fatia) (2026-10-25)
 

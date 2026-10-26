@@ -80,6 +80,44 @@ export const assessmentObservationsOf = (
   })),
 ]
 
+/**
+ * Para scoring, evita que o mesmo documento fiscal seja contado mais de uma vez
+ * por versões diferentes do adapter. A unicidade de `claim_evidence` é
+ * `(claim, source, checker, checker_version)`, então um bump de adapter insere
+ * uma linha nova para o mesmo documento: sem esta dedup, cada versão com
+ * `stance = supports` somaria `0.4 × 0.8 = 0.32`.
+ *
+ * Todas as linhas históricas são mantidas na tabela (auditoria/explicação usam
+ * `readEvidenceSet`, que não é dedupada). Apenas a observação que alimenta o
+ * score é canônica: fica uma linha `supports` por `document_ref_hash`; linhas
+ * sem hash de documento (não fiscais) e linhas não-`supports` (força zero) não
+ * são afetadas.
+ */
+const docRefHashOf = (row: StandaloneEvidenceRow): string | null => {
+  const detail = row.detail as Record<string, unknown> | undefined
+  const verification = detail?.verification as Record<string, unknown> | undefined
+  const docRef = verification?.document_ref_hash
+  return typeof docRef === 'string' ? docRef : null
+}
+
+export const canonicalStandaloneEvidence = (
+  rows: readonly StandaloneEvidenceRow[],
+): readonly StandaloneEvidenceRow[] => {
+  const seenSupportsDoc = new Set<string>()
+  const out: StandaloneEvidenceRow[] = []
+  for (const row of rows) {
+    if (row.stance === 'supports') {
+      const docHash = docRefHashOf(row)
+      if (docHash !== null) {
+        if (seenSupportsDoc.has(docHash)) continue
+        seenSupportsDoc.add(docHash)
+      }
+    }
+    out.push(row)
+  }
+  return out
+}
+
 const claimTypeOf = (docType: string): ClaimType =>
   docType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
 
@@ -196,8 +234,10 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
 
     // F1.3/F2: observações sem `signal` já persistidas no claim participam da
     // avaliação existente. Com `strength`/`confidence` neutros (0), o score e o
-    // veredito não mudam; a F3 decide peso/força.
-    const standaloneEvidence = await readStandaloneEvidenceSet(tx, claimId)
+    // veredito não mudam; a F3 decide peso/força. Versões repetidas de um mesmo
+    // documento fiscal são dedupadas para scoring (uma linha `supports` por
+    // `document_ref_hash`) para não somar força duas vezes.
+    const standaloneEvidence = canonicalStandaloneEvidence(await readStandaloneEvidenceSet(tx, claimId))
     const { score, decision } = evaluateClaim({
       claim: { id: claimId ?? '', type: claimType },
       evidence: assessmentObservationsOf([...signalsAfterT1, ...t2Signals], standaloneEvidence),

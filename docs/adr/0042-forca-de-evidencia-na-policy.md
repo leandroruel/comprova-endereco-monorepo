@@ -95,9 +95,11 @@ Negativas / débito consciente:
   `signal`; o simulador de policy (`policy:simulate`) lê `signal`, não
   `claim_evidence`, então ainda não simula esta força.
 - O histórico append-only pode manter mais de uma versão do mesmo checker
-  (ex.: bump do adapter fiscal). Cada versão é uma observação distinta, como já
-  ocorre com `signal` de versões diferentes; deduplicar por versão é decisão de
-  `SCORER_VERSION` posterior, fora deste slice.
+  (ex.: bump do adapter fiscal). Para scoring, `canonicalStandaloneEvidence`
+  mantém apenas uma linha `supports` por `document_ref_hash`, então cada
+  documento contribui no máximo uma vez; todas as linhas históricas são
+  preservadas na tabela para auditoria (o hash/explicação usam `readEvidenceSet`
+  sem dedup).
 
 ## Testes
 
