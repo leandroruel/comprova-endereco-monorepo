@@ -499,7 +499,69 @@ describe('deepEnrich (activity core)', () => {
       expect(after.verdict).toBe(before.verdict)
     })
 
-    it('duas versões do adapter para o mesmo documento somam 0.32 uma única vez', async () => {
+    // ----- helpers para testes de dedup por versão -----
+
+    const fiscalBaseInput = (documentId: string): FiscalLookupInput => ({
+      source: 'nf3e',
+      tenantId: tenant,
+      claimId: '',
+      documentId,
+      qrCodeUrl: 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=' + documentId + '&tpAmb=1',
+      issuer: 'SVRS',
+      uf: 'SP',
+      artifact: { artifactId: randomUUID(), sha256: 'ab'.repeat(32) },
+    })
+
+    const insertFiscalObservation = async (
+      claimId: string,
+      adapterOptions: Parameters<typeof makeFakeFiscalAdapter>[0],
+      documentId: string,
+      at: Date,
+    ): Promise<void> => {
+      await verifyFiscalClaim(
+        {
+          db: adminPool.db,
+          adapter: makeFakeFiscalAdapter(adapterOptions),
+          now: () => at,
+        },
+        {
+          ...fiscalBaseInput(documentId),
+          claimId,
+        },
+      )
+    }
+
+    const insertFiscalVersion = async (
+      claimId: string,
+      adapterVersion: string,
+      documentId: string,
+      at: Date = new Date('2026-10-23T12:00:00.000Z'),
+    ): Promise<void> => {
+      await insertFiscalObservation(
+        claimId,
+        {
+          version: adapterVersion,
+          document: 'authentic',
+          address: 'matches',
+          holder: 'matches',
+        },
+        documentId,
+        at,
+      )
+    }
+
+    const countFiscalRows = async (claimId: string): Promise<number> => {
+      const rows = await adminPool.db
+        .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+        .from(t.claimEvidence)
+        .where(and(eq(t.claimEvidence.claimId, claimId), eq(t.claimEvidence.source, 'fiscal_nf3e')))
+      return rows.length
+    }
+
+    const createClaimForDedup = async (): Promise<{
+      claimId: string
+      validationId: string
+    }> => {
       const created = await runFastPath(
         fastPathDeps,
         { tenantId: tenant, apiKeyId: null },
@@ -518,7 +580,18 @@ describe('deepEnrich (activity core)', () => {
         .where(eq(t.claim.validationId, created.validationId))
       const claimId = claimRows[0]?.claimId
       if (claimId === undefined) throw new Error('claim nao criado pelo fast path')
+      return { claimId, validationId: created.validationId }
+    }
 
+    const runDedupAssessment = async (
+      versions: readonly string[],
+      documentId: string,
+    ): Promise<{
+      before: DeepEnrichResult
+      after: DeepEnrichResult
+      fiscalRowCount: number
+    }> => {
+      const { claimId, validationId } = await createClaimForDedup()
       const fixedNow = new Date('2026-10-23T12:00:00.000Z')
       const deps = {
         db: adminPool.db,
@@ -527,49 +600,127 @@ describe('deepEnrich (activity core)', () => {
         policyHash: fiscalPolicyHash,
         clock: { now: () => fixedNow },
       }
-      const before = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
-
-      const fiscalInput: FiscalLookupInput = {
-        source: 'nf3e',
+      const before = await deepEnrich(deps, {
         tenantId: tenant,
-        claimId,
-        documentId: '43191212345678000199660000000000101018342413',
-        qrCodeUrl:
-          'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=43191212345678000199660000000000101018342413&tpAmb=1',
-        issuer: 'SVRS',
-        uf: 'SP',
-        artifact: { artifactId: randomUUID(), sha256: 'ab'.repeat(32) },
-      }
-      // Mesmo documento, duas versões do adapter → duas linhas, mas o score soma 0.32 só uma vez.
-      await verifyFiscalClaim(
-        {
-          db: adminPool.db,
-          adapter: makeFakeFiscalAdapter({
-            version: '1.0.0',
-            document: 'authentic',
-            address: 'matches',
-            holder: 'matches',
-          }),
-          now: () => fixedNow,
-        },
-        { ...fiscalInput },
-      )
-      await verifyFiscalClaim(
-        {
-          db: adminPool.db,
-          adapter: makeFakeFiscalAdapter({
-            version: '2.0.0',
-            document: 'authentic',
-            address: 'matches',
-            holder: 'matches',
-          }),
-          now: () => fixedNow,
-        },
-        { ...fiscalInput },
-      )
-      const after = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
+        validationId,
+      })
 
+      // Cada versão é observada 1 min depois da anterior; a última coincide com
+      // o instante de avaliação (decay 1), tornando a canônica determinística.
+      for (const [index, version] of versions.entries()) {
+        const at = new Date(fixedNow.getTime() - (versions.length - 1 - index) * 60_000)
+        await insertFiscalVersion(claimId, version, documentId, at)
+      }
+
+      const after = await deepEnrich(deps, {
+        tenantId: tenant,
+        validationId,
+      })
+      const fiscalRowCount = await countFiscalRows(claimId)
+
+      return { before, after, fiscalRowCount }
+    }
+
+    it('uma única versão soma 0.32 (contribuição de uma evidência)', async () => {
+      const { before, after } = await runDedupAssessment(
+        ['1.0.0'],
+        '43191212345678000199660000000000101018342413',
+      )
       expect(rawScore(after.score) - rawScore(before.score)).toBeCloseTo(0.32, 6)
+    })
+
+    it('duas versões do mesmo documento somam 0.32 uma única vez (não 0.64)', async () => {
+      const { before, after, fiscalRowCount } = await runDedupAssessment(
+        ['1.0.0', '2.0.0'],
+        '43191212345678000199660000000000101018342413',
+      )
+      expect(fiscalRowCount).toBe(2)
+      expect(rawScore(after.score) - rawScore(before.score)).toBeCloseTo(0.32, 6)
+    })
+
+    it('três versões do mesmo documento somam 0.32 uma única vez', async () => {
+      const { before, after, fiscalRowCount } = await runDedupAssessment(
+        ['1.0.0', '2.0.0', '3.0.0'],
+        '43191212345678000199660000000000101018342413',
+      )
+      expect(fiscalRowCount).toBe(3)
+      expect(rawScore(after.score) - rawScore(before.score)).toBeCloseTo(0.32, 6)
+    })
+
+    it('dois documentos diferentes no MESMO claim somam 0.32 cada (0.64)', async () => {
+      const { claimId, validationId } = await createClaimForDedup()
+      const fixedNow = new Date('2026-10-23T12:00:00.000Z')
+      const deps = {
+        db: adminPool.db,
+        t1Checkers: [],
+        policy: fiscalPolicy,
+        policyHash: fiscalPolicyHash,
+        clock: { now: () => fixedNow },
+      }
+      const before = await deepEnrich(deps, { tenantId: tenant, validationId })
+
+      // Dois documentos distintos (document_ref_hash distintos) no mesmo claim.
+      await insertFiscalVersion(claimId, '1.0.0', '43191212345678000199660000000000101018342413')
+      await insertFiscalVersion(claimId, '1.0.0', '43191212345678000199660000000000101018342414')
+      const after = await deepEnrich(deps, { tenantId: tenant, validationId })
+
+      expect(await countFiscalRows(claimId)).toBe(2)
+      expect(rawScore(after.score) - rawScore(before.score)).toBeCloseTo(0.64, 6)
+    })
+
+    it('histórico é preservado: v1 e v2 permanecem em claim_evidence', async () => {
+      const { fiscalRowCount } = await runDedupAssessment(
+        ['1.0.0', '2.0.0'],
+        '43191212345678000199660000000000101018342413',
+      )
+      expect(fiscalRowCount).toBe(2)
+    })
+
+    it('mesmo document_ref_hash com checker_version diferente não duplica contribuição', async () => {
+      const { before, after, fiscalRowCount } = await runDedupAssessment(
+        ['1.0.0', '2.0.0'],
+        '43191212345678000199660000000000101018342413',
+      )
+      expect(fiscalRowCount).toBe(2)
+      expect(rawScore(after.score) - rawScore(before.score)).toBeCloseTo(0.32, 6)
+    })
+
+    it('versão mais recente inconclusive substitui a supports antiga (sem força positiva)', async () => {
+      const { claimId, validationId } = await createClaimForDedup()
+      const fixedNow = new Date('2026-10-23T12:00:00.000Z')
+      const deps = {
+        db: adminPool.db,
+        t1Checkers: [],
+        policy: fiscalPolicy,
+        policyHash: fiscalPolicyHash,
+        clock: { now: () => fixedNow },
+      }
+      const before = await deepEnrich(deps, { tenantId: tenant, validationId })
+
+      const doc = '43191212345678000199660000000000101018342413'
+      // v1 (antiga) autenticou; v2 (recente) ficou inconclusive. A canônica é
+      // v2 — a contribuição positiva da versão antiga morre no scoring.
+      await insertFiscalObservation(
+        claimId,
+        { version: '1.0.0', document: 'authentic', address: 'matches', holder: 'matches' },
+        doc,
+        new Date(fixedNow.getTime() - 60_000),
+      )
+      await insertFiscalObservation(
+        claimId,
+        {
+          version: '2.0.0',
+          document: 'inconclusive',
+          address: 'not_extracted',
+          holder: 'not_extracted',
+        },
+        doc,
+        fixedNow,
+      )
+      const after = await deepEnrich(deps, { tenantId: tenant, validationId })
+
+      expect(await countFiscalRows(claimId)).toBe(2)
+      expect(after.score).toBe(before.score)
     })
   })
 

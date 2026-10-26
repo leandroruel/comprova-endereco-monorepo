@@ -87,11 +87,17 @@ export const assessmentObservationsOf = (
  * uma linha nova para o mesmo documento: sem esta dedup, cada versão com
  * `stance = supports` somaria `0.4 × 0.8 = 0.32`.
  *
+ * A dedup é restrita ao caso fiscal/NF3e (`source = fiscal_nf3e`,
+ * `checker = nf3e_verification`). Evidências não fiscais (intake F1.1,
+ * uploaded_document F1.3) seguem inalteradas.
+ *
  * Todas as linhas históricas são mantidas na tabela (auditoria/explicação usam
- * `readEvidenceSet`, que não é dedupada). Apenas a observação que alimenta o
- * score é canônica: fica uma linha `supports` por `document_ref_hash`; linhas
- * sem hash de documento (não fiscais) e linhas não-`supports` (força zero) não
- * são afetadas.
+ * `readEvidenceSet`, que não é dedupada). Para o score, apenas a observação
+ * canônica de cada documento contribui: a mais recente, já que
+ * `readStandaloneEvidenceSet` retorna ordenada por `observedAt DESC,
+ * createdAt DESC`. A versão mais recente prevalece mesmo quando o stance muda
+ * entre versões (ex.: v1 `supports`, v2 `inconclusive` → só v2 entra no score,
+ * sem força positiva). Linhas sem hash de documento seguem intactas.
  */
 const docRefHashOf = (row: StandaloneEvidenceRow): string | null => {
   const detail = row.detail as Record<string, unknown> | undefined
@@ -100,17 +106,21 @@ const docRefHashOf = (row: StandaloneEvidenceRow): string | null => {
   return typeof docRef === 'string' ? docRef : null
 }
 
+const isFiscalNf3e = (row: StandaloneEvidenceRow): boolean =>
+  row.source === 'fiscal_nf3e' && row.checker === 'nf3e_verification'
+
 export const canonicalStandaloneEvidence = (
   rows: readonly StandaloneEvidenceRow[],
 ): readonly StandaloneEvidenceRow[] => {
-  const seenSupportsDoc = new Set<string>()
+  const seenFiscalDoc = new Set<string>()
   const out: StandaloneEvidenceRow[] = []
   for (const row of rows) {
-    if (row.stance === 'supports') {
+    // Só fiscal/NF3e entra na dedup de versão; não-fiscais passam direto.
+    if (isFiscalNf3e(row)) {
       const docHash = docRefHashOf(row)
       if (docHash !== null) {
-        if (seenSupportsDoc.has(docHash)) continue
-        seenSupportsDoc.add(docHash)
+        if (seenFiscalDoc.has(docHash)) continue
+        seenFiscalDoc.add(docHash)
       }
     }
     out.push(row)

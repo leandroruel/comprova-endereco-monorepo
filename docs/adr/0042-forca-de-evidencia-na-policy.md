@@ -96,10 +96,15 @@ Negativas / débito consciente:
   `claim_evidence`, então ainda não simula esta força.
 - O histórico append-only pode manter mais de uma versão do mesmo checker
   (ex.: bump do adapter fiscal). Para scoring, `canonicalStandaloneEvidence`
-  mantém apenas uma linha `supports` por `document_ref_hash`, então cada
-  documento contribui no máximo uma vez; todas as linhas históricas são
+  (em `deep-enrich.service.ts`, aplicada às observações sem `signal` antes de
+  `evaluateClaim`) mantém apenas a observação **mais recente** de cada
+  `document_ref_hash` — a leitura vem ordenada por `observedAt DESC,
+createdAt DESC` — restrita a `source = fiscal_nf3e` +
+  `checker = nf3e_verification`. A versão mais recente prevalece mesmo quando
+  o stance muda entre versões (ex.: v1 `supports`, v2 `inconclusive` → só v2
+  entra no score, sem força positiva). Todas as linhas históricas são
   preservadas na tabela para auditoria (o hash/explicação usam `readEvidenceSet`
-  sem dedup).
+  sem dedup) e evidências não fiscais seguem inalteradas.
 
 ## Testes
 
