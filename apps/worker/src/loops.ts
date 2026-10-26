@@ -1,9 +1,11 @@
+import type { FiscalAdapter } from '@comprova/core'
 import type { Db } from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import type { DocumentAnalyzer, ObjectStore, ObjectStoreReader } from '@comprova/providers'
 import { retentionTick } from './modules/evidence/evidence-retention.service.js'
 import { analyzeEvidenceTick } from './modules/evidence-analysis/evidence-analysis.service.js'
 import { verifyEvidenceTick } from './modules/evidence-verification/evidence-verification.service.js'
+import { verifyFiscalTick } from './modules/fiscal-verification/fiscal-verification.tick.js'
 import { validationRetentionTick } from './modules/retention/retention.service.js'
 import { ensurePartitions } from './modules/partitions/partitions.service.js'
 
@@ -83,6 +85,35 @@ export const startEvidenceVerificationLoop = (db: Db, logger: Logger, intervalMs
       running = true
       try {
         await verifyEvidenceTick({ db, logger })
+      } finally {
+        running = false
+      }
+    },
+    intervalMs,
+    logger,
+  )
+}
+
+/**
+ * F2.2b/F3: consome as referências fiscais extraídas do comprovante (F1.2),
+ * consulta o autorizador (adapter NF3e) e reavalia o claim. Atravessa tenants
+ * (fila global no pool de manutenção); a consulta e a reavaliação usam
+ * `withTenant`. A reavaliação roda no pool do app/RLS passado pelo caller.
+ */
+export const startFiscalVerificationLoop = (
+  db: Db,
+  adapter: FiscalAdapter,
+  reassess: (tenantId: string, validationId: string) => Promise<unknown>,
+  logger: Logger,
+  intervalMs = 2_000,
+): (() => void) => {
+  let running = false
+  return startLoop(
+    async () => {
+      if (running) return
+      running = true
+      try {
+        await verifyFiscalTick({ db, adapter, reassess, logger })
       } finally {
         running = false
       }

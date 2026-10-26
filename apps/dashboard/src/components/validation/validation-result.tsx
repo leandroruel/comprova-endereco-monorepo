@@ -17,6 +17,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
+import { EvidenceSections } from './evidence-sections'
 import {
   buildSnapshot,
   countStances,
@@ -451,6 +452,15 @@ export function ValidationResult({
               <Section title="Resumo das evidências">
                 <EvidenceBar counts={counts} />
               </Section>
+
+              {(validation.evidence_verification != null || validation.fiscal_verification != null) && (
+                <Section title="Comprovante e consulta fiscal">
+                  <EvidenceSections
+                    evidenceVerification={validation.evidence_verification}
+                    fiscalVerification={validation.fiscal_verification}
+                  />
+                </Section>
+              )}
 
               <Section title={`Pontos de atenção${attention.length > 0 ? ` (${attention.length})` : ''}`}>
                 {attention.length === 0 ? (

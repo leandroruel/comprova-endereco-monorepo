@@ -155,6 +155,35 @@ export const EvidenceVerificationDtoSchema = z.object({
   }),
 })
 
+/**
+ * Leitura corrente da consulta fiscal materializada em `claim_evidence`
+ * (`source = fiscal_nf3e`), no mesmo formato da verificação do documento
+ * enviado. Expõe apenas o que o dashboard precisa: `document` (autenticidade),
+ * `address`/`holder` (comparação) e `limitations`. O hash da referência, a URL
+ * consultada, o IP resolvido e a resposta bruta NUNCA são expostos — eles
+ * existem no `detail` persistido apenas para auditoria.
+ */
+export const FiscalVerificationDtoSchema = z.object({
+  status: z.enum(['completed', 'not_found', 'invalid', 'inconclusive', 'unsupported', 'unavailable']),
+  method: VerificationMethodSchema,
+  source: z.object({
+    kind: EvidenceSourceKindSchema,
+    id: z.string(),
+    authority: z.string().nullable(),
+    environment: z.enum(['production', 'homologation', 'local']),
+  }),
+  document: DocumentOutcomeSchema,
+  address: MatchOutcomeSchema,
+  holder: MatchOutcomeSchema,
+  adapter_version: z.string(),
+  contract_version: z.string(),
+  observed_at: z.iso.datetime(),
+  limitations: z.array(z.string()),
+  error_codes: z.array(z.string()),
+})
+
+export type FiscalVerificationDto = z.infer<typeof FiscalVerificationDtoSchema>
+
 export const AssessmentExplanationDtoSchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -174,6 +203,7 @@ export const ValidationDtoSchema = z.object({
   claim: ClaimDtoSchema.nullable().optional(),
   evidence_summary: EvidenceSummaryDtoSchema.nullable().optional(),
   evidence_verification: EvidenceVerificationDtoSchema.nullable().optional(),
+  fiscal_verification: FiscalVerificationDtoSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
   created_at: z.string(),

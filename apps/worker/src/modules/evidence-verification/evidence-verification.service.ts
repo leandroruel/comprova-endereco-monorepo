@@ -263,21 +263,30 @@ const materialize = async (
 }
 
 /**
- * Persiste o backoff exponencial da análise que falhou ou ficou sem contexto.
- * O estado é administrativo (sem PII) e a próxima tentativa fica no futuro,
- * para que o candidate mais antigo não monopolize todos os ticks.
+ * Persiste o backoff exponencial de uma tentativa que falhou ou ficou sem
+ * contexto. O estado é administrativo (sem PII) e a próxima tentativa fica no
+ * futuro, para que o candidate mais antigo não monopolize todos os ticks.
+ *
+ * Exportada para o tick fiscal (F2.2b→F3) reutilizar o mesmo estado de retry
+ * por `analysis_id`: os dois consumidores nunca disputam a mesma linha (o
+ * tick fiscal só roda depois da verificação F1.3 materializar).
  */
-const recordAttempt = async (
-  deps: EvidenceVerificationDeps,
-  candidate: VerificationCandidate,
+export interface VerificationAttemptKey {
+  readonly analysisId: string
+  readonly tenantId: string
+}
+
+export const recordVerificationAttempt = async (
+  db: Db,
+  key: VerificationAttemptKey,
   errorCode: string,
 ): Promise<void> => {
-  await deps.db.execute(sql`
+  await db.execute(sql`
     INSERT INTO evidence_verification_attempt
       (analysis_id, tenant_id, attempts, last_attempt_at, next_attempt_at, last_error_code)
     VALUES (
-      ${candidate.analysisId},
-      ${candidate.tenantId},
+      ${key.analysisId},
+      ${key.tenantId},
       1,
       now(),
       now() + make_interval(secs => ${ATTEMPT_BACKOFF_BASE_SECONDS}::double precision),
@@ -302,16 +311,19 @@ const recordAttempt = async (
   `)
 }
 
-const clearAttempt = async (
-  deps: EvidenceVerificationDeps,
-  candidate: VerificationCandidate,
-): Promise<void> => {
-  await deps.db.execute(sql`
+export const clearVerificationAttempt = async (db: Db, key: VerificationAttemptKey): Promise<void> => {
+  await db.execute(sql`
     DELETE FROM evidence_verification_attempt
-    WHERE analysis_id = ${candidate.analysisId}
-      AND tenant_id = ${candidate.tenantId}
+    WHERE analysis_id = ${key.analysisId}
+      AND tenant_id = ${key.tenantId}
   `)
 }
+
+const recordAttempt = (deps: EvidenceVerificationDeps, candidate: VerificationCandidate, errorCode: string) =>
+  recordVerificationAttempt(deps.db, candidate, errorCode)
+
+const clearAttempt = (deps: EvidenceVerificationDeps, candidate: VerificationCandidate) =>
+  clearVerificationAttempt(deps.db, candidate)
 
 /**
  * Processa até `batchSize` análises terminais ainda não materializadas.

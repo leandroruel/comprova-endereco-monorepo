@@ -1,6 +1,74 @@
 # PROGRESS.md
 
-Estado: **Força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-25)
+Estado: **Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-26)
+
+## Vertical slice end-to-end pelo dashboard (F3) (2026-10-26)
+
+O fluxo completo do produto passa a ser executável pela interface, sem
+comando interno para "conseguir" o resultado:
+
+```text
+Dashboard → POST /v1/validations → POST /v1/validations/:id/evidence
+  → worker: análise (F1.2) → verificação (F1.3) → tick fiscal (F2.2b,
+    consulta NF3e pela referência do QR) → reavaliação (deep path)
+  → GET /v1/validations/:id (polling) → verdict + evidências no dashboard
+```
+
+- **Nenhum endpoint novo.** Reutilizados: `POST /v1/validations`,
+  `POST /v1/validations/:id/evidence` (multipart já existente) e
+  `GET /v1/validations/:id`, que agora expõe `fiscal_verification`
+  (`FiscalVerificationDtoSchema` em `@comprova/contracts`) — a leitura corrente
+  da consulta fiscal, sem hash da referência, IP, digest da resposta ou URL.
+  A referência NF3e não é digitada no dashboard: o backend extrai do QR do
+  próprio comprovante (F2.2b), e o browser nunca envia dados fiscais.
+- **Worker:** novo `verifyFiscalTick`
+  (`apps/worker/src/modules/fiscal-verification/fiscal-verification.tick.ts`)
+  - loop `startFiscalVerificationLoop` (2s). O tick consome análises com
+    `fiscalReference` encontrada cuja verificação F1.3 já materializou, consulta
+    pelo adapter NF3e existente (`makeNf3eFiscalAdapter`, allowlist/SVRS/RS sem
+    alterações) e reavalia o claim com o `deepEnrich` — a evidência fiscal entra
+    no assessment pela integração do PR #49/#50. Idempotente por
+    claim+fonte+documento+versão; retry de reavaliação via
+    `evidence_verification_attempt` (mesma tabela/padrão do F1.3), sem comando
+    manual. `unavailable`/`inconclusive`/`unsupported` continuam observações
+    neutras — o dashboard comunica "a consulta fiscal não pôde ser concluída",
+    nunca "endereço falso".
+- **Dashboard:** `E2eRunner` (form CNPJ + comprovante + polling que só para
+  quando as evidências chegaram E o resultado estabilizou — o fast path
+  conclui antes do worker processar) e `EvidenceSections` (comprovante +
+  consulta fiscal no `ValidationResult`), com a taxonomia do backend
+  preservada. A `VITE_API_KEY` existente continua sendo facilidade de dev
+  (documentada no client); nenhuma credencial nova no bundle.
+- **Testes:** `apps/api/tests/fiscal-tick.int.test.ts` (7 casos: ordem F1.3→tick,
+  fluxo completo com reavaliação real, idempotência, taxonomia, retry de
+  reavaliação, GET sem PII/auditoria, dois tenants independentes + isolamento 404) e dashboard (`e2e-runner.test.tsx`: submissão/processando/concluído com
+  evidências/erro; `validation-result.test.tsx`: seções de comprovante e
+  consulta fiscal, taxonomia, ausência de PII, sem seção quando não há
+  evidências).
+
+### Como testar manualmente
+
+```bash
+cp .env.example .env        # DATABASE_ADMIN_URL ligam os loops do worker
+pnpm install && pnpm compose:up && pnpm db:migrate && pnpm db:seed
+# cole a chave impressa pelo seed em VITE_API_KEY (e API_KEY se aplicável)
+pnpm dev                    # API (3000) + worker (loops) + dashboard (5173)
+```
+
+1. Abra `http://localhost:5173`, faça login.
+2. Em **Validação completa — comprovante + NF3e**, informe o CNPJ e escolha o
+   comprovante (PDF/imagem; fixture com QR NF3e:
+   `packages/providers/src/fiscal/__fixtures__/nf3e-qr.pdf`; para consulta
+   real, um PDF de NF3e **do RS** com QR).
+3. **Iniciar validação** → o painel mostra "Processando…".
+4. Em ~10s o resultado aparece sozinho: verdict, score, **Comprovante enviado**
+   e **Consulta fiscal NF3e** (fonte/autenticidade/endereço/titular/limitações).
+
+Limitações do slice: a fixture de QR é SVRS/SP (fora da cobertura RS atual) —
+o fluxo é comprovado com a consulta materializada como `unsupported`; a
+consulta REAL ao portal exige comprovante NF3e de emissor do RS. Sem Temporal,
+a reavaliação do tick fiscal ainda produz o assessment (o deep workflow é
+redundante aqui, não obrigatório).
 
 ## Força de evidência fiscal na policy (F3.1 — primeiro slice) (2026-10-25)
 

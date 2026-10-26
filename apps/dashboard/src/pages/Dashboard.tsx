@@ -4,6 +4,7 @@ import { createValidation, getStats, type ValidationDto } from '@/api/client'
 import { authClient } from '@/api/auth'
 import { DashboardLayout } from '@/components/layout'
 import { ValidationCard } from '@/components/validation-card'
+import { E2eRunner } from '@/components/validation/e2e-runner'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { LoginPage } from '@/pages/Login'
 import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
@@ -195,6 +196,8 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
             )}
           </CardContent>
         </Card>
+
+        <E2eRunner />
 
         <div className="space-y-4">
           {history.length === 0 && (

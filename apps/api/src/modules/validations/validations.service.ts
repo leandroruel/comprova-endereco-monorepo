@@ -1,4 +1,4 @@
-import { UPLOADED_DOCUMENT_CHECKER, UPLOADED_DOCUMENT_SOURCE } from '@comprova/core'
+import { FISCAL_SOURCE_KIND, UPLOADED_DOCUMENT_CHECKER, UPLOADED_DOCUMENT_SOURCE } from '@comprova/core'
 import { and, desc, eq, sql, withTenant } from '@comprova/db'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -128,9 +128,27 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
             .limit(1)
     const evidenceVerification = verificationRows[0]?.detail.verification ?? null
 
+    // F2: a leitura corrente da consulta fiscal é a observação mais recente
+    // (mesma no-op de versão do F1.3; o histórico permanece para auditoria).
+    const fiscalRows =
+      claim === null
+        ? []
+        : await tx
+            .select({ detail: t.claimEvidence.detail })
+            .from(t.claimEvidence)
+            .where(
+              and(
+                eq(t.claimEvidence.claimId, claim.claimId),
+                eq(t.claimEvidence.source, FISCAL_SOURCE_KIND['nf3e']),
+              ),
+            )
+            .orderBy(desc(t.claimEvidence.observedAt), desc(t.claimEvidence.createdAt))
+            .limit(1)
+    const fiscalVerification = fiscalRows[0]?.detail.verification ?? null
+
     const address = validation.addressId === null ? null : await loadAddressSummary(tx, validation.addressId)
 
-    return { validation, signals, claim, evidenceSummary, evidenceVerification, address }
+    return { validation, signals, claim, evidenceSummary, evidenceVerification, fiscalVerification, address }
   })
 
 export const setWorkflowId = async (

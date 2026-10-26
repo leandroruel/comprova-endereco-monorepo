@@ -1,0 +1,196 @@
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { createValidation, getValidation, uploadEvidence, type ValidationDto } from '@/api/client'
+import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
+import { ValidationCard } from '@/components/validation-card'
+import { FileUp, Search } from 'lucide-react'
+
+/**
+ * Vertical slice: executar UMA validação real de ponta a ponta pelo dashboard.
+ *
+ *   CNPJ/CPF + comprovante (PDF/imagem com QR NF3e)
+ *     → POST /validations (fast path + deep)
+ *     → POST /validations/:id/evidence (upload do artefato)
+ *     → polling GET /validations/:id até o resultado estabilizar
+ *
+ * A referência NF3e não é digitada: ela é extraída do QR do próprio comprovante
+ * pelo backend (F1.2) e consultada pelo worker (F2.2b) — o browser nunca envia
+ * dados fiscais como se fossem confiáveis.
+ *
+ * O polling não para no primeiro `completed`: o fast path conclui antes de o
+ * worker processar o comprovante. Ele para quando as evidências chegaram E o
+ * resultado parou de mudar entre duas leituras (ou no teto de tempo).
+ */
+
+/** Teto de acompanhamento: uma validação `partial` pode não estabilizar nunca. */
+const MAX_WATCH_MS = 120_000
+const POLL_INTERVAL_MS = 2_000
+
+const evidenceArrived = (v: ValidationDto): boolean =>
+  v.evidence_verification != null || v.fiscal_verification != null
+
+const hardTerminal = (v: ValidationDto): boolean => v.status === 'failed' || v.status === 'expired'
+
+const snapshotOf = (v: ValidationDto): string =>
+  JSON.stringify([
+    v.status,
+    v.verdict,
+    v.score,
+    v.confidence,
+    v.evidence_summary,
+    v.evidence_verification != null,
+    v.fiscal_verification != null,
+  ])
+
+export interface E2eRunnerDeps {
+  readonly create?: (document: string) => Promise<ValidationDto>
+  readonly upload?: (validationId: string, file: File) => Promise<unknown>
+  readonly poll?: (validationId: string) => Promise<ValidationDto>
+  /** Intervalo de polling; testes usam valores curtos. */
+  readonly pollIntervalMs?: number
+}
+
+export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
+  const create = deps?.create ?? ((document: string) => createValidation(document, 'auto'))
+  const upload = deps?.upload ?? uploadEvidence
+  const poll = deps?.poll ?? getValidation
+  const pollIntervalMs = deps?.pollIntervalMs ?? POLL_INTERVAL_MS
+
+  const [document, setDocument] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [phase, setPhase] = useState<'idle' | 'watching' | 'done'>('idle')
+
+  const startedAtRef = useRef(0)
+  const snapshotRef = useRef<string | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const created = await create(document.trim())
+      if (file !== null) await upload(created.validation_id, file)
+      return created
+    },
+    onSuccess: (created) => {
+      setActiveId(created.validation_id)
+      startedAtRef.current = Date.now()
+      snapshotRef.current = null
+      setPhase('watching')
+      setDocument('')
+      setFile(null)
+    },
+  })
+
+  const validation = useQuery({
+    queryKey: ['e2e-validation', activeId],
+    enabled: activeId !== null,
+    initialData: mutation.data ?? undefined,
+    refetchInterval: (query) => {
+      const data = query.state.data as ValidationDto | undefined
+      if (data === undefined) return pollIntervalMs
+      if (hardTerminal(data)) return false
+      if (Date.now() - startedAtRef.current > MAX_WATCH_MS) return false
+      if (!evidenceArrived(data)) return pollIntervalMs
+      // Evidências chegaram: para quando o resultado parar de mudar, dando tempo
+      // para a reavaliação pós-consulta fiscal aparecer na leitura seguinte.
+      const snapshot = snapshotOf(data)
+      const settled = snapshotRef.current === snapshot
+      snapshotRef.current = snapshot
+      return settled ? false : pollIntervalMs
+    },
+    queryFn: () => (activeId === null ? Promise.reject(new Error('no active validation')) : poll(activeId)),
+    retry: false,
+  })
+
+  useEffect(() => {
+    const active = validation.data as ValidationDto | undefined
+    if (active === undefined) return
+    if (hardTerminal(active) || (evidenceArrived(active) && snapshotRef.current === snapshotOf(active))) {
+      setPhase('done')
+    }
+  }, [validation.data])
+
+  useEffect(() => {
+    if (activeId === null) return
+    const timer = setTimeout(() => setPhase('done'), MAX_WATCH_MS)
+    return () => clearTimeout(timer)
+  }, [activeId])
+
+  const running = mutation.isPending
+  const active = validation.data as ValidationDto | undefined
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-4">
+        <div>
+          <h3 className="text-sm font-semibold">Validação completa — comprovante + NF3e</h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            Envia o comprovante (PDF/imagem). A referência NF3e é lida do QR do próprio documento e consultada
+            pelo worker; o resultado aparece abaixo sozinho.
+          </p>
+        </div>
+
+        <form
+          className="flex flex-col gap-3 sm:flex-row sm:items-center"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (document.trim() && file !== null) mutation.mutate()
+          }}
+        >
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="CNPJ do endereço a validar — ex: 12.345.678/0001-95"
+              value={document}
+              onChange={(e) => setDocument(e.target.value)}
+              className="pl-9 font-mono text-sm"
+            />
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent">
+            <FileUp className="h-4 w-4" aria-hidden />
+            <span>{file === null ? 'Escolher comprovante' : file.name}</span>
+            <input
+              type="file"
+              accept="application/pdf,image/png,image/jpeg"
+              className="sr-only"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <Button type="submit" disabled={running || !document.trim() || file === null} className="px-5">
+            {running ? <Spinner /> : 'Iniciar validação'}
+          </Button>
+        </form>
+
+        {mutation.isError && (
+          <p className="text-sm text-destructive" role="alert">
+            {mutation.error instanceof Error ? mutation.error.message : 'Erro desconhecido'}
+          </p>
+        )}
+
+        {phase === 'watching' && active !== undefined && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+            <Spinner />
+            Processando — intake, análise e consulta fiscal rodam no worker
+            {active.evidence_verification == null ? ' (comprovante ainda não analisado)' : ''}
+            {active.fiscal_verification == null && active.evidence_verification != null
+              ? ' (consulta fiscal pendente)'
+              : ''}
+            …
+          </div>
+        )}
+
+        {phase === 'done' && active !== undefined && (
+          <div className="space-y-3">
+            {active.status !== 'completed' && (
+              <p className="text-xs text-muted-foreground">
+                {hardTerminal(active)
+                  ? `Validação terminou com status "${active.status}".`
+                  : 'Acompanhamento encerrado; o resultado abaixo é a leitura mais recente (a validação pode continuar evoluindo no worker).'}
+              </p>
+            )}
+            <ValidationCard validation={active} defaultExpanded={false} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
