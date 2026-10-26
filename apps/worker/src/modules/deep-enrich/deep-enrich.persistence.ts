@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from '@comprova/db'
+import { and, desc, eq, inArray, isNull, sql } from '@comprova/db'
 import type { DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
@@ -246,6 +246,7 @@ export interface StandaloneEvidenceRow {
   readonly observedAt: Date
   readonly ttlSeconds: number
   readonly detail: Record<string, unknown>
+  readonly createdAt: Date
 }
 
 /**
@@ -254,6 +255,10 @@ export interface StandaloneEvidenceRow {
  * fiscal (F2). Elas já estão no conjunto durável (`readEvidenceSet`), mas
  * precisam entrar também na avaliação, sem duplicar as observações ligadas a
  * `signal`. Hoje todos esses produtores gravam `strength`/`confidence` neutros.
+ *
+ * Ordenadas por `observedAt DESC, createdAt DESC` para que a versão mais
+ * recente de um mesmo documento fiscal venha primeiro — usado pela dedup de
+ * scoring em `canonicalStandaloneEvidence`.
  */
 export const readStandaloneEvidenceSet = async (
   tx: DbTx,
@@ -273,9 +278,11 @@ export const readStandaloneEvidenceSet = async (
           observedAt: t.claimEvidence.observedAt,
           ttlSeconds: t.claimEvidence.ttlSeconds,
           detail: t.claimEvidence.detail,
+          createdAt: t.claimEvidence.createdAt,
         })
         .from(t.claimEvidence)
         .where(and(eq(t.claimEvidence.claimId, claimId), isNull(t.claimEvidence.signalId)))
+        .orderBy(desc(t.claimEvidence.observedAt), desc(t.claimEvidence.createdAt))
 
 export interface ValidationOutcomeWrite {
   readonly validationId: string

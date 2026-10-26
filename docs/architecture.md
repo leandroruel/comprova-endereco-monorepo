@@ -288,6 +288,7 @@ Dois pontos de atenção já visíveis:
 | 2026.11.1 | + Pesos T1 (geocode, places, footprint)                              |
 | 2026.12.1 | + Peso T2 (street_view_vlm)                                          |
 | 2026.13.1 | - Hard rule cep-inexistente (era falso positivo); fix versão interna |
+| 2026.14.1 | + Força de evidência fiscal por checker (`evidence_checkers`); F3.1  |
 
 Simulador: `pnpm --filter @comprova/ingestor start -- policy:simulate <versao> [--report]`
 
