@@ -49,6 +49,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { deepEnrich } from './deep-enrich.service.js'
+import type { DeepEnrichResult } from './deep-enrich.schema.js'
 import { verifyFiscalClaim } from '../fiscal-verification/fiscal-verification.service.js'
 import { runFastPath } from '../../../../api/src/services/fastpath.js'
 import { issueCredential } from '../../../../api/src/services/credential-issuer.js'
@@ -79,6 +80,11 @@ const trusted = { id: verificationMethodOf(issuer), publicKey: signing.publicKey
 const policyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.11.1.yaml'), 'utf8')
 const policy = loadPolicy(policyYaml)
 const policyHash = policyHashOf(policyYaml)
+
+// F3.1: policy com força de evidência fiscal (`evidence_checkers`).
+const fiscalPolicyYaml = readFileSync(path.join(repoRoot, 'policies', '2026.14.1.yaml'), 'utf8')
+const fiscalPolicy = loadPolicy(fiscalPolicyYaml)
+const fiscalPolicyHash = policyHashOf(fiscalPolicyYaml)
 
 afterAll(async () => {
   await adminPool.end()
@@ -368,6 +374,129 @@ describe('deepEnrich (activity core)', () => {
       .from(t.validation)
       .where(eq(t.validation.validationId, created.validationId))
     expect(stored[0]?.explanation?.supporting_evidence).toContain(fiscalRows[0]?.claimEvidenceId)
+  })
+
+  describe('F3.1 — força de evidência fiscal definida pela policy', () => {
+    const rawScore = (score: number): number => Math.atanh(score)
+
+    interface FiscalAssessment {
+      readonly before: DeepEnrichResult
+      readonly after: DeepEnrichResult
+      readonly stance: string | undefined
+      readonly fiscalEvidenceId: string | undefined
+      readonly supporting: readonly string[]
+    }
+
+    const assess = async (
+      adapterOptions: Parameters<typeof makeFakeFiscalAdapter>[0],
+    ): Promise<FiscalAssessment> => {
+      const created = await runFastPath(
+        fastPathDeps,
+        { tenantId: tenant, apiKeyId: null },
+        {
+          documentType: 'CNPJ',
+          documentValue: '12345678000195',
+          addressInput: null,
+          legalBasis: 'FRAUD_PREVENTION',
+          mode: 'auto',
+          idempotencyKey: `f3-1-${randomUUID()}`,
+        },
+      )
+      const claimRows = await adminPool.db
+        .select({ claimId: t.claim.claimId })
+        .from(t.claim)
+        .where(eq(t.claim.validationId, created.validationId))
+      const claimId = claimRows[0]?.claimId
+      if (claimId === undefined) throw new Error('claim nao criado pelo fast path')
+
+      const fixedNow = new Date('2026-10-23T12:00:00.000Z')
+      const deps = {
+        db: adminPool.db,
+        t1Checkers: [],
+        policy: fiscalPolicy,
+        policyHash: fiscalPolicyHash,
+        clock: { now: () => fixedNow },
+      }
+      const before = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
+
+      await verifyFiscalClaim(
+        { db: adminPool.db, adapter: makeFakeFiscalAdapter(adapterOptions), now: () => fixedNow },
+        {
+          source: 'nf3e',
+          tenantId: tenant,
+          claimId,
+          documentId: '43191212345678000199660000000000101018342413',
+          qrCodeUrl:
+            'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=43191212345678000199660000000000101018342413&tpAmb=1',
+          issuer: 'SVRS',
+          uf: 'SP',
+          artifact: { artifactId: randomUUID(), sha256: 'ab'.repeat(32) },
+        },
+      )
+
+      const fiscalRows = await adminPool.db
+        .select({
+          claimEvidenceId: t.claimEvidence.claimEvidenceId,
+          stance: t.claimEvidence.stance,
+        })
+        .from(t.claimEvidence)
+        .where(and(eq(t.claimEvidence.claimId, claimId), eq(t.claimEvidence.source, 'fiscal_nf3e')))
+
+      const after = await deepEnrich(deps, { tenantId: tenant, validationId: created.validationId })
+      const stored = await adminPool.db
+        .select({ explanation: t.validation.explanation })
+        .from(t.validation)
+        .where(eq(t.validation.validationId, created.validationId))
+
+      return {
+        before,
+        after,
+        stance: fiscalRows[0]?.stance,
+        fiscalEvidenceId: fiscalRows[0]?.claimEvidenceId,
+        supporting: stored[0]?.explanation?.supporting_evidence ?? [],
+      }
+    }
+
+    it('NF3e authentic com address.matches soma exatamente 0.4 × 0.8 ao score', async () => {
+      const { before, after, stance, fiscalEvidenceId, supporting } = await assess({
+        document: 'authentic',
+        address: 'matches',
+        holder: 'matches',
+        issuer: 'SVRS',
+        environment: 'production',
+      })
+
+      expect(stance).toBe('supports')
+      expect(rawScore(after.score) - rawScore(before.score)).toBeCloseTo(0.32, 6)
+      expect(supporting).toContain(fiscalEvidenceId)
+    })
+
+    it.each(['not_found', 'invalid', 'inconclusive', 'unavailable', 'unsupported'] as const)(
+      'NF3e %s não recebe força positiva',
+      async (document) => {
+        const { before, after, stance } = await assess({
+          document,
+          address: 'not_extracted',
+          holder: 'not_extracted',
+        })
+
+        expect(stance).toBe('unknown')
+        expect(after.score).toBe(before.score)
+        expect(after.verdict).toBe(before.verdict)
+      },
+    )
+
+    it('NF3e authentic com address.differs não vira hard rejection nem força negativa', async () => {
+      const { before, after, stance } = await assess({
+        document: 'authentic',
+        address: 'differs',
+        holder: 'matches',
+      })
+
+      expect(stance).toBe('contradicts')
+      expect(after.score).toBe(before.score)
+      expect(after.verdict).toBe(before.verdict)
+    })
   })
 
   // FASE 7 — validação legada (signals já persistidos, sem claim) recebe claim e

@@ -63,7 +63,7 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
 
   return {
     databaseUrl,
-    policyVersion: env.POLICY_VERSION ?? '2026.13.1',
+    policyVersion: env.POLICY_VERSION ?? '2026.14.1',
     repoRoot: findRepoRoot(process.cwd()),
     evidenceAnalysisMaxBytes: parsedAnalysisMaxBytes,
     vlmEnabled: env.VLM_ENABLED === 'true',

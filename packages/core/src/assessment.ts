@@ -37,14 +37,51 @@ export interface ClaimEvaluation {
 }
 
 /**
+ * Força que a policy atribui a uma observação, ou `null` quando a policy não
+ * configura o checker ou a observação não é uma posição positiva.
+ *
+ * F3.1: apenas `supports` recebe força. `contradicts` (`differs`),
+ * `not_extracted` e estados neutros/indisponíveis permanecem sem força — a
+ * indisponibilidade nunca vira evidência negativa e `differs` não vira hard
+ * rejection. A decisão de força é da policy, não do adapter.
+ */
+export const policyEvidenceStrengthOf = (
+  policy: Policy,
+  observation: Pick<ClaimObservation, 'checker' | 'stance'>,
+): { readonly strength: number; readonly confidence: number } | null => {
+  const configured = policy.evidence_checkers[observation.checker]
+  if (configured === undefined) return null
+  if (observation.stance !== 'supports') return null
+  return { strength: configured.strength, confidence: configured.confidence }
+}
+
+/**
+ * Aplica a força definida na policy às observações elegíveis. Uma evidência
+ * continua sendo **uma** observação/checker — não há uma linha por dimensão,
+ * então não existe dupla contagem de documento/endereço/titular.
+ */
+export const applyPolicyEvidenceStrength = (
+  policy: Policy,
+  observations: readonly ClaimObservation[],
+): readonly ClaimObservation[] =>
+  observations.map((observation) => {
+    const force = policyEvidenceStrengthOf(policy, observation)
+    return force === null ? observation : { ...observation, ...force }
+  })
+
+/**
  * Avalia um claim a partir das suas evidências contra uma policy.
  *
  * Implementação inicial: reconstrói os signals a partir das evidências e delega
  * para `weightedScore` + `decide`. Como o stance é preservado fielmente, o
  * resultado é idêntico ao pipeline anterior (no-op semântico).
+ *
+ * A única transformação antes do scoring é a força de fonte externa definida na
+ * policy (`evidence_checkers`); sem configuração, o comportamento é idêntico ao
+ * pipeline de signals.
  */
 export const evaluateClaim = (input: EvaluateClaimInput): ClaimEvaluation => {
-  const signals: readonly Signal[] = input.evidence.map((e) => ({
+  const signals: readonly Signal[] = applyPolicyEvidenceStrength(input.policy, input.evidence).map((e) => ({
     checkerId: e.checker,
     checkerVersion: e.checkerVersion,
     stance: e.stance,

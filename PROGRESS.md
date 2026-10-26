@@ -1,6 +1,45 @@
 # PROGRESS.md
 
-Estado: **Integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-25)
+Estado: **Força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-25)
+
+## Força de evidência fiscal na policy (F3.1 — primeiro slice) (2026-10-25)
+
+A NF3e autenticada passa a poder contribuir para o assessment existente com uma
+regra explícita, conservadora e versionada. Decisão em
+[ADR-0042](docs/adr/0042-forca-de-evidencia-na-policy.md).
+
+- `PolicySchema` ganhou `evidence_checkers` (opcional, default `{}`), um mapa
+  `checkerId → { strength, confidence }`. Policies já publicadas continuam
+  parseando e o `policy_hash` (hash dos bytes do YAML) não muda; só uma versão
+  nova ativa a regra.
+- `evaluateClaim` (via `applyPolicyEvidenceStrength` em
+  `packages/core/src/assessment.ts`) substitui `strength`/`confidence` da
+  observação pelos valores da policy **somente quando `stance = supports`** e o
+  checker está configurado. `differs`/`contradicts`, `not_extracted`, `neutral`,
+  `inconclusive`, `unavailable` e `unsupported` permanecem sem força: não viram
+  evidência negativa nem hard rule.
+- Sem dupla contagem: a evidência é **uma** observação por fonte/checker;
+  `document`/`address`/`holder` já colapsam em um único `stance`
+  (`stanceForDimensions`). Um NF3e com as três dimensões soma uma só vez.
+- Primeira regra de produção em `policies/2026.14.1.yaml`:
+  `nf3e_verification: { strength: 0.4, confidence: 0.8 }` = 0.32, abaixo de
+  `confirmed_threshold` (0.35) e de `conflict_threshold` (0.45). A NF3e sozinha
+  não confirma nem cria conflito; contribui junto das demais evidências. A
+  policy default passa a `2026.14.1` (`.env.example` incluído).
+- **Limitações:** `holder.matches` isolado (sem `address.matches`) segue
+  `unknown` porque `stanceForDimensions` exige endereço — mudar isso alteraria
+  F1.3 e fica para depois; com a resposta pública atual da SVRS (apenas
+  `Município`) o endereço fica `not_extracted` e a força tende a não se aplicar;
+  o simulador de policy lê `signal`, não `claim_evidence`, e ainda não simula
+  esta força.
+- Sem tabela/migration, sem `signal` novo, sem mudança de RLS/idempotência /
+  versionamento e sem backfill. Assessments antigos mantêm
+  `policy_version`/`policy_hash`.
+- Testes: schema (`evidence_checkers` opcional/default/limites), unidade da
+  força (`supports` só; no-op sem config; contribuição única 0.4 × 0.8) e
+  integração (NF3e `authentic`+`address.matches` soma 0.32; `not_found`,
+  `invalid`, `inconclusive`, `unavailable`, `unsupported` e `differs` não mudam
+  score/veredito).
 
 ## Consulta NF3e real SVRS/RS (F2.2b — primeira fatia) (2026-10-25)
 

@@ -26,11 +26,31 @@ export const HardRuleSchema = z.object({
 /** 30 dias: mesmo horizonte histórico de retenção/validade, agora explícito. */
 export const DEFAULT_CREDENTIAL_TTL_SECONDS = 30 * 24 * 60 * 60
 
+/**
+ * Força que a policy atribui a uma observação de um checker de fonte externa
+ * (ex.: `nf3e_verification`). Substitui o `strength`/`confidence` gravados na
+ * observação — as fontes materializadas sem `signal` (upload/F1.3, fiscal/F2)
+ * gravam `0` e a decisão de força pertence à policy (F3), não ao adapter.
+ *
+ * O slice atual aplica esta força **somente a `stance = supports`**: `differs`
+ * (contradicts), `not_extracted` e estados neutros/indisponíveis permanecem sem
+ * força e nunca viram hard rule por aqui.
+ */
+export const EvidenceCheckerPolicySchema = z.object({
+  strength: z.number().min(0).max(1),
+  confidence: z.number().min(0).max(1),
+})
+
 export const PolicySchema = z.object({
   version: z.string().min(1),
   weights: z.record(z.string(), z.number().positive()),
   hard_rules: z.array(HardRuleSchema),
   required_checkers: z.array(z.string()),
+  /**
+   * Força de evidência por checker de fonte externa. Campo opcional: policies
+   * já publicadas (sem o campo) continuam parseando e mantendo o hash do YAML.
+   */
+  evidence_checkers: z.record(z.string(), EvidenceCheckerPolicySchema).default(() => ({})),
   /**
    * Horizonte da CREDENCIAL (não da retenção): `validUntil` é
    * `completed_at + credential_ttl_seconds`, limitado pelo TTL de cada
