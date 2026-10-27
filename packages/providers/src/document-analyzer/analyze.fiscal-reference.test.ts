@@ -72,6 +72,26 @@ describe('document analyzer — referência fiscal determinística (sem VLM)', (
     expect(result.fiscalReference?.errorCodes).toEqual([])
   })
 
+  it('ignora URL não fiscal e completa a URL de consulta com a chave impressa', async () => {
+    const issuerOnlyUrl = 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode'
+    const result = await analyze(
+      textPdf([
+        'Site do emitente: https://evil.example/pagina',
+        `Chave de acesso: ${NF3E_KEY}`,
+        `Consulta: ${issuerOnlyUrl}`,
+      ]),
+    )
+
+    expect(result.fiscalReference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer: 'SVRS',
+      uf: 'SP',
+      documentId: NF3E_KEY,
+      method: 'text',
+    })
+  })
+
   it('preserva o documentId exatamente como está no documento', async () => {
     for (const data of [fixture('nf3e-qr.pdf'), nf3eText()]) {
       const result = await analyze(data)

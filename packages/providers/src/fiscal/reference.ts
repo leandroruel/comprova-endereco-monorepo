@@ -383,18 +383,127 @@ const unique = <T>(values: readonly T[]): readonly T[] => [...new Set(values)]
 
 const trimUrlPunctuation = (value: string): string => value.replace(/[.,;:!?]+$/, '')
 
+/**
+ * Só referências com fonte fiscal participam da escolha/ambiguidade do texto.
+ * Uma URL qualquer (site do emitente, política de privacidade) não pode
+ * esconder a URL de consulta nem competir com ela.
+ */
+const isFiscalReference = (reference: FiscalReference): boolean =>
+  reference.status === 'found' || (reference.status === 'unsupported' && reference.source !== null)
+
+const referenceSignature = (reference: FiscalReference): string =>
+  reference.status === 'found'
+    ? `found:${reference.fingerprint ?? ''}`
+    : `unsupported:${reference.source ?? ''}:${reference.documentId ?? ''}:${reference.url ?? ''}:${reference.errorCodes.join(',')}`
+
+const uniqueReferences = (references: readonly FiscalReference[]): readonly FiscalReference[] => {
+  const seen = new Map<string, FiscalReference>()
+  for (const reference of references) {
+    const signature = referenceSignature(reference)
+    if (!seen.has(signature)) seen.set(signature, reference)
+  }
+  return [...seen.values()]
+}
+
+/**
+ * Completa uma URL de consulta sem chave com a chave impressa em outro ponto do
+ * texto. A URL e o autorizador são preservados; duas chaves válidas e
+ * divergentes não são combinadas (`AMBIGUOUS_REFERENCE`).
+ */
+const withPrintedKey = (reference: FiscalReference, keys: readonly string[]): FiscalReference => {
+  if (reference.status !== 'found' || keys.length === 0) return reference
+
+  const validKeys = unique(keys.filter((key) => nf3eKeyInfo(key) !== null))
+
+  if (reference.documentId === null) {
+    if (validKeys.length > 1) {
+      return unsupported({ method: reference.method, reasons: ['AMBIGUOUS_REFERENCE'] })
+    }
+    const key = validKeys[0]
+    if (key === undefined) return reference
+    const info = nf3eKeyInfo(key)
+    if (info === null) return reference
+
+    return found({
+      source: 'nf3e',
+      issuer: reference.issuer,
+      uf: info.uf,
+      url: reference.url,
+      documentId: key,
+      method: reference.method,
+      limitations: unique([
+        ...reference.limitations.filter((reason) => reason !== 'DOCUMENT_ID_MISSING'),
+        ...(reference.issuer === null ? (['UNKNOWN_ISSUER'] as const) : []),
+      ]),
+    })
+  }
+
+  if (validKeys.some((key) => key !== reference.documentId)) {
+    return unsupported({ method: reference.method, reasons: ['AMBIGUOUS_REFERENCE'] })
+  }
+
+  return reference
+}
+
 const referenceFromText = (raw: string, method: FiscalReferenceMethod): FiscalReference => {
   const urls = unique([...raw.matchAll(URL_IN_TEXT)].map((match) => trimUrlPunctuation(match[0])))
-  if (urls.length > 1) return unsupported({ method, reasons: ['AMBIGUOUS_REFERENCE'] })
-  const url = urls[0]
-  if (url !== undefined) return referenceFromUrl(url, method)
+  const fiscalUrls = uniqueReferences(
+    urls.map((url) => referenceFromUrl(url, method)).filter(isFiscalReference),
+  )
+  if (fiscalUrls.length > 1) return unsupported({ method, reasons: ['AMBIGUOUS_REFERENCE'] })
 
   const keys = unique([...raw.matchAll(ACCESS_KEY_IN_TEXT)].map((match) => match[0]))
+  const urlReference = fiscalUrls[0]
+  if (urlReference !== undefined) return withPrintedKey(urlReference, keys)
+
   if (keys.length > 1) return unsupported({ method, reasons: ['AMBIGUOUS_REFERENCE'] })
   const key = keys[0]
   if (key !== undefined) return referenceFromKey(key, method)
 
+  // Nenhuma referência fiscal: preserva a classificação da primeira URL
+  // (não reconhecida ou insegura) em vez de inventar uma fonte.
+  const firstUrl = urls[0]
+  if (firstUrl !== undefined) return referenceFromUrl(firstUrl, method)
+
   return notFound(method)
+}
+
+/**
+ * Combina evidências da MESMA referência obtidas por caminhos diferentes
+ * (texto e QR). Campos ausentes são preenchidos pela outra evidência, mas duas
+ * chaves válidas e divergentes nunca são combinadas: o resultado é
+ * `AMBIGUOUS_REFERENCE`. O fingerprint é recalculado porque URL, autorizador ou
+ * UF podem ter sido preenchidos pela evidência complementar.
+ */
+export const combineFiscalReferences = (left: FiscalReference, right: FiscalReference): FiscalReference => {
+  if (left.status !== 'found') return right.status === 'found' ? right : left
+  if (right.status !== 'found') return left
+
+  if (left.documentId !== null && right.documentId !== null && left.documentId !== right.documentId) {
+    return unsupported({ method: right.method, reasons: ['AMBIGUOUS_REFERENCE'] })
+  }
+
+  const documentReference = right.documentId !== null ? right : left
+  const documentId = documentReference.documentId
+  const keyInfo = documentId === null ? null : nf3eKeyInfo(documentId)
+  const issuer = right.issuer ?? left.issuer
+  const url = right.url ?? left.url
+  const uf = keyInfo?.uf ?? right.uf ?? left.uf
+  const limitations = unique([...left.limitations, ...right.limitations]).filter((reason) => {
+    if (reason === 'DOCUMENT_ID_MISSING' && documentId !== null) return false
+    if (reason === 'UNKNOWN_ISSUER' && issuer !== null) return false
+    return true
+  })
+
+  return found({
+    source: 'nf3e',
+    issuer,
+    uf,
+    url,
+    documentId,
+    method: documentReference.method,
+    limitations,
+  })
 }
 
 /**

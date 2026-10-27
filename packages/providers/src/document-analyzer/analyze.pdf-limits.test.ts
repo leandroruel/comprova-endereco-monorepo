@@ -93,4 +93,49 @@ describe('limites e semântica de PDF (F2.2b)', () => {
       method: 'qr_code',
     })
   })
+
+  it('não substitui a chave textual por um QR só com autorizador', async () => {
+    unpdf.extractText.mockResolvedValue({ text: `Chave de acesso: ${NF3E_KEY}`, totalPages: 1 })
+    unpdf.extractImages.mockResolvedValue([raster])
+    zxing.readBarcodes.mockResolvedValue([
+      { isValid: true, text: 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode' },
+    ])
+    unpdf.getDocumentProxy.mockResolvedValue(fakePdf(1))
+    const { analyzeDocument } = await import('./analyze.js')
+
+    const result = await analyzeDocument(
+      { data: new Uint8Array([1, 2, 3]), contentType: 'application/pdf' },
+      new Date('2026-10-22T12:00:00.000Z'),
+    )
+
+    expect(result.fiscalReference).toMatchObject({
+      status: 'found',
+      issuer: 'SVRS',
+      uf: 'SP',
+      documentId: NF3E_KEY,
+      method: 'text',
+    })
+  })
+
+  it('não combina chaves divergentes entre texto e QR', async () => {
+    const otherKey = '35261098765432000188660020000000022000000028'
+    unpdf.extractText.mockResolvedValue({ text: `Chave de acesso: ${NF3E_KEY}`, totalPages: 1 })
+    unpdf.extractImages.mockResolvedValue([raster])
+    zxing.readBarcodes.mockResolvedValue([
+      { isValid: true, text: `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${otherKey}` },
+    ])
+    unpdf.getDocumentProxy.mockResolvedValue(fakePdf(1))
+    const { analyzeDocument } = await import('./analyze.js')
+
+    const result = await analyzeDocument(
+      { data: new Uint8Array([1, 2, 3]), contentType: 'application/pdf' },
+      new Date('2026-10-22T12:00:00.000Z'),
+    )
+
+    expect(result.fiscalReference).toMatchObject({
+      status: 'unsupported',
+      documentId: null,
+      errorCodes: ['AMBIGUOUS_REFERENCE'],
+    })
+  })
 })

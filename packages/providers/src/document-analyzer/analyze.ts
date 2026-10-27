@@ -8,6 +8,7 @@ import {
 } from '@comprova/core'
 import { extractText, getDocumentProxy } from 'unpdf'
 import {
+  combineFiscalReferences,
   extractFiscalReferenceFromArtifact,
   extractFiscalReferenceFromPdf,
   extractFiscalReferenceFromText,
@@ -98,9 +99,12 @@ const analyzePdf = async (data: Uint8Array, now: Date): Promise<DocumentAnalysis
         maxPdfPages: MAX_PAGES,
         maxImagePixels: MAX_IMAGE_PIXELS,
       })
+      // Evidências compatíveis se completam (chave do texto + autorizador do
+      // QR, por exemplo). Um QR só com autorizador não substitui a chave já
+      // lida do texto, e duas chaves divergentes não são combinadas.
       // QR ilegível/ausente: a referência textual (ainda que incompleta) é
       // melhor evidência do que o resultado físico do QR.
-      fiscalReference = qrReference.status === 'found' ? qrReference : (textFound ?? qrReference)
+      fiscalReference = textFound === null ? qrReference : combineFiscalReferences(textFound, qrReference)
     }
 
     if (text === null) {
