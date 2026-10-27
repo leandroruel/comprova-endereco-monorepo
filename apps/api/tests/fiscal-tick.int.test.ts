@@ -105,6 +105,8 @@ const fiscalPolicyHash = policyHashOf(fiscalPolicyYaml)
 // Fixture compartilhada: PDF com QR NF3e raster (SVRS/SP — aceito pelo adapter
 // de teste; a referência é extraída pelo analyzer real).
 const nf3eQrPdf = readFileSync(path.join(repoRoot, 'packages/providers/src/fiscal/__fixtures__/nf3e-qr.pdf'))
+// Chave de acesso contida na fixture (o analyzer a extrai do QR do PDF).
+const NF3E_KEY = '35261012345678000199660010000000011000000015'
 
 afterAll(async () => {
   await app.close()
@@ -198,6 +200,22 @@ const fiscalRowsOf = async (validationId: string) => {
   return rows.filter((row) => row.source === FISCAL_SOURCE_KIND['nf3e'])
 }
 
+/**
+ * Referência fiscal persistida pelo F1.2 para o artefato do claim. É a MESMA
+ * linha que o tick fiscal lê — permite provar que a chave veio do PDF e não foi
+ * injetada no teste.
+ */
+const analysisReferenceOf = async (validationId: string) => {
+  const claimId = await claimIdOf(validationId)
+  const rows = await adminPool.db
+    .select({ result: t.evidenceAnalysis.result })
+    .from(t.evidenceAnalysis)
+    .innerJoin(t.evidenceArtifact, eq(t.evidenceArtifact.artifactId, t.evidenceAnalysis.artifactId))
+    .innerJoin(t.claimEvidence, eq(t.claimEvidence.claimEvidenceId, t.evidenceArtifact.claimEvidenceId))
+    .where(eq(t.claimEvidence.claimId, claimId))
+  return rows[0]?.result?.fiscalReference ?? null
+}
+
 /** Estado durável da reavaliação fiscal (migration 0045). */
 const reassessmentOf = async (validationId: string): Promise<string | null> => {
   const rows = await adminPool.db
@@ -240,6 +258,25 @@ describe('fiscal verification tick — vertical slice', () => {
 
   it('consulta pela referência extraída, materializa e reavalia o claim (fluxo completo)', async () => {
     const validationId = await uploadedAndVerified(tenantA, keyA)
+
+    // O PDF é a única fonte da referência: o analyzer real — o mesmo do worker,
+    // sem VLM — extrai a chave do QR e o tick consome a análise persistida.
+    // Nada de `fiscalReference` injetada no teste.
+    const analyzerOutput = await analyzer.analyze({
+      data: new Uint8Array(nf3eQrPdf),
+      contentType: 'application/pdf',
+    })
+    expect(analyzerOutput.fiscalReference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      documentId: NF3E_KEY,
+      method: 'qr_code',
+    })
+    expect(await analysisReferenceOf(validationId)).toMatchObject({
+      status: 'found',
+      documentId: NF3E_KEY,
+      method: 'qr_code',
+    })
 
     const reassessCalls: { tenantId: string; validationId: string }[] = []
     const processed = await verifyFiscalTick({

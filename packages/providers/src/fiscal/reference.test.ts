@@ -1,6 +1,6 @@
 import { fiscalReferenceFingerprint, toFiscalLookupInput } from '@comprova/core'
 import { describe, expect, it } from 'vitest'
-import { extractFiscalReference } from './reference.js'
+import { extractFiscalReference, extractFiscalReferenceFromText } from './reference.js'
 
 const NF3E_KEY = '35261012345678000199660010000000011000000015'
 const SECOND_NF3E_KEY = '35261098765432000188660020000000022000000028'
@@ -307,6 +307,58 @@ describe('extractFiscalReference (F2.2a)', () => {
 
     const twoKeys = `${NF3E_KEY} e ${SECOND_NF3E_KEY}`
     expect(extractFiscalReference({ value: twoKeys })).toMatchObject({
+      status: 'unsupported',
+      errorCodes: ['AMBIGUOUS_REFERENCE'],
+    })
+  })
+
+  it('ignora URLs não fiscais ao escolher a referência do texto', () => {
+    const reference = extractFiscalReferenceFromText(
+      `Site do emitente: https://evil.example/pagina — consulta: ${NF3E_URL}`,
+    )
+
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer: 'SVRS',
+      uf: 'SP',
+      documentId: NF3E_KEY,
+      method: 'text',
+    })
+  })
+
+  it('mantém a ambiguidade apenas entre referências fiscais concorrentes', () => {
+    const secondUrl = `https://sat.sef.sc.gov.br/nf3e/consulta?chNFe=${SECOND_NF3E_KEY}`
+    const reference = extractFiscalReferenceFromText(
+      `Site https://evil.example/pagina ${NF3E_URL} ${secondUrl}`,
+    )
+
+    expect(reference).toMatchObject({
+      status: 'unsupported',
+      errorCodes: ['AMBIGUOUS_REFERENCE'],
+    })
+  })
+
+  it('usa a chave impressa quando a URL de consulta não traz o documento', () => {
+    const issuerOnlyUrl = 'https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode'
+    const reference = extractFiscalReferenceFromText(`Chave de acesso: ${NF3E_KEY} — ${issuerOnlyUrl}`)
+
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer: 'SVRS',
+      uf: 'SP',
+      documentId: NF3E_KEY,
+      method: 'text',
+      limitations: [],
+    })
+    expect(reference.url).toBe(issuerOnlyUrl)
+  })
+
+  it('não combina a chave da URL com uma chave impressa divergente', () => {
+    const reference = extractFiscalReferenceFromText(`Chave de acesso: ${SECOND_NF3E_KEY} — ${NF3E_URL}`)
+
+    expect(reference).toMatchObject({
       status: 'unsupported',
       errorCodes: ['AMBIGUOUS_REFERENCE'],
     })

@@ -563,6 +563,16 @@ dependências em [`architecture.md`](architecture.md).
   `UNKNOWN_ISSUER`). Parâmetros de chave duplicados/conflitantes retornam
   `AMBIGUOUS_REFERENCE`; valor não estrito retorna `INVALID_DOCUMENT_ID`.
   NFAg-e permanece `unsupported` (`SOURCE_NOT_SUPPORTED`).
+- **Camada textual primeiro:** o analyzer (F1.2) aplica
+  `extractFiscalReferenceFromText` ao texto que o PDF.js já extrai para os
+  campos. URL de autorizador conhecido + chave válida dispensa o QR; chave
+  isolada (`UNKNOWN_ISSUER`) ou URL sem chave ainda dependem do QR, que é o
+  artefato canônico do emitente. Evidências compatíveis de texto e QR se
+  completam (a chave impressa preenche a URL sem documento e o QR fornece o
+  autorizador que falta), mas duas chaves divergentes não são combinadas e
+  resultam em `AMBIGUOUS_REFERENCE`. URLs não fiscais no texto (site do
+  emitente, política de privacidade) não competem com a URL de consulta nem
+  escondem a chave impressa. Nenhum caminho chama VLM/LLM nem busca a URL.
 - **Limitações x erros:** `limitations` registra condições informativas de uma
   referência `found` (`UNKNOWN_ISSUER`, `DOCUMENT_ID_MISSING`); `errorCodes`
   fica vazio em `found` e só recebe códigos em `unsupported`.
