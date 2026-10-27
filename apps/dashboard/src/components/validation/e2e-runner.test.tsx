@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
 import type {
+  AddressInput,
   ValidationDto,
   ValidationProgressDto,
   ValidationProgressStage,
@@ -120,9 +121,18 @@ const setFile = (): void => {
 }
 
 const submit = async (document: string): Promise<void> => {
-  await page.getByPlaceholder(/CNPJ do endereço/).fill(document)
+  await page.getByPlaceholder(/CPF ou CNPJ do endereço/).fill(document)
   setFile()
   await page.getByRole('button', { name: 'Iniciar validação' }).click()
+}
+
+const fillAddress = async (): Promise<void> => {
+  await page.getByPlaceholder('Logradouro').fill('Rua das Flores')
+  await page.getByPlaceholder('Número').fill('100')
+  await page.getByPlaceholder('Bairro (opcional)').fill('Centro')
+  await page.getByPlaceholder('Município').fill('São Paulo')
+  await page.getByPlaceholder('UF').fill('SP')
+  await page.getByPlaceholder('CEP').fill('01310-100')
 }
 
 describe('E2eRunner — vertical slice', () => {
@@ -176,6 +186,78 @@ describe('E2eRunner — vertical slice', () => {
       .toBeVisible()
     await expect.element(page.getByText('Uma etapa não pôde ser concluída')).toBeVisible()
     await expect.element(page.getByText('Não foi possível consultar o provedor fiscal.')).toBeVisible()
+  })
+
+  it('envia o endereço informado quando o documento é um CPF', async () => {
+    const createSpy = vi.fn(async () => processing)
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: createSpy,
+          upload: vi.fn(async () => undefined),
+          poll: vi.fn(async () => done),
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await page.getByPlaceholder(/CPF ou CNPJ do endereço/).fill('529.982.247-25')
+    await fillAddress()
+    setFile()
+    await page.getByRole('button', { name: 'Iniciar validação' }).click()
+
+    await vi.waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1))
+    const [document, address] = createSpy.mock.calls[0] as unknown as [
+      string,
+      AddressInput | null | undefined,
+    ]
+    expect(document).toBe('529.982.247-25')
+    expect(address).toMatchObject({
+      logradouro: 'Rua das Flores',
+      numero: '100',
+      bairro: 'Centro',
+      municipio: 'São Paulo',
+      uf: 'SP',
+      cep: '01310-100',
+    })
+  })
+
+  it('não envia endereço quando o CPF não tem os campos preenchidos', async () => {
+    const createSpy = vi.fn(async () => processing)
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: createSpy,
+          upload: vi.fn(async () => undefined),
+          poll: vi.fn(async () => done),
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await page.getByPlaceholder(/CPF ou CNPJ do endereço/).fill('529.982.247-25')
+    setFile()
+    await page.getByRole('button', { name: 'Iniciar validação' }).click()
+
+    await vi.waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1))
+    const [, address] = createSpy.mock.calls[0] as unknown as [string, AddressInput | null | undefined]
+    expect(address).toBeNull()
+  })
+
+  it('não exibe campos de endereço quando o documento é um CNPJ', async () => {
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: vi.fn(async () => processing),
+          upload: vi.fn(async () => undefined),
+          poll: vi.fn(async () => done),
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await page.getByPlaceholder(/CPF ou CNPJ do endereço/).fill('12.345.678/0001-95')
+    await expect.element(page.getByPlaceholder('Logradouro')).not.toBeInTheDocument()
   })
 
   it('mostra erro de submissão sem quebrar a tela', async () => {
