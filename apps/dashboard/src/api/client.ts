@@ -83,6 +83,21 @@ export interface FiscalVerificationDto {
   error_codes: string[]
 }
 
+export type ValidationProgressStage =
+  'reading_document' | 'reading_qr' | 'consulting_provider' | 'verifying_authenticity' | 'comparing_evidence'
+
+export type ValidationProgressStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped'
+
+export interface ValidationProgressStep {
+  stage: ValidationProgressStage
+  status: ValidationProgressStepStatus
+}
+
+export interface ValidationProgressDto {
+  status: 'in_progress' | 'completed' | 'failed'
+  steps: ValidationProgressStep[]
+}
+
 export interface ValidationDto {
   validation_id: string
   status: string
@@ -100,6 +115,8 @@ export interface ValidationDto {
   fiscal_reference?: 'found' | 'not_found' | 'inconclusive' | 'unsupported' | null
   /** Estado durável da reavaliação pós-consulta fiscal (null = não registrada). */
   fiscal_reassessment?: 'pending' | 'completed' | null
+  /** Progresso observável do fluxo de comprovante, derivado do estado durável. */
+  progress?: ValidationProgressDto | null
   explanation: string | null
   explanation_detail?: AssessmentExplanationDto | null
   address_unavailable_reason?: 'cnpj_not_in_snapshot' | 'address_not_provided' | null

@@ -158,6 +158,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       evidenceVerification,
       fiscalVerification,
       fiscalReferenceStatus,
+      progress,
       address,
     } = result
     const parsedVerification =
@@ -215,6 +216,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       fiscal_verification: parsedFiscal?.success === true ? parsedFiscal.data : null,
       fiscal_reference: parsedReference?.success === true ? parsedReference.data : null,
       fiscal_reassessment: parsedReassessment?.success === true ? parsedReassessment.data : null,
+      progress,
       explanation: summaryOf(validation.explanation),
       explanation_detail: explanationDetailFromStored(validation.explanation),
       created_at: validation.createdAt.toISOString(),

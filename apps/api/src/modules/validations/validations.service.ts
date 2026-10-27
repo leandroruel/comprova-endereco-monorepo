@@ -1,8 +1,14 @@
-import { FISCAL_SOURCE_KIND, UPLOADED_DOCUMENT_CHECKER, UPLOADED_DOCUMENT_SOURCE } from '@comprova/core'
+import {
+  CUSTOMER_DOCUMENT_INTAKE_SOURCE,
+  FISCAL_SOURCE_KIND,
+  UPLOADED_DOCUMENT_CHECKER,
+  UPLOADED_DOCUMENT_SOURCE,
+} from '@comprova/core'
 import { and, desc, eq, sql, withTenant } from '@comprova/db'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { encryptSecret } from '../../shared/secretbox.js'
+import { buildValidationProgress, type ValidationProgressVerification } from './validation-progress.js'
 
 const evidenceSummaryForClaim = async (
   tx: DbTx,
@@ -50,6 +56,15 @@ const loadAddressSummary = async (
     country: row.countryCode,
     uf: row.uf,
     geoPrecision: row.geoPrecision,
+  }
+}
+
+const verificationSummary = (value: unknown): ValidationProgressVerification | null => {
+  if (value === null || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  return {
+    status: typeof record.status === 'string' ? record.status : '',
+    document: typeof record.document === 'string' ? record.document : '',
   }
 }
 
@@ -166,6 +181,72 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
             .limit(1)
     const fiscalVerification = fiscalRows[0]?.detail.verification ?? null
 
+    // Progresso observável: a análise mais recente do artefato de intake é
+    // consultada diretamente (não depende da F1.3 já ter materializado a
+    // verificação), para que o dashboard veja "Lendo documento" e "Lendo QR
+    // Code" enquanto o worker ainda está processando. A query não expõe o
+    // resultado bruto: só status e a taxonomia controlada da referência.
+    const latestAnalysisRows =
+      claim === null
+        ? []
+        : await tx
+            .select({
+              status: t.evidenceAnalysis.status,
+              result: t.evidenceAnalysis.result,
+            })
+            .from(t.claimEvidence)
+            .innerJoin(
+              t.evidenceArtifact,
+              and(
+                eq(t.evidenceArtifact.claimEvidenceId, t.claimEvidence.claimEvidenceId),
+                eq(t.evidenceArtifact.tenantId, t.claimEvidence.tenantId),
+              ),
+            )
+            .innerJoin(
+              t.evidenceAnalysis,
+              and(
+                eq(t.evidenceAnalysis.artifactId, t.evidenceArtifact.artifactId),
+                eq(t.evidenceAnalysis.tenantId, t.evidenceArtifact.tenantId),
+              ),
+            )
+            .where(
+              and(
+                eq(t.claimEvidence.claimId, claim.claimId),
+                eq(t.claimEvidence.source, CUSTOMER_DOCUMENT_INTAKE_SOURCE),
+              ),
+            )
+            .orderBy(desc(t.evidenceAnalysis.createdAt))
+            .limit(1)
+    const latestAnalysis = latestAnalysisRows[0] ?? null
+    const rawLatestResult = latestAnalysis?.result as
+      | {
+          fiscalReference?: { status?: unknown } | null
+          document?: { status?: unknown } | null
+        }
+      | null
+      | undefined
+    const latestReferenceStatus =
+      typeof rawLatestResult?.fiscalReference?.status === 'string'
+        ? rawLatestResult.fiscalReference.status
+        : null
+    const latestDocumentStatus =
+      typeof rawLatestResult?.document?.status === 'string' ? rawLatestResult.document.status : null
+
+    const progress = buildValidationProgress({
+      validationStatus: validation.status,
+      fiscalReassessment: validation.fiscalReassessment,
+      analysis:
+        latestAnalysis === null
+          ? null
+          : {
+              status: latestAnalysis.status,
+              fiscalReferenceStatus: latestReferenceStatus,
+              documentStatus: latestDocumentStatus,
+            },
+      evidenceVerification: verificationSummary(evidenceVerification),
+      fiscalVerification: verificationSummary(fiscalVerification),
+    })
+
     const address = validation.addressId === null ? null : await loadAddressSummary(tx, validation.addressId)
 
     return {
@@ -176,6 +257,7 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
       evidenceVerification,
       fiscalVerification,
       fiscalReferenceStatus,
+      progress,
       address,
     }
   })
