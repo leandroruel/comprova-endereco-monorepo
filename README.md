@@ -28,11 +28,17 @@ pnpm dev
 | Redis/Valkey                    | 6379             |
 | Temporal                        | 7233 / 8233 (UI) |
 | Object storage (S3-compatible)  | 9000             |
+| Kibana (opcional, perfil `elk`) | 5601 (localhost) |
+
+O Kibana é opcional e sobe com `pnpm compose:logs:up`; o Elasticsearch não
+publica porta no host. Veja [Logs centralizados](docs/logs-elk.md).
 
 ## Documentação
 
 - [Ambiente e credenciais](docs/ambiente.md) — `.env`, API keys, S3, intake e
   assinatura de credenciais.
+- [Logs centralizados](docs/logs-elk.md) — Elasticsearch, Kibana e Filebeat
+  opcionais, com coleta dos logs dos containers e da API/worker.
 - [Arquitetura](docs/architecture.md) — fast/deep path, multi-tenancy, evidências
   e componentes.
 - [Roadmap](docs/roadmap.md) — prioridades P0–P3, fases e próximos passos.
@@ -71,6 +77,8 @@ pnpm db:seed          # tenant de dev + API key
 pnpm db:fence         # gate de segurança das migrações
 pnpm seed:golden      # dataset dourado
 pnpm compose:down
+pnpm compose:logs:up   # ELK opcional: Elasticsearch + Kibana + Filebeat
+pnpm compose:logs:down
 ```
 
 Para os testes de componente, instale o Chromium uma vez:

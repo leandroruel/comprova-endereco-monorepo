@@ -17,6 +17,8 @@
     "typecheck": "turbo typecheck",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
+    "compose:logs:up": "docker compose -f docker-compose.yml -f docker-compose.elk.yml --profile elk up -d elasticsearch kibana-setup kibana filebeat",
+    "compose:logs:down": "docker compose -f docker-compose.yml -f docker-compose.elk.yml --profile elk stop kibana filebeat kibana-setup elasticsearch",
     "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
     "db:seed": "tsx --env-file=.env packages/db/src/bootstrap.ts",
     "db:provision-key": "tsx --env-file=.env apps/api/src/scripts/provision-signing-key.ts",

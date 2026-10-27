@@ -33,7 +33,11 @@ function buildPino(opts: CreateLoggerOptions = {}): PinoLike {
         ? {
             transport: {
               target: 'pino-pretty',
-              options: { colorize: true, translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
+              options: {
+                colorize: process.env.LOG_COLOR !== 'false',
+                translateTime: 'HH:MM:ss',
+                ignore: 'pid,hostname',
+              },
             },
           }
         : {}),

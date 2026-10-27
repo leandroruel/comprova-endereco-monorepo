@@ -180,3 +180,11 @@ configuração/segredo externo; no KMS ele nunca sai do KMS. Uma chave com
 `TEMPORAL_*`, `PORT`, `DB_POOL_MAX`, `LOG_LEVEL` e `POLICY_VERSION` estão
 documentadas no [`.env.example`](../.env.example). O `.env` não deve ser
 commitado.
+
+## Logs (Elastic Stack)
+
+`ELASTIC_PASSWORD`, `KIBANA_PASSWORD`, `KIBANA_ENCRYPTION_KEY`,
+`KIBANA_BIND_ADDRESS`, `KIBANA_PORT` e os limites de memória do Elastic Stack
+são opcionais e só são usados pelo perfil `elk`. O `pnpm compose:up` padrão não
+depende deles. Para subir, consultar e parar os serviços, veja
+[Logs centralizados](logs-elk.md).

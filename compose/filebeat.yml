@@ -1,0 +1,108 @@
+# Filebeat do Comprova.
+#
+# Coleta:
+#   1. stdout/stderr dos containers que têm o label `comprova_logs=true`
+#      (postgres, redis, temporal e objectstorage no docker-compose.yml).
+#   2. opcionalmente, os arquivos logs/api.log e logs/worker.log produzidos
+#      pelos processos da API/worker rodando no host (veja docs/logs-elk.md).
+#
+# Elasticsearch, Kibana e o próprio Filebeat não têm o label, então não são
+# coletados.
+filebeat.inputs:
+  - type: filestream
+    id: comprova-containers
+    enabled: true
+    paths:
+      - /var/lib/docker/containers/*/*.log
+    parsers:
+      - container: ~
+    fields:
+      service.type: docker
+    fields_under_root: true
+    processors:
+      - add_docker_metadata:
+          host: 'unix:///var/run/docker.sock'
+      # Só publica eventos de containers com o label explícito. Containers sem
+      # metadata/label (Elasticsearch, Kibana, Filebeat, logs antigos) caem aqui.
+      - drop_event:
+          when:
+            not:
+              equals:
+                container.labels.comprova_logs: 'true'
+      - copy_fields:
+          fields:
+            - from: container.labels.com_docker_compose_service
+              to: service.name
+          fail_on_error: false
+
+  - type: filestream
+    id: comprova-api
+    enabled: true
+    paths:
+      - /var/log/comprova/api.log
+    processors:
+      # Preserva a linha original e decodifica o JSON em `api.*` para não
+      # colidir com `host`/`service` que o Filebeat já adiciona ao evento.
+      - copy_fields:
+          fields:
+            - from: message
+              to: event.original
+          fail_on_error: false
+      - decode_json_fields:
+          fields: ['message']
+          target: 'api'
+          overwrite_keys: true
+          add_error_key: false
+      # Em linhas JSON, troca o `message` bruto pelo texto de `api.msg`.
+      # Linhas não-JSON (ex.: saída do pnpm) mantêm o `message` original.
+      - drop_fields:
+          fields: ['message']
+          ignore_missing: true
+          when:
+            has_fields: ['api.msg']
+      - copy_fields:
+          fields:
+            - from: api.msg
+              to: message
+            - from: api.level
+              to: level
+            - from: api.time
+              to: time
+          fail_on_error: false
+      - add_fields:
+          target: service
+          fields:
+            name: api
+            type: host
+      - timestamp:
+          field: time
+          layouts:
+            - UNIX_MS
+          ignore_failure: true
+
+  - type: filestream
+    id: comprova-worker
+    enabled: true
+    paths:
+      - /var/log/comprova/worker.log
+    fields:
+      service.name: worker
+      service.type: host
+    fields_under_root: true
+
+output.elasticsearch:
+  hosts: ['http://elasticsearch:9200']
+  username: elastic
+  password: '${ELASTIC_PASSWORD}'
+  index: 'comprova-logs-%{+yyyy.MM.dd}'
+
+# Índices diários simples, sem template/ILM. O volume `esdata` persiste os
+# dados; a retenção fica manual (veja docs/logs-elk.md).
+setup.template.enabled: false
+setup.ilm.enabled: false
+
+logging.level: info
+logging.to_stderr: true
+# Evita o snapshot de métricas internas a cada 30s (e os avisos de /proc/io
+# sem SYS_PTRACE). Não afeta a coleta dos logs.
+logging.metrics.enabled: false

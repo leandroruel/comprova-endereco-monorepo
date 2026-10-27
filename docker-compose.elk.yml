@@ -1,0 +1,138 @@
+# Elastic Stack opcional para centralização de logs.
+#
+# Uso:
+#   pnpm compose:logs:up
+#   pnpm compose:logs:down
+#
+# Ou explicitamente:
+#   docker compose -f docker-compose.yml -f docker-compose.elk.yml --profile elk up -d elasticsearch kibana-setup kibana filebeat
+#
+# O arquivo base (docker-compose.yml) continua funcionando sozinho, sem exigir
+# ELASTIC_PASSWORD/KIBANA_PASSWORD/KIBANA_ENCRYPTION_KEY. O perfil `elk` só é
+# ativado aqui.
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    profiles: ['elk']
+    environment:
+      - node.name=comprova-elasticsearch
+      - cluster.name=comprova-logs
+      - discovery.type=single-node
+      - network.host=0.0.0.0
+      # Segurança habilitada. TLS fica desligado apenas na rede privada do
+      # Compose; a porta 9200 não é publicada no host.
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - xpack.license.self_generated.type=basic
+      - xpack.ml.enabled=false
+      - ingest.geoip.downloader.enabled=false
+      # Evita exigir vm.max_map_count=262144 no host de desenvolvimento.
+      # Em produção, habilite mmap e ajuste o sysctl.
+      - node.store.allow_mmap=false
+      - bootstrap.memory_lock=true
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?Defina ELASTIC_PASSWORD no .env}
+      - ES_JAVA_OPTS=-Xms${ELASTICSEARCH_HEAP:-512m} -Xmx${ELASTICSEARCH_HEAP:-512m}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -u "elastic:$${ELASTIC_PASSWORD}"
+          "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
+          >/dev/null || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 90s
+    mem_limit: ${ELASTICSEARCH_MEM_LIMIT:-1536m}
+    restart: unless-stopped
+
+  # Serviço one-shot: define a senha do usuário built-in `kibana_system`.
+  # O Kibana 8.17 recusa o superusuário `elastic`, então o Kibana usa esse
+  # usuário dedicado. O serviço é idempotente e roda de novo a cada `up`.
+  kibana-setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    profiles: ['elk']
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?Defina ELASTIC_PASSWORD no .env}
+      - KIBANA_PASSWORD=${KIBANA_PASSWORD:?Defina KIBANA_PASSWORD no .env}
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - >-
+        curl -fsS -u "elastic:$$ELASTIC_PASSWORD" -X POST
+        "http://elasticsearch:9200/_security/user/kibana_system/_password"
+        -H 'Content-Type: application/json'
+        -d "{\"password\":\"$$KIBANA_PASSWORD\"}"
+    restart: 'no'
+    mem_limit: 256m
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    profiles: ['elk']
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD:?Defina KIBANA_PASSWORD no .env}
+      - XPACK_SECURITY_ENABLED=true
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY:?Defina KIBANA_ENCRYPTION_KEY no .env}
+      - NODE_OPTIONS=--max-old-space-size=512
+    ports:
+      - '${KIBANA_BIND_ADDRESS:-127.0.0.1}:${KIBANA_PORT:-5601}:5601'
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS http://localhost:5601/api/status |
+          grep -q '"level":"available"' || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 90s
+    mem_limit: ${KIBANA_MEM_LIMIT:-1g}
+    restart: unless-stopped
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.17.0
+    profiles: ['elk']
+    # O Filebeat precisa ler o socket e os logs dos containers do Docker.
+    user: root
+    command: ['filebeat', '-e', '--strict.perms=false']
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?Defina ELASTIC_PASSWORD no .env}
+    volumes:
+      - ./compose/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./logs:/var/log/comprova:ro
+      - filebeatdata:/usr/share/filebeat/data
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'filebeat', '--strict.perms=false', 'test', 'output']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: ${FILEBEAT_MEM_LIMIT:-256m}
+    restart: unless-stopped
+
+volumes:
+  esdata:
+  filebeatdata:

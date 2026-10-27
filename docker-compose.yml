@@ -1,6 +1,11 @@
+# Serviços com `comprova_logs=true` são coletados pelo Filebeat quando o
+# perfil `elk` está ativo (docker-compose.elk.yml). Os serviços do Elastic
+# Stack não recebem esse label para não coletarem os próprios logs.
 services:
   postgres:
     image: postgis/postgis:16-3.4
+    labels:
+      comprova_logs: 'true'
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -17,6 +22,8 @@ services:
 
   redis:
     image: valkey/valkey:8-alpine
+    labels:
+      comprova_logs: 'true'
     ports:
       - '6379:6379'
     healthcheck:
@@ -27,6 +34,8 @@ services:
 
   temporal:
     image: temporalio/admin-tools:1.27.0
+    labels:
+      comprova_logs: 'true'
     entrypoint: ['temporal', 'server', 'start-dev', '--ip', '0.0.0.0', '--port', '7233', '--ui-port', '8233']
     ports:
       - '7233:7233'
@@ -34,6 +43,8 @@ services:
 
   objectstorage:
     image: zenko/cloudserver:latest
+    labels:
+      comprova_logs: 'true'
     environment:
       S3DATA: multiple
       S3_BACKEND: mem
