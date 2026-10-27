@@ -355,6 +355,9 @@ describe('fiscal verification tick — vertical slice', () => {
       holder: 'matches',
       source: { kind: 'fiscal_nf3e', id: 'nf3e', authority: 'SVRS' },
     })
+    // Sinal de elegibilidade fiscal: a análise corrente encontrou a referência
+    // do QR — é o que faz o dashboard aguardar a consulta fiscal.
+    expect(body.fiscal_reference).toBe('found')
 
     // Nada de hash da referência, IP resolvido, digest da resposta ou URL.
     const raw = get.body

@@ -18,7 +18,10 @@ Dashboard → POST /v1/validations → POST /v1/validations/:id/evidence
   `POST /v1/validations/:id/evidence` (multipart já existente) e
   `GET /v1/validations/:id`, que agora expõe `fiscal_verification`
   (`FiscalVerificationDtoSchema` em `@comprova/contracts`) — a leitura corrente
-  da consulta fiscal, sem hash da referência, IP, digest da resposta ou URL.
+  da consulta fiscal, sem hash da referência, IP, digest da resposta ou URL —
+  e `fiscal_reference` (`FiscalReferenceStatusSchema`), status da referência
+  fiscal extraída da análise corrente: sinal de que uma consulta fiscal é
+  esperada (usado pelo polling do dashboard).
   A referência NF3e não é digitada no dashboard: o backend extrai do QR do
   próprio comprovante (F2.2b), e o browser nunca envia dados fiscais.
 - **Worker:** novo `verifyFiscalTick`
@@ -33,12 +36,16 @@ Dashboard → POST /v1/validations → POST /v1/validations/:id/evidence
     manual. `unavailable`/`inconclusive`/`unsupported` continuam observações
     neutras — o dashboard comunica "a consulta fiscal não pôde ser concluída",
     nunca "endereço falso".
-- **Dashboard:** `E2eRunner` (form CNPJ + comprovante + polling que só para
-  quando as evidências chegaram E o resultado estabilizou — o fast path
-  conclui antes do worker processar) e `EvidenceSections` (comprovante +
-  consulta fiscal no `ValidationResult`), com a taxonomia do backend
-  preservada. A `VITE_API_KEY` existente continua sendo facilidade de dev
-  (documentada no client); nenhuma credencial nova no bundle.
+- **Dashboard:** `E2eRunner` (form CNPJ + comprovante; cria com mode `fast`
+  porque `auto`/`deep` exigem `VLM_ENABLED` — e a reavaliação do tick fiscal
+  roda o deep enrichment de qualquer forma; polling com regra de parada única:
+  evidências chegaram + leitura inalterada + consulta fiscal, quando esperada
+  `fiscal_reference = found`, já vista — o GET expõe `fiscal_reference` da
+  análise para o dashboard distinguir "aguardar consulta" de "não há
+  consulta", e comprovantes sem QR concluem normalmente) e `EvidenceSections`
+  (comprovante + consulta fiscal no `ValidationResult`), com a taxonomia do
+  backend preservada. A `VITE_API_KEY` existente continua sendo facilidade de
+  dev (documentada no client); nenhuma credencial nova no bundle.
 - **Testes:** `apps/api/tests/fiscal-tick.int.test.ts` (7 casos: ordem F1.3→tick,
   fluxo completo com reavaliação real, idempotência, taxonomia, retry de
   reavaliação, GET sem PII/auditoria, dois tenants independentes + isolamento 404) e dashboard (`e2e-runner.test.tsx`: submissão/processando/concluído com

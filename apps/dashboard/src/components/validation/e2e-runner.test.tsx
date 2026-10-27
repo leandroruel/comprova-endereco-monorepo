@@ -34,6 +34,7 @@ const processing = baseValidation({ status: 'partial', verdict: null, score: nul
 
 const done = baseValidation({
   status: 'completed',
+  fiscal_reference: 'found',
   evidence_verification: {
     status: 'completed',
     method: 'content_extraction',
@@ -150,5 +151,109 @@ describe('E2eRunner — vertical slice', () => {
     await expect.element(page.getByRole('alert')).toHaveTextContent('CNPJ fora da competência carregada')
     // O formulário continua na tela para nova tentativa.
     await expect.element(page.getByRole('button', { name: 'Iniciar validação' })).toBeVisible()
+  })
+
+  it('não encerra o acompanhamento enquanto a consulta fiscal esperada está pendente', async () => {
+    // Evidência chegou com referência found, mas a consulta fiscal ainda não:
+    // duas leituras IDÊNTICAS nesse estado não podem encerrar o watch.
+    const pending = baseValidation({
+      status: 'partial',
+      fiscal_reference: 'found',
+      evidence_verification: {
+        status: 'completed',
+        method: 'content_extraction',
+        source: {
+          kind: 'customer_submitted_document',
+          id: 'intake',
+          authority: null,
+          environment: 'local',
+        },
+        document: 'authentic',
+        address: 'not_extracted',
+        holder: 'not_extracted',
+        analysis_id: 'a1b2c3d4-0000-4000-8000-000000000003',
+        analyzer: { id: 'pdf-text', version: '1.0.0' },
+        contract_version: '3',
+        observed_at: NOW,
+        limitations: [],
+        error_codes: [],
+        comparison: {
+          address: { compared_fields: [], reason_codes: [] },
+          holder: { reference: 'none', reason_codes: [] },
+        },
+      },
+    })
+
+    const queue: ValidationDto[] = [processing, pending, pending, done, done]
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: vi.fn(async () => processing),
+          upload: vi.fn(async () => undefined),
+          poll: vi.fn(async () => queue.shift() ?? done),
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await submit('12.345.678/0001-95')
+
+    // O estado de consulta pendente é comunicado…
+    await expect.element(page.getByText(/consulta fiscal pendente/)).toBeVisible()
+
+    // …e o watch sobrevive às leituras inalteradas até a consulta fiscal
+    // chegar: o resultado final inclui a seção fiscal.
+    await expect.element(page.getByText('Comercial confirmado')).toBeVisible()
+    await expect.element(page.getByText('Consulta fiscal NF3e', { exact: true })).toBeVisible()
+  })
+
+  it('conclui comprovante sem QR sem esperar uma consulta fiscal que não vai acontecer', async () => {
+    const noQr = baseValidation({
+      status: 'completed',
+      fiscal_reference: 'not_found',
+      evidence_verification: {
+        status: 'completed',
+        method: 'content_extraction',
+        source: {
+          kind: 'customer_submitted_document',
+          id: 'intake',
+          authority: null,
+          environment: 'local',
+        },
+        document: 'authentic',
+        address: 'not_extracted',
+        holder: 'not_extracted',
+        analysis_id: 'a1b2c3d4-0000-4000-8000-000000000004',
+        analyzer: { id: 'pdf-text', version: '1.0.0' },
+        contract_version: '3',
+        observed_at: NOW,
+        limitations: [],
+        error_codes: [],
+        comparison: {
+          address: { compared_fields: [], reason_codes: [] },
+          holder: { reference: 'none', reason_codes: [] },
+        },
+      },
+    })
+
+    const queue: ValidationDto[] = [processing, noQr, noQr]
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: vi.fn(async () => processing),
+          upload: vi.fn(async () => undefined),
+          poll: vi.fn(async () => queue.shift() ?? noQr),
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await submit('12.345.678/0001-95')
+
+    // Sem QR não há consulta esperada: conclui normalmente com o comprovante
+    // e sem a seção fiscal.
+    await expect.element(page.getByText('Comercial confirmado')).toBeVisible()
+    await expect.element(page.getByText('Comprovante enviado', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('Consulta fiscal NF3e', { exact: true })).not.toBeInTheDocument()
   })
 })

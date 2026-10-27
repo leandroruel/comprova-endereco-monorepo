@@ -128,6 +128,25 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
             .limit(1)
     const evidenceVerification = verificationRows[0]?.detail.verification ?? null
 
+    // Status da referência fiscal da análise corrente (F2.2b). Diz ao cliente
+    // se uma consulta fiscal é esperada (`found`): o dashboard usa isso para
+    // não encerrar o acompanhamento antes da consulta fiscal chegar — e para
+    // concluir comprovantes sem QR normalmente. Sem PII (nunca a chave/URL).
+    const analysisId = (evidenceVerification as { analysis_id?: unknown } | null)?.analysis_id
+    const analysisRows =
+      typeof analysisId === 'string'
+        ? await tx
+            .select({ result: t.evidenceAnalysis.result })
+            .from(t.evidenceAnalysis)
+            .where(
+              and(eq(t.evidenceAnalysis.analysisId, analysisId), eq(t.evidenceAnalysis.tenantId, tenantId)),
+            )
+            .limit(1)
+        : []
+    const rawReference = (analysisRows[0]?.result as { fiscalReference?: { status?: unknown } } | undefined)
+      ?.fiscalReference
+    const fiscalReferenceStatus = typeof rawReference?.status === 'string' ? rawReference.status : null
+
     // F2: a leitura corrente da consulta fiscal é a observação mais recente
     // (mesma no-op de versão do F1.3; o histórico permanece para auditoria).
     const fiscalRows =
@@ -148,7 +167,16 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
 
     const address = validation.addressId === null ? null : await loadAddressSummary(tx, validation.addressId)
 
-    return { validation, signals, claim, evidenceSummary, evidenceVerification, fiscalVerification, address }
+    return {
+      validation,
+      signals,
+      claim,
+      evidenceSummary,
+      evidenceVerification,
+      fiscalVerification,
+      fiscalReferenceStatus,
+      address,
+    }
   })
 
 export const setWorkflowId = async (

@@ -9,7 +9,8 @@ import { FileUp, Search } from 'lucide-react'
  * Vertical slice: executar UMA validação real de ponta a ponta pelo dashboard.
  *
  *   CNPJ/CPF + comprovante (PDF/imagem com QR NF3e)
- *     → POST /validations (fast path + deep)
+ *     → POST /validations (mode 'fast' — 'auto'/'deep' exigem VLM_ENABLED,
+ *       e a reavaliação do tick fiscal roda o deep enrichment de qualquer forma)
  *     → POST /validations/:id/evidence (upload do artefato)
  *     → polling GET /validations/:id até o resultado estabilizar
  *
@@ -19,7 +20,10 @@ import { FileUp, Search } from 'lucide-react'
  *
  * O polling não para no primeiro `completed`: o fast path conclui antes de o
  * worker processar o comprovante. Ele para quando as evidências chegaram E o
- * resultado parou de mudar entre duas leituras (ou no teto de tempo).
+ * resultado parou de mudar entre duas leituras E não há consulta fiscal
+ * pendente (`fiscal_reference = found` ainda sem `fiscal_verification`) — ou no
+ * teto de tempo. Comprovante sem QR (`fiscal_reference` ≠ found) conclui
+ * normalmente, sem esperar uma consulta que não vai acontecer.
  */
 
 /** Teto de acompanhamento: uma validação `partial` pode não estabilizar nunca. */
@@ -28,6 +32,10 @@ const POLL_INTERVAL_MS = 2_000
 
 const evidenceArrived = (v: ValidationDto): boolean =>
   v.evidence_verification != null || v.fiscal_verification != null
+
+/** Consulta fiscal esperada pela referência do comprovante e ainda não chegou. */
+const fiscalPending = (v: ValidationDto): boolean =>
+  v.fiscal_reference === 'found' && v.fiscal_verification == null
 
 const hardTerminal = (v: ValidationDto): boolean => v.status === 'failed' || v.status === 'expired'
 
@@ -51,7 +59,7 @@ export interface E2eRunnerDeps {
 }
 
 export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
-  const create = deps?.create ?? ((document: string) => createValidation(document, 'auto'))
+  const create = deps?.create ?? ((document: string) => createValidation(document, 'fast'))
   const upload = deps?.upload ?? uploadEvidence
   const poll = deps?.poll ?? getValidation
   const pollIntervalMs = deps?.pollIntervalMs ?? POLL_INTERVAL_MS
@@ -59,7 +67,8 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const [document, setDocument] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [phase, setPhase] = useState<'idle' | 'watching' | 'done'>('idle')
+  /** Acompanhamento encerrado. Definido SÓ pela regra de parada do polling/timeout. */
+  const [stopped, setStopped] = useState(false)
 
   const startedAtRef = useRef(0)
   const snapshotRef = useRef<string | null>(null)
@@ -74,7 +83,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
       setActiveId(created.validation_id)
       startedAtRef.current = Date.now()
       snapshotRef.current = null
-      setPhase('watching')
+      setStopped(false)
       setDocument('')
       setFile(null)
     },
@@ -87,31 +96,29 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
     refetchInterval: (query) => {
       const data = query.state.data as ValidationDto | undefined
       if (data === undefined) return pollIntervalMs
-      if (hardTerminal(data)) return false
-      if (Date.now() - startedAtRef.current > MAX_WATCH_MS) return false
-      if (!evidenceArrived(data)) return pollIntervalMs
-      // Evidências chegaram: para quando o resultado parar de mudar, dando tempo
-      // para a reavaliação pós-consulta fiscal aparecer na leitura seguinte.
-      const snapshot = snapshotOf(data)
-      const settled = snapshotRef.current === snapshot
-      snapshotRef.current = snapshot
-      return settled ? false : pollIntervalMs
+      // Única regra de parada (fonte da verdade, também para o estado `stopped`):
+      // terminal duro, teto de tempo, ou evidências chegaram + leitura inalterada
+      // + consulta fiscal (quando esperada) já vista. Enquanto
+      // `fiscal_reference = found` sem `fiscal_verification`, não encerra — a
+      // consulta e a reavaliação ainda estão no ar.
+      const stop =
+        hardTerminal(data) ||
+        Date.now() - startedAtRef.current > MAX_WATCH_MS ||
+        (evidenceArrived(data) && !fiscalPending(data) && snapshotRef.current === snapshotOf(data))
+      snapshotRef.current = snapshotOf(data)
+      if (stop) {
+        setStopped(true)
+        return false
+      }
+      return pollIntervalMs
     },
     queryFn: () => (activeId === null ? Promise.reject(new Error('no active validation')) : poll(activeId)),
     retry: false,
   })
 
   useEffect(() => {
-    const active = validation.data as ValidationDto | undefined
-    if (active === undefined) return
-    if (hardTerminal(active) || (evidenceArrived(active) && snapshotRef.current === snapshotOf(active))) {
-      setPhase('done')
-    }
-  }, [validation.data])
-
-  useEffect(() => {
     if (activeId === null) return
-    const timer = setTimeout(() => setPhase('done'), MAX_WATCH_MS)
+    const timer = setTimeout(() => setStopped(true), MAX_WATCH_MS)
     return () => clearTimeout(timer)
   }, [activeId])
 
@@ -166,19 +173,16 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
           </p>
         )}
 
-        {phase === 'watching' && active !== undefined && (
+        {!stopped && active !== undefined && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
             <Spinner />
             Processando — intake, análise e consulta fiscal rodam no worker
             {active.evidence_verification == null ? ' (comprovante ainda não analisado)' : ''}
-            {active.fiscal_verification == null && active.evidence_verification != null
-              ? ' (consulta fiscal pendente)'
-              : ''}
-            …
+            {fiscalPending(active) ? ' (consulta fiscal pendente)' : ''}…
           </div>
         )}
 
-        {phase === 'done' && active !== undefined && (
+        {stopped && active !== undefined && (
           <div className="space-y-3">
             {active.status !== 'completed' && (
               <p className="text-xs text-muted-foreground">

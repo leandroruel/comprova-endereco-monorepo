@@ -184,6 +184,16 @@ export const FiscalVerificationDtoSchema = z.object({
 
 export type FiscalVerificationDto = z.infer<typeof FiscalVerificationDtoSchema>
 
+/**
+ * Status da referência fiscal extraída da análise do comprovante (F2.2b).
+ * Não é PII (sem chave/URL): informa ao cliente se uma consulta fiscal é
+ * ESPERADA (`found`), permitindo que o polling aguarde o resultado fiscal em
+ * vez de parar cedo demais — e que comprovantes sem QR concluam normalmente.
+ */
+export const FiscalReferenceStatusSchema = z.enum(['found', 'not_found', 'inconclusive', 'unsupported'])
+
+export type FiscalReferenceStatus = z.infer<typeof FiscalReferenceStatusSchema>
+
 export const AssessmentExplanationDtoSchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -204,6 +214,7 @@ export const ValidationDtoSchema = z.object({
   evidence_summary: EvidenceSummaryDtoSchema.nullable().optional(),
   evidence_verification: EvidenceVerificationDtoSchema.nullable().optional(),
   fiscal_verification: FiscalVerificationDtoSchema.nullable().optional(),
+  fiscal_reference: FiscalReferenceStatusSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
   created_at: z.string(),

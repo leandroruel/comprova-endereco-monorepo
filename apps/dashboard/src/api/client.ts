@@ -96,6 +96,8 @@ export interface ValidationDto {
   evidence_summary?: EvidenceSummaryDto | null
   evidence_verification?: EvidenceVerificationDto | null
   fiscal_verification?: FiscalVerificationDto | null
+  /** Status da referência fiscal extraída do comprovante; `found` = consulta esperada. */
+  fiscal_reference?: 'found' | 'not_found' | 'inconclusive' | 'unsupported' | null
   explanation: string | null
   explanation_detail?: AssessmentExplanationDto | null
   address_unavailable_reason?: 'cnpj_not_in_snapshot' | 'address_not_provided' | null

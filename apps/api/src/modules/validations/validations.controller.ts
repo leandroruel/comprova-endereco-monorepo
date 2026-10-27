@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import {
   EvidenceVerificationDtoSchema,
+  FiscalReferenceStatusSchema,
   FiscalVerificationDtoSchema,
   PROBLEM_CONTENT_TYPE,
   problem,
@@ -148,8 +149,16 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     if (result === null) {
       return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('validation'))
     }
-    const { validation, signals, claim, evidenceSummary, evidenceVerification, fiscalVerification, address } =
-      result
+    const {
+      validation,
+      signals,
+      claim,
+      evidenceSummary,
+      evidenceVerification,
+      fiscalVerification,
+      fiscalReferenceStatus,
+      address,
+    } = result
     const parsedVerification =
       evidenceVerification === null ? null : EvidenceVerificationDtoSchema.safeParse(evidenceVerification)
     // O `detail` fiscal persiste campos de auditoria (hash da referência, IP
@@ -157,6 +166,8 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     // strips unknown keys, expondo apenas o subconjunto do contrato.
     const parsedFiscal =
       fiscalVerification === null ? null : FiscalVerificationDtoSchema.safeParse(fiscalVerification)
+    // Whitelist do status da referência fiscal: o valor vem do JSONB da análise.
+    const parsedReference = FiscalReferenceStatusSchema.safeParse(fiscalReferenceStatus)
 
     const body: ValidationDto = {
       validation_id: validation.validationId,
@@ -199,6 +210,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       evidence_summary: evidenceSummary,
       evidence_verification: parsedVerification?.success === true ? parsedVerification.data : null,
       fiscal_verification: parsedFiscal?.success === true ? parsedFiscal.data : null,
+      fiscal_reference: parsedReference?.success === true ? parsedReference.data : null,
       explanation: summaryOf(validation.explanation),
       explanation_detail: explanationDetailFromStored(validation.explanation),
       created_at: validation.createdAt.toISOString(),
