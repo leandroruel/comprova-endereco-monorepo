@@ -181,4 +181,74 @@ describe('ValidationResult', () => {
       )
       .toBeVisible()
   })
+
+  it('renderiza comprovante e consulta fiscal preservando a taxonomia de status', async () => {
+    await render(
+      <ValidationResult
+        validation={{
+          ...validation,
+          evidence_verification: {
+            status: 'completed',
+            method: 'content_extraction',
+            source: {
+              kind: 'customer_submitted_document',
+              id: 'intake',
+              authority: null,
+              environment: 'local',
+            },
+            document: 'authentic',
+            address: 'matches',
+            holder: 'not_extracted',
+            analysis_id: 'a1b2c3d4-0000-4000-8000-000000000002',
+            analyzer: { id: 'pdf-text', version: '1.0.0' },
+            contract_version: '3',
+            observed_at: NOW,
+            limitations: [],
+            error_codes: [],
+            comparison: {
+              address: { compared_fields: ['cep'], reason_codes: [] },
+              holder: { reference: 'none', reason_codes: [] },
+            },
+          },
+          fiscal_verification: {
+            status: 'unavailable',
+            method: 'official_qr_consultation',
+            source: { kind: 'fiscal_nf3e', id: 'nf3e', authority: 'SVRS', environment: 'production' },
+            document: 'unavailable',
+            address: 'not_extracted',
+            holder: 'not_extracted',
+            adapter_version: '1.0.0',
+            contract_version: '2',
+            observed_at: NOW,
+            limitations: ['SOURCE_UNAVAILABLE'],
+            error_codes: ['SEFAZ_TIMEOUT'],
+          },
+        }}
+      />,
+    )
+
+    await expect.element(page.getByText('Comprovante e consulta fiscal', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('Comprovante enviado', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('Consulta fiscal NF3e', { exact: true })).toBeVisible()
+
+    // Indisponibilidade fiscal é comunicada como "consulta não concluída",
+    // nunca como "endereço falso" ou "falha".
+    await expect
+      .element(page.getByText('a consulta fiscal não pôde ser concluída — autorizador indisponível'))
+      .toBeVisible()
+    await expect.element(page.getByText('Autorizador', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('SVRS · production', { exact: true })).toBeVisible()
+
+    // Sem PII nem identificadores técnicos nas evidências exibidas.
+    expect(document.body.textContent ?? '').not.toContain('document_ref_hash')
+    expect(document.body.textContent ?? '').not.toContain('resolved_ip')
+  })
+
+  it('não renderiza a seção de comprovante quando não há evidências enviadas', async () => {
+    await render(<ValidationResult validation={validation} />)
+
+    await expect
+      .element(page.getByText('Comprovante e consulta fiscal', { exact: true }))
+      .not.toBeInTheDocument()
+  })
 })

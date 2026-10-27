@@ -43,6 +43,46 @@ export interface EvidenceSummaryDto {
   unknown: number
 }
 
+export interface VerificationSourceDto {
+  kind: string
+  id: string
+  authority: string | null
+  environment: 'production' | 'homologation' | 'local'
+}
+
+export interface EvidenceVerificationDto {
+  status: 'completed' | 'invalid' | 'inconclusive' | 'unsupported' | 'unavailable'
+  method: string
+  source: VerificationSourceDto
+  document: 'authentic' | 'not_found' | 'invalid' | 'inconclusive' | 'unavailable' | 'unsupported'
+  address: 'matches' | 'differs' | 'not_extracted'
+  holder: 'matches' | 'differs' | 'not_extracted'
+  analysis_id: string
+  analyzer: { id: string; version: string }
+  contract_version: string
+  observed_at: string
+  limitations: string[]
+  error_codes: string[]
+  comparison: {
+    address: { compared_fields: string[]; reason_codes: string[] }
+    holder: { reference: string; reason_codes: string[] }
+  }
+}
+
+export interface FiscalVerificationDto {
+  status: 'completed' | 'not_found' | 'invalid' | 'inconclusive' | 'unsupported' | 'unavailable'
+  method: string
+  source: VerificationSourceDto
+  document: 'authentic' | 'not_found' | 'invalid' | 'inconclusive' | 'unavailable' | 'unsupported'
+  address: 'matches' | 'differs' | 'not_extracted'
+  holder: 'matches' | 'differs' | 'not_extracted'
+  adapter_version: string
+  contract_version: string
+  observed_at: string
+  limitations: string[]
+  error_codes: string[]
+}
+
 export interface ValidationDto {
   validation_id: string
   status: string
@@ -54,6 +94,12 @@ export interface ValidationDto {
   signals: ValidationSignal[]
   claim?: ClaimDto | null
   evidence_summary?: EvidenceSummaryDto | null
+  evidence_verification?: EvidenceVerificationDto | null
+  fiscal_verification?: FiscalVerificationDto | null
+  /** Status da referência fiscal extraída do comprovante; `found` = consulta esperada. */
+  fiscal_reference?: 'found' | 'not_found' | 'inconclusive' | 'unsupported' | null
+  /** Estado durável da reavaliação pós-consulta fiscal (null = não registrada). */
+  fiscal_reassessment?: 'pending' | 'completed' | null
   explanation: string | null
   explanation_detail?: AssessmentExplanationDto | null
   address_unavailable_reason?: 'cnpj_not_in_snapshot' | 'address_not_provided' | null
@@ -111,6 +157,33 @@ export async function getValidation(id: string): Promise<ValidationDto> {
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return (await res.json()) as ValidationDto
+}
+
+/**
+ * Upload do comprovante (PDF/imagem) para a validação. O backend extrai a
+ * referência fiscal do QR do próprio artefato — a referência NF3e nunca é
+ * digitada/enviada pelo browser.
+ */
+export async function uploadEvidence(
+  validationId: string,
+  file: File,
+): Promise<{ evidence_id: string; artifact_id: string; status: string }> {
+  const body = new FormData()
+  body.append('file', file, file.name)
+  const res = await fetch(`${API_BASE}/v1/validations/${validationId}/evidence`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      'Idempotency-Key': crypto.randomUUID(),
+    },
+    body,
+  })
+  if (!res.ok) {
+    const problem = (await res.json().catch(() => ({}))) as { code?: string; title?: string }
+    throw new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`)
+  }
+  return (await res.json()) as { evidence_id: string; artifact_id: string; status: string }
 }
 
 export async function getReady(): Promise<{ status: string }> {

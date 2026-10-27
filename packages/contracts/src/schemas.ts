@@ -155,6 +155,55 @@ export const EvidenceVerificationDtoSchema = z.object({
   }),
 })
 
+/**
+ * Leitura corrente da consulta fiscal materializada em `claim_evidence`
+ * (`source = fiscal_nf3e`), no mesmo formato da verificação do documento
+ * enviado. Expõe apenas o que o dashboard precisa: `document` (autenticidade),
+ * `address`/`holder` (comparação) e `limitations`. O hash da referência, a URL
+ * consultada, o IP resolvido e a resposta bruta NUNCA são expostos — eles
+ * existem no `detail` persistido apenas para auditoria.
+ */
+export const FiscalVerificationDtoSchema = z.object({
+  status: z.enum(['completed', 'not_found', 'invalid', 'inconclusive', 'unsupported', 'unavailable']),
+  method: VerificationMethodSchema,
+  source: z.object({
+    kind: EvidenceSourceKindSchema,
+    id: z.string(),
+    authority: z.string().nullable(),
+    environment: z.enum(['production', 'homologation', 'local']),
+  }),
+  document: DocumentOutcomeSchema,
+  address: MatchOutcomeSchema,
+  holder: MatchOutcomeSchema,
+  adapter_version: z.string(),
+  contract_version: z.string(),
+  observed_at: z.iso.datetime(),
+  limitations: z.array(z.string()),
+  error_codes: z.array(z.string()),
+})
+
+export type FiscalVerificationDto = z.infer<typeof FiscalVerificationDtoSchema>
+
+/**
+ * Status da referência fiscal extraída da análise do comprovante (F2.2b).
+ * Não é PII (sem chave/URL): informa ao cliente se uma consulta fiscal é
+ * ESPERADA (`found`), permitindo que o polling aguarde o resultado fiscal em
+ * vez de parar cedo demais — e que comprovantes sem QR concluam normalmente.
+ */
+export const FiscalReferenceStatusSchema = z.enum(['found', 'not_found', 'inconclusive', 'unsupported'])
+
+export type FiscalReferenceStatus = z.infer<typeof FiscalReferenceStatusSchema>
+
+/**
+ * Estado durável da reavaliação após a consulta fiscal (migration 0045).
+ * `pending` cobre a consulta/reavaliação em andamento e o retry agendado;
+ * `completed` significa que o assessment já inclui a evidência fiscal — é o
+ * sinal que o cliente usa para parar de acompanhar.
+ */
+export const FiscalReassessmentStateSchema = z.enum(['pending', 'completed'])
+
+export type FiscalReassessmentState = z.infer<typeof FiscalReassessmentStateSchema>
+
 export const AssessmentExplanationDtoSchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -174,6 +223,9 @@ export const ValidationDtoSchema = z.object({
   claim: ClaimDtoSchema.nullable().optional(),
   evidence_summary: EvidenceSummaryDtoSchema.nullable().optional(),
   evidence_verification: EvidenceVerificationDtoSchema.nullable().optional(),
+  fiscal_verification: FiscalVerificationDtoSchema.nullable().optional(),
+  fiscal_reference: FiscalReferenceStatusSchema.nullable().optional(),
+  fiscal_reassessment: FiscalReassessmentStateSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
   created_at: z.string(),

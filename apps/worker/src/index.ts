@@ -1,7 +1,7 @@
 import { systemClock } from '@comprova/core'
 import { createDbPool } from '@comprova/db'
 import { createCLILogger } from '@comprova/observability'
-import { makeDocumentAnalyzer } from '@comprova/providers'
+import { makeDocumentAnalyzer, makeNf3eFiscalAdapter } from '@comprova/providers'
 import { Worker } from '@temporalio/worker'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,9 +11,11 @@ import {
   startEvidenceAnalysisLoop,
   startEvidenceRetentionLoop,
   startEvidenceVerificationLoop,
+  startFiscalVerificationLoop,
   startValidationRetentionLoop,
 } from './loops.js'
 import { makeDeepEnrichActivity } from './modules/deep-enrich/deep-enrich.activity.js'
+import { deepEnrich } from './modules/deep-enrich/deep-enrich.service.js'
 import type { DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
 
 const logger = createCLILogger('worker')
@@ -88,6 +90,26 @@ if (stopEvidenceVerification === null) {
   )
 }
 
+// Vertical slice F3: consulta fiscal pela referência extraída do comprovante
+// (adapter NF3e/SVRS já existente) + reavaliação do claim pelo deep path. O
+// scan usa o pool de manutenção; a reavaliação usa o pool do app (RLS), o
+// mesmo `deepDeps` da activity do Temporal.
+const stopFiscalVerification =
+  adminRetentionPool !== null
+    ? startFiscalVerificationLoop(
+        adminRetentionPool.db,
+        makeNf3eFiscalAdapter(),
+        (tenantId, validationId) => deepEnrich(deepDeps, { tenantId, validationId }),
+        logger,
+      )
+    : null
+if (stopFiscalVerification === null) {
+  logger.warn(
+    { reason: 'FISCAL_VERIFICATION_ADMIN_URL_MISSING' },
+    'fiscal verification loop disabled: DATABASE_ADMIN_URL not configured',
+  )
+}
+
 const worker = await Worker.create({
   taskQueue,
   workflowsPath,
@@ -102,4 +124,5 @@ try {
   stopValidationRetention?.()
   stopEvidenceAnalysis?.()
   stopEvidenceVerification?.()
+  stopFiscalVerification?.()
 }

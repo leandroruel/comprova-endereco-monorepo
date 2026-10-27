@@ -1,4 +1,4 @@
-import { UPLOADED_DOCUMENT_CHECKER, UPLOADED_DOCUMENT_SOURCE } from '@comprova/core'
+import { FISCAL_SOURCE_KIND, UPLOADED_DOCUMENT_CHECKER, UPLOADED_DOCUMENT_SOURCE } from '@comprova/core'
 import { and, desc, eq, sql, withTenant } from '@comprova/db'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -65,6 +65,7 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
         policyVersion: t.validation.policyVersion,
         explanation: t.validation.explanation,
         addressId: t.validation.addressId,
+        fiscalReassessment: t.validation.fiscalReassessment,
         createdAt: t.validation.createdAt,
         expiresAt: t.validation.expiresAt,
       })
@@ -128,9 +129,55 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
             .limit(1)
     const evidenceVerification = verificationRows[0]?.detail.verification ?? null
 
+    // Status da referência fiscal da análise corrente (F2.2b). Diz ao cliente
+    // se uma consulta fiscal é esperada (`found`): o dashboard usa isso para
+    // não encerrar o acompanhamento antes da consulta fiscal chegar — e para
+    // concluir comprovantes sem QR normalmente. Sem PII (nunca a chave/URL).
+    const analysisId = (evidenceVerification as { analysis_id?: unknown } | null)?.analysis_id
+    const analysisRows =
+      typeof analysisId === 'string'
+        ? await tx
+            .select({ result: t.evidenceAnalysis.result })
+            .from(t.evidenceAnalysis)
+            .where(
+              and(eq(t.evidenceAnalysis.analysisId, analysisId), eq(t.evidenceAnalysis.tenantId, tenantId)),
+            )
+            .limit(1)
+        : []
+    const rawReference = (analysisRows[0]?.result as { fiscalReference?: { status?: unknown } } | undefined)
+      ?.fiscalReference
+    const fiscalReferenceStatus = typeof rawReference?.status === 'string' ? rawReference.status : null
+
+    // F2: a leitura corrente da consulta fiscal é a observação mais recente
+    // (mesma no-op de versão do F1.3; o histórico permanece para auditoria).
+    const fiscalRows =
+      claim === null
+        ? []
+        : await tx
+            .select({ detail: t.claimEvidence.detail })
+            .from(t.claimEvidence)
+            .where(
+              and(
+                eq(t.claimEvidence.claimId, claim.claimId),
+                eq(t.claimEvidence.source, FISCAL_SOURCE_KIND['nf3e']),
+              ),
+            )
+            .orderBy(desc(t.claimEvidence.observedAt), desc(t.claimEvidence.createdAt))
+            .limit(1)
+    const fiscalVerification = fiscalRows[0]?.detail.verification ?? null
+
     const address = validation.addressId === null ? null : await loadAddressSummary(tx, validation.addressId)
 
-    return { validation, signals, claim, evidenceSummary, evidenceVerification, address }
+    return {
+      validation,
+      signals,
+      claim,
+      evidenceSummary,
+      evidenceVerification,
+      fiscalVerification,
+      fiscalReferenceStatus,
+      address,
+    }
   })
 
 export const setWorkflowId = async (
