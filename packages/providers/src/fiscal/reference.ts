@@ -397,6 +397,21 @@ const referenceFromText = (raw: string, method: FiscalReferenceMethod): FiscalRe
   return notFound(method)
 }
 
+/**
+ * F2.2a — referência a partir da camada textual do documento.
+ *
+ * É a primeira tentativa determinística do analyzer de PDF: o texto já é
+ * extraído pelo PDF.js (unpdf) para os campos do F1.2 e, quando contém a URL de
+ * consulta ou a chave de acesso, dispensa decodificação de QR, renderização de
+ * página ou modelo generativo.
+ *
+ * Reutiliza as mesmas regras de `extractFiscalReference` — URL `https`, host de
+ * autorizador conhecido, modelo 66, UF e DV — portanto texto livre não vira
+ * referência por heurística e nada é buscado na rede.
+ */
+export const extractFiscalReferenceFromText = (text: string): FiscalReference =>
+  referenceFromText(text, 'text')
+
 const detectMethod = (raw: string): FiscalReferenceMethod => {
   if (/^https?:\/\/\S+$/i.test(raw)) return 'url'
   return /^\d{44}$/.test(raw) ? 'access_key' : 'text'

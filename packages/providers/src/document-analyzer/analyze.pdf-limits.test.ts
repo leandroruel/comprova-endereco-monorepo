@@ -8,11 +8,14 @@ const unpdf = vi.hoisted(() => ({
 
 const zxing = vi.hoisted(() => ({
   prepareZXingModule: vi.fn(async () => undefined),
-  readBarcodes: vi.fn(async () => []),
+  readBarcodes: vi.fn(async (): Promise<{ isValid: boolean; text: string }[]> => []),
 }))
 
 vi.mock('unpdf', () => unpdf)
 vi.mock('zxing-wasm/reader', () => zxing)
+
+const NF3E_KEY = '35261012345678000199660010000000011000000015'
+const NF3E_URL = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_KEY}&nVersao=4&tpAmb=1`
 
 const fakePdf = (numPages: number) => ({
   numPages,
@@ -63,5 +66,31 @@ describe('limites e semântica de PDF (F2.2b)', () => {
 
     expect(reference.status).toBe('inconclusive')
     expect(reference.errorCodes).toEqual(['PDF_QR_VECTOR_UNSUPPORTED'])
+  })
+
+  it.each([
+    ['chave isolada no texto', `Chave de acesso: ${NF3E_KEY}`],
+    ['URL de autorizador sem chave', 'Consulta: https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode'],
+  ])('%s não dispensa o QR (referência textual incompleta)', async (_name, text) => {
+    // Um DANFE pode imprimir só a chave ou só a URL de consulta no texto; sem
+    // autorizador (chave isolada) ou sem documento (URL sem chave) a referência
+    // não é consultável, então o QR legível tem precedência.
+    unpdf.extractText.mockResolvedValue({ text, totalPages: 1 })
+    unpdf.extractImages.mockResolvedValue([raster])
+    zxing.readBarcodes.mockResolvedValue([{ isValid: true, text: NF3E_URL }])
+    unpdf.getDocumentProxy.mockResolvedValue(fakePdf(1))
+    const { analyzeDocument } = await import('./analyze.js')
+
+    const result = await analyzeDocument(
+      { data: new Uint8Array([1, 2, 3]), contentType: 'application/pdf' },
+      new Date('2026-10-22T12:00:00.000Z'),
+    )
+
+    expect(result.fiscalReference).toMatchObject({
+      status: 'found',
+      issuer: 'SVRS',
+      documentId: NF3E_KEY,
+      method: 'qr_code',
+    })
   })
 })

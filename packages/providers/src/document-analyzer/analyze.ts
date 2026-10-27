@@ -10,6 +10,7 @@ import { extractText, getDocumentProxy } from 'unpdf'
 import {
   extractFiscalReferenceFromArtifact,
   extractFiscalReferenceFromPdf,
+  extractFiscalReferenceFromText,
   FISCAL_REFERENCE_MAX_IMAGE_PIXELS,
   FISCAL_REFERENCE_MAX_PDF_PAGES,
   inconclusiveFiscalReference,
@@ -63,22 +64,48 @@ const analyzePdf = async (data: Uint8Array, now: Date): Promise<DocumentAnalysis
       )
     }
 
-    // A referência fiscal é extraída independentemente do texto: um PDF
-    // escaneado pode não ter camada textual e ainda conter um QR raster.
-    const fiscalReference = await extractFiscalReferenceFromPdf(pdf, {
-      maxPdfPages: MAX_PAGES,
-      maxImagePixels: MAX_IMAGE_PIXELS,
-    })
-
-    let text: string
+    // 1) Camada textual: primeira tentativa determinística. O mesmo texto que
+    // alimenta os campos do F1.2 é usado para reconhecer a URL de consulta ou
+    // a chave de acesso — sem decodificar QR, renderizar página ou chamar VLM.
+    let text: string | null = null
     try {
       const extracted = await extractText(pdf, { mergePages: true })
       text = extracted.text
     } catch {
-      return withFiscalReference(inconclusiveResult(now, 'PDF_TEXT_EXTRACTION_FAILED'), fiscalReference)
+      text = null
     }
 
-    const normalized = text.trim()
+    const normalized = text?.trim() ?? ''
+    const textReference =
+      normalized.length >= MIN_TEXT_CHARS && normalized.length <= MAX_TEXT_CHARS
+        ? extractFiscalReferenceFromText(normalized)
+        : null
+    const textFound = textReference?.status === 'found' ? textReference : null
+    // A referência textual só dispensa o QR quando já é completa para a
+    // consulta: documento identificado E autorizador reconhecido. Chave
+    // isolada (`UNKNOWN_ISSUER`) ou URL sem chave ainda dependem do QR, que é
+    // o artefato canônico do emitente e costuma trazer o autorizador.
+    const textIsComplete = textFound !== null && textFound.documentId !== null && textFound.issuer !== null
+
+    // 2) QR raster embutido: fallback determinístico já existente (F2.2b). Um
+    // PDF escaneado pode não ter camada textual e ainda conter o QR como
+    // imagem; e a referência textual incompleta não basta para a consulta.
+    let fiscalReference: FiscalReference
+    if (textIsComplete && textFound !== null) {
+      fiscalReference = textFound
+    } else {
+      const qrReference = await extractFiscalReferenceFromPdf(pdf, {
+        maxPdfPages: MAX_PAGES,
+        maxImagePixels: MAX_IMAGE_PIXELS,
+      })
+      // QR ilegível/ausente: a referência textual (ainda que incompleta) é
+      // melhor evidência do que o resultado físico do QR.
+      fiscalReference = qrReference.status === 'found' ? qrReference : (textFound ?? qrReference)
+    }
+
+    if (text === null) {
+      return withFiscalReference(inconclusiveResult(now, 'PDF_TEXT_EXTRACTION_FAILED'), fiscalReference)
+    }
     if (normalized.length < MIN_TEXT_CHARS) {
       return withFiscalReference(inconclusiveResult(now, 'NO_TEXT_LAYER'), fiscalReference)
     }
