@@ -98,6 +98,8 @@ export interface ValidationDto {
   fiscal_verification?: FiscalVerificationDto | null
   /** Status da referência fiscal extraída do comprovante; `found` = consulta esperada. */
   fiscal_reference?: 'found' | 'not_found' | 'inconclusive' | 'unsupported' | null
+  /** Estado durável da reavaliação pós-consulta fiscal (null = não registrada). */
+  fiscal_reassessment?: 'pending' | 'completed' | null
   explanation: string | null
   explanation_detail?: AssessmentExplanationDto | null
   address_unavailable_reason?: 'cnpj_not_in_snapshot' | 'address_not_provided' | null

@@ -20,8 +20,10 @@ import { FileUp, Search } from 'lucide-react'
  *
  * O polling não para no primeiro `completed`: o fast path conclui antes de o
  * worker processar o comprovante. Ele para quando as evidências chegaram E o
- * resultado parou de mudar entre duas leituras E não há consulta fiscal
- * pendente (`fiscal_reference = found` ainda sem `fiscal_verification`) — ou no
+ * resultado parou de mudar entre duas leituras E não há reavaliação fiscal
+ * pendente — `fiscal_reference = found` exige `fiscal_reassessment = completed`
+ * (estado durável: o tick fiscal materializa a consulta ANTES de reavaliar, e
+ * só `completed` garante que o veredito já reflete a evidência fiscal) — ou no
  * teto de tempo. Comprovante sem QR (`fiscal_reference` ≠ found) conclui
  * normalmente, sem esperar uma consulta que não vai acontecer.
  */
@@ -33,9 +35,9 @@ const POLL_INTERVAL_MS = 2_000
 const evidenceArrived = (v: ValidationDto): boolean =>
   v.evidence_verification != null || v.fiscal_verification != null
 
-/** Consulta fiscal esperada pela referência do comprovante e ainda não chegou. */
+/** Reavaliação fiscal esperada e ainda não concluída (estado durável do GET). */
 const fiscalPending = (v: ValidationDto): boolean =>
-  v.fiscal_reference === 'found' && v.fiscal_verification == null
+  v.fiscal_reference === 'found' && v.fiscal_reassessment !== 'completed'
 
 const hardTerminal = (v: ValidationDto): boolean => v.status === 'failed' || v.status === 'expired'
 
@@ -98,9 +100,10 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
       if (data === undefined) return pollIntervalMs
       // Única regra de parada (fonte da verdade, também para o estado `stopped`):
       // terminal duro, teto de tempo, ou evidências chegaram + leitura inalterada
-      // + consulta fiscal (quando esperada) já vista. Enquanto
-      // `fiscal_reference = found` sem `fiscal_verification`, não encerra — a
-      // consulta e a reavaliação ainda estão no ar.
+      // + reavaliação fiscal (quando esperada) já concluída. Enquanto
+      // `fiscal_reference = found` sem `fiscal_reassessment = completed`, não
+      // encerra: a consulta e o assessment novo ainda estão no ar — o GET expõe
+      // a evidência fiscal antes de o deepEnrich commitar, com o veredito antigo.
       const stop =
         hardTerminal(data) ||
         Date.now() - startedAtRef.current > MAX_WATCH_MS ||

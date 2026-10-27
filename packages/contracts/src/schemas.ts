@@ -194,6 +194,16 @@ export const FiscalReferenceStatusSchema = z.enum(['found', 'not_found', 'inconc
 
 export type FiscalReferenceStatus = z.infer<typeof FiscalReferenceStatusSchema>
 
+/**
+ * Estado durável da reavaliação após a consulta fiscal (migration 0045).
+ * `pending` cobre a consulta/reavaliação em andamento e o retry agendado;
+ * `completed` significa que o assessment já inclui a evidência fiscal — é o
+ * sinal que o cliente usa para parar de acompanhar.
+ */
+export const FiscalReassessmentStateSchema = z.enum(['pending', 'completed'])
+
+export type FiscalReassessmentState = z.infer<typeof FiscalReassessmentStateSchema>
+
 export const AssessmentExplanationDtoSchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -215,6 +225,7 @@ export const ValidationDtoSchema = z.object({
   evidence_verification: EvidenceVerificationDtoSchema.nullable().optional(),
   fiscal_verification: FiscalVerificationDtoSchema.nullable().optional(),
   fiscal_reference: FiscalReferenceStatusSchema.nullable().optional(),
+  fiscal_reassessment: FiscalReassessmentStateSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
   created_at: z.string(),

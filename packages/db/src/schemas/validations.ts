@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm'
 import {
+  check,
   foreignKey,
   index,
   jsonb,
@@ -56,6 +58,10 @@ export const validation = pgTable(
     lastEvaluatedPolicyHash: text('last_evaluated_policy_hash'),
     lastEvaluatedScorerVersion: text('last_evaluated_scorer_version'),
     evidenceSetHash: text('evidence_set_hash'),
+    // F3: estado durável da reavaliação após a consulta fiscal (tick fiscal).
+    // `pending` antes de materializar a evidência fiscal; `completed` só depois
+    // do deepEnrich. O GET expõe ao cliente (migration 0045).
+    fiscalReassessment: text('fiscal_reassessment'),
     idempotencyKey: text('idempotency_key'),
     workflowId: text('workflow_id'),
     explanation: jsonb('explanation').$type<{
@@ -85,6 +91,10 @@ export const validation = pgTable(
       foreignColumns: [subject.subjectId, subject.tenantId],
       name: 'validation_subject_tenant_fk',
     }),
+    check(
+      'validation_fiscal_reassessment_ck',
+      sql`${t.fiscalReassessment} IS NULL OR ${t.fiscalReassessment} IN ('pending', 'completed')`,
+    ),
   ],
 )
 

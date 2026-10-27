@@ -35,6 +35,7 @@ const processing = baseValidation({ status: 'partial', verdict: null, score: nul
 const done = baseValidation({
   status: 'completed',
   fiscal_reference: 'found',
+  fiscal_reassessment: 'completed',
   evidence_verification: {
     status: 'completed',
     method: 'content_extraction',
@@ -153,12 +154,16 @@ describe('E2eRunner — vertical slice', () => {
     await expect.element(page.getByRole('button', { name: 'Iniciar validação' })).toBeVisible()
   })
 
-  it('não encerra o acompanhamento enquanto a consulta fiscal esperada está pendente', async () => {
-    // Evidência chegou com referência found, mas a consulta fiscal ainda não:
-    // duas leituras IDÊNTICAS nesse estado não podem encerrar o watch.
+  it('não encerra o acompanhamento enquanto a reavaliação fiscal está pendente', async () => {
+    // O tick fiscal materializa a evidência ANTES de reavaliar: o GET já mostra
+    // `fiscal_verification` com o veredito ANTERIOR e `fiscal_reassessment =
+    // pending`. Duas leituras idênticas nesse estado não podem encerrar o watch.
     const pending = baseValidation({
       status: 'partial',
+      verdict: null,
+      score: null,
       fiscal_reference: 'found',
+      fiscal_reassessment: 'pending',
       evidence_verification: {
         status: 'completed',
         method: 'content_extraction',
@@ -182,6 +187,19 @@ describe('E2eRunner — vertical slice', () => {
           holder: { reference: 'none', reason_codes: [] },
         },
       },
+      fiscal_verification: {
+        status: 'unavailable',
+        method: 'official_qr_consultation',
+        source: { kind: 'fiscal_nf3e', id: 'nf3e', authority: 'SVRS', environment: 'production' },
+        document: 'unavailable',
+        address: 'not_extracted',
+        holder: 'not_extracted',
+        adapter_version: '1.0.0',
+        contract_version: '2',
+        observed_at: NOW,
+        limitations: ['SOURCE_UNAVAILABLE'],
+        error_codes: ['SEFAZ_TIMEOUT'],
+      },
     })
 
     const queue: ValidationDto[] = [processing, pending, pending, done, done]
@@ -198,11 +216,11 @@ describe('E2eRunner — vertical slice', () => {
 
     await submit('12.345.678/0001-95')
 
-    // O estado de consulta pendente é comunicado…
+    // O estado de reavaliação pendente é comunicado…
     await expect.element(page.getByText(/consulta fiscal pendente/)).toBeVisible()
 
-    // …e o watch sobrevive às leituras inalteradas até a consulta fiscal
-    // chegar: o resultado final inclui a seção fiscal.
+    // …e o watch sobrevive às leituras inalteradas até o assessment novo
+    // chegar: o resultado final é o veredito pós-reavaliação, não o anterior.
     await expect.element(page.getByText('Comercial confirmado')).toBeVisible()
     await expect.element(page.getByText('Consulta fiscal NF3e', { exact: true })).toBeVisible()
   })

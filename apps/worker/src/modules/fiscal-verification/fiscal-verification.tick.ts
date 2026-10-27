@@ -1,6 +1,7 @@
 import type { FiscalReference } from '@comprova/core'
 import { toFiscalLookupInput, type FiscalAdapter, type FiscalLookupInput } from '@comprova/core'
-import { sql } from '@comprova/db'
+import { eq, sql, withTenant } from '@comprova/db'
+import * as t from '@comprova/db'
 import type { Db } from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import {
@@ -31,7 +32,10 @@ import { verifyFiscalClaim } from './fiscal-verification.service.js'
  *     observação neutra — indisponibilidade nunca vira "endereço falso";
  *   - o retry de reavaliação usa o mesmo estado de backoff por `analysis_id`
  *     do F1.3 (`evidence_verification_attempt`): uma reavaliação que falha é
- *     retentada no próximo tick, sem comando manual.
+ *     retentada no próximo tick, sem comando manual;
+ *   - a reavaliação tem estado durável na validation (`fiscal_reassessment`):
+ *     `pending` antes da materialização fiscal, `completed` só depois do
+ *     `deepEnrich` — o cliente espera o assessment novo, não o anterior.
  */
 
 const DEFAULT_BATCH_SIZE = 5
@@ -159,6 +163,28 @@ const lookupInputOf = (candidate: FiscalCandidate): FiscalLookupInput | null =>
   })
 
 /**
+ * Estado durável da reavaliação (migration 0045), escrito na validation:
+ *
+ * - `pending` é gravado ANTES de materializar a evidência fiscal — uma queda do
+ *   worker entre a consulta e a reavaliação deixa o claim `pending` (o backoff
+ *   retenta), nunca um `completed` sem assessment novo;
+ * - `completed` só depois de `deepEnrich` concluir: é o sinal que o cliente usa
+ *   para parar de acompanhar sem exibir o veredito anterior à consulta.
+ */
+const setFiscalReassessment = async (
+  deps: FiscalVerificationTickDeps,
+  candidate: FiscalCandidate,
+  state: 'pending' | 'completed',
+): Promise<void> => {
+  await withTenant(deps.db, candidate.tenantId, async (tx) => {
+    await tx
+      .update(t.validation)
+      .set({ fiscalReassessment: state })
+      .where(eq(t.validation.validationId, candidate.validationId))
+  })
+}
+
+/**
  * Processa até `batchSize` referências fiscais pendentes. Cada item é
  * independente: uma falha registra backoff e não bloqueia os demais.
  */
@@ -185,6 +211,10 @@ export const verifyFiscalTick = async (deps: FiscalVerificationTickDeps): Promis
     }
 
     try {
+      // Estado durável antes da materialização: o GET passa a dizer "pending"
+      // enquanto a consulta e a reavaliação estão no ar.
+      await setFiscalReassessment(deps, candidate, 'pending')
+
       const outcome = await verifyFiscalClaim(
         { db: deps.db, adapter: deps.adapter, logger: deps.logger, now },
         input,
@@ -198,6 +228,9 @@ export const verifyFiscalTick = async (deps: FiscalVerificationTickDeps): Promis
       // A evidência fiscal só entra no assessment quando o deep path roda
       // DEPOIS da materialização. A reavaliação é o último passo do fluxo.
       await deps.reassess(candidate.tenantId, candidate.validationId)
+      // Só agora o resultado reflete a consulta fiscal: o cliente pode parar
+      // de acompanhar sem ler o veredito anterior.
+      await setFiscalReassessment(deps, candidate, 'completed')
       await clearVerificationAttempt(deps.db, candidate)
       deps.logger.debug(
         {

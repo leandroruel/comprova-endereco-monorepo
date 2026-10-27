@@ -65,6 +65,7 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
         policyVersion: t.validation.policyVersion,
         explanation: t.validation.explanation,
         addressId: t.validation.addressId,
+        fiscalReassessment: t.validation.fiscalReassessment,
         createdAt: t.validation.createdAt,
         expiresAt: t.validation.expiresAt,
       })

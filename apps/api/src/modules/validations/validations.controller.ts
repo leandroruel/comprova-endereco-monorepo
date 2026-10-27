@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import {
   EvidenceVerificationDtoSchema,
+  FiscalReassessmentStateSchema,
   FiscalReferenceStatusSchema,
   FiscalVerificationDtoSchema,
   PROBLEM_CONTENT_TYPE,
@@ -168,6 +169,8 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       fiscalVerification === null ? null : FiscalVerificationDtoSchema.safeParse(fiscalVerification)
     // Whitelist do status da referência fiscal: o valor vem do JSONB da análise.
     const parsedReference = FiscalReferenceStatusSchema.safeParse(fiscalReferenceStatus)
+    // Estado durável da reavaliação fiscal (coluna da validation).
+    const parsedReassessment = FiscalReassessmentStateSchema.safeParse(validation.fiscalReassessment)
 
     const body: ValidationDto = {
       validation_id: validation.validationId,
@@ -211,6 +214,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       evidence_verification: parsedVerification?.success === true ? parsedVerification.data : null,
       fiscal_verification: parsedFiscal?.success === true ? parsedFiscal.data : null,
       fiscal_reference: parsedReference?.success === true ? parsedReference.data : null,
+      fiscal_reassessment: parsedReassessment?.success === true ? parsedReassessment.data : null,
       explanation: summaryOf(validation.explanation),
       explanation_detail: explanationDetailFromStored(validation.explanation),
       created_at: validation.createdAt.toISOString(),

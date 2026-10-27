@@ -198,6 +198,15 @@ const fiscalRowsOf = async (validationId: string) => {
   return rows.filter((row) => row.source === FISCAL_SOURCE_KIND['nf3e'])
 }
 
+/** Estado durável da reavaliação fiscal (migration 0045). */
+const reassessmentOf = async (validationId: string): Promise<string | null> => {
+  const rows = await adminPool.db
+    .select({ state: t.validation.fiscalReassessment })
+    .from(t.validation)
+    .where(eq(t.validation.validationId, validationId))
+  return rows[0]?.state ?? null
+}
+
 const runTick = async (
   override: Partial<Parameters<typeof verifyFiscalTick>[0]> = {},
 ): Promise<{ processed: number; reassessCalls: { tenantId: string; validationId: string }[] }> => {
@@ -225,6 +234,8 @@ describe('fiscal verification tick — vertical slice', () => {
     expect(processed).toBe(0)
     expect(reassessCalls).toEqual([])
     expect(await fiscalRowsOf(validationId)).toEqual([])
+    // Sem materialização do documento não há consulta nem estado de reavaliação.
+    expect(await reassessmentOf(validationId)).toBeNull()
   })
 
   it('consulta pela referência extraída, materializa e reavalia o claim (fluxo completo)', async () => {
@@ -282,6 +293,8 @@ describe('fiscal verification tick — vertical slice', () => {
       .where(eq(t.validation.validationId, validationId))
     expect(validation?.verdict).not.toBeNull()
     expect(validation?.score).toBeGreaterThan(0.3)
+    // Estado durável: a reavaliação concluiu DEPOIS da materialização fiscal.
+    expect(await reassessmentOf(validationId)).toBe('completed')
   })
 
   it('é idempotente: um segundo tick não consulta nem reavalia de novo', async () => {
@@ -319,6 +332,9 @@ describe('fiscal verification tick — vertical slice', () => {
     })
     expect(failing.processed).toBe(1)
     expect(await fiscalRowsOf(validationId)).toHaveLength(1)
+    // A evidência fiscal já está materializada, mas o assessment novo falhou:
+    // o estado permanece `pending` (o cliente não deve parar aqui).
+    expect(await reassessmentOf(validationId)).toBe('pending')
 
     // Backoff futuro: o candidato não volta imediatamente…
     const immediate = await runTick()
@@ -335,6 +351,8 @@ describe('fiscal verification tick — vertical slice', () => {
     expect(retried.reassessCalls).toEqual([{ tenantId: tenantA, validationId }])
     // A consulta não duplicou: continua exatamente uma evidência fiscal.
     expect(await fiscalRowsOf(validationId)).toHaveLength(1)
+    // Só o retry bem-sucedido marca a reavaliação como concluída.
+    expect(await reassessmentOf(validationId)).toBe('completed')
   })
 
   it('expõe a consulta fiscal no GET sem PII nem metadados de auditoria', async () => {
@@ -358,6 +376,9 @@ describe('fiscal verification tick — vertical slice', () => {
     // Sinal de elegibilidade fiscal: a análise corrente encontrou a referência
     // do QR — é o que faz o dashboard aguardar a consulta fiscal.
     expect(body.fiscal_reference).toBe('found')
+    // E o estado durável diz que o assessment novo (com a evidência fiscal) já
+    // foi persistido: o dashboard pode parar sem exibir o veredito anterior.
+    expect(body.fiscal_reassessment).toBe('completed')
 
     // Nada de hash da referência, IP resolvido, digest da resposta ou URL.
     const raw = get.body
