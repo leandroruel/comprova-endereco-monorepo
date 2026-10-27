@@ -2,7 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
-import type { ValidationDto } from '@/api/client'
+import type {
+  ValidationDto,
+  ValidationProgressDto,
+  ValidationProgressStage,
+  ValidationProgressStepStatus,
+} from '@/api/client'
 import { E2eRunner } from './e2e-runner'
 
 /**
@@ -28,6 +33,30 @@ const baseValidation = (overrides: Partial<ValidationDto> = {}): ValidationDto =
   created_at: NOW,
   expires_at: '2026-11-25T12:00:00.000Z',
   ...overrides,
+})
+
+const STAGES: readonly ValidationProgressStage[] = [
+  'reading_document',
+  'reading_qr',
+  'consulting_provider',
+  'verifying_authenticity',
+  'comparing_evidence',
+]
+
+const progress = (
+  status: ValidationProgressDto['status'],
+  statuses: Partial<Record<ValidationProgressStage, ValidationProgressStepStatus>> = {},
+): ValidationProgressDto => ({
+  status,
+  steps: STAGES.map((stage) => ({ stage, status: statuses[stage] ?? 'pending' })),
+})
+
+const progressAt = (index: number): ValidationProgressDto => ({
+  status: 'in_progress',
+  steps: STAGES.map((stage, position) => ({
+    stage,
+    status: position < index ? 'completed' : position === index ? 'in_progress' : 'pending',
+  })),
 })
 
 const processing = baseValidation({ status: 'partial', verdict: null, score: null })
@@ -67,6 +96,13 @@ const done = baseValidation({
     limitations: ['SOURCE_UNAVAILABLE'],
     error_codes: ['SEFAZ_TIMEOUT'],
   },
+  progress: progress('failed', {
+    reading_document: 'completed',
+    reading_qr: 'completed',
+    consulting_provider: 'failed',
+    verifying_authenticity: 'skipped',
+    comparing_evidence: 'skipped',
+  }),
 })
 
 const wrap = (node: React.ReactElement) => {
@@ -117,20 +153,29 @@ describe('E2eRunner — vertical slice', () => {
     // O upload do comprovante foi orquestrado pelo frontend.
     expect(uploadCalls).toEqual([VALIDATION_ID])
 
-    // Estado de processamento é comunicado enquanto o worker trabalha.
-    await expect.element(page.getByText(/Processando — intake, análise e consulta fiscal/)).toBeVisible()
+    // Estado inicial real: o upload foi aceito e a primeira leitura do worker
+    // ainda está por vir. Não há animação fictícia de etapas.
+    await expect.element(page.getByText('Validação em andamento')).toBeVisible()
+    await expect
+      .element(page.getByTestId('progress-step-reading_document'))
+      .toHaveAttribute('data-status', 'in_progress')
 
     // A 1ª leitura ainda não tem evidências: continua processando.
     releaseFirstPoll(processing)
-    await expect.element(page.getByText(/comprovante ainda não analisado/)).toBeVisible()
+    await expect
+      .element(page.getByTestId('progress-step-reading_qr'))
+      .toHaveAttribute('data-status', 'pending')
 
     // Conclui com o verdict e as evidências (taxonomia preservada:
-    // indisponibilidade fiscal ≠ endereço falso).
+    // indisponibilidade fiscal ≠ endereço falso). O progresso mínimo continua
+    // visível para mostrar qual etapa não pôde ser concluída.
     await expect.element(page.getByText('Comercial confirmado')).toBeVisible()
     await expect.element(page.getByText('Comprovante e consulta fiscal')).toBeVisible()
     await expect
       .element(page.getByText('a consulta fiscal não pôde ser concluída — autorizador indisponível'))
       .toBeVisible()
+    await expect.element(page.getByText('Uma etapa não pôde ser concluída')).toBeVisible()
+    await expect.element(page.getByText('Não foi possível consultar o provedor fiscal.')).toBeVisible()
   })
 
   it('mostra erro de submissão sem quebrar a tela', async () => {
@@ -188,18 +233,25 @@ describe('E2eRunner — vertical slice', () => {
         },
       },
       fiscal_verification: {
-        status: 'unavailable',
+        status: 'completed',
         method: 'official_qr_consultation',
         source: { kind: 'fiscal_nf3e', id: 'nf3e', authority: 'SVRS', environment: 'production' },
-        document: 'unavailable',
+        document: 'authentic',
         address: 'not_extracted',
         holder: 'not_extracted',
         adapter_version: '1.0.0',
         contract_version: '2',
         observed_at: NOW,
-        limitations: ['SOURCE_UNAVAILABLE'],
-        error_codes: ['SEFAZ_TIMEOUT'],
+        limitations: [],
+        error_codes: [],
       },
+      progress: progress('in_progress', {
+        reading_document: 'completed',
+        reading_qr: 'completed',
+        consulting_provider: 'completed',
+        verifying_authenticity: 'completed',
+        comparing_evidence: 'in_progress',
+      }),
     })
 
     const queue: ValidationDto[] = [processing, pending, pending, done, done]
@@ -216,8 +268,12 @@ describe('E2eRunner — vertical slice', () => {
 
     await submit('12.345.678/0001-95')
 
-    // O estado de reavaliação pendente é comunicado…
-    await expect.element(page.getByText(/consulta fiscal pendente/)).toBeVisible()
+    // O estado de reavaliação pendente é comunicado com a etapa real em
+    // andamento (a comparação ainda não terminou)…
+    await expect
+      .element(page.getByTestId('progress-step-comparing_evidence'))
+      .toHaveAttribute('data-status', 'in_progress')
+    await expect.element(page.getByText('Comparando evidências')).toBeVisible()
 
     // …e o watch sobrevive às leituras inalteradas até o assessment novo
     // chegar: o resultado final é o veredito pós-reavaliação, não o anterior.
@@ -252,6 +308,13 @@ describe('E2eRunner — vertical slice', () => {
           holder: { reference: 'none', reason_codes: [] },
         },
       },
+      progress: progress('completed', {
+        reading_document: 'completed',
+        reading_qr: 'completed',
+        consulting_provider: 'skipped',
+        verifying_authenticity: 'skipped',
+        comparing_evidence: 'skipped',
+      }),
     })
 
     const queue: ValidationDto[] = [processing, noQr, noQr]
@@ -273,5 +336,162 @@ describe('E2eRunner — vertical slice', () => {
     await expect.element(page.getByText('Comercial confirmado')).toBeVisible()
     await expect.element(page.getByText('Comprovante enviado', { exact: true })).toBeVisible()
     await expect.element(page.getByText('Consulta fiscal NF3e', { exact: true })).not.toBeInTheDocument()
+  })
+
+  it('atualiza o progresso pelo polling existente até concluir e então mostra o resultado', async () => {
+    const evidence = done.evidence_verification
+    if (evidence == null) throw new Error('fixture de verificação ausente')
+    const fiscalAuthentic = {
+      status: 'completed' as const,
+      method: 'official_qr_consultation',
+      source: {
+        kind: 'fiscal_nf3e',
+        id: 'nf3e',
+        authority: 'SVRS',
+        environment: 'production' as const,
+      },
+      document: 'authentic' as const,
+      address: 'not_extracted' as const,
+      holder: 'not_extracted' as const,
+      adapter_version: '1.0.0',
+      contract_version: '2',
+      observed_at: NOW,
+      limitations: [],
+      error_codes: [],
+    }
+
+    const afterUpload = baseValidation({
+      status: 'partial',
+      verdict: null,
+      score: null,
+      progress: progressAt(0),
+    })
+    const readingQr = baseValidation({
+      status: 'partial',
+      verdict: null,
+      score: null,
+      fiscal_reference: 'found',
+      evidence_verification: evidence,
+      progress: progress('in_progress', {
+        reading_document: 'completed',
+        reading_qr: 'in_progress',
+        consulting_provider: 'pending',
+        verifying_authenticity: 'pending',
+        comparing_evidence: 'pending',
+      }),
+    })
+    const consulting = baseValidation({
+      status: 'partial',
+      verdict: null,
+      score: null,
+      fiscal_reference: 'found',
+      fiscal_reassessment: 'pending',
+      evidence_verification: evidence,
+      progress: progress('in_progress', {
+        reading_document: 'completed',
+        reading_qr: 'completed',
+        consulting_provider: 'in_progress',
+        verifying_authenticity: 'pending',
+        comparing_evidence: 'pending',
+      }),
+    })
+    const comparing = baseValidation({
+      status: 'partial',
+      verdict: null,
+      score: null,
+      fiscal_reference: 'found',
+      fiscal_reassessment: 'pending',
+      evidence_verification: evidence,
+      fiscal_verification: fiscalAuthentic,
+      progress: progress('in_progress', {
+        reading_document: 'completed',
+        reading_qr: 'completed',
+        consulting_provider: 'completed',
+        verifying_authenticity: 'completed',
+        comparing_evidence: 'in_progress',
+      }),
+    })
+    const completed = baseValidation({
+      status: 'completed',
+      fiscal_reference: 'found',
+      fiscal_reassessment: 'completed',
+      evidence_verification: evidence,
+      fiscal_verification: fiscalAuthentic,
+      progress: progress('completed', {
+        reading_document: 'completed',
+        reading_qr: 'completed',
+        consulting_provider: 'completed',
+        verifying_authenticity: 'completed',
+        comparing_evidence: 'completed',
+      }),
+    })
+
+    const resolvers: Array<(value: ValidationDto) => void> = []
+    const pollMock = vi.fn(
+      () =>
+        new Promise<ValidationDto>((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+    const resolveNext = (value: ValidationDto): void => {
+      const resolve = resolvers.shift()
+      if (resolve === undefined) throw new Error('poll pendente não encontrado')
+      resolve(value)
+    }
+    const waitForPoll = async (): Promise<void> => {
+      await vi.waitFor(() => expect(resolvers.length).toBeGreaterThan(0))
+    }
+
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: vi.fn(async () => processing),
+          upload: vi.fn(async () => undefined),
+          poll: pollMock,
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await submit('12.345.678/0001-95')
+
+    await waitForPoll()
+    resolveNext(afterUpload)
+    await expect
+      .element(page.getByTestId('progress-step-reading_document'))
+      .toHaveAttribute('data-status', 'in_progress')
+
+    await waitForPoll()
+    resolveNext(readingQr)
+    await expect
+      .element(page.getByTestId('progress-step-reading_qr'))
+      .toHaveAttribute('data-status', 'in_progress')
+
+    await waitForPoll()
+    resolveNext(consulting)
+    await expect
+      .element(page.getByTestId('progress-step-consulting_provider'))
+      .toHaveAttribute('data-status', 'in_progress')
+
+    await waitForPoll()
+    resolveNext(comparing)
+    await expect
+      .element(page.getByTestId('progress-step-comparing_evidence'))
+      .toHaveAttribute('data-status', 'in_progress')
+
+    await waitForPoll()
+    resolveNext(completed)
+    // O runner pode encerrar já na primeira leitura estável (o callback de
+    // intervalo pode ser reavaliado sem uma nova leitura); se ele ainda pedir
+    // outro poll, entrega o mesmo estado para a regra de estabilidade fechar.
+    try {
+      await vi.waitFor(() => expect(resolvers.length).toBeGreaterThan(0), { timeout: 250 })
+      resolveNext(completed)
+    } catch {
+      // Já encerrado: o resultado final abaixo é a asserção que importa.
+    }
+
+    await expect.element(page.getByText('Comercial confirmado')).toBeVisible()
+    await expect.element(page.getByText('Validação concluída')).not.toBeInTheDocument()
   })
 })

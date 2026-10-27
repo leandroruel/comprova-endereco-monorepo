@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ValidationProgressSchema } from './validation-progress.js'
 
 export const DocTypeSchema = z.enum(['CPF', 'CNPJ'])
 export const ValModeSchema = z.enum(['fast', 'deep', 'auto'])
@@ -226,6 +227,7 @@ export const ValidationDtoSchema = z.object({
   fiscal_verification: FiscalVerificationDtoSchema.nullable().optional(),
   fiscal_reference: FiscalReferenceStatusSchema.nullable().optional(),
   fiscal_reassessment: FiscalReassessmentStateSchema.nullable().optional(),
+  progress: ValidationProgressSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
   created_at: z.string(),

@@ -225,6 +225,26 @@ const reassessmentOf = async (validationId: string): Promise<string | null> => {
   return rows[0]?.state ?? null
 }
 
+interface ProgressBody {
+  progress: {
+    status: string
+    steps: { stage: string; status: string }[]
+  } | null
+}
+
+const getProgress = async (validationId: string, key: string): Promise<ProgressBody> => {
+  const response = await app.inject({
+    method: 'GET',
+    url: `/v1/validations/${validationId}`,
+    headers: { authorization: `Bearer ${key}` },
+  })
+  expect(response.statusCode).toBe(200)
+  return response.json() as ProgressBody
+}
+
+const progressStatus = (body: ProgressBody, stage: string): string | null =>
+  body.progress?.steps.find((step) => step.stage === stage)?.status ?? null
+
 const runTick = async (
   override: Partial<Parameters<typeof verifyFiscalTick>[0]> = {},
 ): Promise<{ processed: number; reassessCalls: { tenantId: string; validationId: string }[] }> => {
@@ -357,6 +377,16 @@ describe('fiscal verification tick — vertical slice', () => {
     expect(fiscal?.detail).toMatchObject({
       verification: { status: 'unavailable', document: 'unavailable' },
     })
+
+    // O progresso mostra a falha na etapa real (consulta ao autorizador), sem
+    // converter `unavailable` em documento inválido nem em falha da validação.
+    const body = await getProgress(validationId, keyA)
+    expect(body.progress?.status).toBe('failed')
+    expect(progressStatus(body, 'reading_document')).toBe('completed')
+    expect(progressStatus(body, 'reading_qr')).toBe('completed')
+    expect(progressStatus(body, 'consulting_provider')).toBe('failed')
+    expect(progressStatus(body, 'verifying_authenticity')).toBe('skipped')
+    expect(progressStatus(body, 'comparing_evidence')).toBe('skipped')
   })
 
   it('reavaliação que falha é retentada no próximo tick (sem comando manual)', async () => {
@@ -448,5 +478,75 @@ describe('fiscal verification tick — vertical slice', () => {
     )
     expect(await fiscalRowsOf(validationA)).toHaveLength(1)
     expect(await fiscalRowsOf(validationB)).toHaveLength(1)
+  })
+
+  it('expõe o progresso real em cada etapa durável do fluxo', async () => {
+    const validationId = await makeValidationWithAddress(tenantA)
+    expect((await upload(validationId, keyA, nf3eQrPdf)).statusCode).toBe(201)
+
+    // Intake aceito, análise ainda na fila: o documento está sendo lido.
+    const afterUpload = await getProgress(validationId, keyA)
+    expect(afterUpload.progress?.status).toBe('in_progress')
+    expect(progressStatus(afterUpload, 'reading_document')).toBe('in_progress')
+    expect(progressStatus(afterUpload, 'reading_qr')).toBe('pending')
+    expect(progressStatus(afterUpload, 'consulting_provider')).toBe('pending')
+
+    // A análise terminou, mas a verificação F1.3 ainda não materializou: o
+    // documento continua em processamento, sem inventar a etapa fiscal.
+    await runAnalysis()
+    const afterAnalysis = await getProgress(validationId, keyA)
+    expect(progressStatus(afterAnalysis, 'reading_document')).toBe('in_progress')
+    expect(progressStatus(afterAnalysis, 'reading_qr')).toBe('pending')
+    expect(progressStatus(afterAnalysis, 'consulting_provider')).toBe('pending')
+
+    // F1.3 materializada: agora a referência extraída está sendo encaminhada
+    // para a consulta fiscal.
+    await runVerification()
+    const afterVerification = await getProgress(validationId, keyA)
+    expect(progressStatus(afterVerification, 'reading_document')).toBe('completed')
+    expect(progressStatus(afterVerification, 'reading_qr')).toBe('in_progress')
+    expect(progressStatus(afterVerification, 'consulting_provider')).toBe('pending')
+
+    // No ponto real em que a evidência fiscal já foi materializada e o
+    // deepEnrich ainda vai rodar, a consulta/autenticidade estão concluídas e
+    // a comparação está em andamento.
+    const progressDuringReassessment: ProgressBody[] = []
+    const processed = await verifyFiscalTick({
+      db: adminPool.db,
+      adapter: makeFakeFiscalAdapter({ document: 'authentic', address: 'matches', holder: 'matches' }),
+      logger,
+      reassess: async (tenantId, id) => {
+        if (id === validationId) progressDuringReassessment.push(await getProgress(id, keyA))
+        await deepEnrich(
+          {
+            db: adminPool.db,
+            t1Checkers: [],
+            policy: fiscalPolicy,
+            policyHash: fiscalPolicyHash,
+            clock: { now: FIXED_NOW },
+          },
+          { tenantId, validationId: id },
+        )
+      },
+      now: FIXED_NOW,
+    })
+    expect(processed).toBeGreaterThanOrEqual(1)
+    const during = progressDuringReassessment[0]
+    expect(during).toBeDefined()
+    if (during === undefined) throw new Error('progress da reavaliação não capturado')
+    expect(progressStatus(during, 'consulting_provider')).toBe('completed')
+    expect(progressStatus(during, 'verifying_authenticity')).toBe('completed')
+    expect(progressStatus(during, 'comparing_evidence')).toBe('in_progress')
+
+    // O tick só marca `completed` depois do assessment novo.
+    const after = await getProgress(validationId, keyA)
+    expect(after.progress?.status).toBe('completed')
+    expect(after.progress?.steps.map((step) => step.status)).toEqual([
+      'completed',
+      'completed',
+      'completed',
+      'completed',
+      'completed',
+    ])
   })
 })

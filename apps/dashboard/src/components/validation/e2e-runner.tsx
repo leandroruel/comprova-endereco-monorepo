@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { createValidation, getValidation, uploadEvidence, type ValidationDto } from '@/api/client'
+import {
+  createValidation,
+  getValidation,
+  uploadEvidence,
+  type ValidationDto,
+  type ValidationProgressDto,
+} from '@/api/client'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { ValidationCard } from '@/components/validation-card'
+import { ValidationProgress } from '@/components/validation/validation-progress'
 import { FileUp, Search } from 'lucide-react'
 
 /**
@@ -31,6 +38,22 @@ import { FileUp, Search } from 'lucide-react'
 /** Teto de acompanhamento: uma validação `partial` pode não estabilizar nunca. */
 const MAX_WATCH_MS = 120_000
 const POLL_INTERVAL_MS = 2_000
+
+/**
+ * Estado inicial real do fluxo: o upload acabou de ser aceito e o worker ainda
+ * não devolveu a primeira leitura. Não é uma animação — assim que o GET traz
+ * `progress`, esta representação é substituída pelo estado durável.
+ */
+const INITIAL_PROGRESS: ValidationProgressDto = {
+  status: 'in_progress',
+  steps: [
+    { stage: 'reading_document', status: 'in_progress' },
+    { stage: 'reading_qr', status: 'pending' },
+    { stage: 'consulting_provider', status: 'pending' },
+    { stage: 'verifying_authenticity', status: 'pending' },
+    { stage: 'comparing_evidence', status: 'pending' },
+  ],
+}
 
 const evidenceArrived = (v: ValidationDto): boolean =>
   v.evidence_verification != null || v.fiscal_verification != null
@@ -177,16 +200,14 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
         )}
 
         {!stopped && active !== undefined && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-            <Spinner />
-            Processando — intake, análise e consulta fiscal rodam no worker
-            {active.evidence_verification == null ? ' (comprovante ainda não analisado)' : ''}
-            {fiscalPending(active) ? ' (consulta fiscal pendente)' : ''}…
-          </div>
+          <ValidationProgress progress={active.progress ?? INITIAL_PROGRESS} validation={active} />
         )}
 
         {stopped && active !== undefined && (
           <div className="space-y-3">
+            {active.progress != null && active.progress.status !== 'completed' && (
+              <ValidationProgress progress={active.progress} validation={active} compact />
+            )}
             {active.status !== 'completed' && (
               <p className="text-xs text-muted-foreground">
                 {hardTerminal(active)
