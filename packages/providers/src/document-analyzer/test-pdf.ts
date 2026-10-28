@@ -16,13 +16,29 @@ export interface PdfFixtureOptions {
   readonly compress?: boolean
   readonly withContent?: boolean
   readonly fontSize?: number
+  /** QR module matrix, rendered as PDF rectangles instead of an image. */
+  readonly vectorQr?: readonly string[]
 }
 
 export const pdfWithText = (lines: readonly string[], options: PdfFixtureOptions = {}): Buffer => {
   const fontSize = options.fontSize ?? 12
-  const content = `BT\n/F1 ${fontSize} Tf\n72 720 Td\n${lines
+  const text = `BT\n/F1 ${fontSize} Tf\n72 720 Td\n${lines
     .map((line) => `(${escapePdf(line)}) Tj\n0 -20 Td\n`)
     .join('')}ET`
+  const vectorQr = options.vectorQr ?? []
+  const moduleSize = 6
+  const qrX = 300
+  const qrY = 100
+  const qr = vectorQr
+    .flatMap((row, rowIndex) =>
+      [...row].flatMap((value, columnIndex) =>
+        value === '1'
+          ? `${qrX + columnIndex * moduleSize} ${qrY + (vectorQr.length - rowIndex - 1) * moduleSize} ${moduleSize} ${moduleSize} re\n`
+          : [],
+      ),
+    )
+    .join('')
+  const content = `${text}\n${qr.length > 0 ? `${qr}f` : ''}`
   const stream = options.compress
     ? deflateSync(Buffer.from(content, 'latin1'))
     : Buffer.from(content, 'latin1')

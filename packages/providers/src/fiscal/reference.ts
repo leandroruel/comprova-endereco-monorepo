@@ -10,7 +10,7 @@ import {
   type FiscalSourceId,
 } from '@comprova/core'
 import { imageSize } from 'image-size'
-import { extractImages, getDocumentProxy } from 'unpdf'
+import { extractImages, getDocumentProxy, renderPageAsImage } from 'unpdf'
 import { prepareZXingModule, readBarcodes, type ReadResult, type ReaderOptions } from 'zxing-wasm/reader'
 import { isSafeExternalUrl } from '../safe-fetch.js'
 
@@ -21,8 +21,9 @@ import { isSafeExternalUrl } from '../safe-fetch.js'
  *
  *   - `extractFiscalReference` recebe uma referência JÁ EXTRAÍDA (payload de
  *     QR, URL, chave de acesso ou texto) e apenas normaliza/classifica;
- *   - `extractFiscalReferenceFromArtifact` decodifica o QR de PNG/JPEG ou de
- *     imagens raster embutidas em PDF e entrega o resultado ao normalizador.
+ *   - `extractFiscalReferenceFromArtifact` decodifica o QR de PNG/JPEG, de
+ *     imagens raster embutidas em PDF ou de páginas PDF renderizadas e entrega
+ *     o resultado ao normalizador.
  *
  * Nenhuma das funções faz rede: não busca a URL, não resolve DNS, não segue
  * redirecionamento e não consulta autorizador. O payload do QR é entrada não
@@ -726,6 +727,32 @@ const readQrImage = async (
   return readBarcodes(input as Parameters<typeof readBarcodes>[0], qrReaderOptions(maxSymbolsToRead))
 }
 
+/**
+ * Renderiza uma página para que QRs desenhados com paths/rectangles no PDF
+ * também participem da extração. O `unpdf` usa `@napi-rs/canvas` somente neste
+ * caminho; PDFs que já contêm imagens raster continuam no caminho mais barato.
+ */
+const readQrFromRenderedPage = async (
+  pdf: PdfProxy,
+  pageNumber: number,
+  maxImagePixels: number,
+  maxImageEdge: number,
+  maxSymbolsToRead: number,
+): Promise<readonly ReadResult[]> => {
+  const page = await pdf.getPage(pageNumber)
+  const viewport = page.getViewport({ scale: 1 })
+  const pagePixels = viewport.width * viewport.height
+  const maxDimension = Math.max(viewport.width, viewport.height)
+  const scale = Math.min(2, maxImageEdge / maxDimension, Math.sqrt(maxImagePixels / pagePixels))
+  if (!Number.isFinite(scale) || scale <= 0) throw new Error('PDF page exceeds render limits')
+
+  const rendered = await renderPageAsImage(pdf, pageNumber, {
+    scale,
+    canvasImport: () => import('@napi-rs/canvas'),
+  })
+  return readQrImage(new Uint8Array(rendered), maxSymbolsToRead)
+}
+
 const isSafeDimension = (value: number): boolean => Number.isSafeInteger(value) && value > 0
 
 const exceedsImageLimits = (width: number, height: number, maxPixels: number, maxEdge: number): boolean =>
@@ -763,9 +790,8 @@ const imageToRgba = (image: PdfImage): Uint8ClampedArray | null => {
 }
 
 /**
- * Extrai a referência de imagens raster embutidas no PDF. Não renderiza a
- * página e não usa canvas: QR vetorial/desenhado é uma limitação explícita
- * (`PDF_QR_VECTOR_UNSUPPORTED`). A URL nunca é acessada.
+ * Extrai a referência de imagens raster embutidas e, quando necessário, de
+ * páginas renderizadas do PDF. A URL nunca é acessada.
  */
 export const extractFiscalReferenceFromPdf = async (
   pdf: PdfProxy,
@@ -843,14 +869,40 @@ export const extractFiscalReferenceFromPdf = async (
   if (extractionFailed) failures.push('PDF_IMAGE_EXTRACTION_FAILED')
   if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })
 
-  if (imageCount === 0) {
-    return inconclusive({ method: 'qr_code', reasons: ['PDF_QR_VECTOR_UNSUPPORTED'] })
+  // Se o raster não produziu uma referência conclusiva, renderiza a página. Isso
+  // cobre o DANF3E gerado com módulos vetoriais, sem abandonar o caminho de
+  // imagens embutidas nem fazer OCR/VLM.
+  const rasterReference = results.length > 0 ? referenceFromSymbols(results, { maxSymbols }) : null
+  const shouldRenderPages =
+    rasterReference === null ||
+    rasterReference.status === 'not_found' ||
+    rasterReference.status === 'inconclusive'
+  if (shouldRenderPages) {
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      try {
+        const pageResults = await readQrFromRenderedPage(
+          pdf,
+          pageNumber,
+          maxImagePixels,
+          maxImageEdge,
+          maxSymbols + 1,
+        )
+        results.push(...pageResults)
+        readableCount += pageResults.filter(isReadableResult).length
+        if (readableCount > maxSymbols) {
+          return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
+        }
+      } catch {
+        // Um PDF pode ser válido para texto/imagens e ainda não ser renderizável
+        // neste ambiente. Mantemos o resultado inconclusivo, nunca inventamos
+        // ausência de QR.
+      }
+    }
   }
 
   if (results.length === 0) {
-    // Só inspecionamos raster; um QR vetorial no mesmo PDF continua fora do
-    // alcance. Como não é possível afirmar ausência absoluta, o resultado é
-    // inconclusivo, não `not_found`.
+    // Sem imagem raster e sem QR após renderização, não afirmamos ausência
+    // absoluta: o PDF pode usar uma construção vetorial não renderizável.
     return inconclusive({ method: 'qr_code', reasons: ['PDF_QR_VECTOR_UNSUPPORTED'] })
   }
 

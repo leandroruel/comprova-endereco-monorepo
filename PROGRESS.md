@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-26)
+Estado: **Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-26)
 
 ## Vertical slice end-to-end pelo dashboard (F3) (2026-10-26)
 
@@ -34,8 +34,8 @@ Dashboard → POST /v1/validations → POST /v1/validations/:id/evidence
   (`apps/worker/src/modules/fiscal-verification/fiscal-verification.tick.ts`)
   - loop `startFiscalVerificationLoop` (2s). O tick consome análises com
     `fiscalReference` encontrada cuja verificação F1.3 já materializou, consulta
-    pelo adapter NF3e existente (`makeNf3eFiscalAdapter`, allowlist/SVRS/RS sem
-    alterações) e reavalia o claim com o `deepEnrich` — a evidência fiscal entra
+    pelo adapter NF3e existente (`makeNf3eFiscalAdapter`, allowlist/SVRS/RS+SP) e
+    reavalia o claim com o `deepEnrich` — a evidência fiscal entra
     no assessment pela integração do PR #49/#50. Idempotente por
     claim+fonte+documento+versão; retry de reavaliação via
     `evidence_verification_attempt` (mesma tabela/padrão do F1.3), sem comando
@@ -133,10 +133,10 @@ regra explícita, conservadora e versionada. Decisão em
   `supports` antiga sem força positiva; evidências não fiscais não são
   deduplicadas — unidade de `canonicalStandaloneEvidence`).
 
-## Consulta NF3e real SVRS/RS (F2.2b — primeira fatia) (2026-10-25)
+## Consulta NF3e real SVRS/RS+SP (F2.2b — primeira fatia) (2026-10-25)
 
 A segunda metade da F2.2b habilita a primeira consulta fiscal real: **NF3e do
-autorizador SVRS, UF RS, ambiente produção**, pelo formulário público de
+autorizador SVRS, UFs RS e SP, ambiente produção**, pelo formulário público de
 consulta por QR. O escopo é deliberadamente pequeno; não há cobertura nacional.
 
 - Endpoint na allowlist:
@@ -147,9 +147,9 @@ consulta por QR. O escopo é deliberadamente pequeno; não há cobertura naciona
   `safeExternalFetch` (HTTPS, DNS/IP fixado, sem redirect, timeout de 5 s,
   corpo máximo de 128 KiB e `content-type: text/html`).
 - `makeNf3eFiscalAdapter` em
-  `packages/providers/src/fiscal/nf3e-fiscal-adapter.ts` aceita somente
-  `source=nf3e`, `issuer=SVRS`, `uf=RS`, chave de 44 dígitos com cUF `43` e
-  modelo `66`, e QR SVRS (ou ausente). O POST envia
+  `packages/providers/src/fiscal/nf3e-fiscal-adapter.ts` aceita
+  `source=nf3e`, `issuer=SVRS`, `uf=RS|SP`, chave de 44 dígitos com cUF `43|35`
+  correspondente e modelo `66`, e QR SVRS (ou ausente). O POST envia
   `pesq.Sistema=Nf3e`, `pesq.tpAmb=1|2`, `pesq.chBpe`, `pesq.chCte` e
   `pesq.chMdfe`. O `tpAmb` vem do ambiente server-side, nunca do QR.
 - Resposta: HTML encontrado (`id="nf3eQrCode"`) → `document=authentic`; `205` →
@@ -169,7 +169,7 @@ consulta por QR. O escopo é deliberadamente pequeno; não há cobertura naciona
 - Sem tabela/migration, sem scoring/`signal`, sem cache/rate limit, sem
   descoberta de autorizador e sem NFAg-e. O materializador continua persistindo
   apenas outcomes, `document_ref_hash`, versões, limitações e auditoria mínima.
-- Testes: 19 no adapter (escopo, allowlist, POST, timeout/HTTP/content-type/
+- Testes: 20 no adapter (escopo, SP, allowlist, POST, timeout/HTTP/content-type/
   oversized, found/minimal/not_found/invalid/inconclusive, ausência de
   PII/scoring), 32 na referência (inclui `chNF3e`), 10 na allowlist/schema e 23
   de integração (servidor HTTP local via guarda, idempotência, versionamento,
@@ -326,7 +326,7 @@ extração física do QR (decodificar imagem) foi entregue na F2.2b.
 
 A F2.1 preparou a primeira fonte fiscal **sem executar nenhuma consulta real**.
 Ela entregou o contrato `FiscalAdapter`, a normalização do resultado e a
-materialização em `claim_evidence`; a primeira consulta real NF3e/SVRS/RS foi
+materialização em `claim_evidence`; a primeira consulta real NF3e/SVRS/RS+SP foi
 entregue na F2.2b (seção acima). Decisão em
 [ADR-0041](docs/adr/0041-contrato-fiscal-adapter.md) e detalhes em
 [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#55-contrato-fiscal-e-materialização-f21-implementado).
@@ -633,7 +633,7 @@ SSRF), `docs/architecture.md` (seção de evidências e policy global) e
 
 Fatos externos verificados em 2026-10-22: NF3e (modelo 66) com autorizadores
 MG/MS/MT/PR/SVRS/SC e QR por autorizador; NFAg-e (modelo 75) ainda como Minuta,
-somente SVRS. Nenhuma cobertura nacional é assumida.
+somente SVRS, nas UFs RS e SP. Nenhuma cobertura nacional é assumida.
 
 ## Backend de assinatura AWS KMS (roadmap #24, etapa 24.3) (2026-10-21)
 

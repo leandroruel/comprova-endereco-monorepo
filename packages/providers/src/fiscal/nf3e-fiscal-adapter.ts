@@ -28,11 +28,11 @@ import {
 } from './endpoint.js'
 
 /**
- * F2.2b — primeiro adapter fiscal real (NF3e / SVRS / RS / produção).
+ * F2.2b — adapter fiscal real (NF3e / SVRS / RS+SP / produção).
  *
  * Escopo deliberadamente pequeno:
  *   - um autorizador: SVRS;
- *   - uma UF: RS;
+ *   - UFs autorizadas no endpoint: RS e SP;
  *   - um ambiente no default: produção;
  *   - um protocolo: formulário HTML público de consulta por QR.
  *
@@ -42,9 +42,15 @@ import {
  * que a referência pertence ao autorizador suportado; ela nunca é buscada.
  */
 
-export const NF3E_FISCAL_ADAPTER_VERSION = '1.0.0'
+export const NF3E_FISCAL_ADAPTER_VERSION = '1.1.0'
 export const NF3E_SVRS_ISSUER = 'SVRS'
+export const NF3E_SVRS_UFS = ['RS', 'SP'] as const
+/** @deprecated Use `NF3E_SVRS_UFS`; kept for callers compiled against 1.0.0. */
 export const NF3E_SVRS_UF = 'RS'
+const NF3E_SVRS_UF_CODES: Readonly<Record<(typeof NF3E_SVRS_UFS)[number], string>> = {
+  RS: '43',
+  SP: '35',
+}
 export const NF3E_CONSULTATION_TIMEOUT_MS = 5_000
 export const NF3E_CONSULTATION_MAX_RESPONSE_BYTES = 128 * 1024
 
@@ -76,10 +82,11 @@ const isSvrsQrUrl = (raw: string): boolean => {
 const isSupportedInput = (input: FiscalLookupInput): boolean => {
   if (input.source !== 'nf3e') return false
   if (normalizeIssuer(input.issuer) !== NF3E_SVRS_ISSUER) return false
-  if ((input.uf ?? '').toUpperCase() !== NF3E_SVRS_UF) return false
+  const uf = (input.uf ?? '').toUpperCase()
+  if (!NF3E_SVRS_UFS.includes(uf as (typeof NF3E_SVRS_UFS)[number])) return false
   if (input.documentId === null || !/^\d{44}$/.test(input.documentId)) return false
-  // cUF 43 = RS; modelo 66 = NF3e. O DV já foi validado na extração.
-  if (input.documentId.slice(0, 2) !== '43') return false
+  // cUF 43 = RS / 35 = SP; modelo 66 = NF3e. O DV já foi validado na extração.
+  if (NF3E_SVRS_UF_CODES[uf as (typeof NF3E_SVRS_UFS)[number]] !== input.documentId.slice(0, 2)) return false
   if (input.documentId.slice(20, 22) !== '66') return false
   // Se houver URL de QR, ela precisa ser a referência SVRS reconhecida.
   return input.qrCodeUrl === null || isSvrsQrUrl(input.qrCodeUrl)
