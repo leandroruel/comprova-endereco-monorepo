@@ -165,10 +165,20 @@ const makeValidationWithAddress = async (
     .update(t.validation)
     .set({
       addressId,
-      deepContext: {
-        docDigitsValid: true,
-        record: { cnpjBasico: CNPJ_BASICO, cnpjOrdem: '0001', cnpjDv: '95', nomeFantasia: 'Empresa Exemplo' },
-      },
+      // CPF não possui registro de estabelecimento na Receita. O deepContext
+      // real desse fluxo fica vazio; não injeta um registro CNPJ no cenário CPF.
+      deepContext:
+        documentType === 'CPF'
+          ? null
+          : {
+              docDigitsValid: true,
+              record: {
+                cnpjBasico: CNPJ_BASICO,
+                cnpjOrdem: '0001',
+                cnpjDv: '95',
+                nomeFantasia: 'Empresa Exemplo',
+              },
+            },
     })
     .where(eq(t.validation.validationId, validationId))
   return validationId
@@ -389,6 +399,12 @@ describe('fiscal verification tick — vertical slice', () => {
 
   it('mantém a extração e consulta NF3e para uma validação iniciada com CPF', async () => {
     const validationId = await uploadedAndVerified(tenantB, keyB, 'CPF')
+
+    const [validation] = await adminPool.db
+      .select({ deepContext: t.validation.deepContext })
+      .from(t.validation)
+      .where(eq(t.validation.validationId, validationId))
+    expect(validation?.deepContext).toBeNull()
 
     const reference = await analysisReferenceOf(validationId)
     expect(reference).toMatchObject({

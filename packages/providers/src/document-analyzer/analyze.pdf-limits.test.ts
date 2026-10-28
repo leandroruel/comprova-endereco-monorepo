@@ -87,6 +87,31 @@ describe('limites e semântica de PDF (F2.2b)', () => {
     expect(reference.errorCodes).toEqual(['AMBIGUOUS_REFERENCE'])
   })
 
+  it('falha de renderização impede found mesmo com QR raster válido', async () => {
+    unpdf.extractImages.mockResolvedValue([raster])
+    unpdf.renderPageAsImage.mockRejectedValue(new Error('renderer unavailable'))
+    zxing.readBarcodes.mockResolvedValue([{ isValid: true, text: NF3E_URL }])
+
+    const { extractFiscalReferenceFromPdf } = await import('../fiscal/reference.js')
+    const reference = await extractFiscalReferenceFromPdf(fakePdf(1) as never)
+
+    expect(reference.status).toBe('inconclusive')
+    expect(reference.errorCodes).toEqual(['PDF_RENDER_FAILED'])
+  })
+
+  it('limita pixels de renderização acumulados no documento', async () => {
+    zxing.readBarcodes.mockResolvedValue([{ isValid: true, text: NF3E_URL }])
+
+    const { extractFiscalReferenceFromPdf } = await import('../fiscal/reference.js')
+    const reference = await extractFiscalReferenceFromPdf(fakePdf(3) as never, {
+      maxPdfRenderPixels: 2_000_000,
+    })
+
+    expect(reference.status).toBe('inconclusive')
+    expect(reference.errorCodes).toEqual(['PDF_RENDER_TOO_LARGE'])
+    expect(unpdf.renderPageAsImage).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['chave isolada no texto', `Chave de acesso: ${NF3E_KEY}`],
     ['URL de autorizador sem chave', 'Consulta: https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode'],

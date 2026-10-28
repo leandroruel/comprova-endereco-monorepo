@@ -32,6 +32,8 @@ import { isSafeExternalUrl } from '../safe-fetch.js'
  */
 
 export const FISCAL_REFERENCE_MAX_IMAGE_PIXELS = 16_000_000
+/** Orçamento total do documento para renderização de páginas PDF. */
+export const FISCAL_REFERENCE_MAX_PDF_RENDER_PIXELS = FISCAL_REFERENCE_MAX_IMAGE_PIXELS
 export const FISCAL_REFERENCE_MAX_PDF_PAGES = 50
 const MAX_IMAGE_EDGE = 10_000
 const MAX_PDF_IMAGES = 64
@@ -625,10 +627,13 @@ export interface FiscalReferenceArtifactOptions {
   readonly maxImageEdge?: number
   readonly maxPdfPages?: number
   readonly maxPdfImages?: number
+  /** Orçamento cumulativo de pixels para todas as páginas renderizadas. */
+  readonly maxPdfRenderPixels?: number
   readonly maxSymbols?: number
 }
 
 class QrDecoderUnavailableError extends Error {}
+class PdfRenderBudgetExceededError extends Error {}
 
 const require = createRequire(import.meta.url)
 
@@ -738,27 +743,54 @@ const readQrImage = async (
 /**
  * Renderiza uma página para que QRs desenhados com paths/rectangles no PDF
  * também participem da extração. O `unpdf` usa `@napi-rs/canvas` somente neste
- * caminho; PDFs que já contêm imagens raster continuam no caminho mais barato.
+ * caminho; imagens raster embutidas continuam sendo extraídas separadamente.
  */
 const readQrFromRenderedPage = async (
   pdf: PdfProxy,
   pageNumber: number,
   maxImagePixels: number,
   maxImageEdge: number,
+  maxRenderPixels: number,
   maxSymbolsToRead: number,
-): Promise<readonly ReadResult[]> => {
+): Promise<{ readonly results: readonly ReadResult[]; readonly pixels: number }> => {
   const page = await pdf.getPage(pageNumber)
   const viewport = page.getViewport({ scale: 1 })
   const pagePixels = viewport.width * viewport.height
   const maxDimension = Math.max(viewport.width, viewport.height)
+  if (!Number.isFinite(maxRenderPixels) || maxRenderPixels < 1) {
+    throw new PdfRenderBudgetExceededError('PDF render pixel budget exhausted')
+  }
+
   const scale = Math.min(2, maxImageEdge / maxDimension, Math.sqrt(maxImagePixels / pagePixels))
-  if (!Number.isFinite(scale) || scale <= 0) throw new Error('PDF page exceeds render limits')
+  if (!Number.isFinite(scale) || scale <= 0) {
+    throw new Error('PDF page exceeds render limits')
+  }
+
+  // `renderPageAsImage` cria o canvas com dimensões inteiras. O custo efetivo
+  // da página é contabilizado antes da alocação; não reduzimos uma página até
+  // um thumbnail ilegível apenas para caber no orçamento restante.
+  const renderedWidth = Math.ceil(viewport.width * scale)
+  const renderedHeight = Math.ceil(viewport.height * scale)
+  const renderedPixels = renderedWidth * renderedHeight
+  if (
+    !Number.isSafeInteger(renderedPixels) ||
+    renderedPixels < 1 ||
+    renderedWidth > maxImageEdge ||
+    renderedHeight > maxImageEdge ||
+    renderedPixels > maxImagePixels ||
+    renderedPixels > maxRenderPixels
+  ) {
+    throw new PdfRenderBudgetExceededError('PDF page exceeds render pixel budget')
+  }
 
   const rendered = await renderPageAsImage(pdf, pageNumber, {
     scale,
     canvasImport: () => import('@napi-rs/canvas'),
   })
-  return readQrImage(new Uint8Array(rendered), maxSymbolsToRead)
+  return {
+    results: await readQrImage(new Uint8Array(rendered), maxSymbolsToRead),
+    pixels: renderedPixels,
+  }
 }
 
 const isSafeDimension = (value: number): boolean => Number.isSafeInteger(value) && value > 0
@@ -798,8 +830,8 @@ const imageToRgba = (image: PdfImage): Uint8ClampedArray | null => {
 }
 
 /**
- * Extrai a referência de imagens raster embutidas e, quando necessário, de
- * páginas renderizadas do PDF. A URL nunca é acessada.
+ * Extrai a referência de imagens raster embutidas e de todas as páginas
+ * renderizáveis do PDF. A URL nunca é acessada.
  */
 export const extractFiscalReferenceFromPdf = async (
   pdf: PdfProxy,
@@ -809,6 +841,7 @@ export const extractFiscalReferenceFromPdf = async (
   const maxImageEdge = options.maxImageEdge ?? MAX_IMAGE_EDGE
   const maxPages = options.maxPdfPages ?? FISCAL_REFERENCE_MAX_PDF_PAGES
   const maxImages = options.maxPdfImages ?? MAX_PDF_IMAGES
+  const maxPdfRenderPixels = options.maxPdfRenderPixels ?? FISCAL_REFERENCE_MAX_PDF_RENDER_PIXELS
   const maxSymbols = resolveMaxSymbols(options.maxSymbols)
 
   if (pdf.numPages > maxPages) {
@@ -873,22 +906,41 @@ export const extractFiscalReferenceFromPdf = async (
 
   // Sempre inspeciona as páginas: um QR raster válido não exclui a existência
   // de outro QR desenhado com paths/rectangles no mesmo PDF.
+  let remainingRenderPixels = maxPdfRenderPixels
+  let renderFailed = false
+  let renderBudgetExceeded = false
+  let renderDecoderUnavailable = false
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     try {
-      const pageResults = await readQrFromRenderedPage(
+      const renderedPage = await readQrFromRenderedPage(
         pdf,
         pageNumber,
         maxImagePixels,
         maxImageEdge,
+        remainingRenderPixels,
         maxSymbols + 1,
       )
-      results.push(...pageResults)
-    } catch {
+      results.push(...renderedPage.results)
+      remainingRenderPixels -= renderedPage.pixels
+    } catch (error) {
+      if (error instanceof QrDecoderUnavailableError) {
+        renderDecoderUnavailable = true
+        break
+      }
+      if (error instanceof PdfRenderBudgetExceededError) {
+        renderBudgetExceeded = true
+        break
+      }
       // Um PDF pode ser válido para texto/imagens e ainda não ser renderizável
-      // neste ambiente. Mantemos o resultado inconclusivo quando não houver
-      // evidência suficiente, nunca inventamos ausência de QR.
+      // neste ambiente. A falha fica registrada e impede `found`, mas as demais
+      // páginas ainda são examinadas para não esconder uma ambiguidade.
+      renderFailed = true
     }
   }
+
+  if (renderFailed) failures.push('PDF_RENDER_FAILED')
+  if (renderBudgetExceeded) failures.push('PDF_RENDER_TOO_LARGE')
+  if (renderDecoderUnavailable) failures.push('QR_DECODER_UNAVAILABLE')
 
   if (results.length === 0) {
     if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })

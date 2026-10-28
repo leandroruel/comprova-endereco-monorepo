@@ -28,6 +28,8 @@ const SVRS_QR = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=${RS_KEY}&
 // Chave estruturalmente válida de uma NF3e SP (CNPJ conhecido da distribuidora,
 // modelo 66 e DV calculado). O documento pode não existir no portal; o teste
 // valida que a consulta chega ao autorizador, em vez de ser descartada por UF.
+// A suíte não faz consulta live ao SVRS: o safeFetch permanece simulado para
+// manter os testes determinísticos e sem dependência de rede externa.
 const SP_KEY = '35261002302100000106660010000000011123456780'
 const SP_QR = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${SP_KEY}&nVersao=4&tpAmb=1`
 const HOSTILE_QR = 'https://169.254.169.254/latest/meta-data/iam/security-credentials/?token=secret'
