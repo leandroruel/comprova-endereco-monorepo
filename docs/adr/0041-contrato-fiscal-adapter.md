@@ -8,7 +8,7 @@ autorizador**. A execução NF3e (allowlist preenchida, fetch, parsing e
 credenciais, se necessárias) fica para F2.2b; a F2.2a entrega apenas a
 extração/normalização da referência, sem rede. Emendado em 2026-10-24 pela
 parte física da F2.2b: a decodificação local do QR foi entregue. Emendado em
-2026-10-25 pela primeira fatia de consulta real: **NF3e/SVRS, UF RS, ambiente
+2026-10-25 pela primeira fatia de consulta real: **NF3e/SVRS, UFs RS e SP, ambiente
 produção**, sem cobertura nacional.
 
 Relaciona-se com o [ADR-0033](0033-verificacao-de-evidencias-por-adaptadores.md)
@@ -91,9 +91,10 @@ força e eventual hard rule da fonte fiscal. O schema de saída
 
 ### 4. Identificadores de fonte
 
-`nf3e` e `nfag-e` existem no contrato. A primeira fatia real implementa apenas
-`nf3e`/SVRS/RS/produção; o adaptador **fake** NF3e continua sendo usado nos
-testes de contrato. NFAg-e, outros autorizadores e outras UFs continuam fora.
+`nf3e` e `nfag-e` existem no contrato. A primeira fatia real implementa
+`nf3e`/SVRS/produção para RS e SP; o adaptador **fake** NF3e continua sendo
+usado nos testes de contrato. NFAg-e, outros autorizadores e outras UFs
+continuam fora.
 A F2.2a adiciona `FiscalReference` e `extractFiscalReference` para classificar
 uma referência já extraída, sem rede.
 
@@ -197,7 +198,7 @@ Positivas:
 
 Negativas / débito consciente:
 
-- A allowlist cobre apenas SVRS/RS/produção; outros autorizadores, UFs e
+- A allowlist cobre apenas SVRS/produção; o adapter aceita RS e SP, enquanto outros autorizadores, UFs e
   ambientes não funcionam.
 - O detalhe fiscal não é exposto no `GET` nesta etapa.
 - O `FakeFiscalAdapter` não valida parsing nem assinatura. O adapter real foi
@@ -215,13 +216,13 @@ Negativas / débito consciente:
   remove scoring, allowlist exata, endpoint fora da allowlist sem fetch e defesa
   de metadata/RFC1918.
 - `packages/providers/src/fiscal/nf3e-fiscal-adapter.test.ts`: escopo
-  SVRS/RS, allowlist, POST de formulário, timeout/HTTP/content-type/oversized,
+  SVRS/RS+SP, allowlist, POST de formulário, timeout/HTTP/content-type/oversized,
   found/not_found/invalid/inconclusive, ausência de PII/scoring e reuso de
   `compareAddress`/`compareHolder`.
 - `apps/api/tests/fiscal-verification.int.test.ts`: todos os status, endereço e
   titular independentes, ausência de `signal`, remoção de scoring, timeout como
   `unavailable`, idempotência, versionamento, cross-tenant e a consulta real
-  SVRS/RS com servidor local determinístico.
+  SVRS/RS+SP com servidor local determinístico.
 
 ## Emenda F2.2b — parte física (2026-10-24)
 
@@ -236,12 +237,13 @@ complementam esta ADR:
   embutidas em PDF com `zxing-wasm`, carregando o WASM apenas do pacote local
   (`wasmBinary`). Não há fetch, DNS, redirect nem CDN; a URL do QR continua
   apenas uma referência não confiável.
-- PDF vetorial/desenhado não é renderizado (`PDF_QR_VECTOR_UNSUPPORTED`); não há
-  canvas nativo. A extração reaproveita o mesmo `PDFDocumentProxy` da análise de
-  texto. PDF com raster inspecionado sem QR também é
-  `inconclusive`/`PDF_QR_VECTOR_UNSUPPORTED`: `not_found` fica reservado a
-  artefatos integralmente inspecionáveis (PNG/JPEG). O limite de páginas é
-  validado antes de qualquer decodificação de QR ou extração de texto.
+- PDF vetorial/desenhado é renderizado com `@napi-rs/canvas` quando o caminho de
+  imagens raster não encontra uma referência. A extração reaproveita o mesmo
+  `PDFDocumentProxy` da análise de texto e limita a escala por página/pixels.
+  PDF que não possa ser renderizado continua `inconclusive`/
+  `PDF_QR_VECTOR_UNSUPPORTED`; `not_found` fica reservado a artefatos
+  integralmente inspecionáveis. O limite de páginas é validado antes de qualquer
+  decodificação de QR ou extração de texto.
 - Múltiplos QR: mesmo fingerprint vira `found`; referências fiscais distintas
   viram `AMBIGUOUS_REFERENCE`; fiscal + não fiscal vira `found` com
   `MULTIPLE_QR_CODES`. O decoder nunca escolhe arbitrariamente o primeiro. Ele
@@ -255,15 +257,15 @@ complementam esta ADR:
   não é recalculável a partir da projeção persistida; `documentId` é o
   identificador fiscal estável e a URL é dado transitório.
 - Esta parte física não consulta a rede. A consulta real foi entregue na
-  emenda seguinte, restrita a SVRS/RS/produção.
+  emenda seguinte, restrita a SVRS/produção em RS e SP.
 
-## Emenda F2.2b — primeira consulta real (SVRS/RS/produção) (2026-10-25)
+## Emenda F2.2b — primeira consulta real (SVRS/RS+SP/produção) (2026-10-25)
 
 A primeira fatia de consulta real fica deliberadamente restrita a **um
-autorizador, uma UF e um ambiente**:
+autorizador, as UFs cobertas pelo endpoint e um ambiente**:
 
 - autorizador: SVRS;
-- UF: RS;
+- UFs cobertas pelo adapter: RS e SP;
 - ambiente no default da allowlist: produção;
 - protocolo: formulário público de consulta por QR da NF3e.
 
@@ -277,8 +279,8 @@ host do QR nem endpoint vindo do cliente.
 O adapter `makeNf3eFiscalAdapter`
 (`packages/providers/src/fiscal/nf3e-fiscal-adapter.ts`):
 
-- só suporta `source=nf3e`, `issuer=SVRS`, `uf=RS`, chave de 44 dígitos com cUF
-  `43` e modelo `66`, e QR SVRS ou ausente;
+- só suporta `source=nf3e`, `issuer=SVRS`, `uf=RS|SP`, chave de 44 dígitos com
+  cUF correspondente (`43|35`) e modelo `66`, e QR SVRS ou ausente;
 - resolve `(nf3e, SVRS, production)` na allowlist e chama
   `safeFetchFiscalEndpoint` → `safeExternalFetch` (ADR-0036);
 - envia POST `application/x-www-form-urlencoded` com `pesq.Sistema=Nf3e`,
@@ -308,7 +310,7 @@ Limitações observadas e débito consciente:
 
 ## Fora de escopo desta etapa
 
-A consulta real foi implementada **somente** para SVRS/RS/produção. Outros
+A consulta real foi implementada **somente** para SVRS/produção em RS e SP. Outros
 autorizadores, outras UFs, outros ambientes, HTTP/SOAP genérico, certificado
 digital genérico, descoberta de autorizador, cache/rate limit por fonte,
 exposição do detalhe fiscal no `GET`, NFAg-e, OCR/VLM, wallet/SSI e billing

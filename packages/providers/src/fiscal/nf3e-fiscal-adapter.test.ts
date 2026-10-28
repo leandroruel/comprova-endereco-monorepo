@@ -25,6 +25,13 @@ import {
 const NOW = new Date('2026-10-25T12:00:00.000Z')
 const RS_KEY = '43191212345678000199660000000000101018342413'
 const SVRS_QR = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNF3e=${RS_KEY}&tpAmb=1`
+// Chave estruturalmente válida de uma NF3e SP (CNPJ conhecido da distribuidora,
+// modelo 66 e DV calculado). O documento pode não existir no portal; o teste
+// valida que a consulta chega ao autorizador, em vez de ser descartada por UF.
+// A suíte não faz consulta live ao SVRS: o safeFetch permanece simulado para
+// manter os testes determinísticos e sem dependência de rede externa.
+const SP_KEY = '35261002302100000106660010000000011123456780'
+const SP_QR = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${SP_KEY}&nVersao=4&tpAmb=1`
 const HOSTILE_QR = 'https://169.254.169.254/latest/meta-data/iam/security-credentials/?token=secret'
 
 const fixture = (name: string): string =>
@@ -48,6 +55,13 @@ const INPUT: FiscalLookupInput = {
     artifactId: '00000000-0000-4000-8000-000000000003',
     sha256: 'ab'.repeat(32),
   },
+}
+
+const SP_INPUT: FiscalLookupInput = {
+  ...INPUT,
+  documentId: SP_KEY,
+  qrCodeUrl: SP_QR,
+  uf: 'SP',
 }
 
 const CONTEXT: FiscalAdapterContext = {
@@ -103,19 +117,21 @@ const makeAdapter = (
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex')
 
 describe('Nf3eFiscalAdapter — escopo', () => {
-  it('suporta somente NF3e/SVRS/RS com chave e QR do autorizador', () => {
+  it('suporta NF3e/SVRS para RS e SP com chave e QR do autorizador', () => {
     const adapter = makeAdapter()
 
     expect(adapter.supports(INPUT)).toBe(true)
+    expect(adapter.supports(SP_INPUT)).toBe(true)
     expect(adapter.supports({ ...INPUT, issuer: 'svrs' })).toBe(true)
     expect(adapter.supports({ ...INPUT, qrCodeUrl: null })).toBe(true)
+    expect(adapter.supports({ ...SP_INPUT, documentId: RS_KEY })).toBe(false)
     expect(adapter.supports({ ...INPUT, source: 'nfag-e' })).toBe(false)
     expect(adapter.supports({ ...INPUT, issuer: null })).toBe(false)
     expect(adapter.supports({ ...INPUT, issuer: 'SC' })).toBe(false)
-    expect(adapter.supports({ ...INPUT, uf: 'SP' })).toBe(false)
+    expect(adapter.supports({ ...INPUT, uf: 'SC' })).toBe(false)
     expect(adapter.supports({ ...INPUT, uf: null })).toBe(false)
     expect(adapter.supports({ ...INPUT, documentId: null })).toBe(false)
-    expect(adapter.supports({ ...INPUT, documentId: '35261012345678000199660010000000011000000010' })).toBe(
+    expect(adapter.supports({ ...SP_INPUT, documentId: `${SP_KEY.slice(0, 20)}65${SP_KEY.slice(22)}` })).toBe(
       false,
     )
     expect(adapter.supports({ ...INPUT, qrCodeUrl: HOSTILE_QR })).toBe(false)
@@ -131,6 +147,19 @@ describe('Nf3eFiscalAdapter — escopo', () => {
       FiscalAdapterUnavailableError,
     )
     expect(safeFetch).not.toHaveBeenCalled()
+  })
+
+  it('consulta uma chave NF3e de SP no endpoint SVRS', async () => {
+    const safeFetch = safeFetchOf(NOT_FOUND)
+    const adapter = makeAdapter({ safeFetch })
+
+    const result = await adapter.verify(SP_INPUT, CONTEXT)
+
+    expect(safeFetch).toHaveBeenCalledTimes(1)
+    const [, options] = safeFetch.mock.calls[0] ?? []
+    const body = new URLSearchParams(options?.body as string)
+    expect(body.get('pesq.chBpe')).toBe(SP_KEY)
+    expect(result).toMatchObject({ document: 'not_found', documentId: SP_KEY, issuer: 'SVRS' })
   })
 })
 

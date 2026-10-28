@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createValidation, type AddressInput } from './client'
+import { createValidation, getAddressByCep, type AddressInput } from './client'
 
 /**
  * Payload do `POST /v1/validations` montado pelo dashboard.
@@ -67,5 +67,70 @@ describe('createValidation — payload', () => {
     const body = bodyOf(fetchSpy.mock.calls[0])
     expect(body.document).toEqual({ type: 'CNPJ', value: '12.345.678/0001-95' })
     expect('address' in body).toBe(false)
+  })
+})
+
+describe('getAddressByCep', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('normaliza a resposta da BrasilAPI para o formulário', async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            street: 'Avenida Paulista',
+            neighborhood: 'Bela Vista',
+            city: 'São Paulo',
+            state: 'SP',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(getAddressByCep('01310-100')).resolves.toEqual({
+      logradouro: 'Avenida Paulista',
+      bairro: 'Bela Vista',
+      municipio: 'São Paulo',
+      uf: 'SP',
+    })
+    expect(fetchSpy).toHaveBeenCalledWith('https://brasilapi.com.br/api/cep/v2/01310100', {
+      signal: undefined,
+    })
+  })
+
+  it('retorna null para CEP inexistente', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 404 })),
+    )
+
+    await expect(getAddressByCep('00000-000')).resolves.toBeNull()
+  })
+
+  it('usa ViaCEP quando a BrasilAPI não responde', async () => {
+    const fetchSpy = vi.fn(async (input: string | URL) => {
+      if (String(input).includes('brasilapi.com.br')) return new Response(null, { status: 503 })
+      return new Response(
+        JSON.stringify({
+          logradouro: 'Avenida Paulista',
+          bairro: 'Bela Vista',
+          localidade: 'São Paulo',
+          uf: 'SP',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(getAddressByCep('01310-100')).resolves.toEqual({
+      logradouro: 'Avenida Paulista',
+      bairro: 'Bela Vista',
+      municipio: 'São Paulo',
+      uf: 'SP',
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 })

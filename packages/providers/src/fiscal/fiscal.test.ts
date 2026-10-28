@@ -220,7 +220,7 @@ describe('allowlist de endpoints fiscais', () => {
     ).rejects.toMatchObject({ reason: 'PRIVATE_IP' })
   })
 
-  it('habilita somente o primeiro autorizador real: SVRS/RS em produção', () => {
+  it('habilita somente o primeiro autorizador real: SVRS em produção', () => {
     expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref('SVRS'))?.url).toBe(NF3E_SVRS_PRODUCTION_QR_ENDPOINT)
     expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref('svrs '))?.url).toBe(NF3E_SVRS_PRODUCTION_QR_ENDPOINT)
     expect(FISCAL_ENDPOINT_ALLOWLIST.resolve(ref('OUTRO'))).toBeNull()

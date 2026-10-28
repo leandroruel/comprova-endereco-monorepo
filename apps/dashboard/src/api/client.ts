@@ -116,6 +116,89 @@ export interface AddressInput {
   country_code?: string
 }
 
+export interface CepAddressLookup {
+  logradouro: string
+  bairro: string
+  municipio: string
+  uf: string
+}
+
+type CepLookupResponse = {
+  street?: string | null
+  logradouro?: string | null
+  neighborhood?: string | null
+  bairro?: string | null
+  city?: string | null
+  localidade?: string | null
+  state?: string | null
+  uf?: string | null
+  erro?: boolean | string
+}
+
+const addressFromBrasilApi = (body: CepLookupResponse): CepAddressLookup | null => {
+  const uf = body.state ?? body.uf
+  if (uf === null || uf === undefined || uf === '') return null
+
+  return {
+    logradouro: body.street ?? body.logradouro ?? '',
+    bairro: body.neighborhood ?? body.bairro ?? '',
+    municipio: body.city ?? body.localidade ?? '',
+    uf,
+  }
+}
+
+const addressFromViaCep = (body: CepLookupResponse): CepAddressLookup | null => {
+  if (
+    body.erro === true ||
+    body.erro === 'true' ||
+    body.uf === null ||
+    body.uf === undefined ||
+    body.uf === ''
+  ) {
+    return null
+  }
+
+  return {
+    logradouro: body.logradouro ?? '',
+    bairro: body.bairro ?? '',
+    municipio: body.localidade ?? '',
+    uf: body.uf,
+  }
+}
+
+const lookupViaCep = async (cep: string, signal?: AbortSignal): Promise<CepAddressLookup | null> => {
+  const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`, { signal })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`CEP fallback lookup failed: HTTP ${res.status}`)
+  return addressFromViaCep((await res.json()) as CepLookupResponse)
+}
+
+/** Consulta pública de CEP usada para sugerir os campos do endereço no formulário. */
+export async function getAddressByCep(cep: string, signal?: AbortSignal): Promise<CepAddressLookup | null> {
+  const clean = cep.replace(/\D+/g, '')
+  if (clean.length !== 8) return null
+
+  let primary: CepAddressLookup | null = null
+  try {
+    const res = await fetch(`https://brasilapi.com.br/api/cep/v2/${clean}`, { signal })
+    if (res.ok) {
+      primary = addressFromBrasilApi((await res.json()) as CepLookupResponse)
+      if (primary !== null && primary.logradouro !== '') return primary
+    } else if (res.status !== 404) {
+      throw new Error(`CEP lookup failed: HTTP ${res.status}`)
+    }
+  } catch (error) {
+    if (signal?.aborted || (error as { name?: unknown }).name === 'AbortError') throw error
+  }
+
+  try {
+    return (await lookupViaCep(clean, signal)) ?? primary
+  } catch (error) {
+    if (primary !== null) return primary
+    throw error
+  }
+}
+
 export interface ValidationDto {
   validation_id: string
   status: string

@@ -45,6 +45,21 @@ describe('extractFiscalReference (F2.2a)', () => {
     expect(reference.errorCodes).toEqual([])
   })
 
+  it('reconhece o QR HTTP legado da EDP e o normaliza para HTTPS', () => {
+    const edpUrl = `http://dfe-portal.svrs.rs.gov.br/nf3e/QRCode?chNF3e=${NF3E_KEY}&tpAmb=1`
+    const reference = extractFiscalReference({ value: edpUrl, method: 'qr_code' })
+
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer: 'SVRS',
+      uf: 'SP',
+      documentId: NF3E_KEY,
+      url: 'https://dfe-portal.svrs.rs.gov.br/nf3e/QRCode?chNF3e=35261012345678000199660010000000011000000015&tpAmb=1',
+    })
+    expect(reference.limitations).toEqual([])
+  })
+
   it('reconhece chave de acesso isolada como NF3e, sem inventar autorizador', () => {
     const reference = extractFiscalReference({ value: NF3E_KEY })
 

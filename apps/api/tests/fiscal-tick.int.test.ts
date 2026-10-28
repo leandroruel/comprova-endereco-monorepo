@@ -2,7 +2,13 @@ import { loadPolicy, policyHashOf, FISCAL_SOURCE_KIND } from '@comprova/core'
 import { createDbPool, eq, runMigrations, sql } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
-import { makeDocumentAnalyzer, makeFakeFiscalAdapter, makeFakeObjectStore } from '@comprova/providers'
+import {
+  makeDocumentAnalyzer,
+  makeFakeFiscalAdapter,
+  makeFakeObjectStore,
+  makeFiscalEndpointAllowlist,
+  makeNf3eFiscalAdapter,
+} from '@comprova/providers'
 import {
   createSubject,
   createTenant,
@@ -108,6 +114,26 @@ const nf3eQrPdf = readFileSync(path.join(repoRoot, 'packages/providers/src/fisca
 // Chave de acesso contida na fixture (o analyzer a extrai do QR do PDF).
 const NF3E_KEY = '35261012345678000199660010000000011000000015'
 
+const localNf3eAdapter = makeNf3eFiscalAdapter({
+  environment: 'local',
+  allowlist: makeFiscalEndpointAllowlist([
+    {
+      source: 'nf3e',
+      issuer: 'SVRS',
+      environment: 'local',
+      url: 'https://fiscal.test/nf3e/qrCode',
+    },
+  ]),
+  safeFetch: async () => ({
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: Buffer.from(
+      '<div id="nf3eQrCode"></div><div id="destinatario"><table><tr><th>Nome/Razão Social</th></tr><tr><td>Empresa Exemplo Ltda</td></tr></table></div>',
+    ),
+    address: '203.0.113.10',
+  }),
+})
+
 afterAll(async () => {
   await app.close()
   redis.disconnect()
@@ -117,8 +143,11 @@ afterAll(async () => {
   await db.stop()
 })
 
-const makeValidationWithAddress = async (tenantId: string): Promise<string> => {
-  const subjectId = await createSubject(adminPool.db, tenantId, 'CNPJ')
+const makeValidationWithAddress = async (
+  tenantId: string,
+  documentType: 'CPF' | 'CNPJ' = 'CNPJ',
+): Promise<string> => {
+  const subjectId = await createSubject(adminPool.db, tenantId, documentType)
   const validationId = await createValidation(adminPool.db, tenantId, subjectId)
   const addressId = randomUUID()
   await adminPool.db.insert(t.canonicalAddress).values({
@@ -136,10 +165,20 @@ const makeValidationWithAddress = async (tenantId: string): Promise<string> => {
     .update(t.validation)
     .set({
       addressId,
-      deepContext: {
-        docDigitsValid: true,
-        record: { cnpjBasico: CNPJ_BASICO, cnpjOrdem: '0001', cnpjDv: '95', nomeFantasia: 'Empresa Exemplo' },
-      },
+      // CPF não possui registro de estabelecimento na Receita. O deepContext
+      // real desse fluxo fica vazio; não injeta um registro CNPJ no cenário CPF.
+      deepContext:
+        documentType === 'CPF'
+          ? null
+          : {
+              docDigitsValid: true,
+              record: {
+                cnpjBasico: CNPJ_BASICO,
+                cnpjOrdem: '0001',
+                cnpjDv: '95',
+                nomeFantasia: 'Empresa Exemplo',
+              },
+            },
     })
     .where(eq(t.validation.validationId, validationId))
   return validationId
@@ -175,8 +214,12 @@ const runAnalysis = () =>
 const runVerification = () => verifyEvidenceTick({ db: adminPool.db, logger, batchSize: 10, now: FIXED_NOW })
 
 /** Sobe o fluxo até a verificação F1.3 materializada (ponto de entrada do tick). */
-const uploadedAndVerified = async (tenantId: string, key: string): Promise<string> => {
-  const validationId = await makeValidationWithAddress(tenantId)
+const uploadedAndVerified = async (
+  tenantId: string,
+  key: string,
+  documentType: 'CPF' | 'CNPJ' = 'CNPJ',
+): Promise<string> => {
+  const validationId = await makeValidationWithAddress(tenantId, documentType)
   const response = await upload(validationId, key, nf3eQrPdf)
   expect(response.statusCode).toBe(201)
   await runAnalysis()
@@ -352,6 +395,37 @@ describe('fiscal verification tick — vertical slice', () => {
     expect(validation?.score).toBeGreaterThan(0.3)
     // Estado durável: a reavaliação concluiu DEPOIS da materialização fiscal.
     expect(await reassessmentOf(validationId)).toBe('completed')
+  })
+
+  it('mantém a extração e consulta NF3e para uma validação iniciada com CPF', async () => {
+    const validationId = await uploadedAndVerified(tenantB, keyB, 'CPF')
+
+    const [validation] = await adminPool.db
+      .select({ deepContext: t.validation.deepContext })
+      .from(t.validation)
+      .where(eq(t.validation.validationId, validationId))
+    expect(validation?.deepContext).toBeNull()
+
+    const reference = await analysisReferenceOf(validationId)
+    expect(reference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      issuer: 'SVRS',
+      uf: 'SP',
+      documentId: NF3E_KEY,
+      method: 'qr_code',
+    })
+
+    const { processed } = await runTick({ adapter: localNf3eAdapter })
+    expect(processed).toBe(1)
+
+    const [fiscal] = await fiscalRowsOf(validationId)
+    expect(fiscal?.detail).toMatchObject({
+      verification: {
+        status: 'completed',
+        document: 'authentic',
+      },
+    })
   })
 
   it('é idempotente: um segundo tick não consulta nem reavalia de novo', async () => {

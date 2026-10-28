@@ -718,7 +718,7 @@ describe('F2.2a — da referência extraída à observação fiscal', () => {
   })
 })
 
-describe('F2.2b — primeira consulta real NF3e/SVRS/RS', () => {
+describe('F2.2b — primeira consulta real NF3e/SVRS', () => {
   const LOCAL_ALLOWLIST = makeFiscalEndpointAllowlist([
     {
       source: 'nf3e',
@@ -812,7 +812,7 @@ describe('F2.2b — primeira consulta real NF3e/SVRS/RS', () => {
       claimId: claim.claimId,
       artifact: { artifactId: randomUUID(), sha256: ARTIFACT_SHA256 },
     })
-    if (input === null) throw new Error('QR SVRS/RS deveria produzir FiscalLookupInput')
+    if (input === null) throw new Error('QR SVRS deveria produzir FiscalLookupInput')
     return input
   }
 
