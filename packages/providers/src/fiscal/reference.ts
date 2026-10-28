@@ -219,7 +219,23 @@ const parseSafeUrl = (raw: string): URL | null => {
   } catch {
     return null
   }
-  if (url.protocol !== 'https:' || !isSafeExternalUrl(raw)) return null
+
+  // Alguns DANF3E da EDP ainda imprimem o endpoint SVRS com `http://`. O
+  // protocolo do QR é apenas uma referência para identificar o autorizador;
+  // a consulta real continua fixa na allowlist HTTPS do servidor. Aceitamos e
+  // normalizamos somente esse host + caminho conhecidos, nunca HTTP arbitrário.
+  if (
+    url.protocol === 'http:' &&
+    url.hostname.toLowerCase() === 'dfe-portal.svrs.rs.gov.br' &&
+    /^\/nf3e\/qrcode\/?$/i.test(url.pathname) &&
+    [...url.searchParams].some(
+      ([name, value]) => KEY_PARAM_NAMES.has(name.toLowerCase()) && /^\d{44}$/.test(value),
+    )
+  ) {
+    url.protocol = 'https:'
+  }
+
+  if (url.protocol !== 'https:' || !isSafeExternalUrl(url.toString())) return null
   url.hash = ''
   const entries = [...url.searchParams.entries()].sort(
     ([aKey, aValue], [bKey, bValue]) => compareStrings(aKey, bKey) || compareStrings(aValue, bValue),

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
 import type {
@@ -136,6 +136,10 @@ const fillAddress = async (): Promise<void> => {
   await page.getByPlaceholder('CEP').fill('01310-100')
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 describe('E2eRunner — vertical slice', () => {
   it('executa o fluxo: criar, subir comprovante, processar e concluir com evidências', async () => {
     const uploadCalls: string[] = []
@@ -252,6 +256,44 @@ describe('E2eRunner — vertical slice', () => {
     await expect.element(page.getByPlaceholder('Bairro (opcional)')).toHaveValue('Bela Vista')
     await expect.element(page.getByPlaceholder('Município')).toHaveValue('São Paulo')
     await expect.element(page.getByPlaceholder('UF')).toHaveValue('SP')
+  })
+
+  it('preenche o logradouro usando a busca padrão da BrasilAPI', async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            street: 'Avenida Paulista',
+            neighborhood: 'Bela Vista',
+            city: 'São Paulo',
+            state: 'SP',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: vi.fn(async () => processing),
+          upload: vi.fn(async () => undefined),
+          poll: vi.fn(async () => done),
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await page.getByPlaceholder(/CPF ou CNPJ do endereço/).fill('529.982.247-25')
+    await page.getByPlaceholder('CEP').fill('01310100')
+
+    await vi.waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://brasilapi.com.br/api/cep/v2/01310100',
+        expect.objectContaining({ signal: expect.anything() }),
+      ),
+    )
+    await expect.element(page.getByPlaceholder('Logradouro')).toHaveValue('Avenida Paulista')
   })
 
   it('bloqueia o envio quando o CPF não tem endereço completo', async () => {

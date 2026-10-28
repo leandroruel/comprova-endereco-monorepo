@@ -109,4 +109,28 @@ describe('getAddressByCep', () => {
 
     await expect(getAddressByCep('00000-000')).resolves.toBeNull()
   })
+
+  it('usa ViaCEP quando a BrasilAPI não responde', async () => {
+    const fetchSpy = vi.fn(async (input: string | URL) => {
+      if (String(input).includes('brasilapi.com.br')) return new Response(null, { status: 503 })
+      return new Response(
+        JSON.stringify({
+          logradouro: 'Avenida Paulista',
+          bairro: 'Bela Vista',
+          localidade: 'São Paulo',
+          uf: 'SP',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(getAddressByCep('01310-100')).resolves.toEqual({
+      logradouro: 'Avenida Paulista',
+      bairro: 'Bela Vista',
+      municipio: 'São Paulo',
+      uf: 'SP',
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
 })
