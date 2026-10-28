@@ -159,6 +159,106 @@ describe('decide: tabela de casos', () => {
     const out = decide({ signals, score: 0.2, policy, now })
     expect(out.verdict).toBe('INSUFFICIENT_EVIDENCE')
     expect(out.confidence).toBeLessThan(0.6)
+    expect(out.explanation).toBe(
+      'Não foi possível confirmar o endereço porque o CNPJ não consta no cadastro da Receita Federal.',
+    )
+    expect(out.explanation).not.toContain('ausencia de evidencia nao e evidencia de ausencia')
+  })
+
+  it('INSUFFICIENT_EVIDENCE com comprovante sem endereco extraido', () => {
+    const signals: readonly Signal[] = [
+      sig('document_integrity', 'supports', 0.5),
+      sig('document_upload_verification', 'unknown', 0, {
+        verification: { address: 'not_extracted', document: 'inconclusive' },
+      }),
+      sig('cnefe_match', 'unknown', 0, { match: 'none' }),
+    ]
+    const out = decide({ signals, score: 0.2, policy, now })
+    expect(out.verdict).toBe('INSUFFICIENT_EVIDENCE')
+    expect(out.explanation).toBe(
+      'Não foi possível confirmar o endereço porque o comprovante não apresentou dados suficientes para comparação.',
+    )
+  })
+
+  it('INSUFFICIENT_EVIDENCE com fonte fiscal nao suportada', () => {
+    const signals: readonly Signal[] = [
+      sig('document_integrity', 'supports', 0.5),
+      sig('nf3e_verification', 'unknown', 0, {
+        verification: { document: 'unsupported', address: 'not_extracted' },
+      }),
+    ]
+    const out = decide({ signals, score: 0.2, policy, now })
+    expect(out.verdict).toBe('INSUFFICIENT_EVIDENCE')
+    expect(out.explanation).toBe(
+      'Não foi possível confirmar a autenticidade do documento porque a fonte fiscal ainda não é suportada.',
+    )
+  })
+
+  it('INSUFFICIENT_EVIDENCE com CEP ausente', () => {
+    const signals: readonly Signal[] = [
+      sig('document_integrity', 'supports', 0.5),
+      sig('registry_status', 'unknown', 0, { reason: 'not_in_registry' }),
+      sig('cep_consistency', 'unknown', 0, { reason: 'cep_missing' }),
+      sig('cnefe_match', 'unknown', 0, { match: 'none' }),
+    ]
+    const out = decide({ signals, score: 0.2, policy, now })
+    expect(out.verdict).toBe('INSUFFICIENT_EVIDENCE')
+    expect(out.explanation).toBe('Não foi possível confirmar o endereço porque o CEP não foi informado.')
+  })
+
+  it('INSUFFICIENT_EVIDENCE com CEP inexistente na base local', () => {
+    const signals: readonly Signal[] = [
+      sig('document_integrity', 'supports', 0.5),
+      sig('registry_status', 'unknown', 0, { reason: 'not_in_registry' }),
+      sig('cep_consistency', 'unknown', 0, { reason: 'cep_not_in_local_db' }),
+      sig('cnefe_match', 'unknown', 0, { match: 'none' }),
+    ]
+    const out = decide({ signals, score: 0.2, policy, now })
+    expect(out.verdict).toBe('INSUFFICIENT_EVIDENCE')
+    expect(out.explanation).toBe(
+      'Não foi possível confirmar o endereço porque o CEP informado não consta na base de referência.',
+    )
+  })
+
+  it('INSUFFICIENT_EVIDENCE com endereco nao resolvido no CNEFE', () => {
+    const signals: readonly Signal[] = [
+      sig('document_integrity', 'supports', 0.5),
+      sig('registry_status', 'unknown', 0, { reason: 'not_in_registry' }),
+      sig('cep_consistency', 'unknown', 0, { reason: 'cep_missing' }),
+      sig('cnefe_match', 'unknown', 0, { reason: 'address_not_resolved' }),
+    ]
+    const out = decide({ signals, score: 0.2, policy, now })
+    expect(out.verdict).toBe('INSUFFICIENT_EVIDENCE')
+    expect(out.explanation).toBe(
+      'Não foi possível confirmar o endereço porque o endereço informado não pôde ser localizado no CNEFE.',
+    )
+  })
+
+  it('INSUFFICIENT_EVIDENCE sem causa reconhecível usa fallback generico', () => {
+    const signals: readonly Signal[] = [
+      sig('document_integrity', 'supports', 0.5),
+      sig('registry_status', 'unknown', 0, { reason: 'no_profile' }),
+      sig('cnefe_match', 'unknown', 0, { match: 'none' }),
+    ]
+    const out = decide({ signals, score: 0.2, policy, now })
+    expect(out.verdict).toBe('INSUFFICIENT_EVIDENCE')
+    expect(out.explanation).toBe('Não foi possível confirmar o endereço com as evidências disponíveis.')
+  })
+
+  it('vereditos existentes nao mudam a explanation', () => {
+    const confirmed: readonly Signal[] = [
+      sig('document_integrity', 'supports', 0.5),
+      sig('registry_status', 'supports', 0.5, { situacao: 'ativa' }),
+      sig('country_check', 'supports', 0.2, { country: 'BR' }),
+      sig('cep_consistency', 'supports', 0.6, { cep: '01310100' }),
+      sig('cnefe_match', 'supports', 0.6, { match: 'exact_number' }),
+    ]
+    const score = weightedScore(confirmed, policy, now)
+    const out = decide({ signals: confirmed, score, policy, now })
+    expect(out.verdict).toBe('CONFIRMED_COMMERCIAL')
+    expect(out.explanation).toBe(
+      'Endereco existe e e compativel com a atividade comercial do CNPJ consultado.',
+    )
   })
 })
 
