@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { extractFiscalReferenceFromText } from '../fiscal/reference.js'
+import { extractFiscalReferenceFromArtifact, extractFiscalReferenceFromText } from '../fiscal/reference.js'
 import { analyzeDocument } from './analyze.js'
 import { pdfWithText } from './test-pdf.js'
 
@@ -72,8 +72,58 @@ const VECTOR_QR = [
   '1111111011011100101011111100110110001',
 ] as const
 
+const SECOND_VECTOR_QR = [
+  '1111111010011111110001100100001111111',
+  '1000001001100011101100101010001000001',
+  '1011101000101100101001010100101011101',
+  '1011101000001010101011101110101011101',
+  '1011101001010110011010110110101011101',
+  '1000001000101101011000011110101000001',
+  '1111111010101010101010101010101111111',
+  '0000000010110101001110110101100000000',
+  '1101101001110011001101111010101000001',
+  '0001100101001111101010000111100010010',
+  '1111011110010111111011011101000011111',
+  '0101110001011010111001111001010110100',
+  '0101001110111111111110101001001101011',
+  '0011100000100101011110110111110011110',
+  '1010001100011100010101100011001000011',
+  '1000110100110100101010011011010010101',
+  '1110111111100100001110111110001001111',
+  '1000110111011101011010100011000101000',
+  '0001101000010110011011110011001110001',
+  '0010100111001000011111010101100011001',
+  '1101001100001100001101110011111011011',
+  '1000100011100111000101011011010111110',
+  '0011011110001011111001010001011001001',
+  '1010000100100001110001110011010001111',
+  '1100101101100110101010111010101001001',
+  '1110010010001010000001110011010011010',
+  '1101111110000011011111001011001011011',
+  '1000100000001111100101000001110101101',
+  '1010001001111000100000011101111111110',
+  '0000000011010000110111000011100011110',
+  '1111111001101110001110110110101010101',
+  '1000001000010101011110010101100010001',
+  '1011101010010101011100111011111111011',
+  '1011101011101100100011010000001001010',
+  '1011101001110100101011010111010110011',
+  '1000001011111101110000001001000001111',
+  '1111111011011100101111011100110110001',
+] as const
+
+const INVALID_VECTOR_QR = VECTOR_QR.map((row, index) => (index === 0 ? `0${row.slice(1)}` : row))
+
 const vectorQrPdf = (): Uint8Array =>
   new Uint8Array(pdfWithText(['Comprovante de energia'], { vectorQr: VECTOR_QR }))
+
+const rasterAndVectorPdf = (vectorQrs: readonly (readonly string[])[]): Uint8Array =>
+  new Uint8Array(
+    pdfWithText(['Comprovante de energia'], {
+      rasterJpeg: { data: fixture('qr-nf3e.jpg'), width: 270, height: 270 },
+      vectorQrs: vectorQrs.map((matrix, index) => ({ matrix, x: index === 0 ? 300 : 40 })),
+    }),
+  )
 
 const nf3eText = (): Uint8Array =>
   textPdf([
@@ -127,6 +177,64 @@ describe('document analyzer — referência fiscal determinística (sem VLM)', (
       method: 'qr_code',
     })
     expect(result.fiscalReference?.errorCodes).toEqual([])
+  })
+
+  it('deduplica o mesmo QR encontrado na imagem embutida e na renderização', async () => {
+    const result = await analyze(rasterAndVectorPdf([VECTOR_QR]))
+
+    expect(result.fiscalReference).toMatchObject({
+      status: 'found',
+      source: 'nf3e',
+      documentId: NF3E_KEY,
+      limitations: [],
+    })
+    expect(result.fiscalReference?.errorCodes).toEqual([])
+  })
+
+  it('deduplica antes de maxSymbols quando a mesma referência aparece três vezes', async () => {
+    const reference = await extractFiscalReferenceFromArtifact(
+      { data: rasterAndVectorPdf([VECTOR_QR, VECTOR_QR]), contentType: 'application/pdf' },
+      { maxSymbols: 2 },
+    )
+
+    expect(reference).toMatchObject({
+      status: 'found',
+      documentId: NF3E_KEY,
+      limitations: [],
+    })
+  })
+
+  it('não escolhe entre QR raster e vetorial com referências diferentes', async () => {
+    const result = await analyze(rasterAndVectorPdf([SECOND_VECTOR_QR]))
+
+    expect(result.fiscalReference?.status).toBe('unsupported')
+    expect(result.fiscalReference?.errorCodes).toContain('AMBIGUOUS_REFERENCE')
+    expect(result.fiscalReference?.documentId).toBeNull()
+  })
+
+  it('trata múltiplos QR vetoriais distintos como ambíguos', async () => {
+    const result = await analyze(
+      new Uint8Array(
+        pdfWithText(['Comprovante de energia'], {
+          vectorQrs: [
+            { matrix: VECTOR_QR, x: 300 },
+            { matrix: SECOND_VECTOR_QR, x: 40 },
+          ],
+        }),
+      ),
+    )
+
+    expect(result.fiscalReference?.status).toBe('unsupported')
+    expect(result.fiscalReference?.errorCodes).toContain('AMBIGUOUS_REFERENCE')
+  })
+
+  it('não transforma QR vetorial inválido em referência fiscal', async () => {
+    const result = await analyze(
+      new Uint8Array(pdfWithText(['Comprovante de energia'], { vectorQr: INVALID_VECTOR_QR })),
+    )
+
+    expect(result.fiscalReference?.status).not.toBe('found')
+    expect(result.fiscalReference?.documentId).toBeNull()
   })
 
   it('ignora URL não fiscal e completa a URL de consulta com a chave impressa', async () => {

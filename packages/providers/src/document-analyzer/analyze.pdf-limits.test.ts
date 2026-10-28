@@ -4,6 +4,7 @@ const unpdf = vi.hoisted(() => ({
   getDocumentProxy: vi.fn(),
   extractImages: vi.fn(),
   extractText: vi.fn(),
+  renderPageAsImage: vi.fn(),
 }))
 
 const zxing = vi.hoisted(() => ({
@@ -16,9 +17,12 @@ vi.mock('zxing-wasm/reader', () => zxing)
 
 const NF3E_KEY = '35261012345678000199660010000000011000000015'
 const NF3E_URL = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${NF3E_KEY}&nVersao=4&tpAmb=1`
+const SECOND_NF3E_KEY = '35261098765432000188660020000000022000000028'
+const SECOND_NF3E_URL = `https://dfe-portal.svrs.rs.gov.br/nf3e/qrCode?chNFe=${SECOND_NF3E_KEY}&nVersao=4&tpAmb=1`
 
 const fakePdf = (numPages: number) => ({
   numPages,
+  getPage: vi.fn(async () => ({ getViewport: () => ({ width: 612, height: 792 }) })),
   loadingTask: { destroy: vi.fn(async () => undefined) },
 })
 
@@ -35,6 +39,7 @@ describe('limites e semântica de PDF (F2.2b)', () => {
     vi.clearAllMocks()
     unpdf.extractImages.mockResolvedValue([])
     unpdf.extractText.mockResolvedValue({ text: '', totalPages: 1 })
+    unpdf.renderPageAsImage.mockResolvedValue(new Uint8Array([1]))
   })
 
   it('valida o limite de páginas antes de decodificar QR ou texto', async () => {
@@ -66,6 +71,20 @@ describe('limites e semântica de PDF (F2.2b)', () => {
 
     expect(reference.status).toBe('inconclusive')
     expect(reference.errorCodes).toEqual(['PDF_QR_VECTOR_UNSUPPORTED'])
+  })
+
+  it('falha no raster não mascara ambiguidade encontrada na renderização', async () => {
+    unpdf.extractImages.mockRejectedValue(new Error('raster unavailable'))
+    zxing.readBarcodes.mockResolvedValue([
+      { isValid: true, text: NF3E_URL },
+      { isValid: true, text: SECOND_NF3E_URL },
+    ])
+
+    const { extractFiscalReferenceFromPdf } = await import('../fiscal/reference.js')
+    const reference = await extractFiscalReferenceFromPdf(fakePdf(1) as never)
+
+    expect(reference.status).toBe('unsupported')
+    expect(reference.errorCodes).toEqual(['AMBIGUOUS_REFERENCE'])
   })
 
   it.each([

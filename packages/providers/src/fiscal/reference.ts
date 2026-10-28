@@ -693,23 +693,31 @@ const referenceFromSymbols = (
   results: readonly ReadResult[],
   options: SymbolPolicyOptions,
 ): FiscalReference => {
-  const readable = results.filter(isReadableResult)
+  // A mesma página pode aparecer como imagem embutida e novamente depois da
+  // renderização. Deduplica antes de aplicar maxSymbols para não contar um
+  // único QR duas vezes.
+  const readablePayloads = unique(
+    results
+      .filter(isReadableResult)
+      .map((result) => result.text.trim())
+      .filter((text) => text.length > 0),
+  )
 
   // O decoder lê `maxSymbols + 1`; só há truncamento quando esse limite
   // extra é atingido. Exatamente `maxSymbols` referências legíveis ainda
-  // passam pela política (duplicata vira found, distintas viram ambíguo).
-  if (readable.length > options.maxSymbols) {
+  // passam pela política (duplicata já foi removida, distintas viram ambíguo).
+  if (readablePayloads.length > options.maxSymbols) {
     return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
   }
 
-  const unreadable = results.length - readable.length
+  const unreadable = results.filter((result) => !isReadableResult(result)).length
 
-  if (readable.length === 0) {
+  if (readablePayloads.length === 0) {
     if (unreadable > 0) return inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
     return notFound('qr_code')
   }
 
-  const reference = extractFiscalReferenceFromPayloads(readable.map((result) => result.text))
+  const reference = extractFiscalReferenceFromPayloads(readablePayloads)
   if (reference.status === 'not_found' && unreadable > 0) {
     return inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
   }
@@ -810,7 +818,6 @@ export const extractFiscalReferenceFromPdf = async (
   const results: ReadResult[] = []
   const seenImageKeys = new Set<string>()
   let imageCount = 0
-  let readableCount = 0
   let extractionFailed = false
   let skippedOversized = false
 
@@ -851,10 +858,6 @@ export const extractFiscalReferenceFromPdf = async (
           maxSymbols + 1,
         )
         results.push(...pageResults)
-        readableCount += pageResults.filter(isReadableResult).length
-        if (readableCount > maxSymbols) {
-          return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
-        }
       } catch (error) {
         if (error instanceof QrDecoderUnavailableError) {
           return inconclusive({ method: 'qr_code', reasons: ['QR_DECODER_UNAVAILABLE'] })
@@ -867,46 +870,40 @@ export const extractFiscalReferenceFromPdf = async (
   const failures: FiscalReferenceReason[] = []
   if (skippedOversized) failures.push('IMAGE_TOO_LARGE')
   if (extractionFailed) failures.push('PDF_IMAGE_EXTRACTION_FAILED')
-  if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })
 
-  // Se o raster não produziu uma referência conclusiva, renderiza a página. Isso
-  // cobre o DANF3E gerado com módulos vetoriais, sem abandonar o caminho de
-  // imagens embutidas nem fazer OCR/VLM.
-  const rasterReference = results.length > 0 ? referenceFromSymbols(results, { maxSymbols }) : null
-  const shouldRenderPages =
-    rasterReference === null ||
-    rasterReference.status === 'not_found' ||
-    rasterReference.status === 'inconclusive'
-  if (shouldRenderPages) {
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      try {
-        const pageResults = await readQrFromRenderedPage(
-          pdf,
-          pageNumber,
-          maxImagePixels,
-          maxImageEdge,
-          maxSymbols + 1,
-        )
-        results.push(...pageResults)
-        readableCount += pageResults.filter(isReadableResult).length
-        if (readableCount > maxSymbols) {
-          return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
-        }
-      } catch {
-        // Um PDF pode ser válido para texto/imagens e ainda não ser renderizável
-        // neste ambiente. Mantemos o resultado inconclusivo, nunca inventamos
-        // ausência de QR.
-      }
+  // Sempre inspeciona as páginas: um QR raster válido não exclui a existência
+  // de outro QR desenhado com paths/rectangles no mesmo PDF.
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    try {
+      const pageResults = await readQrFromRenderedPage(
+        pdf,
+        pageNumber,
+        maxImagePixels,
+        maxImageEdge,
+        maxSymbols + 1,
+      )
+      results.push(...pageResults)
+    } catch {
+      // Um PDF pode ser válido para texto/imagens e ainda não ser renderizável
+      // neste ambiente. Mantemos o resultado inconclusivo quando não houver
+      // evidência suficiente, nunca inventamos ausência de QR.
     }
   }
 
   if (results.length === 0) {
+    if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })
     // Sem imagem raster e sem QR após renderização, não afirmamos ausência
     // absoluta: o PDF pode usar uma construção vetorial não renderizável.
     return inconclusive({ method: 'qr_code', reasons: ['PDF_QR_VECTOR_UNSUPPORTED'] })
   }
 
   const reference = referenceFromSymbols(results, { maxSymbols })
+  // Uma ambiguidade observada em qualquer caminho é mais informativa que uma
+  // falha da outra estratégia; nunca a substitua por PDF_IMAGE_EXTRACTION_FAILED.
+  if (reference.status === 'unsupported' && reference.errorCodes.includes('AMBIGUOUS_REFERENCE')) {
+    return reference
+  }
+  if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })
   if (reference.status === 'not_found') {
     return inconclusive({
       method: 'qr_code',
