@@ -163,6 +163,13 @@ export async function getStats(): Promise<StatsDto> {
   return (await res.json()) as StatsDto
 }
 
+/**
+ * Cria uma validação (`POST /v1/validations`).
+ *
+ * `address` só é incluído no payload quando o documento é um CPF — CNPJ usa o
+ * endereço do snapshot da Receita Federal. `country_code` recebe o padrão `BR`
+ * quando o chamador não informar.
+ */
 export async function createValidation(
   document: string,
   mode: string = 'fast',

@@ -222,7 +222,7 @@ describe('E2eRunner — vertical slice', () => {
     })
   })
 
-  it('não envia endereço quando o CPF não tem os campos preenchidos', async () => {
+  it('bloqueia o envio quando o CPF não tem endereço completo', async () => {
     const createSpy = vi.fn(async () => processing)
     await wrap(
       <E2eRunner
@@ -237,11 +237,10 @@ describe('E2eRunner — vertical slice', () => {
 
     await page.getByPlaceholder(/CPF ou CNPJ do endereço/).fill('529.982.247-25')
     setFile()
-    await page.getByRole('button', { name: 'Iniciar validação' }).click()
 
-    await vi.waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1))
-    const [, address] = createSpy.mock.calls[0] as unknown as [string, AddressInput | null | undefined]
-    expect(address).toBeNull()
+    await expect.element(page.getByText(/Preencha: Logradouro, Número, Município, UF, CEP/)).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Iniciar validação' })).toBeDisabled()
+    expect(createSpy).not.toHaveBeenCalled()
   })
 
   it('não exibe campos de endereço quando o documento é um CNPJ', async () => {

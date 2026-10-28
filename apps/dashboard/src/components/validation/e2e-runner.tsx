@@ -99,6 +99,16 @@ const emptyAddress: AddressForm = {
   cep: '',
 }
 
+/** Rótulos exibidos quando o CPF ainda não tem endereço completo. */
+const ADDRESS_FIELD_LABELS: Readonly<Record<keyof AddressForm, string>> = {
+  logradouro: 'Logradouro',
+  numero: 'Número',
+  bairro: 'Bairro',
+  municipio: 'Município',
+  uf: 'UF',
+  cep: 'CEP',
+}
+
 const isCpfDocument = (document: string): boolean => document.replace(/\D+/g, '').length === 11
 
 export interface E2eRunnerDeps {
@@ -109,6 +119,12 @@ export interface E2eRunnerDeps {
   readonly pollIntervalMs?: number
 }
 
+/**
+ * Executa o fluxo de validação de ponta a ponta pelo dashboard.
+ *
+ * Para CPF, exige o endereço informado pelo usuário antes de habilitar o envio;
+ * para CNPJ, o endereço continua vindo do snapshot da Receita Federal no backend.
+ */
 export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const create =
     deps?.create ??
@@ -136,6 +152,24 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
     address.cep.trim() !== ''
 
   /**
+   * Campos de endereço ainda não preenchidos. Usado apenas para orientar o
+   * usuário enquanto o CPF não tem endereço completo para enviar.
+   */
+  const missingAddressFields: readonly string[] = isCpf
+    ? (
+        [
+          ['logradouro', address.logradouro],
+          ['numero', address.numero],
+          ['municipio', address.municipio],
+          ['uf', address.uf],
+          ['cep', address.cep],
+        ] as const
+      )
+        .filter(([, value]) => value.trim() === '')
+        .map(([field]) => ADDRESS_FIELD_LABELS[field])
+    : []
+
+  /**
    * Só envia `address` quando o documento é um CPF e o usuário preencheu os
    * campos que o CNEFE consegue consumir. Sem isso, a API continuaria devolvendo
    * `ADDRESS_REQUIRED_FOR_CPF` (regra preservada no backend).
@@ -151,6 +185,8 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
           cep: address.cep.trim(),
         }
       : null
+
+  const canSubmit = document.trim() !== '' && file !== null && (!isCpf || addressReady)
 
   const setAddressField = (field: keyof AddressForm, value: string): void =>
     setAddress((prev) => ({ ...prev, [field]: value }))
@@ -224,7 +260,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault()
-            if (document.trim() && file !== null) mutation.mutate()
+            if (canSubmit) mutation.mutate()
           }}
         >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -289,8 +325,11 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
               />
             </div>
           )}
+          {isCpf && !addressReady && missingAddressFields.length > 0 && (
+            <p className="text-xs text-muted-foreground">Preencha: {missingAddressFields.join(', ')}.</p>
+          )}
           <div className="flex justify-end">
-            <Button type="submit" disabled={running || !document.trim() || file === null} className="px-5">
+            <Button type="submit" disabled={running || !canSubmit} className="px-5">
               {running ? <Spinner /> : 'Iniciar validação'}
             </Button>
           </div>
