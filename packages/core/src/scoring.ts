@@ -146,13 +146,15 @@ export const decide = (input: DecisionInput): Decision => {
     }
   }
 
+  const insufficientExplanation = insufficientEvidenceExplanation(signals)
+
   const [bandLow, bandHigh] = policy.decision.insufficient_band
   if (score >= bandLow && score <= bandHigh) {
     return {
       verdict: 'INSUFFICIENT_EVIDENCE',
       confidence: confidenceFrom(signals, policy, now),
       hardRuleId: null,
-      explanation: 'Score dentro da banda de insuficiencia; sinais nao sustentam conclusao.',
+      explanation: insufficientExplanation,
     }
   }
 
@@ -160,8 +162,62 @@ export const decide = (input: DecisionInput): Decision => {
     verdict: 'INSUFFICIENT_EVIDENCE',
     confidence: confidenceFrom(signals, policy, now),
     hardRuleId: null,
-    explanation: 'Evidencia insuficiente para concluir; ausencia de evidencia nao e evidencia de ausencia.',
+    explanation: insufficientExplanation,
   }
+}
+
+/**
+ * Monta uma explicacao objetiva para um veredito `INSUFFICIENT_EVIDENCE` com
+ * base nos sinais efetivamente retornados pelos checkers. Nunca inventa uma
+ * causa: so mapeia `detail` que os checkers ja produzem. Quando nenhuma causa
+ * e reconhecível, devolve o fallback generico.
+ */
+const insufficientEvidenceExplanation = (signals: readonly Signal[]): string => {
+  const detailOf = (signal: Signal | undefined): Record<string, unknown> | undefined =>
+    signal?.detail && typeof signal.detail === 'object'
+      ? (signal.detail as Record<string, unknown>)
+      : undefined
+
+  const verificationOf = (signal: Signal | undefined): Record<string, unknown> | undefined => {
+    const d = detailOf(signal)
+    return d?.verification && typeof d.verification === 'object'
+      ? (d.verification as Record<string, unknown>)
+      : undefined
+  }
+
+  // Comprovante enviado nao teve endereco extraido
+  const uploadVerification = verificationOf(
+    signals.find((s) => s.checkerId === 'document_upload_verification'),
+  )
+  if (uploadVerification?.address === 'not_extracted') {
+    return 'Não foi possível confirmar o endereço porque o comprovante não apresentou dados suficientes para comparação.'
+  }
+
+  // Fonte fiscal nao suportada
+  const fiscalVerification = verificationOf(signals.find((s) => s.checkerId === 'nf3e_verification'))
+  if (fiscalVerification?.document === 'unsupported') {
+    return 'Não foi possível confirmar a autenticidade do documento porque a fonte fiscal ainda não é suportada.'
+  }
+
+  const cnefe = signals.find((s) => s.checkerId === 'cnefe_match')
+  if (cnefe?.detail?.reason === 'address_not_resolved') {
+    return 'Não foi possível confirmar o endereço porque o endereço informado não pôde ser localizado no CNEFE.'
+  }
+
+  const cep = signals.find((s) => s.checkerId === 'cep_consistency')
+  if (cep?.detail?.reason === 'cep_missing') {
+    return 'Não foi possível confirmar o endereço porque o CEP não foi informado.'
+  }
+  if (cep?.detail?.reason === 'cep_not_in_local_db') {
+    return 'Não foi possível confirmar o endereço porque o CEP informado não consta na base de referência.'
+  }
+
+  const registry = signals.find((s) => s.checkerId === 'registry_status')
+  if (registry?.detail?.reason === 'not_in_registry') {
+    return 'Não foi possível confirmar o endereço porque o CNPJ não consta no cadastro da Receita Federal.'
+  }
+
+  return 'Não foi possível confirmar o endereço com as evidências disponíveis.'
 }
 
 const hardRuleExplanation = (verdict: Verdict): string => {
