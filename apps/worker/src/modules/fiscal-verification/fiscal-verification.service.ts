@@ -121,8 +121,6 @@ const runAdapter = async (
 
   if (!supported) {
     // Diagnóstico: a referência foi extraída, mas o adapter não a suporta.
-    // Sem este evento, o motivo de a consulta não ter acontecido só existe
-    // na observação materializada em `claim_evidence`, nunca no log.
     deps.logger?.info(
       {
         claim_id: input.claimId,
@@ -245,7 +243,7 @@ export const verifyFiscalClaim = async (
   })
 
   if (inserted) {
-    deps.logger?.debug(
+    deps.logger?.info(
       {
         source: input.source,
         claim_id: input.claimId,

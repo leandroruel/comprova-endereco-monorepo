@@ -7,7 +7,7 @@ import { startBatchLoop } from './services/batch-processor.js'
 import { startPublisherLoop } from './modules/webhooks/outbox-publisher.js'
 
 const config = loadConfig()
-const logger = createLogger({ level: config.LOG_LEVEL, base: { service: 'api' } })
+const logger = createLogger({ level: config.LOG_LEVEL, base: { service: 'api' }, file: config.LOG_FILE })
 const pool = createDbPool(config.DATABASE_URL)
 const adminPool = config.DATABASE_ADMIN_URL !== undefined ? createDbPool(config.DATABASE_ADMIN_URL) : null
 const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true })

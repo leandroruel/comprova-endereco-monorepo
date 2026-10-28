@@ -86,9 +86,8 @@ filebeat.inputs:
     paths:
       - /var/log/comprova/worker.log
     processors:
-      # O worker emite JSON quando redirecionado (`pretty: isTTY`). Preserva a
-      # linha original e decodifica em `worker.*` para buscas estruturadas
-      # (validation_id, claim_id, reason, etc.), igual ao input da API.
+      # O worker emite JSON quando LOG_FILE está configurado. Decodifica os
+      # campos fiscais para permitir buscas por claim_id, validation_id e reason.
       - copy_fields:
           fields:
             - from: message

@@ -54,6 +54,7 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),
+  LOG_FILE: z.string().min(1).optional(),
   POLICY_VERSION: z.string().default('2026.14.1'),
   TEMPORAL_ENABLED: z
     .string()

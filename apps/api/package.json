@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch --env-file=../../.env src/server.ts",
-    "start": "tsx --env-file=../../.env src/server.ts",
+    "dev": "NODE_ENV=development LOG_FILE=../../logs/api.log tsx watch --env-file=../../.env src/server.ts",
+    "start": "LOG_FILE=../../logs/api.log tsx --env-file=../../.env src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

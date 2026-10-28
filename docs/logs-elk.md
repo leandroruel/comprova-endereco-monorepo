@@ -153,8 +153,9 @@ Exemplos de KQL no Discover:
 | Logs do Temporal                       | `container.name: *temporal*`                |
 | Procurar uma validação/termo           | `message: *<termo>*`                        |
 
-A API emite JSON (campos `level`, `time`, `msg`, `service` etc.); o worker emite
-texto formatado. Logs de containers trazem `container.name` e `service.name`.
+A API e o worker emitem JSON quando executados pelos scripts do projeto (campos
+`level`, `time`, `msg`, `service` etc.). Logs de containers trazem
+`container.name` e `service.name`.
 
 Para linhas JSON da API, o Filebeat decodifica o objeto em `api.*` (para não
 colidir com `host`/`service` do próprio evento), copia `api.msg` para
@@ -162,7 +163,10 @@ colidir com `host`/`service` do próprio evento), copia `api.msg` para
 `@timestamp`. A linha bruta fica em `event.original`. Assim, `message` e
 `level` funcionam como nos exemplos acima; campos específicos da API (por
 exemplo `api.port`, `api.signal`, `api.worker_loops`) ficam em `api.*`. Linhas
-não-JSON (como a saída do `pnpm`) mantêm o texto original em `message`.
+não-JSON mantêm o texto original em `message`.
+
+Para linhas JSON do worker, o mesmo processo ocorre em `worker.*`, incluindo os
+campos fiscais como `worker.reason`, `worker.claim_id` e `worker.validation_id`.
 
 Para logs do host, `host.name` é o hostname do container do Filebeat, não o
 host da API/worker; use `service.name` e `log.file.path` para identificar a
@@ -170,27 +174,27 @@ origem. O endereço de bind da API fica em `api.host`.
 
 ## Logs da API e do worker (host)
 
-A API e o worker rodam via `pnpm dev` no host, não em containers. O Filebeat não
-consegue ler o `stdout` de processos do host diretamente. Para indexá-los,
-redirecione a saída para os arquivos que o Filebeat monta em `./logs`:
+A API e o worker rodam via `pnpm dev` no host, não em containers. Os scripts dos
+dois pacotes configuram automaticamente `LOG_FILE` e duplicam os eventos para
+stdout e para os arquivos que o Filebeat monta em `./logs`:
 
 ```bash
 mkdir -p logs
 
 # terminal 1
-pnpm --filter @comprova/api dev 2>&1 | tee -a logs/api.log
+pnpm --filter @comprova/api dev
 
 # terminal 2
-LOG_COLOR=false pnpm --filter @comprova/worker dev 2>&1 | tee -a logs/worker.log
+pnpm --filter @comprova/worker dev
 ```
 
-O `LOG_COLOR=false` evita códigos ANSI no log do worker. O input da API faz
-`decode_json_fields` para `api.*` e normaliza `message`/`level`/`time`; o do
-worker mantém o texto como `message`.
+O logger mantém JSON estruturado nos arquivos. A API grava em `logs/api.log` e o
+worker em `logs/worker.log`; o Filebeat decodifica os campos em `api.*` e
+`worker.*`, normalizando `message`/`level`/`time` e usando o tempo do evento como
+`@timestamp`.
 
-O `pnpm dev` normal continua funcionando, mas os logs da API/worker ficam
-apenas no terminal e **não** aparecem no Kibana. Use os comandos acima quando
-precisar investigar uma execução no Kibana.
+Assim, as execuções iniciadas por `pnpm dev` aparecem no Kibana sem precisar de
+`tee` manual. Para outro destino, `LOG_FILE` pode ser sobrescrito no ambiente.
 
 ## Parar, reiniciar e remover
 

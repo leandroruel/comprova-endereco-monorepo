@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx --env-file=../../.env src/index.ts",
+    "dev": "LOG_FILE=../../logs/worker.log tsx --env-file=../../.env src/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

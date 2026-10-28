@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { createLogger } from './logger.js'
 
 function capture() {
@@ -25,5 +28,21 @@ describe('logger', () => {
     const out = lines.join('\n')
     expect(out).not.toContain('11.222.333/0001-81')
     expect(out).toContain('***REDACTED***')
+  })
+
+  it('duplica eventos estruturados para o arquivo configurado', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'comprova-logger-'))
+    const file = path.join(directory, 'nested', 'app.log')
+
+    try {
+      const logger = createLogger({ level: 'info', file })
+      logger.info({ reason: 'FISCAL_VERIFICATION_TICK_DONE' }, 'fiscal verification materialized')
+
+      const output = readFileSync(file, 'utf8')
+      expect(output).toContain('FISCAL_VERIFICATION_TICK_DONE')
+      expect(output).toContain('fiscal verification materialized')
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 })

@@ -10,6 +10,7 @@ describe('workerEnvFromProcess', () => {
     })
 
     expect(env.evidenceAnalysisMaxBytes).toBe(EVIDENCE_ARTIFACT_MAX_BYTES)
+    expect(env.logLevel).toBe('info')
   })
 
   it('rejeita EVIDENCE_ANALYSIS_MAX_BYTES acima do limite do artefato', () => {

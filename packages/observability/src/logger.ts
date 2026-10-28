@@ -13,6 +13,7 @@ export interface CreateLoggerOptions {
   level?: string
   base?: Record<string, unknown>
   stream?: { write(line: string): void }
+  file?: string
   pretty?: boolean
 }
 
@@ -25,11 +26,24 @@ interface PinoLike {
 }
 
 function buildPino(opts: CreateLoggerOptions = {}): PinoLike {
+  const stream =
+    opts.stream ??
+    (opts.file === undefined
+      ? undefined
+      : pino.multistream([
+          { level: opts.level ?? 'info', stream: process.stdout },
+          {
+            level: opts.level ?? 'info',
+            stream: pino.destination({ dest: opts.file, mkdir: true, sync: true }),
+          },
+        ]))
   const inner = pino(
     {
       level: opts.level ?? 'info',
       base: opts.base,
-      ...(opts.pretty
+      // When a file is configured, keep JSON on both stdout and the file so
+      // Filebeat can decode the same structured event that the terminal sees.
+      ...(opts.pretty && opts.file === undefined
         ? {
             transport: {
               target: 'pino-pretty',
@@ -42,7 +56,7 @@ function buildPino(opts: CreateLoggerOptions = {}): PinoLike {
           }
         : {}),
     },
-    opts.stream,
+    stream,
   )
   return inner as unknown as PinoLike
 }

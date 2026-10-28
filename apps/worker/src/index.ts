@@ -21,16 +21,15 @@ import type { DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.j
 const env = workerEnvFromProcess()
 
 /**
- * Pretty no terminal (dev), JSON quando redirecionado (`tee -a logs/worker.log`).
- * O JSON permite o Filebeat decodificar os campos estruturados (validation_id,
- * claim_id, etc.) — sem isso, as buscas no Kibana só encontram texto livre.
+ * Pretty no terminal quando não há arquivo configurado. Com LOG_FILE, mantém
+ * JSON em stdout e no arquivo para o Filebeat decodificar os campos fiscais.
  */
 const logger = createLogger({
   level: env.logLevel,
   base: { service: 'worker' },
-  pretty: process.stdout.isTTY === true,
+  file: env.logFile,
+  pretty: env.logFile === undefined && process.stdout.isTTY === true,
 })
-
 const ctx = buildWorkerContext(env)
 const taskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'comprova-deep-t1'
 

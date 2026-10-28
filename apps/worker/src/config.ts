@@ -8,6 +8,7 @@ export interface WorkerEnv {
   readonly repoRoot: string
   readonly vlmEnabled: boolean
   readonly logLevel: string
+  readonly logFile?: string
   readonly nominatimUrl?: string
   readonly overpassUrl?: string
   readonly googleStreetViewKey?: string
@@ -69,6 +70,7 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     evidenceAnalysisMaxBytes: parsedAnalysisMaxBytes,
     vlmEnabled: env.VLM_ENABLED === 'true',
     logLevel: env.LOG_LEVEL ?? 'info',
+    logFile: nonEmpty(env.LOG_FILE),
     ...Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined)),
     ...(env.STORE_STREET_VIEW_IMAGES === 'true' ? { storeStreetViewImages: true } : {}),
   }
