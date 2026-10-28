@@ -116,6 +116,38 @@ export interface AddressInput {
   country_code?: string
 }
 
+export interface CepAddressLookup {
+  logradouro: string
+  bairro: string
+  municipio: string
+  uf: string
+}
+
+/** Consulta pública de CEP usada para sugerir os campos do endereço no formulário. */
+export async function getAddressByCep(cep: string, signal?: AbortSignal): Promise<CepAddressLookup | null> {
+  const clean = cep.replace(/\D+/g, '')
+  if (clean.length !== 8) return null
+
+  const res = await fetch(`https://brasilapi.com.br/api/cep/v2/${clean}`, { signal })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`CEP lookup failed: HTTP ${res.status}`)
+
+  const body = (await res.json()) as {
+    street?: string | null
+    neighborhood?: string | null
+    city?: string | null
+    state?: string | null
+  }
+  if (body.state === null || body.state === undefined) return null
+
+  return {
+    logradouro: body.street ?? '',
+    bairro: body.neighborhood ?? '',
+    municipio: body.city ?? '',
+    uf: body.state,
+  }
+}
+
 export interface ValidationDto {
   validation_id: string
   status: string

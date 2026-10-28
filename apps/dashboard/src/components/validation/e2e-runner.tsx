@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   createValidation,
+  getAddressByCep,
   getValidation,
   uploadEvidence,
   type AddressInput,
+  type CepAddressLookup,
   type ValidationDto,
   type ValidationProgressDto,
 } from '@/api/client'
@@ -115,6 +117,7 @@ export interface E2eRunnerDeps {
   readonly create?: (document: string, address?: AddressInput | null) => Promise<ValidationDto>
   readonly upload?: (validationId: string, file: File) => Promise<unknown>
   readonly poll?: (validationId: string) => Promise<ValidationDto>
+  readonly lookupCep?: (cep: string, signal?: AbortSignal) => Promise<CepAddressLookup | null>
   /** Intervalo de polling; testes usam valores curtos. */
   readonly pollIntervalMs?: number
 }
@@ -131,11 +134,15 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
     ((document: string, address?: AddressInput | null) => createValidation(document, 'fast', address))
   const upload = deps?.upload ?? uploadEvidence
   const poll = deps?.poll ?? getValidation
+  const lookupCep = deps?.lookupCep ?? getAddressByCep
   const pollIntervalMs = deps?.pollIntervalMs ?? POLL_INTERVAL_MS
 
   const [document, setDocument] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [address, setAddress] = useState<AddressForm>(emptyAddress)
+  const [touchedAddressFields, setTouchedAddressFields] = useState<ReadonlySet<keyof AddressForm>>(
+    () => new Set(),
+  )
   const [activeId, setActiveId] = useState<string | null>(null)
   /** Acompanhamento encerrado. Definido SÓ pela regra de parada do polling/timeout. */
   const [stopped, setStopped] = useState(false)
@@ -144,12 +151,35 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const snapshotRef = useRef<string | null>(null)
 
   const isCpf = isCpfDocument(document)
+  const cepDigits = address.cep.replace(/\D+/g, '')
+  const cepLookup = useQuery({
+    queryKey: ['address-by-cep', cepDigits],
+    queryFn: ({ signal }) => lookupCep(cepDigits, signal),
+    enabled: isCpf && cepDigits.length === 8,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const lookup = cepLookup.data
+  const resolvedAddress: AddressForm = {
+    ...address,
+    logradouro:
+      touchedAddressFields.has('logradouro') || address.logradouro !== ''
+        ? address.logradouro
+        : (lookup?.logradouro ?? ''),
+    bairro:
+      touchedAddressFields.has('bairro') || address.bairro !== '' ? address.bairro : (lookup?.bairro ?? ''),
+    municipio:
+      touchedAddressFields.has('municipio') || address.municipio !== ''
+        ? address.municipio
+        : (lookup?.municipio ?? ''),
+    uf: touchedAddressFields.has('uf') || address.uf !== '' ? address.uf : (lookup?.uf ?? ''),
+  }
   const addressReady =
-    address.logradouro.trim() !== '' &&
-    address.numero.trim() !== '' &&
-    address.municipio.trim() !== '' &&
-    address.uf.trim() !== '' &&
-    address.cep.trim() !== ''
+    resolvedAddress.logradouro.trim() !== '' &&
+    resolvedAddress.numero.trim() !== '' &&
+    resolvedAddress.municipio.trim() !== '' &&
+    resolvedAddress.uf.trim() !== '' &&
+    resolvedAddress.cep.trim() !== ''
 
   /**
    * Campos de endereço ainda não preenchidos. Usado apenas para orientar o
@@ -158,11 +188,11 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const missingAddressFields: readonly string[] = isCpf
     ? (
         [
-          ['logradouro', address.logradouro],
-          ['numero', address.numero],
-          ['municipio', address.municipio],
-          ['uf', address.uf],
-          ['cep', address.cep],
+          ['logradouro', resolvedAddress.logradouro],
+          ['numero', resolvedAddress.numero],
+          ['municipio', resolvedAddress.municipio],
+          ['uf', resolvedAddress.uf],
+          ['cep', resolvedAddress.cep],
         ] as const
       )
         .filter(([, value]) => value.trim() === '')
@@ -177,19 +207,26 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const addressPayload: AddressInput | null =
     isCpf && addressReady
       ? {
-          logradouro: address.logradouro.trim(),
-          numero: address.numero.trim(),
-          ...(address.bairro.trim() !== '' ? { bairro: address.bairro.trim() } : {}),
-          municipio: address.municipio.trim(),
-          uf: address.uf.trim(),
-          cep: address.cep.trim(),
+          logradouro: resolvedAddress.logradouro.trim(),
+          numero: resolvedAddress.numero.trim(),
+          ...(resolvedAddress.bairro.trim() !== '' ? { bairro: resolvedAddress.bairro.trim() } : {}),
+          municipio: resolvedAddress.municipio.trim(),
+          uf: resolvedAddress.uf.trim(),
+          cep: resolvedAddress.cep.trim(),
         }
       : null
 
   const canSubmit = document.trim() !== '' && file !== null && (!isCpf || addressReady)
 
-  const setAddressField = (field: keyof AddressForm, value: string): void =>
+  const setAddressField = (field: keyof AddressForm, value: string): void => {
+    setTouchedAddressFields((prev) => new Set(prev).add(field))
     setAddress((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const formatCep = (value: string): string => {
+    const digits = value.replace(/\D+/g, '').slice(0, 8)
+    return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits
+  }
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -205,6 +242,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
       setDocument('')
       setFile(null)
       setAddress(emptyAddress)
+      setTouchedAddressFields(new Set())
     },
   })
 
@@ -290,40 +328,52 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
                 className="col-span-2"
                 placeholder="Logradouro"
                 aria-label="Logradouro"
-                value={address.logradouro}
+                value={resolvedAddress.logradouro}
                 onChange={(e) => setAddressField('logradouro', e.target.value)}
               />
               <Input
                 placeholder="Número"
                 aria-label="Número"
-                value={address.numero}
+                value={resolvedAddress.numero}
                 onChange={(e) => setAddressField('numero', e.target.value)}
               />
               <Input
                 placeholder="Bairro (opcional)"
                 aria-label="Bairro"
-                value={address.bairro}
+                value={resolvedAddress.bairro}
                 onChange={(e) => setAddressField('bairro', e.target.value)}
               />
               <Input
                 placeholder="Município"
                 aria-label="Município"
-                value={address.municipio}
+                value={resolvedAddress.municipio}
                 onChange={(e) => setAddressField('municipio', e.target.value)}
               />
               <Input
                 placeholder="UF"
                 aria-label="UF"
-                value={address.uf}
+                value={resolvedAddress.uf}
                 onChange={(e) => setAddressField('uf', e.target.value)}
               />
               <Input
                 placeholder="CEP"
                 aria-label="CEP"
+                inputMode="numeric"
+                maxLength={9}
                 value={address.cep}
-                onChange={(e) => setAddressField('cep', e.target.value)}
+                onChange={(e) => setAddressField('cep', formatCep(e.target.value))}
               />
             </div>
+          )}
+          {isCpf && cepLookup.isFetching && (
+            <p className="text-xs text-muted-foreground" role="status">
+              Buscando endereço pelo CEP…
+            </p>
+          )}
+          {isCpf && cepLookup.isError && (
+            <p className="text-xs text-muted-foreground" role="status">
+              Não foi possível buscar o CEP. Preencha o endereço manualmente.
+            </p>
           )}
           {isCpf && !addressReady && missingAddressFields.length > 0 && (
             <p className="text-xs text-muted-foreground">Preencha: {missingAddressFields.join(', ')}.</p>

@@ -4,6 +4,7 @@ import { page } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
 import type {
   AddressInput,
+  CepAddressLookup,
   ValidationDto,
   ValidationProgressDto,
   ValidationProgressStage,
@@ -220,6 +221,37 @@ describe('E2eRunner — vertical slice', () => {
       uf: 'SP',
       cep: '01310-100',
     })
+  })
+
+  it('preenche o endereço ao digitar um CEP válido', async () => {
+    const lookupCep = vi.fn(async (_cep: string): Promise<CepAddressLookup> => ({
+      logradouro: 'Avenida Paulista',
+      bairro: 'Bela Vista',
+      municipio: 'São Paulo',
+      uf: 'SP',
+    }))
+    const createSpy = vi.fn(async () => processing)
+
+    await wrap(
+      <E2eRunner
+        deps={{
+          create: createSpy,
+          upload: vi.fn(async () => undefined),
+          poll: vi.fn(async () => done),
+          lookupCep,
+          pollIntervalMs: 50,
+        }}
+      />,
+    )
+
+    await page.getByPlaceholder(/CPF ou CNPJ do endereço/).fill('529.982.247-25')
+    await page.getByPlaceholder('CEP').fill('01310100')
+
+    await vi.waitFor(() => expect(lookupCep).toHaveBeenCalledWith('01310100', expect.anything()))
+    await expect.element(page.getByPlaceholder('Logradouro')).toHaveValue('Avenida Paulista')
+    await expect.element(page.getByPlaceholder('Bairro (opcional)')).toHaveValue('Bela Vista')
+    await expect.element(page.getByPlaceholder('Município')).toHaveValue('São Paulo')
+    await expect.element(page.getByPlaceholder('UF')).toHaveValue('SP')
   })
 
   it('bloqueia o envio quando o CPF não tem endereço completo', async () => {
