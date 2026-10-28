@@ -452,6 +452,7 @@ describe('F2.1 — contrato e materialização de fonte fiscal', () => {
       supports: () => false,
       verify,
     }
+    const before = logLines.length
 
     await expect(run(nf3eAdapter, inputFor(claim, { source: 'nfag-e' }))).resolves.toBe('inserted')
 
@@ -463,6 +464,13 @@ describe('F2.1 — contrato e materialização de fonte fiscal', () => {
       source: { kind: 'fiscal_nfag', id: 'nfag-e' },
     })
     expect(verify).not.toHaveBeenCalled()
+
+    // O motivo explícito precisa estar no log para diagnóstico no Kibana.
+    const newLogs = logLines.slice(before).join('\n')
+    expect(newLogs).toContain('SOURCE_NOT_SUPPORTED')
+    expect(newLogs).toContain('fiscal source not supported by adapter')
+    expect(newLogs).toContain(claim.claimId)
+    expect(newLogs).toContain('"source":"nfag-e"')
   })
 
   it('trata timeout/erro do adapter como unavailable, nunca invalid', async () => {

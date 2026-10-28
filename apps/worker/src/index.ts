@@ -1,6 +1,6 @@
 import { systemClock } from '@comprova/core'
 import { createDbPool } from '@comprova/db'
-import { createCLILogger } from '@comprova/observability'
+import { createLogger } from '@comprova/observability'
 import { makeDocumentAnalyzer, makeNf3eFiscalAdapter } from '@comprova/providers'
 import { Worker } from '@temporalio/worker'
 import path from 'node:path'
@@ -18,8 +18,19 @@ import { makeDeepEnrichActivity } from './modules/deep-enrich/deep-enrich.activi
 import { deepEnrich } from './modules/deep-enrich/deep-enrich.service.js'
 import type { DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
 
-const logger = createCLILogger('worker')
 const env = workerEnvFromProcess()
+
+/**
+ * Pretty no terminal (dev), JSON quando redirecionado (`tee -a logs/worker.log`).
+ * O JSON permite o Filebeat decodificar os campos estruturados (validation_id,
+ * claim_id, etc.) — sem isso, as buscas no Kibana só encontram texto livre.
+ */
+const logger = createLogger({
+  level: env.logLevel,
+  base: { service: 'worker' },
+  pretty: process.stdout.isTTY === true,
+})
+
 const ctx = buildWorkerContext(env)
 const taskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'comprova-deep-t1'
 

@@ -85,10 +85,44 @@ filebeat.inputs:
     enabled: true
     paths:
       - /var/log/comprova/worker.log
-    fields:
-      service.name: worker
-      service.type: host
-    fields_under_root: true
+    processors:
+      # O worker emite JSON quando redirecionado (`pretty: isTTY`). Preserva a
+      # linha original e decodifica em `worker.*` para buscas estruturadas
+      # (validation_id, claim_id, reason, etc.), igual ao input da API.
+      - copy_fields:
+          fields:
+            - from: message
+              to: event.original
+          fail_on_error: false
+      - decode_json_fields:
+          fields: ['message']
+          target: 'worker'
+          overwrite_keys: true
+          add_error_key: false
+      - drop_fields:
+          fields: ['message']
+          ignore_missing: true
+          when:
+            has_fields: ['worker.msg']
+      - copy_fields:
+          fields:
+            - from: worker.msg
+              to: message
+            - from: worker.level
+              to: level
+            - from: worker.time
+              to: time
+          fail_on_error: false
+      - add_fields:
+          target: service
+          fields:
+            name: worker
+            type: host
+      - timestamp:
+          field: time
+          layouts:
+            - UNIX_MS
+          ignore_failure: true
 
 output.elasticsearch:
   hosts: ['http://elasticsearch:9200']

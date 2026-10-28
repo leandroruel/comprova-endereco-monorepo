@@ -18,6 +18,7 @@ const envWith = (vlmEnabled: boolean): WorkerEnv => ({
   policyVersion: '2026.12.1',
   repoRoot: process.cwd(),
   vlmEnabled,
+  logLevel: 'info',
   evidenceAnalysisMaxBytes: EVIDENCE_ARTIFACT_MAX_BYTES,
 })
 

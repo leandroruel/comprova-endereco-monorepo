@@ -203,7 +203,12 @@ export const verifyFiscalTick = async (deps: FiscalVerificationTickDeps): Promis
     const input = lookupInputOf(candidate)
     if (input === null) {
       deps.logger.warn(
-        { analysis_id: candidate.analysisId, reason: 'FISCAL_REFERENCE_UNUSABLE' },
+        {
+          analysis_id: candidate.analysisId,
+          claim_id: candidate.claimId,
+          validation_id: candidate.validationId,
+          reason: 'FISCAL_REFERENCE_UNUSABLE',
+        },
         'fiscal reference not usable for lookup',
       )
       await recordVerificationAttempt(deps.db, candidate, 'FISCAL_REFERENCE_UNUSABLE')
@@ -214,6 +219,25 @@ export const verifyFiscalTick = async (deps: FiscalVerificationTickDeps): Promis
       // Estado durável antes da materialização: o GET passa a dizer "pending"
       // enquanto a consulta e a reavaliação estão no ar.
       await setFiscalReassessment(deps, candidate, 'pending')
+
+      // Diagnóstico: quais metadados da referência foram extraídos e qual
+      // adapter vai tentar a consulta. Não inclui chave/URL/PII.
+      deps.logger.info(
+        {
+          validation_id: candidate.validationId,
+          claim_id: candidate.claimId,
+          analysis_id: candidate.analysisId,
+          reference_method: candidate.reference.method,
+          reference_status: candidate.reference.status,
+          reference_source: candidate.reference.source,
+          reference_uf: candidate.reference.uf,
+          reference_issuer: candidate.reference.issuer,
+          adapter_source: deps.adapter.source,
+          adapter_version: deps.adapter.version,
+          reason: 'FISCAL_VERIFICATION_CANDIDATE_FOUND',
+        },
+        'fiscal verification candidate found',
+      )
 
       const outcome = await verifyFiscalClaim(
         { db: deps.db, adapter: deps.adapter, logger: deps.logger, now },
@@ -232,7 +256,7 @@ export const verifyFiscalTick = async (deps: FiscalVerificationTickDeps): Promis
       // de acompanhar sem ler o veredito anterior.
       await setFiscalReassessment(deps, candidate, 'completed')
       await clearVerificationAttempt(deps.db, candidate)
-      deps.logger.debug(
+      deps.logger.info(
         {
           analysis_id: candidate.analysisId,
           claim_id: candidate.claimId,
