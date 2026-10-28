@@ -4,6 +4,7 @@ import {
   createValidation,
   getValidation,
   uploadEvidence,
+  type AddressInput,
   type ValidationDto,
   type ValidationProgressDto,
 } from '@/api/client'
@@ -75,22 +76,66 @@ const snapshotOf = (v: ValidationDto): string =>
     v.fiscal_verification != null,
   ])
 
+/**
+ * Campos do endereço capturados no dashboard quando o documento é um CPF.
+ * `bairro` é opcional; os demais são exigidos pelo fluxo do CNEFE
+ * (`logradouro`, `numero`, `municipio`, `uf` e `cep`).
+ */
+interface AddressForm {
+  readonly logradouro: string
+  readonly numero: string
+  readonly bairro: string
+  readonly municipio: string
+  readonly uf: string
+  readonly cep: string
+}
+
+const emptyAddress: AddressForm = {
+  logradouro: '',
+  numero: '',
+  bairro: '',
+  municipio: '',
+  uf: '',
+  cep: '',
+}
+
+/** Rótulos exibidos quando o CPF ainda não tem endereço completo. */
+const ADDRESS_FIELD_LABELS: Readonly<Record<keyof AddressForm, string>> = {
+  logradouro: 'Logradouro',
+  numero: 'Número',
+  bairro: 'Bairro',
+  municipio: 'Município',
+  uf: 'UF',
+  cep: 'CEP',
+}
+
+const isCpfDocument = (document: string): boolean => document.replace(/\D+/g, '').length === 11
+
 export interface E2eRunnerDeps {
-  readonly create?: (document: string) => Promise<ValidationDto>
+  readonly create?: (document: string, address?: AddressInput | null) => Promise<ValidationDto>
   readonly upload?: (validationId: string, file: File) => Promise<unknown>
   readonly poll?: (validationId: string) => Promise<ValidationDto>
   /** Intervalo de polling; testes usam valores curtos. */
   readonly pollIntervalMs?: number
 }
 
+/**
+ * Executa o fluxo de validação de ponta a ponta pelo dashboard.
+ *
+ * Para CPF, exige o endereço informado pelo usuário antes de habilitar o envio;
+ * para CNPJ, o endereço continua vindo do snapshot da Receita Federal no backend.
+ */
 export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
-  const create = deps?.create ?? ((document: string) => createValidation(document, 'fast'))
+  const create =
+    deps?.create ??
+    ((document: string, address?: AddressInput | null) => createValidation(document, 'fast', address))
   const upload = deps?.upload ?? uploadEvidence
   const poll = deps?.poll ?? getValidation
   const pollIntervalMs = deps?.pollIntervalMs ?? POLL_INTERVAL_MS
 
   const [document, setDocument] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [address, setAddress] = useState<AddressForm>(emptyAddress)
   const [activeId, setActiveId] = useState<string | null>(null)
   /** Acompanhamento encerrado. Definido SÓ pela regra de parada do polling/timeout. */
   const [stopped, setStopped] = useState(false)
@@ -98,9 +143,57 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const startedAtRef = useRef(0)
   const snapshotRef = useRef<string | null>(null)
 
+  const isCpf = isCpfDocument(document)
+  const addressReady =
+    address.logradouro.trim() !== '' &&
+    address.numero.trim() !== '' &&
+    address.municipio.trim() !== '' &&
+    address.uf.trim() !== '' &&
+    address.cep.trim() !== ''
+
+  /**
+   * Campos de endereço ainda não preenchidos. Usado apenas para orientar o
+   * usuário enquanto o CPF não tem endereço completo para enviar.
+   */
+  const missingAddressFields: readonly string[] = isCpf
+    ? (
+        [
+          ['logradouro', address.logradouro],
+          ['numero', address.numero],
+          ['municipio', address.municipio],
+          ['uf', address.uf],
+          ['cep', address.cep],
+        ] as const
+      )
+        .filter(([, value]) => value.trim() === '')
+        .map(([field]) => ADDRESS_FIELD_LABELS[field])
+    : []
+
+  /**
+   * Só envia `address` quando o documento é um CPF e o usuário preencheu os
+   * campos que o CNEFE consegue consumir. Sem isso, a API continuaria devolvendo
+   * `ADDRESS_REQUIRED_FOR_CPF` (regra preservada no backend).
+   */
+  const addressPayload: AddressInput | null =
+    isCpf && addressReady
+      ? {
+          logradouro: address.logradouro.trim(),
+          numero: address.numero.trim(),
+          ...(address.bairro.trim() !== '' ? { bairro: address.bairro.trim() } : {}),
+          municipio: address.municipio.trim(),
+          uf: address.uf.trim(),
+          cep: address.cep.trim(),
+        }
+      : null
+
+  const canSubmit = document.trim() !== '' && file !== null && (!isCpf || addressReady)
+
+  const setAddressField = (field: keyof AddressForm, value: string): void =>
+    setAddress((prev) => ({ ...prev, [field]: value }))
+
   const mutation = useMutation({
     mutationFn: async () => {
-      const created = await create(document.trim())
+      const created = await create(document.trim(), addressPayload)
       if (file !== null) await upload(created.validation_id, file)
       return created
     },
@@ -111,6 +204,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
       setStopped(false)
       setDocument('')
       setFile(null)
+      setAddress(emptyAddress)
     },
   })
 
@@ -163,34 +257,82 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
         </div>
 
         <form
-          className="flex flex-col gap-3 sm:flex-row sm:items-center"
+          className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault()
-            if (document.trim() && file !== null) mutation.mutate()
+            if (canSubmit) mutation.mutate()
           }}
         >
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="CNPJ do endereço a validar — ex: 12.345.678/0001-95"
-              value={document}
-              onChange={(e) => setDocument(e.target.value)}
-              className="pl-9 font-mono text-sm"
-            />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="CPF ou CNPJ do endereço a validar"
+                value={document}
+                onChange={(e) => setDocument(e.target.value)}
+                className="pl-9 font-mono text-sm"
+              />
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent">
+              <FileUp className="h-4 w-4" aria-hidden />
+              <span>{file === null ? 'Escolher comprovante' : file.name}</span>
+              <input
+                type="file"
+                accept="application/pdf,image/png,image/jpeg"
+                className="sr-only"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
           </div>
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent">
-            <FileUp className="h-4 w-4" aria-hidden />
-            <span>{file === null ? 'Escolher comprovante' : file.name}</span>
-            <input
-              type="file"
-              accept="application/pdf,image/png,image/jpeg"
-              className="sr-only"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          <Button type="submit" disabled={running || !document.trim() || file === null} className="px-5">
-            {running ? <Spinner /> : 'Iniciar validação'}
-          </Button>
+          {isCpf && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <Input
+                className="col-span-2"
+                placeholder="Logradouro"
+                aria-label="Logradouro"
+                value={address.logradouro}
+                onChange={(e) => setAddressField('logradouro', e.target.value)}
+              />
+              <Input
+                placeholder="Número"
+                aria-label="Número"
+                value={address.numero}
+                onChange={(e) => setAddressField('numero', e.target.value)}
+              />
+              <Input
+                placeholder="Bairro (opcional)"
+                aria-label="Bairro"
+                value={address.bairro}
+                onChange={(e) => setAddressField('bairro', e.target.value)}
+              />
+              <Input
+                placeholder="Município"
+                aria-label="Município"
+                value={address.municipio}
+                onChange={(e) => setAddressField('municipio', e.target.value)}
+              />
+              <Input
+                placeholder="UF"
+                aria-label="UF"
+                value={address.uf}
+                onChange={(e) => setAddressField('uf', e.target.value)}
+              />
+              <Input
+                placeholder="CEP"
+                aria-label="CEP"
+                value={address.cep}
+                onChange={(e) => setAddressField('cep', e.target.value)}
+              />
+            </div>
+          )}
+          {isCpf && !addressReady && missingAddressFields.length > 0 && (
+            <p className="text-xs text-muted-foreground">Preencha: {missingAddressFields.join(', ')}.</p>
+          )}
+          <div className="flex justify-end">
+            <Button type="submit" disabled={running || !canSubmit} className="px-5">
+              {running ? <Spinner /> : 'Iniciar validação'}
+            </Button>
+          </div>
         </form>
 
         {mutation.isError && (

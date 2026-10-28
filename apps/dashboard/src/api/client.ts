@@ -98,6 +98,24 @@ export interface ValidationProgressDto {
   steps: ValidationProgressStep[]
 }
 
+/**
+ * Endereço informado pelo usuário no dashboard (contrato `AddressInputSchema`
+ * da API). Só é enviado quando o documento é um CPF — CNPJ continua usando o
+ * endereço vindo do snapshot da Receita Federal.
+ */
+export interface AddressInput {
+  tipo_logradouro?: string
+  logradouro: string
+  numero?: string
+  complemento?: string
+  bairro?: string
+  cep?: string
+  uf?: string
+  municipio?: string
+  municipio_ibge?: number
+  country_code?: string
+}
+
 export interface ValidationDto {
   validation_id: string
   status: string
@@ -145,8 +163,21 @@ export async function getStats(): Promise<StatsDto> {
   return (await res.json()) as StatsDto
 }
 
-export async function createValidation(document: string, mode: string = 'fast'): Promise<ValidationDto> {
+/**
+ * Cria uma validação (`POST /v1/validations`).
+ *
+ * `address` só é incluído no payload quando o documento é um CPF — CNPJ usa o
+ * endereço do snapshot da Receita Federal. `country_code` recebe o padrão `BR`
+ * quando o chamador não informar.
+ */
+export async function createValidation(
+  document: string,
+  mode: string = 'fast',
+  address?: AddressInput | null,
+): Promise<ValidationDto> {
   const isCpf = document.replace(/\D+/g, '').length === 11
+  const addressPayload =
+    isCpf && address != null ? { ...address, country_code: address.country_code ?? 'BR' } : null
   const res = await fetch(`${API_BASE}/v1/validations`, {
     method: 'POST',
     credentials: 'include',
@@ -158,6 +189,7 @@ export async function createValidation(document: string, mode: string = 'fast'):
       document: { type: isCpf ? 'CPF' : 'CNPJ', value: document },
       mode,
       legal_basis: 'FRAUD_PREVENTION',
+      ...(addressPayload !== null ? { address: addressPayload } : {}),
     }),
   })
   if (!res.ok) {
