@@ -1,7 +1,8 @@
 # Roadmap canônico — Comprova
 
 > **Status:** documento canônico a partir de 2026-10-22. Última revisão:
-> 2026-10-22 — reposicionamento para plataforma B2B de comprovação de endereço
+> 2026-10-28 — sincronização do estado das fases com `PROGRESS.md` e o código
+> mergeado em `main`; reposicionamento para plataforma B2B de comprovação de endereço
 > para KYC.
 > **Escopo:** produto, arquitetura e prioridades (não é changelog).
 > **Changelog:** [`PROGRESS.md`](../PROGRESS.md) continua sendo o log cronológico do
@@ -9,6 +10,26 @@
 > **Contexto de arquitetura:** [`docs/architecture.md`](architecture.md) (estado
 > atual) e [`docs/arquitetura-evidencias.md`](arquitetura-evidencias.md) (alvo de
 > evidências e fontes).
+
+## Snapshot de implementação (2026-10-28)
+
+O código mergeado em `main` está à frente do snapshot histórico deste documento:
+
+- **Entregues:** F0.1/F0.2; F1.1/F1.2a/F1.2b/F1.3; F2.1; F2.2a e a
+  primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
+  o vertical slice F3.2 pelo dashboard.
+- **Em andamento:** F0 (evento faturável e checklist de produção), F1 (OCR e
+  documentos complexos), F2 (expansão/hardening da cobertura fiscal), F3.3
+  (medição/cobrança) e F6 (operação/segurança).
+- **Próximo passo:** fechar F3.3 e o checklist de produção; a unidade de
+  cobrança e as regras de faturamento continuam decisões comerciais abertas.
+- **Futuro:** F4 (fluxo do titular), F7 (NFAg-e/outras fontes) e F8 (SSI).
+  F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda
+  faltam decisões e o kit de verificação do produto.
+
+Este snapshot não transforma uma primeira fatia em cobertura nacional: a
+consulta fiscal continua explicitamente limitada ao autorizador SVRS e às UFs
+RS/SP suportadas pelo adapter.
 
 ## Por que este arquivo existe
 
@@ -267,13 +288,14 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 1. **Guarda de fetch genérica entregue em F0.2.** `safeExternalFetch`
    (`packages/providers/src/safe-fetch.ts`) resolve/valida todos os IPs, fixa o
    IP na conexão, exige HTTPS, não segue redirect e limita
-   tempo/corpo/content-type; o webhook já a usa no envio. A allowlist por
-   autorizador fiscal continua pendente para F2 (ADR-0034).
+   tempo/corpo/content-type; o webhook e a primeira consulta fiscal já a usam.
+   A allowlist fiscal tem a primeira entrada SVRS em produção para RS/SP;
+   expansão e hardening continuam em F2 (ADR-0034).
 2. **`evidence` é global por design**, o que é correto para imagem pública de
    street view e **incorreto** para comprovante com dado pessoal do cliente. A
    fundação tenant-scoped foi entregue em F0.1 (`evidence_artifact`, ADR-0035);
-   o intake e a análise com PII foram entregues em F1.1/F1.2. A verificação
-   dessas fontes é F1.3/F2.
+   o intake, a análise e a verificação com PII foram entregues em F1.1/F1.2/F1.3.
+   OCR e fontes externas adicionais continuam em F2.
 3. **Não há checklist de produção** para issuer origin definitivo, KMS por
    tenant, restore de backup, alarmes e capacidade.
 
@@ -339,8 +361,8 @@ fontes disponíveis. O comprovante é **uma fonte**, não o produto.
 A divisão F1.2a/F1.2b é **conceitual e de responsabilidade**. No MVP atual, as
 duas etapas são executadas pelo mesmo `DocumentAnalyzer` e produzem um único
 `DocumentAnalysisResult`; a separação permite substituir parser/OCR sem mexer no
-entendimento e vice-versa. A F1.3 é a próxima etapa e ainda **não está
-implementada**.
+entendimento e vice-versa. A F1.3 foi entregue em 2026-10-23; OCR e formatos
+complexos continuam como evolução da fase.
 
 ### F1.1 — Intake seguro do comprovante (entregue em 2026-10-22)
 
@@ -432,7 +454,7 @@ outros campos relevantes
 - Contrato em [ADR-0038](adr/0038-analise-de-documento-do-cliente.md) e
   [`arquitetura-evidencias.md`](arquitetura-evidencias.md#53-análise-do-documento-do-cliente-f12-implementado).
 
-### F1.3 — Verification (P1, próxima etapa)
+### F1.3 — Verification (P1, entregue em 2026-10-23)
 
 **Responsabilidade:**
 
@@ -470,10 +492,13 @@ EvidenceVerificationResult
   `stance × strength × confidence × decay × weight`, com deduplicação por
   fonte/grupo quando necessário.
 
+**Estado:** o contrato, o matching nas três dimensões, a materialização em
+`claim_evidence`, o detalhe no `GET` e a regra de versões foram implementados.
+As lacunas restantes da fase são OCR, formatos complexos e decisões de policy
+de produto; elas não bloqueiam o vertical slice atual.
+
 ### Ainda falta para concluir a Fase 1
 
-- F1.3 completa: matching nas três dimensões, mapeamento para
-  `claim_evidence`/`stance`, detalhe no `GET` e regra de múltiplas versões.
 - OCR de imagem e mais formatos de documento.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
   contrato, mas a decisão de produto é F1.3/F3.
@@ -490,22 +515,16 @@ EvidenceVerificationResult
 | Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                  |
 | Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score       |
 | Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única        |
-| Verificação (F1.3)             | busca no repo                                                                                  | **Não implementada**                                                       |
+| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência   |
 
 ### Lacunas
 
-1. **F1.3 não existe:** não há comparação entre observação, claim e fontes, nem
-   materialização da verificação em `claim_evidence`.
-2. **OCR de imagem e formatos complexos:** o MVP cobre apenas PDF textual; não
+1. **OCR de imagem e formatos complexos:** o MVP cobre apenas PDF textual; não
    há provider/limites/consentimento definidos para OCR/VLM.
-3. **Múltiplas versões de análise:** a F1.2 preserva versões, mas a F1.3 ainda
-   não define qual versão é a leitura corrente.
-4. **Detalhe público:** `GET /v1/validations/:id` continua mostrando
-   `evidence_summary.unknown`; expor o resultado é decisão de contrato da F1.3.
-5. **Independência de score:** `weightedScore` é aditivo e ainda não deduplica
+2. **Independência de score:** `weightedScore` é aditivo e ainda não deduplica
    por fonte/grupo; a F3 decide `SCORER_VERSION=2` quando houver a segunda fonte
    externa.
-6. **Documento autêntico ≠ titular mora aqui:** a separação de dimensões existe,
+3. **Documento autêntico ≠ titular mora aqui:** a separação de dimensões existe,
    mas a política de vínculo com o titular é F1.3/F3.
 
 ### Escopo
@@ -658,8 +677,9 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
 
 > **Nota de sequenciamento:** o pedido original chamava esta etapa de "F2.2a".
 > No roadmap canônico a F2.2a é a normalização (já entregue); a decodificação
-> física da imagem/PDF é a **primeira metade da F2.2b**. A segunda metade
-> (consulta real ao autorizador) continua pendente.
+> física da imagem/PDF é a **primeira metade da F2.2b**. A segunda metade foi
+> entregue na primeira fatia SVRS/produção para RS e SP; expansão, cache,
+> métricas e hardening continuam pendentes.
 
 - `extractFiscalReferenceFromArtifact` em
   `packages/providers/src/fiscal/reference.ts` decodifica QR de **PNG/JPEG** e
@@ -680,9 +700,12 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
   ganhou `fiscalReference`; a URL normalizada é **removida antes da
   persistência** (`redactFiscalReference`), preservando `fingerprint` e
   `documentId`. O schema do resultado proíbe `url != null`.
-- Pendente na F2.2b: resolver o autorizador **no servidor**, consultar somente
-  URL da allowlist e normalizar a resposta (com allowlist, cache, métricas e
-  fixtures de respostas gravadas).
+- **Entregue na primeira fatia da F2.2b:** resolver o autorizador no servidor,
+  consultar somente o endpoint HTTPS da allowlist SVRS em produção e normalizar
+  a resposta com fixtures e testes de indisponibilidade.
+- **Ainda pendente:** cache/rate limit por fonte, métricas operacionais,
+  expansão para outros autorizadores/UFs e eventuais fixtures adicionais de
+  respostas reais.
 
 ### Escopo
 
@@ -745,7 +768,10 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
 operar a consulta comercial com cobrança auditável. A policy não é fonte; a fonte
 não decide o veredito.
 
-### F3.1 — Policy engine e scoring
+**Estado:** F3.1 e o vertical slice F3.2 estão entregues. F3.3 é a próxima
+etapa comercial e ainda não está concluída.
+
+### F3.1 — Policy engine e scoring (primeiro slice entregue em 2026-10-25)
 
 - Evoluir a policy/scoring existentes (`evaluateClaim` + `weightedScore` +
   `policies/*.yaml`) para consumir as três dimensões e produzir `stance`,
@@ -763,7 +789,11 @@ não decide o veredito.
   existir, mas o primeiro contrato B2B provavelmente exige versionamento
   explícito.
 
-### F3.2 — Fluxo comercial e entrega do resultado
+O primeiro checker fiscal (`nf3e_verification`) já tem força e confiança
+versionadas na policy `2026.14.1`; fontes `unsupported`/`unavailable`/
+`inconclusive` continuam neutras.
+
+### F3.2 — Fluxo comercial e entrega do resultado (vertical slice entregue em 2026-10-26)
 
 - O cliente corporativo solicita uma consulta; o Comprova cria/associa a
   execução técnica (`validation`) e, quando necessário, o link do titular (F4).
@@ -774,6 +804,10 @@ não decide o veredito.
 - Replay/retry não geram novo resultado nem nova cobrança.
 - O contrato público do resultado (API/dashboard) é definido junto com a F1.3 e
   evolui de forma aditiva.
+
+O dashboard já executa criação, upload, análise, verificação, consulta fiscal,
+reavaliação e polling até o resultado estabilizar. O fluxo ainda é single-tenant
+de desenvolvimento e não representa cobrança pronta para produção.
 
 ### F3.3 — Medição de uso e cobrança
 
@@ -1144,20 +1178,20 @@ Não confundir "SSI" com "credencial":
 | SSI como pré-requisito do MVP | **não**                  | Verificação de endereço e resultado B2B são o valor inicial |
 | Segundo roadmap               | **não criar**            | Este arquivo é o canônico                                   |
 
-### Adicionar
+### Adicionar / acompanhar
 
-| Item                                    | Fase    | Por quê                                                |
-| --------------------------------------- | ------- | ------------------------------------------------------ |
-| Evidence Source / EvidenceObservation   | F1/F2   | Uniformiza documento, fiscal, cadastro e outras fontes |
-| Contrato de verificador + taxonomia     | F1.3/F2 | Evita "booleano mágico" e duplicação                   |
-| Verificação do documento contra o claim | F1.3    | Fecha a etapa que hoje termina na extração             |
-| Policy/scoring por dimensões            | F3      | Autenticidade ≠ endereço ≠ titular                     |
-| Fluxo comercial e cobrança por consulta | F3      | É o modelo de negócio B2B                              |
-| Fluxo do titular por link seguro        | F4      | Requisito de coleta/atualização                        |
-| Credencial como saída                   | F5      | Recibo verificável, sem tornar SSI o centro            |
-| Guarda de fetch (SSRF real)             | F0      | Pré-requisito de qualquer fonte externa                |
-| Medição faturável                       | F3      | Sem isso não há receita auditável                      |
-| Expansão de fontes (NFAg-e etc.)        | F7      | Adaptadores, não novos domínios                        |
+| Item                                    | Fase    | Estado / por quê                                          |
+| --------------------------------------- | ------- | --------------------------------------------------------- |
+| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes               |
+| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação        |
+| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                   |
+| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente |
+| Fluxo comercial e cobrança por consulta | F3      | F3.2 entregue; F3.3 é o próximo passo B2B                 |
+| Fluxo do titular por link seguro        | F4      | Futuro; requisito de coleta/atualização                   |
+| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui           |
+| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua         |
+| Medição faturável                       | F3      | Próximo; sem isso não há receita auditável                |
+| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                   |
 
 ## Decisões de produto em aberto
 
@@ -1206,9 +1240,11 @@ isolamento/integridade (ADR-0035; migration 0039).
 
 **F1.1/F1.2 (entregues em 2026-10-22):** intake seguro, análise/extração e
 entendimento do comprovante, com `evidence_analysis` append-only e idempotente
-(ADR-0037/ADR-0038; migrations 0040/0041). A F1.3 ainda não existe.
+(ADR-0037/ADR-0038; migrations 0040/0041). A F1.3 foi entregue em 2026-10-23.
 
-**Próximo passo:** fechar o checklist de produção e implementar a **F1.3**
-(contrato de verificação, matching nas três dimensões e materialização em
-`claim_evidence`). Em seguida, a **F2** começa pelo contrato de
-`EvidenceSourceAdapter` e pelo adaptador NF3e, com allowlist e guarda de fetch.
+**F2.1/F2.2:** contrato fiscal, referência normalizada, QR físico e primeira
+consulta real NF3-e SVRS para RS/SP entregues; cobertura adicional, cache,
+métricas e hardening continuam no backlog.
+
+**Próximo passo:** fechar o checklist de produção e implementar a **F3.3**
+(evento faturável canônico, cotas, reconciliação e regras de não cobrança).

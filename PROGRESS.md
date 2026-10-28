@@ -1,6 +1,16 @@
 # PROGRESS.md
 
-Estado: **Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico** (2026-10-26)
+Estado: **Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-10-28)
+
+## Sincronização do roadmap (2026-10-28)
+
+- A correção do QR HTTP legado da EDP foi publicada: só é aceito para host/caminho
+  SVRS conhecido e chave NF3-e válida, com normalização para HTTPS.
+- O dashboard passou a contar com autocomplete de CEP com fallback BrasilAPI/ViaCEP;
+  observabilidade fiscal e logs persistidos também foram incorporados ao `main`.
+- `docs/roadmap.md`, `docs/architecture.md` e `docs/arquitetura-evidencias.md`
+  agora distinguem entregas concluídas, cobertura limitada a SVRS/RS+SP e lacunas
+  futuras. O próximo passo comercial é F3.3: evento faturável, cotas e reconciliação.
 
 ## Vertical slice end-to-end pelo dashboard (F3) (2026-10-26)
 

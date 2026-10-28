@@ -1,12 +1,13 @@
 # Arquitetura de evidências e verificação fiscal (alvo)
 
-> **Status:** proposta de arquitetura, 2026-10-22, atualizada em 2026-10-24.
+> **Status:** proposta de arquitetura, 2026-10-22, atualizada em 2026-10-28.
 > **F0.1 (artefato tenant-scoped), F1.1 (intake do comprovante), F1.2
 > (análise/extração do documento), F1.3 (verificação do documento enviado),
 > F2.1 (contrato `FiscalAdapter` e materialização da observação fiscal), F2.2a
-> (referência fiscal normalizada) e a parte física da F2.2b (decodificação
-> local do QR) estão implementados**; a consulta fiscal real, OCR de imagem e as
-> demais fontes continuam não implementados.
+> (referência fiscal normalizada), a parte física da F2.2b (decodificação local
+> do QR) e a primeira consulta NF3-e via SVRS em produção para RS/SP estão
+> implementados**; OCR de imagem, expansão fiscal e as demais fontes continuam
+> não implementados.
 > Este documento descreve o alvo e o que já existe para reaproveitar. As decisões
 > estão registradas em [ADR-0033](adr/0033-verificacao-de-evidencias-por-adaptadores.md),
 > [ADR-0034](adr/0034-consulta-a-fontes-fiscais-endpoints-oficiais.md),
@@ -32,8 +33,9 @@ duas famílias de evidência:
 
 O ponto central: **essas duas famílias não são um novo domínio**. Elas produzem
 observações que se encaixam no modelo existente `validation → claim →
-claim_evidence → evidence`. O que falta é um **contrato de verificação** e uma
-taxonomia de resultado. A análise intermediária da F1.2 precisou de uma única
+claim_evidence → evidence`. O contrato de verificação e a taxonomia de resultado
+já existem; permanecem como evolução OCR, cobertura fiscal e operação comercial.
+A análise intermediária da F1.2 precisou de uma única
 tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
 `evidence_artifact` é write-once; a decisão e o contrato estão no
 [ADR-0038](adr/0038-analise-de-documento-do-cliente.md).
@@ -65,7 +67,7 @@ tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
 | Identificação do tipo | Assinatura de PDF/JPEG/PNG no intake (F1.1)                                                                                     | Estrutura/OCR e XML/QR (F1.2/F2)          |
 | Extração de campos    | PDF via `unpdf`/PDF.js no worker (F1.2); campos só por rótulo explícito; VLM só fachada                                         | OCR de imagem; parse no adaptador fiscal  |
 | Verificação do upload | Comparadores puros + worker (`evidence-verification.ts`, F1.3)                                                                  | Igual                                     |
-| Consulta externa      | Providers de endereço com URL fixa                                                                                              | Adaptadores com allowlist (F2)            |
+| Consulta externa      | Providers de endereço com URL fixa; NF3-e SVRS em produção para RS/SP (F2.2b)                                                   | Adaptadores com allowlist (F2)            |
 | Normalização          | Checkers T0/T1/T2 + normalização de endereço/titular (F1.2/F1.3)                                                                | Normalizador por fonte                    |
 | Persistência          | `claim_evidence` + `evidence`/`evidence_artifact` + `evidence_analysis` + `evidence_verification_attempt` (F0.1/F1.1/F1.2/F1.3) | Igual + evidência de fonte fiscal (F2)    |
 | Avaliação             | `evaluateClaim` / `weightedScore`                                                                                               | Igual + metadados de independência        |
@@ -79,7 +81,8 @@ tabela append-only (`evidence_analysis`) porque `claim_evidence` é imutável e
 > `differs`. O contrato puro e a implementação para `uploaded_document` estão na
 > F1.3 (`packages/core/src/evidence-verification.ts`). A F2.1 adiciona o
 > contrato `FiscalAdapter` (`packages/core/src/fiscal-verification.ts`) e a
-> materialização em `claim_evidence`; nenhuma consulta fiscal real existe ainda.
+> materialização em `claim_evidence`; a primeira consulta real NF3-e via SVRS em
+> produção para RS/SP está implementada na F2.2b.
 
 ```ts
 type EvidenceSourceKind = 'uploaded_document' | 'fiscal_nf3e' | 'fiscal_nfag' | 'public_registry'
@@ -467,8 +470,9 @@ ANONIMA`, `MICROEMPRESA`, `EMPRESARIO INDIVIDUAL`). Sem nome extraído ou sem
 
 ### 5.5 Contrato fiscal e materialização (F2.1, implementado)
 
-A F2.1 prepara a primeira fonte externa **sem executar consulta fiscal real**.
-Contrato puro em `packages/core/src/fiscal-verification.ts`; materialização em
+A F2.1 define o contrato e a materialização da primeira fonte externa; a
+consulta real pertence à F2.2b. Contrato puro em
+`packages/core/src/fiscal-verification.ts`; materialização em
 `apps/worker/src/modules/fiscal-verification/fiscal-verification.service.ts`;
 adapter determinístico em `packages/providers/src/fiscal/`. Decisão em
 [ADR-0041](adr/0041-contrato-fiscal-adapter.md).
@@ -518,14 +522,16 @@ adapter determinístico em `packages/providers/src/fiscal/`. Decisão em
   A chave de acesso/URL do QR não é copiada; logs usam apenas ids, status e
   reason codes.
 - **SSRF:** a URL do QR nunca é buscada. `packages/providers/src/fiscal/endpoint.ts`
-  define a allowlist server-side por `(source, issuer, environment)`, nasce
-  **vazia** e delega a chamada para a guarda única `safeExternalFetch`
+  define a allowlist server-side por `(source, issuer, environment)`, com a
+  entrada SVRS em produção para NF3-e, e delega a chamada para a guarda única
+  `safeExternalFetch`
   (ADR-0036). Um endpoint fora da allowlist nem chega ao fetch; mesmo uma
   allowlist mal configurada para metadata/RFC1918 é barrada pela guarda.
-- **Fora da F2.1/F2.2a (F2.2b):** decodificação física do QR, seleção de
-  autorizador/UF para consulta, consulta HTTP/SOAP, certificado, cache, rate
-  limit por fonte, métricas, exposição do detalhe fiscal no `GET`, NFAg-e e
-  qualquer chamada de rede.
+- **Entregue na F2.2b:** decodificação física do QR, seleção do autorizador
+  SVRS, consulta HTTP pela allowlist em produção para RS/SP, normalização da
+  resposta e exposição do detalhe fiscal no `GET`.
+- **Ainda pendente:** certificado/SOAP, cache, rate limit por fonte, métricas,
+  expansão de autorizadores/UFs e NFAg-e.
 
 Testes: `packages/core/src/fiscal-verification.test.ts` (taxonomia, fingerprint,
 versão, stance), `packages/providers/src/fiscal/fiscal.test.ts` (fake adapter,
@@ -535,8 +541,8 @@ idempotência, versionamento, cross-tenant, ausência de `signal` e de PII/bruto
 
 ### 5.6 Referência fiscal/QR: extração e normalização (F2.2a/F2.2b — parte física, implementado)
 
-A F2.2a é a ponte entre o documento/artefato e o `FiscalAdapter`, ainda **sem
-consulta fiscal real**. Ela recebe uma referência **já extraída** — payload de
+A F2.2a é a ponte entre o documento/artefato e o `FiscalAdapter`, sem executar
+rede. Ela recebe uma referência **já extraída** — payload de
 QR, URL, chave de acesso ou texto — e devolve um `FiscalReference` normalizado.
 A parte física da F2.2b decodifica o QR do próprio artefato (PNG/JPEG e raster
 embutido em PDF) e entrega o payload ao mesmo normalizador; **não há fetch**.
@@ -577,11 +583,10 @@ dependências em [`architecture.md`](architecture.md).
   referência `found` (`UNKNOWN_ISSUER`, `DOCUMENT_ID_MISSING`); `errorCodes`
   fica vazio em `found` e só recebe códigos em `unsupported`.
 - **URL não confiável:** o extractor **não faz fetch, HEAD, DNS lookup nem
-  segue redirect**. Reutiliza `isSafeExternalUrl` (F0.2) para rejeitar `http`,
-  credenciais embutidas, loopback, RFC1918, link-local/metadata e IPv6
-  privado. A URL é apenas normalizada (host minúsculo, sem fragmento, query
-  ordenada) e guardada como referência; a allowlist server-side e o fetch
-  continuam em F2.1/F2.2b.
+  segue redirect**. Reutiliza `isSafeExternalUrl` (F0.2) para rejeitar URLs
+  arbitrárias inseguras; o QR HTTP legado da EDP só é aceito para o host/caminho
+  SVRS conhecido e uma chave NF3-e válida, sendo normalizado para HTTPS. A URL
+  continua apenas uma referência; a consulta usa a allowlist server-side.
 - **Decodificação local:** `zxing-wasm` carrega o WASM apenas do pacote
   instalado (`wasmBinary`), sem CDN/fetch/DNS/redirect; `image-size` faz a
   pré-checagem de dimensões. Tetos: 16 MP e 10.000 px por imagem, 8 símbolos
@@ -626,19 +631,20 @@ persistida, idempotência/replay e cross-tenant, sem rede).
 ## 6. Segurança das consultas externas
 
 A guarda genérica `safeExternalFetch` foi entregue em F0.2 (ADR-0036) e já é
-usada no envio de webhook. Ela cobre resolução/fixação de IP, HTTPS, ausência de
-redirect e limites de tempo/corpo/content-type. A F2.1 entregou o **contrato** do
-adaptador e o **esqueleto da allowlist server-side**, ainda vazio; a F2.2a
-entrega a **referência normalizada** (sem rede) e a parte física da F2.2b
-entrega a **decodificação local do QR** (sem rede); os autorizadores reais e a
-consulta NF3e continuam pendentes (ADR-0034, ADR-0041).
+usada no envio de webhook e na consulta fiscal. Ela cobre resolução/fixação de
+IP, HTTPS, ausência de redirect e limites de tempo/corpo/content-type. A F2.1
+entregou o contrato do adaptador e o esqueleto da allowlist; a F2.2a entrega a
+referência normalizada (sem rede), e a F2.2b entrega a decodificação local do
+QR e a primeira consulta NF3-e real via SVRS em produção para RS/SP
+(ADR-0034, ADR-0041).
 Requisitos:
 
 1. **Allowlist server-side** por `(tipo de documento, autorizador, ambiente)`.
    A URL do QR é usada apenas para **identificar** o autorizador — nunca para
    fetch. **Esqueleto implementado em F2.1**
-   (`packages/providers/src/fiscal/endpoint.ts`), **vazio por decisão**;
-   autorizadores reais entram em F2.2.
+   (`packages/providers/src/fiscal/endpoint.ts`), com a primeira entrada real
+   para `nf3e/SVRS/production`; novas entradas entram conforme a cobertura for
+   priorizada.
 2. **Resolução e fixação de IP:** resolver o host, rejeitar loopback, RFC1918,
    link-local (`169.254.0.0/16`), metadata (`169.254.169.254`), IPv6
    `::1`/`fc00::/7`/`fe80::/10`, e conectar ao IP validado (evita DNS
@@ -656,7 +662,7 @@ Requisitos:
    expostos pela guarda;** a F2.1 persiste IP, status, hash do corpo e hash da
    URL pedida, nunca a URL crua.
 7. **Rate limit** por tenant e por fonte, além do cache por chave. **Ainda não
-   implementado (F2.2).**
+   implementado; permanece backlog operacional da F2.2/F6.**
 
 `isSafeWebhookUrl` continua apenas no cadastro como validação de UX; ela não
 resolve DNS e não substitui a guarda no envio.

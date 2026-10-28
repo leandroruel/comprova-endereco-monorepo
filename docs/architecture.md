@@ -182,15 +182,14 @@ endereço. A F1.2 adiciona a extração estruturada de PDF textual em
 `evidence_analysis`, ainda **não confiável**: não autentica o documento, não
 compara com o endereço e não altera o score. A F1.3 materializa a verificação do
 documento enviado (endereço/titular) em uma observação própria, ainda sem
-autenticar o documento. A F2.1 adiciona o **contrato** `FiscalAdapter` e a
-materialização de uma fonte fiscal, **sem nenhuma consulta real**: a allowlist
-server-side nasce vazia e não há `signal`. A F2.2a adiciona a
+autenticar o documento. A F2.1 adiciona o contrato `FiscalAdapter` e a
+materialização de uma fonte fiscal. A F2.2a adiciona a
 extração/normalização da **referência fiscal** (payload de QR, URL, chave de
-acesso ou texto) e a conversão para `FiscalLookupInput`, ainda **sem rede**. A
-parte física da F2.2b decodifica o QR do artefato (PNG/JPEG e raster embutido em
-PDF) e o injeta no mesmo contrato, também **sem rede**. **Ainda não existem**
-OCR de imagem, consulta fiscal real nem NFAg-e; a consulta real é a segunda
-metade da F2.2b.
+acesso ou texto) e a conversão para `FiscalLookupInput`, sem rede. A parte
+física da F2.2b decodifica o QR do artefato (PNG/JPEG e raster embutido em PDF)
+e o injeta no mesmo contrato, também sem rede; a segunda metade adiciona a
+primeira consulta real NF3-e via SVRS em produção para RS e SP. **Ainda não
+existem** OCR de imagem, cobertura fiscal nacional nem NFAg-e.
 
 A fundação para documento de cliente é `evidence_artifact` (F0.1/ADR-0035):
 
@@ -208,8 +207,8 @@ validation → claim → claim_evidence → assessment → credential
 é persistida. O endpoint de upload e o sniffing de conteúdo foram entregues em
 F1.1; a extração de texto de PDF (via `unpdf`/PDF.js) foi entregue em F1.2; o
 matching do upload foi F1.3; a decodificação física do QR (raster em PDF e
-PNG/JPEG) foi entregue na parte física da F2.2b. OCR de imagem e a consulta
-fiscal real (segunda metade da F2.2b) continuam pendentes.
+PNG/JPEG) e a primeira consulta fiscal real foram entregues na F2.2b. OCR de
+imagem, expansão da cobertura fiscal e hardening operacional continuam pendentes.
 
 A F2.1 não cria um novo modelo de evidência: o adapter fiscal devolve uma
 observação normalizada que vira **uma linha** em `claim_evidence`
@@ -217,7 +216,8 @@ observação normalizada que vira **uma linha** em `claim_evidence`
 sem `signal`. O resultado não pode emitir `trust_score`/`approved`; a policy
 continua dona do score. A idempotência usa a versão do adapter + hash do
 documento + versão do contrato. O endpoint de consulta vem de allowlist
-server-side vazia e, quando existir, passa por `safeExternalFetch`. Detalhes em
+server-side versionada e passa por `safeExternalFetch`; a primeira entrada real
+é o endpoint SVRS em produção para NF3-e, RS/SP. Detalhes em
 [ADR-0041](adr/0041-contrato-fiscal-adapter.md).
 
 A F2.2a também não cria modelo de evidência nem tabela: `FiscalReference` é um
@@ -255,9 +255,10 @@ A parte física da F2.2b decodifica o QR localmente e não cria contrato paralel
   rejeita `url != null`. `fingerprint`/`documentId` permanecem para auditoria e
   consulta futura. O fingerprint inclui a URL e é preservado na redaction,
   portanto não é recalculável a partir da projeção persistida.
-- **Sem novo modelo de evidência, score ou allowlist.** A referência continua
-  sendo uma observação não confiável; a consulta real, a allowlist preenchida e
-  o parsing da resposta seguem na segunda metade da F2.2b.
+- **Sem novo modelo de evidência ou score.** A referência continua sendo uma
+  observação não confiável; a primeira consulta real e o parsing da resposta
+  vivem na segunda metade já entregue da F2.2b. Expansão, cache e métricas
+  continuam no backlog.
 
 O alvo (documento do cliente + NF3e/NFAg-e), o contrato de verificação, a
 taxonomia de resultado e as extensões mínimas estão em
