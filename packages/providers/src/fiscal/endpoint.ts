@@ -1,5 +1,5 @@
 import type { FiscalSourceId, VerificationEnvironment } from '@comprova/core'
-import type { SafeFetch, SafeFetchOptions, SafeFetchResponse } from '../safe-fetch.js'
+import type { SafeFetch, SafeFetchOptions, SafeFetchResponse } from '../safe-fetch/index.js'
 
 /**
  * F2.1 — allowlist server-side de endpoints fiscais.

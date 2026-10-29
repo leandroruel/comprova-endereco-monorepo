@@ -277,7 +277,7 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 | Idempotência de validação | `apps/api/src/services/fastpath.ts` (`findExistingIdempotency`, `requestHashOf`) + `validation_idempotency`      | Funciona; replay não reescreve e não reemite `usage_event`                                                                               |
 | RLS multi-tenant          | `packages/db/migrations/0007_rls.sql`, `withTenant`                                                              | FORCE em `subject`, `validation`, `claim`, `claim_evidence`, `usage_event`, `audit_log`, `webhook_*`, `batch*`                           |
 | Retenção de validação     | `apps/worker/src/modules/retention/retention.service.ts` + loop em `apps/worker/src/loops.ts`                    | Job diário existe e apaga o grafo                                                                                                        |
-| Guarda de fetch externo   | `packages/providers/src/safe-fetch.ts`, [ADR-0036](adr/0036-guarda-de-fetch-externo.md)                          | **Entregue em F0.2**: HTTPS, DNS resolvido, todos os IPs validados e fixados, sem redirect, limites e content-type; webhook usa no envio |
+| Guarda de fetch externo   | `packages/providers/src/safe-fetch/`, [ADR-0036](adr/0036-guarda-de-fetch-externo.md)                            | **Entregue em F0.2**: HTTPS, DNS resolvido, todos os IPs validados e fixados, sem redirect, limites e content-type; webhook usa no envio |
 | `evidence` global         | `packages/db/migrations/0005_validation.sql`, `0007_rls.sql`, `0008_grants.sql`                                  | **Sem `tenant_id`/RLS**; único escritor hoje é o VLM de street view (`apps/worker/src/modules/evidence/evidence.service.ts`)             |
 | Artefato de PII           | `packages/db/migrations/0039_evidence_artifact.sql`, [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) | **Entregue em F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, write-once; intake em F1.1 e análise em F1.2a/F1.2b                  |
 | Expiração de validação    | `fastpath.ts` (`expires_at = now + 30d`)                                                                         | 30 dias hardcoded, não vem da policy                                                                                                     |
@@ -286,7 +286,7 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 ### Lacunas
 
 1. **Guarda de fetch genérica entregue em F0.2.** `safeExternalFetch`
-   (`packages/providers/src/safe-fetch.ts`) resolve/valida todos os IPs, fixa o
+   (`packages/providers/src/safe-fetch/`) resolve/valida todos os IPs, fixa o
    IP na conexão, exige HTTPS, não segue redirect e limita
    tempo/corpo/content-type; o webhook e a primeira consulta fiscal já a usam.
    A allowlist fiscal tem a primeira entrada SVRS em produção para RS/SP;
@@ -1220,7 +1220,7 @@ reutilizável pela fonte fiscal.**
 
 Entregue:
 
-- `safeExternalFetch` (`packages/providers/src/safe-fetch.ts`), usando
+- `safeExternalFetch` (`packages/providers/src/safe-fetch/`), usando
   `node:https` e `node:dns/promises` (sem novo cliente HTTP) e `ipaddr.js` para
   classificar faixas IPv4/IPv6. Resolve o host, rejeita IP privado/loopback/
   link-local/metadata/reservado, fixa o IP validado no `lookup` da conexão, não

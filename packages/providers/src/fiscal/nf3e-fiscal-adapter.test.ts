@@ -12,7 +12,7 @@ import {
   type SafeFetch,
   type SafeFetchOptions,
   type SafeFetchResponse,
-} from '../safe-fetch.js'
+} from '../safe-fetch/index.js'
 import { makeFiscalEndpointAllowlist } from './endpoint.js'
 import {
   NF3E_CONSULTATION_MAX_RESPONSE_BYTES,

@@ -19,7 +19,7 @@ import {
   safeExternalFetch,
   type SafeFetch,
   type SafeFetchOptions,
-} from '../safe-fetch.js'
+} from '../safe-fetch/index.js'
 import {
   FISCAL_ENDPOINT_ALLOWLIST,
   safeFetchFiscalEndpoint,

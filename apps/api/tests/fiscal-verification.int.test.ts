@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs'
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSafeExternalFetch } from '../../../packages/providers/src/safe-fetch.js'
+import { createSafeExternalFetch } from '../../../packages/providers/src/safe-fetch/index.js'
 import { verifyFiscalClaim } from '../../worker/src/modules/fiscal-verification/fiscal-verification.service.js'
 
 const FIXED_NOW = new Date('2026-10-23T12:00:00.000Z')

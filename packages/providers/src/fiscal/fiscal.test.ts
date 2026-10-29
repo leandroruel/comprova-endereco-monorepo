@@ -5,7 +5,7 @@ import {
   type FiscalLookupInput,
 } from '@comprova/core'
 import { describe, expect, it, vi } from 'vitest'
-import { safeExternalFetch } from '../safe-fetch.js'
+import { safeExternalFetch } from '../safe-fetch/index.js'
 import {
   FISCAL_ENDPOINT_ALLOWLIST,
   FiscalEndpointNotAllowedError,

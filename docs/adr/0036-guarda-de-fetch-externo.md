@@ -38,7 +38,7 @@ não havia uma primitiva reutilizável para a fase fiscal.
 ### 1. Uma única guarda em `packages/providers`
 
 A guarda é `safeExternalFetch`
-(`packages/providers/src/safe-fetch.ts`), exportada por
+(`packages/providers/src/safe-fetch/index.ts`), exportada por
 `@comprova/providers`. Ela é a única camada de fetch externo iniciado pelo
 servidor; callers não recebem opções para desligar protocolo, resolução,
 validação de IP, redirect ou limites.

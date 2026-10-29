@@ -12,7 +12,7 @@ import {
   safeExternalFetch,
   SafeFetchError,
   type SafeFetch,
-} from './safe-fetch.js'
+} from './safe-fetch/index.js'
 
 const makeCertificate = (): { readonly dir: string; readonly key: Buffer; readonly cert: Buffer } => {
   const dir = mkdtempSync(join(tmpdir(), 'comprova-safe-fetch-'))

@@ -12,7 +12,7 @@ import {
 import { imageSize } from 'image-size'
 import { extractImages, getDocumentProxy, renderPageAsImage } from 'unpdf'
 import { prepareZXingModule, readBarcodes, type ReadResult, type ReaderOptions } from 'zxing-wasm/reader'
-import { isSafeExternalUrl } from '../safe-fetch.js'
+import { isSafeExternalUrl } from '../safe-fetch/index.js'
 
 /**
  * F2.2a/F2.2b — extractor de referência fiscal.

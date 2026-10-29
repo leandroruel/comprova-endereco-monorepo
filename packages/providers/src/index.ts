@@ -8,5 +8,10 @@ export * from './fiscal/index.js'
 export * from './street-view.js'
 export * from './vision-model.js'
 export * from './brasilapi-cep.js'
-export { SAFE_FETCH_REASONS, SafeFetchError, isSafeExternalUrl, safeExternalFetch } from './safe-fetch.js'
-export type { SafeFetch, SafeFetchOptions, SafeFetchReason, SafeFetchResponse } from './safe-fetch.js'
+export {
+  SAFE_FETCH_REASONS,
+  SafeFetchError,
+  isSafeExternalUrl,
+  safeExternalFetch,
+} from './safe-fetch/index.js'
+export type { SafeFetch, SafeFetchOptions, SafeFetchReason, SafeFetchResponse } from './safe-fetch/index.js'
