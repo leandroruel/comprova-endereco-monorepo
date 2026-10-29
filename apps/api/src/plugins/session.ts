@@ -5,6 +5,7 @@ export interface SessionUser {
   readonly id: string
   readonly email: string
   readonly name: string
+  readonly role: string
 }
 
 declare module 'fastify' {
@@ -26,10 +27,13 @@ export const makeSessionMiddleware = (auth: Auth) => {
 
       const session = await auth.api.getSession({ headers: incoming })
       if (session?.user) {
+        // O plugin admin do better-auth inclui o campo `role` no objeto do usuário.
+        const user = session.user as { readonly role?: string | null }
         request.sessionUser = {
           id: session.user.id,
           email: session.user.email,
           name: session.user.name,
+          role: user.role ?? 'user',
         }
       }
     } catch {

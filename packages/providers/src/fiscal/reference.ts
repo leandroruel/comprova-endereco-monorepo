@@ -12,6 +12,7 @@ import {
 import { imageSize } from 'image-size'
 import { extractImages, getDocumentProxy, renderPageAsImage } from 'unpdf'
 import { prepareZXingModule, readBarcodes, type ReadResult, type ReaderOptions } from 'zxing-wasm/reader'
+import { emitDebug, type DebugTraceSink } from '../debug-trace.js'
 import { isSafeExternalUrl } from '../safe-fetch/index.js'
 
 /**
@@ -646,7 +647,37 @@ export interface FiscalReferenceArtifactOptions {
   /** Orçamento cumulativo de pixels para todas as páginas renderizadas. */
   readonly maxPdfRenderPixels?: number
   readonly maxSymbols?: number
+  /** Diagnóstico opcional; não altera a decisão da extração. */
+  readonly onDebug?: DebugTraceSink
 }
+
+interface DebugPayloadSummary {
+  readonly length: number
+  readonly preview: string
+}
+
+const debugPayloadSummary = (payload: string): DebugPayloadSummary => ({
+  length: payload.length,
+  // O payload do QR é entrada não confiável, mas a rota que usa o trace é
+  // administrativa. Ainda assim limitamos o tamanho para não despejar um
+  // documento inteiro na resposta.
+  preview: payload.length > 240 ? `${payload.slice(0, 240)}…` : payload,
+})
+
+const debugReferenceSummary = (reference: FiscalReference): Record<string, unknown> => ({
+  status: reference.status,
+  source: reference.source,
+  issuer: reference.issuer,
+  uf: reference.uf,
+  url: reference.url,
+  documentId: reference.documentId,
+  method: reference.method,
+  limitations: reference.limitations,
+  errorCodes: reference.errorCodes,
+})
+
+const debugLevelOfReference = (reference: FiscalReference): 'success' | 'warning' =>
+  reference.status === 'found' ? 'success' : 'warning'
 
 class QrDecoderUnavailableError extends Error {}
 class PdfRenderBudgetExceededError extends Error {}
@@ -713,6 +744,7 @@ const isReadableResult = (result: ReadResult): boolean => result.isValid && resu
 const referenceFromSymbols = (
   results: readonly ReadResult[],
   options: SymbolPolicyOptions,
+  onDebug?: DebugTraceSink,
 ): FiscalReference => {
   // A mesma página pode aparecer como imagem embutida e novamente depois da
   // renderização. Deduplica antes de aplicar maxSymbols para não contar um
@@ -723,28 +755,87 @@ const referenceFromSymbols = (
       .map((result) => result.text.trim())
       .filter((text) => text.length > 0),
   )
+  const unreadable = results.filter((result) => !isReadableResult(result)).length
+
+  emitDebug(onDebug, {
+    code: 'qr.symbols',
+    level: readablePayloads.length > 0 ? 'success' : unreadable > 0 ? 'warning' : 'info',
+    message:
+      readablePayloads.length > 0
+        ? `${readablePayloads.length} símbolo(s) QR legível(is) encontrado(s).`
+        : unreadable > 0
+          ? 'Símbolos QR foram detectados, mas nenhum pôde ser lido.'
+          : 'Nenhum símbolo QR foi encontrado.',
+    details: {
+      readable: readablePayloads.length,
+      unreadable,
+      payloads: readablePayloads.map(debugPayloadSummary),
+    },
+  })
 
   // O decoder lê `maxSymbols + 1`; só há truncamento quando esse limite
   // extra é atingido. Exatamente `maxSymbols` referências legíveis ainda
   // passam pela política (duplicata já foi removida, distintas viram ambíguo).
   if (readablePayloads.length > options.maxSymbols) {
-    return inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
+    const reference = inconclusive({ method: 'qr_code', reasons: ['QR_TOO_MANY_SYMBOLS'] })
+    emitDebug(onDebug, {
+      code: 'qr.policy',
+      level: 'warning',
+      message: 'Há mais símbolos QR legíveis do que o limite de segurança.',
+      details: debugReferenceSummary(reference),
+    })
+    return reference
   }
 
-  const unreadable = results.filter((result) => !isReadableResult(result)).length
-
   if (readablePayloads.length === 0) {
-    if (unreadable > 0) return inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
-    return notFound('qr_code')
+    const reference =
+      unreadable > 0 ? inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] }) : notFound('qr_code')
+    emitDebug(onDebug, {
+      code: 'qr.policy',
+      level: 'warning',
+      message:
+        reference.status === 'inconclusive'
+          ? 'O QR foi detectado, mas está ilegível.'
+          : 'Nenhuma referência fiscal foi encontrada no QR.',
+      details: debugReferenceSummary(reference),
+    })
+    return reference
   }
 
   const reference = extractFiscalReferenceFromPayloads(readablePayloads)
   if (reference.status === 'not_found' && unreadable > 0) {
-    return inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
+    const result = inconclusive({ method: 'qr_code', reasons: ['QR_NOT_READABLE'] })
+    emitDebug(onDebug, {
+      code: 'qr.policy',
+      level: 'warning',
+      message: 'O QR foi detectado, mas está ilegível.',
+      details: debugReferenceSummary(result),
+    })
+    return result
   }
   if ((reference.status === 'found' || reference.status === 'unsupported') && unreadable > 0) {
-    return { ...reference, limitations: unique([...reference.limitations, 'QR_NOT_READABLE']) }
+    const result = {
+      ...reference,
+      limitations: unique([...reference.limitations, 'QR_NOT_READABLE'] as readonly FiscalReferenceReason[]),
+    }
+    emitDebug(onDebug, {
+      code: 'qr.policy',
+      level: debugLevelOfReference(result),
+      message: 'A referência do QR foi classificada; havia também símbolos ilegíveis.',
+      details: debugReferenceSummary(result),
+    })
+    return result
   }
+
+  emitDebug(onDebug, {
+    code: 'qr.policy',
+    level: debugLevelOfReference(reference),
+    message:
+      reference.status === 'found'
+        ? 'Referência fiscal reconhecida no QR.'
+        : 'O QR foi lido, mas a referência não é uma NF3e suportada.',
+    details: debugReferenceSummary(reference),
+  })
   return reference
 }
 
@@ -859,9 +950,17 @@ export const extractFiscalReferenceFromPdf = async (
   const maxImages = options.maxPdfImages ?? MAX_PDF_IMAGES
   const maxPdfRenderPixels = options.maxPdfRenderPixels ?? FISCAL_REFERENCE_MAX_PDF_RENDER_PIXELS
   const maxSymbols = resolveMaxSymbols(options.maxSymbols)
+  const onDebug = options.onDebug
 
   if (pdf.numPages > maxPages) {
-    return inconclusive({ method: 'qr_code', reasons: ['PDF_TOO_MANY_PAGES'] })
+    const reference = inconclusive({ method: 'qr_code', reasons: ['PDF_TOO_MANY_PAGES'] })
+    emitDebug(onDebug, {
+      code: 'pdf.pages.limit',
+      level: 'warning',
+      message: `O PDF tem ${pdf.numPages} páginas; o limite é ${maxPages}.`,
+      details: { pages: pdf.numPages, maxPages, ...debugReferenceSummary(reference) },
+    })
+    return reference
   }
 
   const results: ReadResult[] = []
@@ -876,10 +975,26 @@ export const extractFiscalReferenceFromPdf = async (
       images = await extractImages(pdf, pageNumber)
     } catch {
       extractionFailed = true
+      emitDebug(onDebug, {
+        code: 'pdf.page.images.error',
+        level: 'warning',
+        message: `Não foi possível extrair as imagens raster da página ${pageNumber}.`,
+        details: { page: pageNumber },
+      })
       continue
     }
 
-    for (const image of images) {
+    emitDebug(onDebug, {
+      code: 'pdf.page.images',
+      level: images.length > 0 ? 'info' : 'info',
+      message:
+        images.length > 0
+          ? `${images.length} imagem(ns) raster encontrada(s) na página ${pageNumber}.`
+          : `Nenhuma imagem raster na página ${pageNumber}.`,
+      details: { page: pageNumber, images: images.length },
+    })
+
+    for (const [imageIndex, image] of images.entries()) {
       if (image.key.length > 0) {
         if (seenImageKeys.has(image.key)) continue
         seenImageKeys.add(image.key)
@@ -887,17 +1002,49 @@ export const extractFiscalReferenceFromPdf = async (
 
       imageCount += 1
       if (imageCount > maxImages) {
-        return inconclusive({ method: 'qr_code', reasons: ['PDF_TOO_MANY_IMAGES'] })
+        const reference = inconclusive({ method: 'qr_code', reasons: ['PDF_TOO_MANY_IMAGES'] })
+        emitDebug(onDebug, {
+          code: 'pdf.images.limit',
+          level: 'warning',
+          message: `O PDF tem mais de ${maxImages} imagens raster.`,
+          details: { page: pageNumber, image: imageIndex, imageCount, maxImages },
+        })
+        return reference
       }
 
       if (exceedsImageLimits(image.width, image.height, maxImagePixels, maxImageEdge)) {
         skippedOversized = true
+        emitDebug(onDebug, {
+          code: 'pdf.image.skipped',
+          level: 'warning',
+          message: `A imagem ${imageIndex + 1} da página ${pageNumber} excede os limites de dimensão.`,
+          details: {
+            page: pageNumber,
+            image: imageIndex,
+            width: image.width,
+            height: image.height,
+            maxImagePixels,
+            maxImageEdge,
+          },
+        })
         continue
       }
 
       const rgba = imageToRgba(image)
       if (rgba === null) {
         extractionFailed = true
+        emitDebug(onDebug, {
+          code: 'pdf.image.invalid',
+          level: 'warning',
+          message: `A imagem ${imageIndex + 1} da página ${pageNumber} tem um formato de pixels não suportado.`,
+          details: {
+            page: pageNumber,
+            image: imageIndex,
+            width: image.width,
+            height: image.height,
+            channels: image.channels,
+          },
+        })
         continue
       }
 
@@ -907,11 +1054,39 @@ export const extractFiscalReferenceFromPdf = async (
           maxSymbols + 1,
         )
         results.push(...pageResults)
+        emitDebug(onDebug, {
+          code: 'pdf.image.qr',
+          level: pageResults.some(isReadableResult) ? 'success' : 'info',
+          message: `Leitura de QR concluída na imagem ${imageIndex + 1} da página ${pageNumber}.`,
+          details: {
+            page: pageNumber,
+            image: imageIndex,
+            width: image.width,
+            height: image.height,
+            payloads: pageResults
+              .filter(isReadableResult)
+              .map((result) => debugPayloadSummary(result.text.trim())),
+            unreadable: pageResults.filter((result) => !isReadableResult(result)).length,
+          },
+        })
       } catch (error) {
         if (error instanceof QrDecoderUnavailableError) {
-          return inconclusive({ method: 'qr_code', reasons: ['QR_DECODER_UNAVAILABLE'] })
+          const reference = inconclusive({ method: 'qr_code', reasons: ['QR_DECODER_UNAVAILABLE'] })
+          emitDebug(onDebug, {
+            code: 'qr.decoder.unavailable',
+            level: 'error',
+            message: 'O decodificador de QR não pôde ser inicializado.',
+            details: debugReferenceSummary(reference),
+          })
+          return reference
         }
         extractionFailed = true
+        emitDebug(onDebug, {
+          code: 'pdf.image.qr.error',
+          level: 'warning',
+          message: `Falha ao decodificar QR na imagem ${imageIndex + 1} da página ${pageNumber}.`,
+          details: { page: pageNumber, image: imageIndex },
+        })
       }
     }
   }
@@ -919,6 +1094,13 @@ export const extractFiscalReferenceFromPdf = async (
   const failures: FiscalReferenceReason[] = []
   if (skippedOversized) failures.push('IMAGE_TOO_LARGE')
   if (extractionFailed) failures.push('PDF_IMAGE_EXTRACTION_FAILED')
+
+  emitDebug(onDebug, {
+    code: 'pdf.images.summary',
+    level: failures.length > 0 ? 'warning' : 'info',
+    message: `Varredura de imagens raster concluída: ${imageCount} imagem(ns), ${results.length} símbolo(s) QR.`,
+    details: { images: imageCount, qrSymbols: results.length, failures },
+  })
 
   // Sempre inspeciona as páginas: um QR raster válido não exclui a existência
   // de outro QR desenhado com paths/rectangles no mesmo PDF.
@@ -938,19 +1120,51 @@ export const extractFiscalReferenceFromPdf = async (
       )
       results.push(...renderedPage.results)
       remainingRenderPixels -= renderedPage.pixels
+      emitDebug(onDebug, {
+        code: 'pdf.page.render',
+        level: renderedPage.results.some(isReadableResult) ? 'success' : 'info',
+        message: `Página ${pageNumber} renderizada e verificada.`,
+        details: {
+          page: pageNumber,
+          pixels: renderedPage.pixels,
+          remainingRenderPixels,
+          payloads: renderedPage.results
+            .filter(isReadableResult)
+            .map((result) => debugPayloadSummary(result.text.trim())),
+          unreadable: renderedPage.results.filter((result) => !isReadableResult(result)).length,
+        },
+      })
     } catch (error) {
       if (error instanceof QrDecoderUnavailableError) {
         renderDecoderUnavailable = true
+        emitDebug(onDebug, {
+          code: 'qr.decoder.unavailable',
+          level: 'error',
+          message: 'O decodificador de QR não pôde ser inicializado durante a renderização.',
+          details: { page: pageNumber },
+        })
         break
       }
       if (error instanceof PdfRenderBudgetExceededError) {
         renderBudgetExceeded = true
+        emitDebug(onDebug, {
+          code: 'pdf.page.render.budget',
+          level: 'warning',
+          message: `O orçamento de pixels terminou antes da página ${pageNumber}.`,
+          details: { page: pageNumber, remainingRenderPixels, maxPdfRenderPixels },
+        })
         break
       }
       // Um PDF pode ser válido para texto/imagens e ainda não ser renderizável
       // neste ambiente. A falha fica registrada e impede `found`, mas as demais
       // páginas ainda são examinadas para não esconder uma ambiguidade.
       renderFailed = true
+      emitDebug(onDebug, {
+        code: 'pdf.page.render.error',
+        level: 'warning',
+        message: `Não foi possível renderizar a página ${pageNumber}.`,
+        details: { page: pageNumber },
+      })
     }
   }
 
@@ -958,26 +1172,83 @@ export const extractFiscalReferenceFromPdf = async (
   if (renderBudgetExceeded) failures.push('PDF_RENDER_TOO_LARGE')
   if (renderDecoderUnavailable) failures.push('QR_DECODER_UNAVAILABLE')
 
+  emitDebug(onDebug, {
+    code: 'pdf.scan.summary',
+    level: failures.length > 0 ? 'warning' : 'info',
+    message: `Varredura do PDF concluída: ${results.length} símbolo(s) QR e ${failures.length} falha(s) registrada(s).`,
+    details: { qrSymbols: results.length, failures, remainingRenderPixels },
+  })
+
   if (results.length === 0) {
-    if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })
+    if (failures.length > 0) {
+      const reference = inconclusive({ method: 'qr_code', reasons: failures })
+      emitDebug(onDebug, {
+        code: 'pdf.reference',
+        level: 'warning',
+        message: 'Nenhum QR legível; a extração terminou inconclusiva.',
+        details: debugReferenceSummary(reference),
+      })
+      return reference
+    }
     // Sem imagem raster e sem QR após renderização, não afirmamos ausência
     // absoluta: o PDF pode usar uma construção vetorial não renderizável.
-    return inconclusive({ method: 'qr_code', reasons: ['PDF_QR_VECTOR_UNSUPPORTED'] })
+    const reference = inconclusive({ method: 'qr_code', reasons: ['PDF_QR_VECTOR_UNSUPPORTED'] })
+    emitDebug(onDebug, {
+      code: 'pdf.reference',
+      level: 'warning',
+      message: 'Nenhum QR legível foi encontrado no PDF.',
+      details: debugReferenceSummary(reference),
+    })
+    return reference
   }
 
-  const reference = referenceFromSymbols(results, { maxSymbols })
+  const reference = referenceFromSymbols(results, { maxSymbols }, onDebug)
   // Uma ambiguidade observada em qualquer caminho é mais informativa que uma
   // falha da outra estratégia; nunca a substitua por PDF_IMAGE_EXTRACTION_FAILED.
   if (reference.status === 'unsupported' && reference.errorCodes.includes('AMBIGUOUS_REFERENCE')) {
+    emitDebug(onDebug, {
+      code: 'pdf.reference',
+      level: 'warning',
+      message: 'Mais de uma referência fiscal distinta foi encontrada no PDF.',
+      details: debugReferenceSummary(reference),
+    })
     return reference
   }
-  if (failures.length > 0) return inconclusive({ method: 'qr_code', reasons: failures })
-  if (reference.status === 'not_found') {
-    return inconclusive({
-      method: 'qr_code',
-      reasons: unique([...reference.limitations, 'PDF_QR_VECTOR_UNSUPPORTED']),
+  if (failures.length > 0) {
+    const result = inconclusive({ method: 'qr_code', reasons: failures })
+    emitDebug(onDebug, {
+      code: 'pdf.reference',
+      level: 'warning',
+      message: 'A varredura do PDF teve falhas; o resultado é inconclusivo.',
+      details: debugReferenceSummary(result),
     })
+    return result
   }
+  if (reference.status === 'not_found') {
+    const result = inconclusive({
+      method: 'qr_code',
+      reasons: unique([
+        ...reference.limitations,
+        'PDF_QR_VECTOR_UNSUPPORTED',
+      ] as readonly FiscalReferenceReason[]),
+    })
+    emitDebug(onDebug, {
+      code: 'pdf.reference',
+      level: 'warning',
+      message: 'A referência do PDF não pôde ser confirmada.',
+      details: debugReferenceSummary(result),
+    })
+    return result
+  }
+  emitDebug(onDebug, {
+    code: 'pdf.reference',
+    level: debugLevelOfReference(reference),
+    message:
+      reference.status === 'found'
+        ? 'Referência fiscal extraída do PDF.'
+        : 'O PDF foi lido, mas a referência não é uma NF3e suportada.',
+    details: debugReferenceSummary(reference),
+  })
   return reference
 }
 

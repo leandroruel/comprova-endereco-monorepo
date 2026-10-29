@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth'
+import { admin } from 'better-auth/plugins/admin'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import type { Db } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -24,6 +25,7 @@ export const createAuth = (db: Db, secret: string) =>
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,
     },
+    plugins: [admin()],
   })
 
 export type Auth = ReturnType<typeof createAuth>

@@ -118,8 +118,12 @@ export function BulkSearchPage({ onNavigate }: { onNavigate?: (page: string) => 
     if (docs.length > 0) mutation.mutate(docs)
   }
 
+  const handleNavigate = (page: string) => {
+    onNavigate?.(page)
+  }
+
   return (
-    <DashboardLayout activePage="bulk" onNavigate={onNavigate}>
+    <DashboardLayout activePage="bulk" onNavigate={handleNavigate}>
       <div className="space-y-6">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Busca em lote</h1>

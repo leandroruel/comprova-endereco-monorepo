@@ -47,7 +47,10 @@ function StatCard({
 }
 
 export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void }) {
-  const [session, setSession] = useState<{ user: { email: string; name: string } } | null>(null)
+  const [session, setSession] = useState<{ user: { email: string; name: string; role?: string } } | null>(
+    null,
+  )
+  const [userRole, setUserRole] = useState<string>('user')
   const [authChecked, setAuthChecked] = useState(false)
   const [document, setDocument] = useState('')
   const [mode, setMode] = useState<'fast' | 'auto' | 'deep'>('fast')
@@ -73,7 +76,11 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
   useEffect(() => {
     if (authChecked) return
     void authClient.getSession().then((result) => {
-      if (result.data) setSession(result.data)
+      if (result.data) {
+        const user = result.data.user as { readonly role?: string | null }
+        setSession(result.data)
+        setUserRole(user.role ?? 'user')
+      }
       setAuthChecked(true)
     })
   }, [authChecked])
@@ -101,11 +108,16 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
   const notFoundCount = s?.by_verdict?.['NOT_FOUND'] ?? 0
   const unsuccessful = insuffCount + notFoundCount + (s?.by_verdict?.['INCONSISTENT'] ?? 0)
 
+  const handleNavigate = (page: string) => {
+    onNavigate?.(page)
+  }
+
   return (
     <DashboardLayout
       activePage="validations"
-      onNavigate={onNavigate}
+      onNavigate={handleNavigate}
       userEmail={session.user.name}
+      userRole={userRole}
       onLogout={() => {
         void authClient.signOut().then(() => {
           setSession(null)

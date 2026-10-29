@@ -45,6 +45,9 @@ import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
+import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
+import { registerMeRoute } from './modules/me/me.route.js'
+import { requireWriteScope } from './plugins/scope.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
 import { makeSigningKeyProvider } from './services/signing-key-provider.factory.js'
 import { readPolicyFile } from './policy-loader.js'
@@ -229,6 +232,8 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         evidenceMaxConcurrency,
         logger: deps.logger,
       })
+      registerDebugNf3eQrCodeRoute(v1, requireWriteScope)
+      registerMeRoute(v1, requireWriteScope)
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
@@ -241,6 +246,20 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   )
 
   app.get('/openapi.json', async () => app.swagger())
+
+  // Endpoint para o frontend saber o role do usuário logado (apenas cookie de sessão, sem API key).
+  app.get('/api/me', async (request, reply) => {
+    const sessionUser = request.sessionUser
+    if (sessionUser === undefined) {
+      return reply.code(401).send({ error: 'não autenticado' })
+    }
+    return reply.send({
+      id: sessionUser.id,
+      email: sessionUser.email,
+      name: sessionUser.name,
+      role: sessionUser.role,
+    })
+  })
 
   registerIssuerRoutes(app, {
     db: deps.db,

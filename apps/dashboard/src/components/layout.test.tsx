@@ -14,6 +14,20 @@ describe('DashboardLayout', () => {
     await expect.element(page.getByRole('button', { name: 'Busca em lote' })).toBeVisible()
   })
 
+  it('omite o item QRCode NF3e debugger quando o usuário não é admin', async () => {
+    await render(<DashboardLayout userRole="user">conteúdo</DashboardLayout>)
+
+    await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Busca em lote' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'QRCode NF3e debugger' })).not.toBeInTheDocument()
+  })
+
+  it('mostra o item QRCode NF3e debugger quando o usuário é admin', async () => {
+    await render(<DashboardLayout userRole="admin">conteúdo</DashboardLayout>)
+
+    await expect.element(page.getByRole('button', { name: 'QRCode NF3e debugger' })).toBeVisible()
+  })
+
   it('troca de aba e avisa a navegação ao clicar no menu lateral', async () => {
     const onNavigate = vi.fn()
     await render(<DashboardLayout onNavigate={onNavigate}>conteúdo</DashboardLayout>)

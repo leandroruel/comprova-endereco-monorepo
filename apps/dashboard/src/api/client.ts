@@ -322,3 +322,72 @@ export async function getReady(): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/readyz`)
   return (await res.json()) as { status: string }
 }
+
+export interface DebugTraceEventDto {
+  readonly code: string
+  readonly level: 'info' | 'success' | 'warning' | 'error'
+  readonly message: string
+  readonly details?: Readonly<Record<string, unknown>>
+}
+
+export interface DebugNf3eQrCodeResponse {
+  readonly events: DebugTraceEventDto[]
+  readonly reference: {
+    readonly status: string
+    readonly source: string | null
+    readonly issuer: string | null
+    readonly uf: string | null
+    readonly url: string | null
+    readonly documentId: string | null
+    readonly method: string
+    readonly limitations: string[]
+    readonly errorCodes: string[]
+    readonly fingerprint: string | null
+  }
+}
+
+/**
+ * POST /v1/debug/nf3e/qrcode — endpoint administrativo protegido por API key
+ * (`validate:write`). Retorna o trace da extração da referência fiscal.
+ */
+export async function debugNf3eQrCode(file: File): Promise<DebugNf3eQrCodeResponse> {
+  const body = new FormData()
+  body.append('file', file, file.name)
+  const res = await fetch(`${API_BASE}/v1/debug/nf3e/qrcode`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    body,
+  })
+  if (!res.ok) {
+    const problem = (await res.json().catch(() => ({}))) as { code?: string; title?: string }
+    throw new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`)
+  }
+  return (await res.json()) as DebugNf3eQrCodeResponse
+}
+
+export interface MeDto {
+  readonly id: string
+  readonly email: string
+  readonly name: string
+  readonly role: string
+}
+
+/**
+ * GET /api/me — retorna os dados da sessão corrente, incluindo o role do usuário.
+ * Usa apenas cookie de sessão (não precisa de API key).
+ */
+export async function getMe(): Promise<MeDto | null> {
+  const res = await fetch(`${API_BASE}/api/me`, {
+    method: 'GET',
+    credentials: 'include',
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) {
+    const problem = (await res.json().catch(() => ({}))) as { code?: string; title?: string }
+    throw new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`)
+  }
+  return (await res.json()) as MeDto
+}

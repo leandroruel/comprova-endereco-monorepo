@@ -18,9 +18,13 @@ interface NavItem {
   readonly icon: ReactNode
 }
 
-const navItems: readonly NavItem[] = [
+const baseNavItems: readonly NavItem[] = [
   { id: 'validations', label: 'Validações', icon: <FileSearch className="h-4 w-4" /> },
   { id: 'bulk', label: 'Busca em lote', icon: <Activity className="h-4 w-4" /> },
+]
+
+const adminNavItems: readonly NavItem[] = [
+  { id: 'debug-nf3e-qrcode', label: 'QRCode NF3e debugger', icon: <Activity className="h-4 w-4" /> },
 ]
 
 const initialsOf = (name: string): string => {
@@ -106,16 +110,19 @@ export function DashboardLayout({
   children,
   onLogout,
   userEmail,
+  userRole,
   onNavigate,
   activePage,
 }: {
   children: ReactNode
   onLogout?: () => void
   userEmail?: string
+  userRole?: string
   onNavigate?: (page: string) => void
   activePage?: string
 }) {
   const [active, setActive] = useState(activePage ?? 'validations')
+  const navItems = userRole === 'admin' ? [...baseNavItems, ...adminNavItems] : baseNavItems
 
   return (
     <div className="flex min-h-screen bg-background">

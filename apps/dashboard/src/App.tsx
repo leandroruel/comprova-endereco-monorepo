@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Dashboard from '@/pages/Dashboard'
 import { BulkSearchPage } from '@/pages/BulkSearch'
+import { DebugNf3eQrCodePage } from '@/pages/DebugNf3eQrCode'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,7 +15,13 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {page === 'bulk' ? <BulkSearchPage onNavigate={setPage} /> : <Dashboard onNavigate={setPage} />}
+      {page === 'bulk' ? (
+        <BulkSearchPage onNavigate={setPage} />
+      ) : page === 'debug-nf3e-qrcode' ? (
+        <DebugNf3eQrCodePage onNavigate={setPage} />
+      ) : (
+        <Dashboard onNavigate={setPage} />
+      )}
     </QueryClientProvider>
   )
 }
