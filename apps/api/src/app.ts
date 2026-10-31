@@ -121,13 +121,15 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   const evidenceMaxBytes = deps.config.EVIDENCE_MAX_BYTES ?? EVIDENCE_ARTIFACT_MAX_BYTES
   const evidenceMaxConcurrency = deps.config.EVIDENCE_MAX_CONCURRENCY ?? DEFAULT_EVIDENCE_MAX_CONCURRENCY
+  const documentIntelligenceTimeoutMs = deps.config.DOCUMENT_INTELLIGENCE_TIMEOUT_MS ?? 300_000
+  const documentIntelligenceMaxFileSizeMb = deps.config.DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB ?? 30
   const documentIntelligence = makeDocumentIntelligenceClient({
     url: deps.config.DOCUMENT_INTELLIGENCE_URL,
-    timeoutMs: deps.config.DOCUMENT_INTELLIGENCE_TIMEOUT_MS,
-    maxFileSizeMb: deps.config.DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB,
+    timeoutMs: documentIntelligenceTimeoutMs,
+    maxFileSizeMb: documentIntelligenceMaxFileSizeMb,
     logger: deps.logger,
   })
-  const documentIntelligenceMaxBytes = deps.config.DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB * 1024 * 1024
+  const documentIntelligenceMaxBytes = documentIntelligenceMaxFileSizeMb * 1024 * 1024
 
   await app.register(helmet)
   await app.register(cors, { origin: true, credentials: true })

@@ -98,11 +98,12 @@ const EnvSchema = z.object({
   /**
    * Serviço independente de OCR/layout (apps/document-intelligence). As três
    * variáveis são opcionais: sem `DOCUMENT_INTELLIGENCE_URL` a rota
-   * `/v1/documents/parse` falha fechado com 503 e nada é enviado.
+   * `/v1/documents/parse` falha fechado com 503 e nada é enviado. Timeout e
+   * tamanho usam fallbacks em `app.ts` quando ausentes.
    */
   DOCUMENT_INTELLIGENCE_URL: z.url().optional(),
-  DOCUMENT_INTELLIGENCE_TIMEOUT_MS: z.coerce.number().int().positive().max(3_600_000).default(300_000),
-  DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).default(30),
+  DOCUMENT_INTELLIGENCE_TIMEOUT_MS: z.coerce.number().int().positive().max(3_600_000).optional(),
+  DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>
