@@ -74,6 +74,49 @@ services:
       exit 1
       "
 
+  # Serviço independente de OCR/layout (Python + Marker). Processa PDFs e
+  # devolve JSON estruturado; não guarda documentos e não usa LLM.
+  # Opt-in: `docker compose --profile document-intelligence up -d` — o stack
+  # padrão não constrói nem inicia esta imagem (build pesado, warmup longo).
+  document-intelligence:
+    build:
+      context: ./apps/document-intelligence
+      dockerfile: Dockerfile
+    profiles:
+      - document-intelligence
+    labels:
+      comprova_logs: 'true'
+    environment:
+      DI_PORT: '8000'
+      DI_MAX_FILE_SIZE_MB: '30'
+      DI_MAX_CONCURRENCY: '1'
+      DI_TIMEOUT_S: '300'
+      DI_PRELOAD_MODELS: 'true'
+      DI_WARMUP: 'true'
+      DI_LOG_LEVEL: 'info'
+    ports:
+      # Só a máquina local acessa o serviço sem autenticação. Em produção,
+      # mantenha-o em rede privada atrás da API.
+      - '127.0.0.1:8000:8000'
+    volumes:
+      # Pesos do Marker/Surya (persistem entre reinícios; o primeiro boot baixa).
+      - document_intelligence_cache:/app/.cache
+      - document_intelligence_tmp:/tmp/document-intelligence
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else sys.exit(1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   pgdata:
   objectdata:
+  document_intelligence_cache:
+  document_intelligence_tmp:

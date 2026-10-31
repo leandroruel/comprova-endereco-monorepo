@@ -44,6 +44,8 @@ import { registerMetaRoutes } from './modules/meta/meta.routes.js'
 import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
+import { registerDocumentRoutes } from './modules/documents/documents.routes.js'
+import { makeDocumentIntelligenceClient } from './services/document-intelligence-client.js'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'
@@ -119,6 +121,15 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   const evidenceMaxBytes = deps.config.EVIDENCE_MAX_BYTES ?? EVIDENCE_ARTIFACT_MAX_BYTES
   const evidenceMaxConcurrency = deps.config.EVIDENCE_MAX_CONCURRENCY ?? DEFAULT_EVIDENCE_MAX_CONCURRENCY
+  const documentIntelligenceTimeoutMs = deps.config.DOCUMENT_INTELLIGENCE_TIMEOUT_MS ?? 300_000
+  const documentIntelligenceMaxFileSizeMb = deps.config.DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB ?? 30
+  const documentIntelligence = makeDocumentIntelligenceClient({
+    url: deps.config.DOCUMENT_INTELLIGENCE_URL,
+    timeoutMs: documentIntelligenceTimeoutMs,
+    maxFileSizeMb: documentIntelligenceMaxFileSizeMb,
+    logger: deps.logger,
+  })
+  const documentIntelligenceMaxBytes = documentIntelligenceMaxFileSizeMb * 1024 * 1024
 
   await app.register(helmet)
   await app.register(cors, { origin: true, credentials: true })
@@ -233,6 +244,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         logger: deps.logger,
       })
       registerDebugNf3eQrCodeRoute(v1, requireWriteScope)
+      registerDocumentRoutes(v1, {
+        client: documentIntelligence,
+        maxBytes: documentIntelligenceMaxBytes,
+        logger: deps.logger,
+      })
       registerMeRoute(v1, requireWriteScope)
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
