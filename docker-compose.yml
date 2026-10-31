@@ -76,10 +76,14 @@ services:
 
   # Serviço independente de OCR/layout (Python + Marker). Processa PDFs e
   # devolve JSON estruturado; não guarda documentos e não usa LLM.
+  # Opt-in: `docker compose --profile document-intelligence up -d` — o stack
+  # padrão não constrói nem inicia esta imagem (build pesado, warmup longo).
   document-intelligence:
     build:
       context: ./apps/document-intelligence
       dockerfile: Dockerfile
+    profiles:
+      - document-intelligence
     labels:
       comprova_logs: 'true'
     environment:

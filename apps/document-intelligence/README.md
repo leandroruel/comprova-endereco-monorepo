@@ -54,11 +54,12 @@ cd apps/document-intelligence
 uv venv .venv
 source .venv/bin/activate
 uv pip install -e .
+uv sync --extra dev   # dependências de teste (pytest etc.)
 # Primeira execução baixa os modelos (~1–2 GB) e aquece o pipeline.
 DI_PRELOAD_MODELS=true DI_WARMUP=true python -m document_intelligence
 ```
 
-Sem `uv`, use `python -m venv .venv` + `pip install -e .`.
+Sem `uv`, use `python -m venv .venv` + `pip install -e ".[dev]"`.
 
 ### Docker
 
@@ -71,26 +72,35 @@ docker run --rm -p 8000:8000 \
   document-intelligence
 ```
 
-Ou via `docker compose` (serviço `document-intelligence` no compose raiz).
+Ou via `docker compose` na raiz — o serviço é **opt-in** (perfil dedicado) para
+não pesar o stack padrão:
+
+```bash
+docker compose --profile document-intelligence up -d document-intelligence
+```
+
+O `Dockerfile` já embute o `llama-server` (llama.cpp, CPU), backend de OCR do
+Marker/Surya para PDFs escaneados. Em produção com GPU, aponte
+`SURYA_INFERENCE_URL` para um servidor de inferência dedicado.
 
 ## Configuração
 
 Todas as variáveis usam o prefixo `DI_`.
 
-| Variável | Default | Descrição |
-|---|---|---|
-| `DI_HOST` | `0.0.0.0` | Host de escuta |
-| `DI_PORT` | `8000` | Porta |
-| `DI_LOG_LEVEL` | `info` | `debug`/`info`/`warning`/`error` |
-| `DI_LOG_FILE` | — | Arquivo de log opcional (além do stdout JSON) |
-| `DI_MAX_FILE_SIZE_MB` | `30` | Tamanho máximo do upload |
-| `DI_MAX_CONCURRENCY` | `1` | Requisições admitidas por processo (ver limitações) |
-| `DI_TIMEOUT_S` | `300` | Timeout por documento |
-| `DI_MAX_PAGES` | — | Limite de páginas; acima disso → HTTP 422 |
-| `DI_PRELOAD_MODELS` | `true` | Carrega modelos no startup |
-| `DI_WARMUP` | `true` | Roda um PDF sintético no startup para carregar layout/OCR |
-| `DI_TEMP_DIR` | — | Diretório dos temporários (default: sistema) |
-| `DI_MIN_FREE_MEMORY_MB` | `512` | Mínimo de memória livre para `/ready` |
+| Variável                | Default   | Descrição                                                 |
+| ----------------------- | --------- | --------------------------------------------------------- |
+| `DI_HOST`               | `0.0.0.0` | Host de escuta                                            |
+| `DI_PORT`               | `8000`    | Porta                                                     |
+| `DI_LOG_LEVEL`          | `info`    | `debug`/`info`/`warning`/`error`                          |
+| `DI_LOG_FILE`           | —         | Arquivo de log opcional (além do stdout JSON)             |
+| `DI_MAX_FILE_SIZE_MB`   | `30`      | Tamanho máximo do upload                                  |
+| `DI_MAX_CONCURRENCY`    | `1`       | Requisições admitidas por processo (ver limitações)       |
+| `DI_TIMEOUT_S`          | `300`     | Timeout por documento                                     |
+| `DI_MAX_PAGES`          | —         | Limite de páginas; acima disso → HTTP 422                 |
+| `DI_PRELOAD_MODELS`     | `true`    | Carrega modelos no startup                                |
+| `DI_WARMUP`             | `true`    | Roda um PDF sintético no startup para carregar layout/OCR |
+| `DI_TEMP_DIR`           | —         | Diretório dos temporários (default: sistema)              |
+| `DI_MIN_FREE_MEMORY_MB` | `512`     | Mínimo de memória livre para `/ready`                     |
 
 Cache de modelos (variáveis do Marker/Surya, não `DI_`):
 
@@ -104,7 +114,7 @@ Cache de modelos (variáveis do Marker/Surya, não `DI_`):
 Responde imediatamente. **Não** carrega modelos.
 
 ```json
-{"status":"ok","service":"document-intelligence","version":"0.1.0","marker_available":true}
+{ "status": "ok", "service": "document-intelligence", "version": "0.1.0", "marker_available": true }
 ```
 
 ### `GET /ready`
@@ -141,8 +151,8 @@ Marker viram `type: "unknown"`, mas texto e `bbox` são preservados.
 {
   "documentId": "doc-123",
   "status": "completed",
-  "document": {"mimeType": "application/pdf", "pageCount": 2, "sizeBytes": 1137},
-  "content": {"text": "...", "markdown": "..."},
+  "document": { "mimeType": "application/pdf", "pageCount": 2, "sizeBytes": 1137 },
+  "content": { "text": "...", "markdown": "..." },
   "pages": [
     {
       "pageNumber": 1,
@@ -153,11 +163,11 @@ Marker viram `type: "unknown"`, mas texto e `bbox` são preservados.
           "id": "/page/0/Text/0",
           "type": "text",
           "text": "CONTRATO DE PRESTACAO DE SERVICOS ...",
-          "bbox": {"x1": 68.05, "y1": 58.14, "x2": 418.67, "y2": 107.39},
+          "bbox": { "x1": 68.05, "y1": 58.14, "x2": 418.67, "y2": 107.39 },
           "confidence": null,
           "table": null,
           "imageRef": null,
-          "metadata": {"blockType": "Text", "sectionHierarchy": {}}
+          "metadata": { "blockType": "Text", "sectionHierarchy": {} }
         }
       ]
     }
@@ -188,9 +198,12 @@ Quando `type == "table"`, `table` traz:
 ```json
 {
   "headers": ["Item", "Qtd", "Valor"],
-  "rows": [["Energia", "10", "100,00"], ["Agua", "5", "50,00"]],
-  "cells": [{"text": "Item", "row": 0, "column": 0, "rowspan": 1, "colspan": 1}],
-  "bbox": {"x1": 96.86, "y1": 186.98, "x2": 397.88, "y2": 290.42}
+  "rows": [
+    ["Energia", "10", "100,00"],
+    ["Agua", "5", "50,00"]
+  ],
+  "cells": [{ "text": "Item", "row": 0, "column": 0, "rowspan": 1, "colspan": 1 }],
+  "bbox": { "x1": 96.86, "y1": 186.98, "x2": 397.88, "y2": 290.42 }
 }
 ```
 
@@ -211,11 +224,11 @@ endereço ou qualquer conteúdo do documento.
 
 Medições reais em CPU (Linux, sem GPU, fixtures de 1–2 páginas):
 
-| Cenário | Tempo |
-|---|---|
-| PDF com camada de texto (2 páginas) | ~1 s |
-| PDF com tabela (1 página, steady state, com OCR) | ~10 s |
-| Primeira inferência de layout/tabela (carrega pesos) | ~5 min |
+| Cenário                                                | Tempo  |
+| ------------------------------------------------------ | ------ |
+| PDF com camada de texto (2 páginas)                    | ~1 s   |
+| PDF com tabela (1 página, steady state, com OCR)       | ~10 s  |
+| Primeira inferência de layout/tabela (carrega pesos)   | ~5 min |
 | RAM recomendada no host (modelos + pico de inferência) | 6–8 GB |
 
 > O `sample_table.pdf` dos testes não tem camada de texto: o conteúdo é
@@ -226,7 +239,7 @@ Medições reais em CPU (Linux, sem GPU, fixtures de 1–2 páginas):
   startup (em background). Enquanto isso, `/ready` responde `not_ready`; `/health`
   continua `ok`.
 - A inferência local do Marker/Surya **não é thread-safe**: duas inferências
-  simultâneas no mesmo processo causam *segfault*. A implementação serializa a
+  simultâneas no mesmo processo causam _segfault_. A implementação serializa a
   inferência com um lock. `DI_MAX_CONCURRENCY` limita requisições em fila, mas o
   ganho de paralelismo exige **réplicas do serviço** ou um servidor Surya em GPU
   (`SURYA_INFERENCE_URL`).
@@ -237,6 +250,9 @@ Medições reais em CPU (Linux, sem GPU, fixtures de 1–2 páginas):
 ## Testes
 
 ```bash
+cd apps/document-intelligence
+source .venv/bin/activate   # ou: uv sync --extra dev (ver Instalação)
+
 # Rápidos (não baixam modelos): segurança, contrato, fila, parsing de HTML/tabela, API.
 pytest -m "not integration"
 

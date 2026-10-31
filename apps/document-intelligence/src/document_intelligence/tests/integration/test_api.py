@@ -66,6 +66,23 @@ def test_rejeita_pdf_corrompido(client: TestClient) -> None:
     assert response.status_code == 400
 
 
+def test_rejeita_arquivo_acima_do_limite_com_413(client: TestClient, monkeypatch) -> None:
+    """A leitura em blocos para cedo: payload maior que o limite vira 413
+    sem ser totalmente recebido/bufferizado."""
+    import io
+
+    from document_intelligence import main
+
+    monkeypatch.setattr(main.settings, "max_file_size_mb", 1)
+    payload = b"%PDF-1.7\n" + b"a" * (2 * 1024 * 1024)
+    response = client.post(
+        "/documents/parse",
+        files={"file": ("grande.pdf", io.BytesIO(payload), "application/pdf")},
+    )
+    assert response.status_code == 413
+    assert "limite" in response.json()["detail"].lower()
+
+
 def test_timeout_responde_504(client: TestClient, sample_text_pdf, monkeypatch) -> None:
     import time
 

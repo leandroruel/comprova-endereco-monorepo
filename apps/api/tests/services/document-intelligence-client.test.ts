@@ -198,6 +198,49 @@ describe('document intelligence client', () => {
     ).rejects.toMatchObject({ kind: 'timeout' })
   })
 
+  it('mapeia arquivo vazio para empty sem chamar o serviço', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const client = makeDocumentIntelligenceClient(config())
+    await expect(
+      client.parsePdf({ data: Buffer.alloc(0), filename: 'a.pdf', documentId: 'doc-1' }),
+    ).rejects.toMatchObject({ kind: 'empty' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('mapeia 400 do serviço para rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('não é um PDF', { status: 400 })),
+    )
+    const client = makeDocumentIntelligenceClient(config())
+    await expect(
+      client.parsePdf({ data: Buffer.from('%PDF-1.4'), filename: 'a.pdf', documentId: 'doc-1' }),
+    ).rejects.toMatchObject({ kind: 'rejected', upstreamStatus: 400 })
+  })
+
+  it('mapeia 422 do serviço para rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('criptografado', { status: 422 })),
+    )
+    const client = makeDocumentIntelligenceClient(config())
+    await expect(
+      client.parsePdf({ data: Buffer.from('%PDF-1.4'), filename: 'a.pdf', documentId: 'doc-1' }),
+    ).rejects.toMatchObject({ kind: 'rejected', upstreamStatus: 422 })
+  })
+
+  it('mapeia 504 do serviço para timeout', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('timeout', { status: 504 })),
+    )
+    const client = makeDocumentIntelligenceClient(config())
+    await expect(
+      client.parsePdf({ data: Buffer.from('%PDF-1.4'), filename: 'a.pdf', documentId: 'doc-1' }),
+    ).rejects.toMatchObject({ kind: 'timeout', upstreamStatus: 504 })
+  })
+
   it('propaga erro tipado sem vazar detalhes internos', async () => {
     vi.stubGlobal(
       'fetch',

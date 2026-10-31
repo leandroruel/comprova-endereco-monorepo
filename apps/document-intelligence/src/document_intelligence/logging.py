@@ -48,4 +48,5 @@ def configure_logging(level: str = "info", log_file: str | None = None) -> None:
 
 
 def get_logger(name: str = "document-intelligence") -> structlog.stdlib.BoundLogger:
+    """Retorna um logger structlog ligado ao logging padrão do Python."""
     return structlog.get_logger(name)

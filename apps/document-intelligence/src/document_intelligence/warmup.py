@@ -10,6 +10,7 @@ from __future__ import annotations
 
 
 def _escape(text: str) -> str:
+    """Escapa caracteres reservados de strings literais em conteúdo PDF."""
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 

@@ -50,8 +50,14 @@ const multipartProblem = (error: EvidenceMultipartError): Problem => {
 
 const clientProblem = (error: DocumentIntelligenceError): Problem => {
   switch (error.kind) {
+    case 'empty':
+      return problems.evidenceEmpty()
     case 'too_large':
       return problems.evidenceTooLarge()
+    case 'rejected':
+      // Entrada inválida do chamador: não-PDF, corrompido, criptografado ou
+      // acima do limite de páginas (HTTP 400/422 do serviço).
+      return problems.invalidDocument()
     case 'timeout':
       return problems.documentIntelligenceTimeout()
     case 'invalid_response':

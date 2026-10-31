@@ -46,10 +46,13 @@ class Settings(BaseSettings):
     @field_validator("log_level")
     @classmethod
     def _validate_log_level(cls, value: str) -> str:
-        allowed = {"debug", "info", "warn", "warning", "error", "critical"}
-        if value.lower() not in allowed:
+        """Normaliza ``warn`` para ``warning`` (nível aceito por uvicorn)."""
+        normalized = value.lower()
+        if normalized == "warn":
+            normalized = "warning"
+        if normalized not in {"debug", "info", "warning", "error", "critical"}:
             raise ValueError(f"log_level inválido: {value}")
-        return value.lower()
+        return normalized
 
 
 settings = Settings()

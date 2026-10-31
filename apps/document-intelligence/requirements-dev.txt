@@ -1,5 +1,6 @@
-# Dependências de desenvolvimento do Document Intelligence
-# Instalar com: uv sync --group dev
+# Dependências de desenvolvimento do Document Intelligence.
+# `dev` é um extra opcional do pyproject; instalar com:
+#   uv venv && uv sync --extra dev
 
 pytest==8.3.3
 pytest-asyncio==0.26.0

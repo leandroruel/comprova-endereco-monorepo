@@ -115,6 +115,7 @@ _WS_RE = re.compile(r"[ \t\r\f\v]+")
 
 
 def _normalize_text(text: str) -> str:
+    """Colapsa espaços por linha, preservando quebras e removendo linhas vazias."""
     lines = []
     for line in text.splitlines():
         line = _WS_RE.sub(" ", line).strip()
@@ -210,6 +211,7 @@ class MarkerParser:
     """
 
     def __init__(self) -> None:
+        """Estado vazio; modelos e locks são criados sob demanda."""
         self._models: dict[str, Any] | None = None
         self._converter: Any = None
         self._json_renderer: Any = None
@@ -249,10 +251,12 @@ class MarkerParser:
 
     @property
     def models_loaded(self) -> bool:
+        """``True`` quando os modelos do Marker já estão carregados."""
         return self._loaded
 
     @property
     def warm(self) -> bool:
+        """``True`` quando o warmup com um PDF sintético concluiu com sucesso."""
         return self._warm
 
     def warmup(self) -> None:
@@ -276,7 +280,14 @@ class MarkerParser:
             with temporary_pdf_path(
                 build_warmup_pdf(), prefix="di-warmup-", dir=settings.temp_dir
             ) as path:
-                self.parse(path, "warmup", size_bytes=0)
+                # parse() captura exceções e devolve status "failed"; um parse
+                # com falha NÃO aquece o serviço — /ready deve continuar
+                # "not_ready" para o orquestrador não rotear tráfego.
+                response = self.parse(path, "warmup", size_bytes=0)
+            if response.status != "completed":
+                raise RuntimeError(
+                    f"aquecimento falhou: {response.error_code}"
+                )
             self._warm = True
             logger.info(
                 "modelos_marker_aquecidos",
@@ -448,6 +459,7 @@ class MarkerParser:
 
     @staticmethod
     def _marker_version() -> str:
+        """Versão instalada do ``marker-pdf`` (``unknown`` se indisponível)."""
         try:
             from importlib.metadata import version
 

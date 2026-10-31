@@ -12,7 +12,14 @@ import type { Logger } from '@comprova/observability'
  */
 
 export type DocumentIntelligenceErrorKind =
-  'not_configured' | 'timeout' | 'unavailable' | 'invalid_response' | 'upstream_error' | 'too_large'
+  | 'not_configured'
+  | 'timeout'
+  | 'unavailable'
+  | 'invalid_response'
+  | 'upstream_error'
+  | 'too_large'
+  | 'rejected'
+  | 'empty'
 
 export class DocumentIntelligenceError extends Error {
   constructor(
@@ -70,7 +77,7 @@ export const makeDocumentIntelligenceClient = (
       throw new DocumentIntelligenceError('not_configured', 'DOCUMENT_INTELLIGENCE_URL is not configured')
     }
     if (data.byteLength === 0) {
-      throw new DocumentIntelligenceError('too_large', 'document is empty')
+      throw new DocumentIntelligenceError('empty', 'document is empty')
     }
     if (data.byteLength > maxFileSizeBytes) {
       throw new DocumentIntelligenceError(
@@ -102,6 +109,14 @@ export const makeDocumentIntelligenceClient = (
 
       if (response.status === 413) {
         throw new DocumentIntelligenceError('too_large', 'service rejected the document size')
+      }
+      if (response.status === 400 || response.status === 422) {
+        // Entrada inválida do chamador (não-PDF, corrompido, criptografado,
+        // acima do limite de páginas): é erro do usuário, não do serviço.
+        throw new DocumentIntelligenceError('rejected', 'service rejected the document', response.status)
+      }
+      if (response.status === 504) {
+        throw new DocumentIntelligenceError('timeout', 'service timed out', response.status)
       }
       if (!response.ok) {
         throw new DocumentIntelligenceError(

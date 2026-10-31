@@ -11,6 +11,7 @@ from .logging import configure_logging, get_logger
 
 
 def main() -> None:
+    """Configura o logging e sobe o uvicorn com as configurações de ``DI_``."""
     configure_logging(level=settings.log_level, log_file=settings.log_file)
     logger = get_logger("document-intelligence.cli")
     logger.info("inicializando_servico_document_intelligence")

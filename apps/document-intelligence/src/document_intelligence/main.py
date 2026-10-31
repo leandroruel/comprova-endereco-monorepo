@@ -45,6 +45,10 @@ from .security import (
 
 logger = get_logger("document-intelligence.main")
 
+# Leitura do upload em blocos de 1 MiB para aplicar o limite de tamanho
+# antes de manter o payload inteiro em memória.
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
 # Instâncias compartilhadas (carregadas no startup / first use).
 parser = MarkerParser()
 queue = ProcessingQueue(max_concurrency=settings.max_concurrency)
@@ -56,6 +60,11 @@ executor = ThreadPoolExecutor(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
+    """Carrega modelos (opcional) no startup e agenda o warmup em background.
+
+    Falha de carregamento não derruba o serviço: ``/ready`` reporta o erro e o
+    orquestrador não roteia tráfego enquanto o estado for ``not_ready``.
+    """
     configure_logging(level=settings.log_level, log_file=settings.log_file)
     logger.info(
         "servico_iniciando",
@@ -89,6 +98,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
 
 
 async def _run_warmup() -> None:
+    """Executa o warmup do parser no executor; falhas já são logadas lá."""
     try:
         await asyncio.get_running_loop().run_in_executor(executor, parser.warmup)
     except Exception:  # pragma: no cover - já logado no parser
@@ -144,6 +154,59 @@ async def ready() -> ReadyResponse:
     )
 
 
+async def _read_upload_bounded(file: UploadFile) -> bytes:
+    """Lê o upload em blocos, abortando com 413 ao exceder o limite.
+
+    Evita receber e manter em memória um payload maior que o configurado: a
+    leitura para no primeiro bloco que estourar ``DI_MAX_FILE_SIZE_MB``.
+    """
+    max_bytes = settings.max_file_size_mb * 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=(
+                    f"arquivo excede o limite de {settings.max_file_size_mb} MiB"
+                ),
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _process_document(
+    data: bytes,
+    filename: str,
+    declared_content_type: str | None,
+    request_id: str,
+) -> ParseResponse:
+    """Pipeline síncrono completo; roda no executor de worker único.
+
+    Tudo aqui bloqueia a thread: escrita do temporário, inspeção PDFium e
+    parse do Marker. Rodar na mesma thread do Marker serializa o PDFium com
+    a inferência (o PDFium não é thread-safe) e libera o event loop para
+    ``/health`` e ``/ready``. Erros de domínio (``SecurityError`` e
+    subclasses) são mapeados para HTTP pelo handler assíncrono.
+    """
+    uploaded = validate_uploaded_pdf(
+        data=data,
+        filename=filename,
+        declared_content_type=declared_content_type,
+        max_size_bytes=settings.max_file_size_mb * 1024 * 1024,
+    )
+    with temporary_pdf_path(
+        uploaded.data, prefix="di-", dir=settings.temp_dir
+    ) as pdf_path:
+        # Inspeção barata (sem modelos): páginas e criptografia.
+        inspect_pdf(pdf_path, max_pages=settings.max_pages)
+        return parser.parse(pdf_path, request_id, uploaded.size_bytes)
+
+
 @app.post("/documents/parse", response_model=ParseResponse, tags=["documents"])
 async def parse_document(
     file: UploadFile = File(..., description="Arquivo PDF a ser processado"),
@@ -155,91 +218,66 @@ async def parse_document(
 
     Validações de segurança:
     - somente PDFs válidos (assinatura ``%PDF-`` + magic bytes);
-    - tamanho dentro do limite configurado;
+    - tamanho dentro do limite configurado (leitura em blocos, 413 cedo);
     - PDF não criptografado e dentro do limite de páginas;
     - nome de arquivo temporário aleatório com limpeza garantida.
     """
     request_id = document_id or generate_document_id()
     start = time.perf_counter()
 
-    data = await file.read()
-
-    try:
-        uploaded = validate_uploaded_pdf(
-            data=data,
-            filename=file.filename or "documento.pdf",
-            declared_content_type=file.content_type,
-            max_size_bytes=settings.max_file_size_mb * 1024 * 1024,
-        )
-    except SecurityError as exc:
-        logger.warning(
-            "rejeicao_por_seguranca",
-            document_id=request_id,
-            motivo=str(exc),
-            tamanho_bytes=len(data),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+    data = await _read_upload_bounded(file)
 
     async with queue:
-        with temporary_pdf_path(
-            uploaded.data,
-            prefix="di-",
-            dir=settings.temp_dir,
-        ) as pdf_path:
-            # Inspeção barata (sem modelos): páginas e criptografia.
-            try:
-                inspect_pdf(pdf_path, max_pages=settings.max_pages)
-            except EncryptedPDFError as exc:
-                logger.warning(
-                    "pdf_criptografado", document_id=request_id
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=str(exc),
-                ) from exc
-            except PageLimitError as exc:
-                logger.warning(
-                    "pdf_acima_do_limite_de_paginas", document_id=request_id
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=str(exc),
-                ) from exc
-            except SecurityError as exc:
-                logger.warning(
-                    "pdf_invalido", document_id=request_id, motivo=str(exc)
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-
-            loop = asyncio.get_running_loop()
-            future = loop.run_in_executor(
-                executor,
-                parser.parse,
-                pdf_path,
-                request_id,
-                uploaded.size_bytes,
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(
+            executor,
+            _process_document,
+            data,
+            file.filename or "documento.pdf",
+            file.content_type,
+            request_id,
+        )
+        try:
+            response = await asyncio.wait_for(
+                future, timeout=settings.timeout_s
             )
-            try:
-                response = await asyncio.wait_for(
-                    future, timeout=settings.timeout_s
-                )
-            except (asyncio.TimeoutError, TimeoutError) as exc:
-                logger.error(
-                    "timeout_no_processamento",
-                    document_id=request_id,
-                    timeout_s=settings.timeout_s,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                    detail=(
-                        f"O processamento excedeu o timeout de "
-                        f"{settings.timeout_s}s"
-                    ),
-                ) from exc
+        except EncryptedPDFError as exc:
+            logger.warning("pdf_criptografado", document_id=request_id)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except PageLimitError as exc:
+            logger.warning(
+                "pdf_acima_do_limite_de_paginas", document_id=request_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except SecurityError as exc:
+            logger.warning(
+                "rejeicao_por_seguranca",
+                document_id=request_id,
+                motivo=str(exc),
+                tamanho_bytes=len(data),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            logger.error(
+                "timeout_no_processamento",
+                document_id=request_id,
+                timeout_s=settings.timeout_s,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=(
+                    f"O processamento excedeu o timeout de "
+                    f"{settings.timeout_s}s"
+                ),
+            ) from exc
 
     duracao_ms = int((time.perf_counter() - start) * 1000)
     log = logger.info if response.status == "completed" else logger.error
@@ -257,6 +295,7 @@ async def parse_document(
 
 
 def _marker_importable() -> bool:
+    """Indica se o pacote ``marker`` está importável (instalação íntegra)."""
     try:
         import marker  # noqa: F401
 
