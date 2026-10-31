@@ -18,19 +18,23 @@ export const registerMeRoute = (
   app: FastifyInstance,
   requireWriteScope: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | void>,
 ): void => {
-  app.addHook('preHandler', requireWriteScope)
+  // Guard no nível da rota: `addHook` no mesmo contexto do `v1` vazaria o
+  // scope de escrita para TODAS as rotas do plugin (inclusive leituras).
+  app.get(
+    '/me',
+    { preHandler: requireWriteScope },
+    async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> => {
+      const sessionUser = request.sessionUser
+      if (sessionUser === undefined) {
+        return sendProblem(reply, 401, 'UNAUTHORIZED', 'Sessão não encontrada')
+      }
 
-  app.get('/me', async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> => {
-    const sessionUser = request.sessionUser
-    if (sessionUser === undefined) {
-      return sendProblem(reply, 401, 'UNAUTHORIZED', 'Sessão não encontrada')
-    }
-
-    return reply.code(200).send({
-      id: sessionUser.id,
-      email: sessionUser.email,
-      name: sessionUser.name,
-      role: sessionUser.role,
-    } as MeResponse)
-  })
+      return reply.code(200).send({
+        id: sessionUser.id,
+        email: sessionUser.email,
+        name: sessionUser.name,
+        role: sessionUser.role,
+      } as MeResponse)
+    },
+  )
 }

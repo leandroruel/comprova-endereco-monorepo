@@ -121,7 +121,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   const evidenceMaxBytes = deps.config.EVIDENCE_MAX_BYTES ?? EVIDENCE_ARTIFACT_MAX_BYTES
   const evidenceMaxConcurrency = deps.config.EVIDENCE_MAX_CONCURRENCY ?? DEFAULT_EVIDENCE_MAX_CONCURRENCY
-  const documentIntelligenceTimeoutMs = deps.config.DOCUMENT_INTELLIGENCE_TIMEOUT_MS ?? 300_000
+  // Deve ser MAIOR que o `DI_TIMEOUT_S` do serviço (default 300 s): assim o
+  // 504 estruturado do serviço chega antes do abort do cliente. A primeira
+  // inferência de OCR em CPU foi medida em ~294 s; 360 s dá margem para o
+  // upload e a transferência da resposta.
+  const documentIntelligenceTimeoutMs = deps.config.DOCUMENT_INTELLIGENCE_TIMEOUT_MS ?? 360_000
   const documentIntelligenceMaxFileSizeMb = deps.config.DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB ?? 30
   const documentIntelligence = makeDocumentIntelligenceClient({
     url: deps.config.DOCUMENT_INTELLIGENCE_URL,

@@ -169,8 +169,11 @@ async def _read_upload_bounded(file: UploadFile) -> bytes:
             break
         total += len(chunk)
         if total > max_bytes:
+            # 413 literal: `status.HTTP_413_CONTENT_TOO_LARGE` só existe em
+            # Starlette >=0.48, e fastapi>=0.115,<1 permite resolver Starlette
+            # <0.47 (nesse caso o atributo levantaria AttributeError → 500).
             raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                status_code=413,
                 detail=(
                     f"arquivo excede o limite de {settings.max_file_size_mb} MiB"
                 ),
@@ -227,8 +230,9 @@ async def parse_document(
 
     data = await _read_upload_bounded(file)
 
-    async with queue:
-        loop = asyncio.get_running_loop()
+    await queue.acquire()
+    loop = asyncio.get_running_loop()
+    try:
         future = loop.run_in_executor(
             executor,
             _process_document,
@@ -237,47 +241,54 @@ async def parse_document(
             file.content_type,
             request_id,
         )
-        try:
-            response = await asyncio.wait_for(
-                future, timeout=settings.timeout_s
-            )
-        except EncryptedPDFError as exc:
-            logger.warning("pdf_criptografado", document_id=request_id)
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
-            ) from exc
-        except PageLimitError as exc:
-            logger.warning(
-                "pdf_acima_do_limite_de_paginas", document_id=request_id
-            )
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
-            ) from exc
-        except SecurityError as exc:
-            logger.warning(
-                "rejeicao_por_seguranca",
-                document_id=request_id,
-                motivo=str(exc),
-                tamanho_bytes=len(data),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
-        except (asyncio.TimeoutError, TimeoutError) as exc:
-            logger.error(
-                "timeout_no_processamento",
-                document_id=request_id,
-                timeout_s=settings.timeout_s,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail=(
-                    f"O processamento excedeu o timeout de "
-                    f"{settings.timeout_s}s"
-                ),
-            ) from exc
+    except BaseException:
+        # Falha ao agendar (executor encerrando): não deixar o slot preso.
+        queue.release()
+        raise
+    # O slot só é liberado quando o trabalho na thread realmente termina:
+    # `wait_for` cancela o future do asyncio, mas não interrompe a thread já
+    # iniciada — liberar no `async with` deixaria a fila admitir trabalho
+    # enquanto o worker segue ocupado.
+    future.add_done_callback(lambda _: queue.release())
+    try:
+        response = await asyncio.wait_for(
+            asyncio.shield(future), timeout=settings.timeout_s
+        )
+    except EncryptedPDFError as exc:
+        logger.warning("pdf_criptografado", document_id=request_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except PageLimitError as exc:
+        logger.warning("pdf_acima_do_limite_de_paginas", document_id=request_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except SecurityError as exc:
+        logger.warning(
+            "rejeicao_por_seguranca",
+            document_id=request_id,
+            motivo=str(exc),
+            tamanho_bytes=len(data),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        logger.error(
+            "timeout_no_processamento",
+            document_id=request_id,
+            timeout_s=settings.timeout_s,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=(
+                f"O processamento excedeu o timeout de "
+                f"{settings.timeout_s}s"
+            ),
+        ) from exc
 
     duracao_ms = int((time.perf_counter() - start) * 1000)
     log = logger.info if response.status == "completed" else logger.error
