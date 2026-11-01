@@ -40,6 +40,11 @@ minimumReleaseAgeExclude:
   - '@smithy/core@3.36.1'
 overrides:
   'vitest>jsdom': '-'
+  # seroval <=1.6.9 tem dois CVEs médios (XSS e execução arbitrária via
+  # serialização). Entra via @tanstack/router-core; override substitui a
+  # versão vulnerável até o parent soltar a correção.
+  '@tanstack/router-core>seroval': '>=1.6.12'
+  'seroval-plugins>seroval': '>=1.6.12'
 permissions:
   '@tanstack/react-table':
     skills: false

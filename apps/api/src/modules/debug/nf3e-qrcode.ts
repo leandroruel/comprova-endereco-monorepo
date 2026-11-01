@@ -34,12 +34,13 @@ export const registerDebugNf3eQrCodeRoute = (
   app: FastifyInstance,
   requireWriteScope: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | void>,
 ): void => {
-  app.addHook('preHandler', requireWriteScope)
-
+  // Guard no nível da rota: `addHook` no mesmo contexto do `v1` vazaria o
+  // scope de escrita para TODAS as rotas do plugin (inclusive leituras).
   app.post(
     '/debug/nf3e/qrcode',
     {
       bodyLimit: DEBUG_MAX_BYTES,
+      preHandler: requireWriteScope,
     },
     async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> => {
       let file: { readonly data: Buffer; readonly mimetype: string }

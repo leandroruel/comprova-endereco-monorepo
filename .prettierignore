@@ -4,3 +4,7 @@ coverage
 .turbo
 pnpm-lock.yaml
 compose/cloudserver-config.json
+# Artefatos do ambiente Python do serviço Document Intelligence.
+.venv
+.pytest_cache
+__pycache__

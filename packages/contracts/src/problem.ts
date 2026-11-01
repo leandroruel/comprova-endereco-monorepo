@@ -63,4 +63,20 @@ export const problems = {
     'Evidence storage is unavailable',
   ),
   evidencePersistenceFailed: internal(500, 'EVIDENCE_PERSISTENCE_FAILED', 'Evidence could not be persisted'),
+  documentIntelligenceUnavailable: internal(
+    503,
+    'DOCUMENT_INTELLIGENCE_UNAVAILABLE',
+    'Document Intelligence service is unavailable',
+  ),
+  documentIntelligenceTimeout: internal(
+    504,
+    'DOCUMENT_INTELLIGENCE_TIMEOUT',
+    'Document Intelligence request timed out',
+  ),
+  documentIntelligenceInvalidResponse: internal(
+    502,
+    'DOCUMENT_INTELLIGENCE_INVALID_RESPONSE',
+    'Document Intelligence returned an invalid response',
+  ),
+  documentParsingFailed: internal(502, 'DOCUMENT_PARSING_FAILED', 'Document could not be parsed'),
 }

@@ -6,4 +6,37 @@
 # vitest 5 — a CVE do HMR WebSocket foi corrigida no 4.1.11 e o `tinypool`
 # deixou de existir sem o pool reescrito do v4. Se voltar a ser preciso suprimir
 # algo, cada item precisa de `statement` (por que é aceitável) e `expired_at`.
-vulnerabilities: []
+#
+# glob 10.5.0 / minimatch 5.1.9 / minimatch 9.0.9 (DoS): toda a subárvore de
+# testcontainers → archiver → archiver-utils/readdir-glob (este último puxa
+# minimatch 5.1.9) e glob 10.5.0 (que puxa minimatch 9.0.9). Tooling de teste,
+# ausente do runtime. As correções são majors (glob >=14.0.2, minimatch
+# >=11.0.1) controladas pelos parents. `purls` restringe cada supressão à
+# versão efetivamente avaliada — o ID sozinho ocultaria achados de outros
+# caminhos que esta justificativa não cobre.
+vulnerabilities:
+  - id: CVE-2026-118773
+    purls:
+      - pkg:npm/glob@10.5.0
+    statement: >-
+      glob 10.5.0 é dependência transitiva de testcontainers→archiver
+      (archiver-utils), apenas tooling de teste, fora do runtime. Correção
+      exige glob >=14.0.2, major versionada pelo archiver-utils; revisar
+      quando o parent atualizar.
+    expired_at: 2026-11-30
+  - id: CVE-2026-118764
+    purls:
+      - pkg:npm/minimatch@5.1.9
+    statement: >-
+      minimatch 5.1.9 vem de testcontainers→archiver→readdir-glob; só existe
+      em testes. Correção exige minimatch >=11.0.1, major versionada pelo
+      readdir-glob; revisar quando o parent atualizar.
+    expired_at: 2026-11-30
+  - id: CVE-2026-118764
+    purls:
+      - pkg:npm/minimatch@9.0.9
+    statement: >-
+      minimatch 9.0.9 é dependência de glob@10.5.0 (mesma subárvore de
+      testcontainers→archiver). Correção exige minimatch >=11.0.1, major
+      versionada pelo glob; revisar quando o parent atualizar.
+    expired_at: 2026-11-30
