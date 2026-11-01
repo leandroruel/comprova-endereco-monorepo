@@ -99,6 +99,17 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     expect(result.address.value?.cep).toBeNull()
   })
 
+  it('não parte logradouro que é apenas tipo + número (Rua 7)', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText(['CONTA DE ENERGIA', 'Endereço: Rua 7', 'CEP: 01001-000']),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value?.logradouro).toBe('RUA 7')
+    expect(result.address.value?.numero).toBeNull()
+  })
+
   it('não extrai endereço quando o rótulo é ambíguo', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
       data: pdfWithText([
@@ -212,6 +223,81 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
       uf: 'SP',
       cep: '01001000',
     })
+  })
+
+  it('extrai titular e endereço de bloco estrutural do DANF3E (Light/RJ)', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText(
+        [
+          'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+          'FISCAL DE ENERGIA ELÉTRICA ELETRÔNICA',
+          'JOAO DA SILVA',
+          'R ALM GRENFALL 405 BL 1 LJ 4',
+          'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+          'CEP 25085-135 | MEDIDOR: 6018930',
+          'CPF 077.333.417-36',
+          'NOTA FISCAL Nº 078474606 - SÉRIE 05 / DATA DE EMISSÃO: 24/04/2025',
+        ],
+        { fontSize: 10 },
+      ),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('extracted')
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA ALM GRENFALL',
+      numero: '405',
+      complemento: 'BL 1 LJ 4',
+      bairro: 'VILA SAO LUIS',
+      cidade: 'DUQUE DE CAXIAS',
+      uf: 'RJ',
+      cep: '25085135',
+    })
+    // Emissão atrás de um prefixo longo na linha.
+    expect(result.document.issuedAt).toBe('2025-04-24')
+    expect(JSON.stringify(result)).not.toContain('077.333.417-36')
+    expect(JSON.stringify(result)).not.toContain('07733341736')
+  })
+
+  it('aceita cidade e UF em linhas separadas no bloco estrutural', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS,',
+        'RJ',
+        'CEP 25085-135',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA ALM GRENFALL',
+      numero: '405',
+      bairro: 'VILA SAO LUIS',
+      cidade: 'DUQUE DE CAXIAS',
+      uf: 'RJ',
+      cep: '25085135',
+    })
+  })
+
+  it('não trata bloco estrutural sem CEP como endereço', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.address.status).toBe('not_extracted')
+    expect(result.holder.status).toBe('not_extracted')
   })
 
   it('marca address = not_extracted quando o documento não traz endereço', async () => {

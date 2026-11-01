@@ -86,17 +86,26 @@ const KNOWN_LABELS: ReadonlySet<string> = new Set(
   ].map(labelOf),
 )
 
+/** Janela máxima (em caracteres) antes de um `:` para procurar um rótulo. */
+const LABEL_WINDOW_CHARS = 80
+/** Linha maior que isto não é um `Rótulo: valor` real. */
+const MAX_LABELED_LINE_CHARS = 2_000
+
 /** Índice onde começa o próximo rótulo conhecido dentro de `value`. */
 const inlineLabelStart = (value: string): number | null => {
   for (let colon = 0; colon < value.length; colon += 1) {
     if (value[colon] !== ':') continue
-    const before = value.slice(0, colon)
+    // Só olhamos uma janela fixa antes do `:`: um rótulo real cabe nela, e o
+    // custo deixa de crescer com o quadrado do tamanho da linha.
+    const windowStart = Math.max(0, colon - LABEL_WINDOW_CHARS)
+    const before = value.slice(windowStart, colon)
     const words = before.trimEnd().split(/\s+/)
+    if (windowStart > 0) words.shift() // primeira palavra pode estar cortada
     for (let count = Math.min(words.length, 4); count >= 1; count -= 1) {
       const suffix = words.slice(-count).join(' ')
       if (!KNOWN_LABELS.has(labelOf(suffix))) continue
       const start = before.lastIndexOf(suffix)
-      if (start >= 0) return start
+      if (start >= 0) return windowStart + start
     }
   }
   return null
@@ -111,8 +120,16 @@ const inlineLabelStart = (value: string): number | null => {
  */
 const parseLabeledLine = (line: string): readonly LabeledLine[] => {
   const trimmed = line.trim()
+  if (trimmed.length > MAX_LABELED_LINE_CHARS) return []
   const match = trimmed.match(/^([^:]{2,40}):\s*(.+)$/)
-  if (match === null) return []
+  if (match === null) {
+    // Linhas longas podem trazer o rótulo no meio, atrás de um prefixo
+    // (`NOTA FISCAL Nº ... DATA DE EMISSÃO: 24/04/2025`). Nesse caso só
+    // cortamos em um rótulo conhecido, nunca em texto livre.
+    const start = inlineLabelStart(trimmed)
+    if (start === null || start === 0) return []
+    return parseLabeledLine(trimmed.slice(start).replace(/^[\s/,-]+/, ''))
+  }
   const label = labelOf(match[1] ?? '')
   if (label.length === 0) return []
   const rest = match[2] ?? ''
@@ -168,7 +185,9 @@ const splitAddress = (value: string): AddressParts => {
   // isolado; o restante continua sendo o logradouro.
   if (parts.length === 1) {
     const trailing = value.match(/^(.*\S)\s+(\d+[A-Za-z]?|S\/?N)$/i)
-    if (trailing !== null) {
+    // `Rua 7`/`Avenida 85` são nomes de via, não "logradouro + número": só
+    // separamos quando sobra um nome antes do número.
+    if (trailing !== null && /\s/.test(trailing[1] ?? '')) {
       return {
         logradouro: trailing[1] ?? value.trim(),
         numero: trailing[2] ?? null,
@@ -194,7 +213,7 @@ const ADDRESS_SECTION_LABELS: readonly string[] = [
 ]
 
 const STREET_PREFIX =
-  /^(?:RUA|R\.|AVENIDA|AV\.?|TRAVESSA|TRAV\.?|ALAMEDA|ALAM\.?|AL\.?|RODOVIA|ROD\.?|ESTRADA|ESTR\.?|EST\.?|PRACA|LARGO|LGO\.?|BECO|BC\.?|VIELA|FAZENDA|FAZ\.?|SITIO|CHACARA|CHAC\.?|VILA|VL\.?|MORRO|MR\.?)\s+/i
+  /^(?:RUA|R\.?|AVENIDA|AV\.?|TRAVESSA|TRAV\.?|ALAMEDA|ALAM\.?|AL\.?|RODOVIA|ROD\.?|ESTRADA|ESTR\.?|EST\.?|PRACA|LARGO|LGO\.?|BECO|BC\.?|VIELA|FAZENDA|FAZ\.?|SITIO|CHACARA|CHAC\.?|VILA|VL\.?|MORRO|MR\.?)\s+/i
 
 const isAddressSectionHeader = (line: string): boolean => {
   const trimmed = line.trim()
@@ -203,29 +222,72 @@ const isAddressSectionHeader = (line: string): boolean => {
   return ADDRESS_SECTION_LABELS.some((name) => label.endsWith(name))
 }
 
-interface AddressSection {
-  readonly name: string | null
-  readonly nameRaw: string | null
-  readonly street: string | null
+interface CityAndUf {
   readonly neighborhood: string | null
   readonly city: string | null
-  readonly uf: string | null
-  readonly cep: string | null
-  readonly raw: string
+  readonly uf: string
 }
 
-const parseCityLine = (
-  line: string,
-): { readonly neighborhood: string | null; readonly city: string | null; readonly uf: string } | null => {
-  const match = normalizeText(line).match(/^(.+?)\s*-\s*([A-Z]{2})$/)
+/** `Bairro / Cidade - UF`, `Bairro / Cidade, UF` ou `Cidade - UF`. */
+const parseCityAndUf = (text: string): CityAndUf | null => {
+  const match = normalizeText(text).match(/^(.+?)\s*[,/-]\s*([A-Z]{2})$/)
   if (match === null) return null
   const head = (match[1] ?? '').trim()
+  if (head.length === 0) return null
   const parts = head.split(/\s*\/\s*/)
   return {
     neighborhood: parts.length > 1 ? (parts[0] ?? null) : null,
     city: parts.length > 1 ? (parts[parts.length - 1] ?? null) : head,
     uf: match[2] ?? '',
   }
+}
+
+/** `CEP 25085-135`, `CEP: 12000-000`, `CEP 05069-900`. */
+const extractCep = (text: string): string | null => {
+  const match = text.match(/\bCEP\b\s*:?\s*(\d{5})\s*-?\s*(\d{3})\b/i)
+  if (match === null) return null
+  return normalizeCep(`${match[1] ?? ''}${match[2] ?? ''}`)
+}
+
+/** Rua sem vírgula, com o número no meio e complemento depois. */
+const splitStructuralStreet = (value: string): AddressParts => {
+  const commaParts = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+  const commaNumber = commaParts[1]
+  if (commaNumber !== undefined && /^(?:\d+[A-Za-z]?|S\/?N)$/i.test(commaNumber)) {
+    return {
+      logradouro: commaParts[0] ?? value.trim(),
+      numero: commaNumber,
+      complemento: commaParts.length > 2 ? commaParts.slice(2).join(', ') : null,
+    }
+  }
+  const match = value.match(/^(.+?\S)\s+(\d+[A-Za-z]?|S\/?N)(?:\s+(.*\S))?\s*$/i)
+  const street = (match?.[1] ?? '').trim()
+  // Exige um nome de via antes do número: `RUA 25 DE MARCO` não vira `RUA` + 25.
+  if (match === null || street.split(/\s+/).length < 2) {
+    return { logradouro: value.trim(), numero: null, complemento: null }
+  }
+  return {
+    logradouro: street,
+    numero: match[2] ?? null,
+    complemento: match[3]?.trim() ?? null,
+  }
+}
+
+interface AddressSection {
+  readonly name: string | null
+  readonly nameRaw: string | null
+  readonly street: string | null
+  readonly logradouro: string | null
+  readonly numero: string | null
+  readonly complemento: string | null
+  readonly neighborhood: string | null
+  readonly city: string | null
+  readonly uf: string | null
+  readonly cep: string | null
+  readonly raw: string
 }
 
 const parseAddressSection = (block: readonly string[]): AddressSection | null => {
@@ -243,25 +305,27 @@ const parseAddressSection = (block: readonly string[]): AddressSection | null =>
             .trim(),
           MAX_FIELD_CHARS,
         )
-  const cityLine = block
-    .slice(streetIndex === -1 ? 0 : streetIndex + 1)
-    .map(parseCityLine)
-    .find((parsed) => parsed !== null)
-  const blockLines = labeledLines(block.join('\n'))
-  const cepLine = pickUnique(blockLines, ['CEP'])
-  const cepDigits = (cepLine?.value ?? '').replace(/\D+/g, '')
-  const cep = cepDigits.length === 8 ? normalizeCep(cepDigits) : null
+  const cepIndex = block.findIndex((line) => extractCep(line) !== null)
+  const citySource = block
+    .slice(streetIndex === -1 ? 0 : streetIndex + 1, cepIndex === -1 ? block.length : cepIndex)
+    .join(' ')
+  const city = parseCityAndUf(citySource)
+  const cep = extractCep(block.join(' '))
+  const parts = street === null ? null : splitAddress(street)
 
-  if (street === null && cityLine == null && cep === null) return null
+  if (street === null && city == null && cep === null) return null
   return {
     name: name === null || name.length === 0 ? null : name,
     nameRaw,
     street,
-    neighborhood: cityLine?.neighborhood ?? null,
-    city: cityLine?.city ?? null,
-    uf: cityLine?.uf ?? null,
+    logradouro: parts?.logradouro ?? null,
+    numero: parts?.numero ?? null,
+    complemento: parts?.complemento ?? null,
+    neighborhood: city?.neighborhood ?? null,
+    city: city?.city ?? null,
+    uf: city?.uf ?? null,
     cep,
-    raw: cap(block.join(' | '), MAX_RAW_CHARS),
+    raw: cap(redactTaxIds(block.join(' | ')), MAX_RAW_CHARS),
   }
 }
 
@@ -285,6 +349,89 @@ const addressSectionsFromText = (text: string): readonly AddressSection[] => {
     if (section !== null) sections.push(section)
   }
   return sections
+}
+
+const NAME_LINE_RE = /^[A-Z][A-Z\s.'&-]{3,79}$/
+const NON_NAME_RE =
+  /\b(?:DANF3E|FISCAL|DOCUMENTO|AUXILIAR|GRUPO|SUBGRUPO|RESIDENCIAL|CONTA|NOTA|CHAVE|PROTOCOLO|MEDIDOR|LEITURA|TOTAL)\b/
+
+const looksLikeRecipientName = (line: string): boolean => {
+  const normalized = normalizeText(line)
+  if (normalized.length < 4 || normalized.length > 80) return false
+  if (!NAME_LINE_RE.test(normalized)) return false
+  if (/\d/.test(normalized)) return false
+  if (normalized.includes('/') || normalized.includes(',') || normalized.includes(':')) return false
+  if (normalized.split(/\s+/).length < 2) return false
+  if (NON_NAME_RE.test(normalized)) return false
+  if (STREET_PREFIX.test(normalized)) return false
+  if (parseCityAndUf(normalized) !== null) return false
+  return true
+}
+
+const cleanRecipientName = (value: string): string | null => {
+  const name = cap(
+    redactTaxIds(value)
+      .replace(/\b(?:CPF|CNPJ)\b[\s:=-]*.*$/i, '')
+      .replace(/[\s,;:-]+$/, '')
+      .trim(),
+    MAX_FIELD_CHARS,
+  )
+  return name.length === 0 ? null : name
+}
+
+/**
+ * DANF3E sem cabeçalho textual: o bloco do destinatário vem como
+ * `nome` + `rua com número` + `bairro / cidade, UF` + `CEP`. Só aceitamos o
+ * bloco quando a sequência inteira existe e termina em CEP — assim evitamos
+ * capturar títulos, cabeçalhos de tabela ou linhas soltas.
+ *
+ * Usado apenas quando não há bloco explicitamente rotulado (ENDEREÇO DE
+ * ENTREGA), para que o endereço do emitente não vire ambiguidade.
+ */
+const recipientBlocksFromText = (text: string): readonly AddressSection[] => {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  const blocks: AddressSection[] = []
+  for (let index = 0; index < lines.length - 2; index += 1) {
+    const nameLine = lines[index] ?? ''
+    if (!looksLikeRecipientName(nameLine)) continue
+    const street = lines[index + 1] ?? ''
+    if (!STREET_PREFIX.test(normalizeText(street))) continue
+
+    const collected: string[] = [street]
+    let cepIndex = -1
+    for (let cursor = index + 2; cursor < lines.length && collected.length < 5; cursor += 1) {
+      collected.push(lines[cursor] ?? '')
+      if (extractCep(lines[cursor] ?? '') !== null) {
+        cepIndex = collected.length - 1
+        break
+      }
+    }
+    if (cepIndex === -1) continue
+    const cep = extractCep(collected[cepIndex] ?? '')
+    if (cep === null) continue
+    const city = parseCityAndUf(collected.slice(1, cepIndex).join(' '))
+    if (city === null) continue
+    const parts = splitStructuralStreet(street)
+    if (parts.logradouro.length < 4) continue
+
+    blocks.push({
+      name: cleanRecipientName(nameLine),
+      nameRaw: cap(redactTaxIds(nameLine), MAX_RAW_CHARS),
+      street,
+      logradouro: parts.logradouro,
+      numero: parts.numero,
+      complemento: parts.complemento,
+      neighborhood: city.neighborhood,
+      city: city.city,
+      uf: city.uf,
+      cep,
+      raw: cap(redactTaxIds([nameLine, ...collected].join(' | ')), MAX_RAW_CHARS),
+    })
+  }
+  return blocks
 }
 
 /** Um valor só é usado quando todas as ocorrências explícitas concordam. */
@@ -337,7 +484,11 @@ const resolveStreet = (labeled: string | null, section: string | null): string |
 }
 
 const addressFromLines = (lines: readonly LabeledLine[], text: string): ExtractedAddress | null => {
-  const sections = addressSectionsFromText(text)
+  // Bloco rotulado tem prioridade; o bloco estrutural (DANF3E sem cabeçalho)
+  // só é usado quando não há nenhum endereço explicitamente rotulado, para não
+  // confundir o endereço do emitente com o do destinatário.
+  const explicitSections = addressSectionsFromText(text)
+  const sections = explicitSections.length > 0 ? explicitSections : recipientBlocksFromText(text)
   const streetLine = pickUnique(lines, ['ENDERECO', 'LOGRADOURO'])
   const numberLine = pickUnique(lines, ['NUMERO'])
   const complementLine = pickUnique(lines, ['COMPLEMENTO'])
@@ -346,13 +497,17 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
   const stateLine = pickUnique(lines, ['UF', 'ESTADO'])
   const cepLine = pickUnique(lines, ['CEP'])
 
-  const streetValue = resolveStreet(
-    streetLine?.value ?? null,
-    pickSectionField(sections, (s) => s.street),
-  )
+  const labeledStreet = streetLine?.value ?? null
+  const sectionStreet = pickSectionField(sections, (s) => s.street)
+  const streetValue = resolveStreet(labeledStreet, sectionStreet)
+  const usingSectionStreet = streetValue !== null && sectionStreet !== null && streetValue === sectionStreet
   const parts = streetValue === null ? null : splitAddress(streetValue)
-  const logradouro = parts?.logradouro ?? null
-  const embeddedNumber = parts?.numero ?? null
+  const logradouro = usingSectionStreet
+    ? pickSectionField(sections, (s) => s.logradouro)
+    : (parts?.logradouro ?? null)
+  const embeddedNumber = usingSectionStreet
+    ? pickSectionField(sections, (s) => s.numero)
+    : (parts?.numero ?? null)
   const labeledNumber = numberLine?.value ?? null
   const numero =
     embeddedNumber === null
@@ -362,7 +517,11 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
         : normalizeNumero(embeddedNumber) === normalizeNumero(labeledNumber)
           ? labeledNumber
           : null
-  const complemento = complementLine?.value ?? parts?.complemento ?? null
+  const complemento =
+    complementLine?.value ??
+    (usingSectionStreet ? pickSectionField(sections, (s) => s.complemento) : null) ??
+    parts?.complemento ??
+    null
 
   const cepValue = resolveField(
     cepLine?.value ?? null,
@@ -442,7 +601,8 @@ const holderFromLines = (lines: readonly LabeledLine[], text: string): Extracted
     'CLIENTE',
     'RAZAOSOCIAL',
   ])
-  const sections = addressSectionsFromText(text)
+  const explicitSections = addressSectionsFromText(text)
+  const sections = explicitSections.length > 0 ? explicitSections : recipientBlocksFromText(text)
   const sectionName = pickSectionField(sections, (s) => s.name)
   const rawValue = resolveField(nameLine?.value ?? null, sectionName)
   if (rawValue === null) return null

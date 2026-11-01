@@ -141,7 +141,9 @@ contrário retorna **`503`** com `status: "not_ready"` no corpo.
 ```json
 {
   "status": "not_ready",
-  "modelsLoaded": false,
+  "service": "document-intelligence",
+  "version": "0.1.0",
+  "models_loaded": false,
   "checks": { "marker_modelos": "não carregados", "aquecimento": "em andamento" }
 }
 ```

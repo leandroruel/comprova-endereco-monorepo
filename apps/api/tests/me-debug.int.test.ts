@@ -267,4 +267,44 @@ describe('POST /v1/debug/nf3e/qrcode', () => {
     expect(codes).toContain('ADDRESS_EXTRACTED')
     expect(JSON.stringify(json)).not.toContain('11222333000181')
   })
+
+  it('extrai titular e endereço de bloco estrutural sem rótulo (Light/RJ)', async () => {
+    const { body, contentType } = multipart(
+      pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'FISCAL DE ENERGIA ELÉTRICA ELETRÔNICA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135 | MEDIDOR: 6018930',
+        'CPF 077.333.417-36',
+      ]),
+    )
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/debug/nf3e/qrcode',
+      headers: { ...auth(adminKey), 'content-type': contentType },
+      payload: body,
+    })
+
+    expect(res.statusCode).toBe(200)
+    const json = res.json()
+    expect(json.analysis.holder).toMatchObject({
+      status: 'extracted',
+      value: { name: 'JOAO DA SILVA' },
+    })
+    expect(json.analysis.address).toMatchObject({
+      status: 'extracted',
+      value: {
+        logradouro: 'RUA ALM GRENFALL',
+        numero: '405',
+        complemento: 'BL 1 LJ 4',
+        bairro: 'VILA SAO LUIS',
+        cidade: 'DUQUE DE CAXIAS',
+        uf: 'RJ',
+        cep: '25085135',
+      },
+    })
+    expect(JSON.stringify(json)).not.toContain('077.333.417-36')
+  })
 })
