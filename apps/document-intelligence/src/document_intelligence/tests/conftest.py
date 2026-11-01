@@ -54,3 +54,8 @@ def sample_text_pdf() -> Path:
 @pytest.fixture
 def sample_table_pdf() -> Path:
     return FIXTURES_DIR / "sample_table.pdf"
+
+
+@pytest.fixture
+def sample_image_pdf() -> Path:
+    return FIXTURES_DIR / "sample_image.pdf"

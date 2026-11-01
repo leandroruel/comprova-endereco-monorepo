@@ -241,6 +241,28 @@ describe('document intelligence client', () => {
     ).rejects.toMatchObject({ kind: 'timeout', upstreamStatus: 504 })
   })
 
+  it('mapeia 429 (admissão esgotada) para busy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('ocupado', { status: 429, headers: { 'retry-after': '5' } })),
+    )
+    const client = makeDocumentIntelligenceClient(config())
+    await expect(
+      client.parsePdf({ data: Buffer.from('%PDF-1.4'), filename: 'a.pdf', documentId: 'doc-1' }),
+    ).rejects.toMatchObject({ kind: 'busy', upstreamStatus: 429 })
+  })
+
+  it('mapeia 503 (não pronto) para unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not ready', { status: 503 })),
+    )
+    const client = makeDocumentIntelligenceClient(config())
+    await expect(
+      client.parsePdf({ data: Buffer.from('%PDF-1.4'), filename: 'a.pdf', documentId: 'doc-1' }),
+    ).rejects.toMatchObject({ kind: 'unavailable', upstreamStatus: 503 })
+  })
+
   it('propaga erro tipado sem vazar detalhes internos', async () => {
     vi.stubGlobal(
       'fetch',

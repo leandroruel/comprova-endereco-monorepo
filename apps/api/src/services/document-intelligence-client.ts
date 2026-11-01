@@ -15,6 +15,7 @@ export type DocumentIntelligenceErrorKind =
   | 'not_configured'
   | 'timeout'
   | 'unavailable'
+  | 'busy'
   | 'invalid_response'
   | 'upstream_error'
   | 'too_large'
@@ -117,6 +118,14 @@ export const makeDocumentIntelligenceClient = (
       }
       if (response.status === 504) {
         throw new DocumentIntelligenceError('timeout', 'service timed out', response.status)
+      }
+      if (response.status === 429) {
+        // Controle de admissão do serviço: capacidade (worker + fila) esgotada.
+        throw new DocumentIntelligenceError('busy', 'service is at capacity', response.status)
+      }
+      if (response.status === 503) {
+        // Serviço não pronto (modelos/warmup) ou indisponível no momento.
+        throw new DocumentIntelligenceError('unavailable', 'service is not ready', response.status)
       }
       if (!response.ok) {
         throw new DocumentIntelligenceError(

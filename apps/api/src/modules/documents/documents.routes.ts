@@ -60,6 +60,10 @@ const clientProblem = (error: DocumentIntelligenceError): Problem => {
       return problems.invalidDocument()
     case 'timeout':
       return problems.documentIntelligenceTimeout()
+    case 'busy':
+      // Capacidade do serviço esgotada (HTTP 429): transitório, o chamador
+      // pode tentar novamente mais tarde.
+      return problems.rateLimited()
     case 'invalid_response':
       return problems.documentIntelligenceInvalidResponse()
     case 'upstream_error':

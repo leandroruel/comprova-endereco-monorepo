@@ -344,6 +344,36 @@ export interface DebugNf3eQrCodeResponse {
     readonly errorCodes: string[]
     readonly fingerprint: string | null
   }
+  readonly analysis: {
+    readonly status: string
+    readonly document: {
+      readonly status: string
+      readonly kind: string
+      readonly issuedAt: string | null
+      readonly issuedRaw: string | null
+    }
+    readonly holder: {
+      readonly status: string
+      readonly value: { readonly name: string | null; readonly raw: string } | null
+      readonly raw: string | null
+    }
+    readonly address: {
+      readonly status: string
+      readonly value: {
+        readonly logradouro: string | null
+        readonly numero: string | null
+        readonly complemento: string | null
+        readonly bairro: string | null
+        readonly cidade: string | null
+        readonly uf: string | null
+        readonly cep: string | null
+        readonly raw: string
+      } | null
+      readonly raw: string | null
+    }
+    readonly limitations: string[]
+    readonly errorCodes: string[]
+  } | null
 }
 
 /**

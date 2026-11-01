@@ -3,7 +3,7 @@ import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Spinner } from
 import { cn } from '@/lib/utils'
 import { debugNf3eQrCode, type DebugNf3eQrCodeResponse } from '@/api/client'
 import { DashboardLayout } from '@/components/layout'
-import { Activity, FileText, Play, Search, Upload } from 'lucide-react'
+import { Activity, FileText, Play, Search, Upload, UserRound } from 'lucide-react'
 
 const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png']
 
@@ -143,6 +143,86 @@ function ReferencePanel({ reference }: { readonly reference: DebugNf3eQrCodeResp
   )
 }
 
+function ExtractionPanel({
+  analysis,
+}: {
+  readonly analysis: NonNullable<DebugNf3eQrCodeResponse['analysis']>
+}) {
+  const { holder, address } = analysis
+  const addressValue = address.status === 'extracted' ? address.value : null
+  const formattedCep =
+    addressValue?.cep !== null && addressValue?.cep !== undefined
+      ? addressValue.cep.replace(/^(\d{5})(\d{3})$/, '$1-$2')
+      : null
+  const street = addressValue
+    ? [addressValue.logradouro, addressValue.numero].filter(Boolean).join(', ')
+    : null
+  const district = addressValue
+    ? [addressValue.complemento, addressValue.bairro].filter(Boolean).join(' - ')
+    : null
+  const city = addressValue ? [addressValue.cidade, addressValue.uf].filter(Boolean).join('/') : null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <UserRound className="h-4 w-4" />
+          Titular e endereço
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Titular</p>
+          {holder.status === 'extracted' && holder.value?.name ? (
+            <p className="text-sm font-medium">{holder.value.name}</p>
+          ) : (
+            <Badge variant="outline" className="mt-1 text-[10px]">
+              {holder.status}
+            </Badge>
+          )}
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Endereço</p>
+          {addressValue ? (
+            <div className="mt-1 space-y-0.5 text-sm">
+              {street && <p className="font-medium">{street}</p>}
+              {district && <p>{district}</p>}
+              {city && <p>{city}</p>}
+              {formattedCep && <p className="font-mono text-xs">CEP {formattedCep}</p>}
+            </div>
+          ) : (
+            <Badge variant="outline" className="mt-1 text-[10px]">
+              {address.status}
+            </Badge>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-4 border-t border-border pt-3 text-xs">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Status da análise</p>
+            <span className="font-mono">{analysis.status}</span>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Emissão</p>
+            <span className="font-mono">{analysis.document.issuedAt ?? '—'}</span>
+          </div>
+        </div>
+        {analysis.errorCodes.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Códigos de erro</p>
+            <div className="flex flex-wrap gap-1">
+              {analysis.errorCodes.map((code) => (
+                <Badge key={code} variant="destructive" className="text-[10px]">
+                  {code}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -186,7 +266,8 @@ export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string
         <div>
           <h1 className="text-lg font-semibold tracking-tight">QRCode NF3e debugger</h1>
           <p className="text-sm text-muted-foreground">
-            Envie um comprovante (PDF, JPEG ou PNG) e acompanhe cada passo da extração da referência fiscal
+            Envie um comprovante (PDF, JPEG ou PNG) e acompanhe a extração da referência fiscal, do titular e
+            do endereço
           </p>
         </div>
 
@@ -245,6 +326,8 @@ export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string
         {response && (
           <>
             <ReferencePanel reference={response.reference} />
+
+            {response.analysis && <ExtractionPanel analysis={response.analysis} />}
 
             <Card>
               <CardHeader>

@@ -99,6 +99,17 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     expect(result.address.value?.cep).toBeNull()
   })
 
+  it('não parte logradouro que é apenas tipo + número (Rua 7)', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText(['CONTA DE ENERGIA', 'Endereço: Rua 7', 'CEP: 01001-000']),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value?.logradouro).toBe('RUA 7')
+    expect(result.address.value?.numero).toBeNull()
+  })
+
   it('não extrai endereço quando o rótulo é ambíguo', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
       data: pdfWithText([
@@ -111,6 +122,304 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     })
     expect(result.address.status).toBe('not_extracted')
     expect(result.address.value).toBeNull()
+  })
+
+  it('extrai titular e endereço do bloco ENDEREÇO DE ENTREGA (DANF3E)', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText(
+        [
+          'DANF3E - DOCUMENTO AUXILIAR DA NOTA FISCAL',
+          'DISTRIBUIDORA EXEMPLO SA',
+          'RUA DA DISTRIBUIDORA, 1',
+          'CEP 00000-000',
+          'ENDEREÇO DE ENTREGA:',
+          'EMPRESA EXEMPLO LTDA',
+          'RUA DAS FLORES 123',
+          'CENTRO / SAO PAULO - SP',
+          'CEP: 01001-000 MEDIDOR:0013681013',
+          // Repetição do bloco em outra página deve concordar, não virar ambiguidade.
+          'ENDEREÇO DE ENTREGA:',
+          'EMPRESA EXEMPLO LTDA',
+          'RUA DAS FLORES 123',
+          'CENTRO / SAO PAULO - SP',
+          'CEP: 01001-000 MEDIDOR:0013681013',
+          'Pagador: EMPRESA EXEMPLO LTDA CNPJ: 11.222.333/0001-81',
+        ],
+        { fontSize: 10 },
+      ),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.address.status).toBe('extracted')
+    // O endereço da distribuidora fora do bloco não é usado.
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA DAS FLORES',
+      numero: '123',
+      complemento: null,
+      bairro: 'CENTRO',
+      cidade: 'SAO PAULO',
+      uf: 'SP',
+      cep: '01001000',
+    })
+    expect(result.holder.status).toBe('extracted')
+    expect(result.holder.value?.name).toBe('EMPRESA EXEMPLO LTDA')
+    expect(JSON.stringify(result)).not.toContain('11222333000181')
+  })
+
+  it('corta o titular no próximo rótulo conhecido (Pagador + CNPJ na mesma linha)', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Pagador: EMPRESA EXEMPLO LTDA CNPJ: 11.222.333/0001-81 Vencimento: 06/11/2025',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('extracted')
+    expect(result.holder.value).toEqual({
+      name: 'EMPRESA EXEMPLO LTDA',
+      raw: 'Pagador: EMPRESA EXEMPLO LTDA',
+    })
+  })
+
+  it('marca holder = not_extracted quando os blocos de endereço discordam do titular', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Titular: Maria da Silva',
+        'ENDEREÇO DE ENTREGA:',
+        'EMPRESA EXEMPLO LTDA',
+        'RUA DAS FLORES 123',
+        'CENTRO / SAO PAULO - SP',
+        'CEP: 01001-000',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('not_extracted')
+    expect(result.holder.value).toBeNull()
+  })
+
+  it('combina logradouro rotulado com o número do bloco de entrega', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Titular: EMPRESA EXEMPLO LTDA',
+        'Endereço: Rua das Flores',
+        'ENDEREÇO DE ENTREGA:',
+        'EMPRESA EXEMPLO LTDA',
+        'RUA DAS FLORES 123',
+        'CENTRO / SAO PAULO - SP',
+        'CEP: 01001-000',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA DAS FLORES',
+      numero: '123',
+      cidade: 'SAO PAULO',
+      uf: 'SP',
+      cep: '01001000',
+    })
+  })
+
+  it('extrai titular e endereço de bloco estrutural do DANF3E (Light/RJ)', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText(
+        [
+          'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+          'FISCAL DE ENERGIA ELÉTRICA ELETRÔNICA',
+          'JOAO DA SILVA',
+          'R ALM GRENFALL 405 BL 1 LJ 4',
+          'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+          'CEP 25085-135 | MEDIDOR: 6018930',
+          'CPF 077.333.417-36',
+          'NOTA FISCAL Nº 078474606 - SÉRIE 05 / DATA DE EMISSÃO: 24/04/2025',
+        ],
+        { fontSize: 10 },
+      ),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('extracted')
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA ALM GRENFALL',
+      numero: '405',
+      complemento: 'BL 1 LJ 4',
+      bairro: 'VILA SAO LUIS',
+      cidade: 'DUQUE DE CAXIAS',
+      uf: 'RJ',
+      cep: '25085135',
+    })
+    // Emissão atrás de um prefixo longo na linha.
+    expect(result.document.issuedAt).toBe('2025-04-24')
+    expect(JSON.stringify(result)).not.toContain('077.333.417-36')
+    expect(JSON.stringify(result)).not.toContain('07733341736')
+  })
+
+  it('aceita cidade e UF em linhas separadas no bloco estrutural', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS,',
+        'RJ',
+        'CEP 25085-135 | MEDIDOR: 6018930',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA ALM GRENFALL',
+      numero: '405',
+      bairro: 'VILA SAO LUIS',
+      cidade: 'DUQUE DE CAXIAS',
+      uf: 'RJ',
+      cep: '25085135',
+    })
+  })
+
+  it('ignora bloco de emitente quando há titular rotulado', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Titular: Maria da Silva',
+        'Endereço: Rua das Flores 123',
+        'DISTRIBUIDORA EMITENTE SA',
+        'RUA DO EMITENTE 500',
+        'CENTRO / CIDADE EMITENTE - SP',
+        'CEP 99999-999',
+        'CNPJ: 11.222.333/0001-81',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value).toEqual({ name: 'Maria da Silva', raw: 'Titular: Maria da Silva' })
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA DAS FLORES',
+      numero: '123',
+    })
+    // Nada do bloco do emitente (cidade/UF/CEP) vaza para o resultado.
+    expect(result.address.value?.cidade).toBeNull()
+    expect(result.address.value?.uf).toBeNull()
+    expect(result.address.value?.cep).toBeNull()
+  })
+
+  it('usa bloco estrutural do próprio titular só para campos sem rótulo', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'Titular: JOAO DA SILVA',
+        'Endereço: Rua das Flores',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135 | MEDIDOR: 6018930',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.value).toMatchObject({
+      // O logradouro rotulado prevalece; o bloco só completa o que falta.
+      logradouro: 'RUA DAS FLORES',
+      numero: null,
+      bairro: 'VILA SAO LUIS',
+      cidade: 'DUQUE DE CAXIAS',
+      uf: 'RJ',
+      cep: '25085135',
+    })
+  })
+
+  it('não aceita "ATENDIMENTO AO CLIENTE" como rótulo de destinatário', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135',
+        'ATENDIMENTO AO CLIENTE:',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('not_extracted')
+    expect(result.address.status).toBe('not_extracted')
+  })
+
+  it('aceita cabeçalho DESTINATARIO: imediatamente antes do bloco estrutural', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'DESTINATARIO:',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.value?.cep).toBe('25085135')
+  })
+
+  it('não usa cabeçalho DESTINATARIO: posterior como evidência do bloco', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'DISTRIBUIDORA EMITENTE SA',
+        'RUA DO EMITENTE 500',
+        'CENTRO / CIDADE EMITENTE - SP',
+        'CEP 99999-999',
+        'CNPJ: 11.222.333/0001-81',
+        'DESTINATARIO:',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('not_extracted')
+    expect(result.address.status).toBe('not_extracted')
+  })
+
+  it('não usa bloco estrutural quando o titular rotulado é ambíguo', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Nome: Maria da Silva',
+        'Cliente: Joao da Silva',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135 | MEDIDOR: 6018930',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('not_extracted')
+    expect(result.address.status).toBe('not_extracted')
+  })
+
+  it('não trata bloco estrutural sem CEP como endereço', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.address.status).toBe('not_extracted')
+    expect(result.holder.status).toBe('not_extracted')
   })
 
   it('marca address = not_extracted quando o documento não traz endereço', async () => {

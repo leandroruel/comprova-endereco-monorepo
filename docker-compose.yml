@@ -90,7 +90,15 @@ services:
       DI_PORT: '8000'
       DI_MAX_FILE_SIZE_MB: '30'
       DI_MAX_CONCURRENCY: '1'
+      # Capacidade total de admissão = 1 + 2; excedente recebe 429 sem ter o
+      # upload lido (evita acumular PDFs em memória).
+      DI_MAX_QUEUE: '2'
       DI_TIMEOUT_S: '300'
+      # Limite de páginas aplicado na inspeção prévia (antes da inferência).
+      DI_MAX_PAGES: '100'
+      # Recortes de imagem (Picture/Figure/Diagram) embutidos como data URL,
+      # com tetos por imagem (256 KiB) e por documento (2 MiB).
+      DI_INCLUDE_IMAGES: 'true'
       DI_PRELOAD_MODELS: 'true'
       DI_WARMUP: 'true'
       DI_LOG_LEVEL: 'info'
@@ -102,18 +110,26 @@ services:
       # Pesos do Marker/Surya (persistem entre reinícios; o primeiro boot baixa).
       - document_intelligence_cache:/app/.cache
       - document_intelligence_tmp:/tmp/document-intelligence
+    # Healthcheck = READINESS (/ready): 200 só com modelos carregados, warmup
+    # concluído e memória suficiente; 503 enquanto não estiver pronto. O
+    # Dockerfile mantém HEALTHCHECK de liveness em /health. Como o Compose
+    # aceita um único healthcheck por serviço, o de liveness fica no Dockerfile.
+    # `start_period` largo cobre o primeiro warmup em CPU (~5 min).
     healthcheck:
       test:
-        [
-          'CMD',
-          'python',
-          '-c',
-          "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else sys.exit(1)",
-        ]
+        - CMD
+        - python
+        - -c
+        - |
+          import sys, urllib.request
+          try:
+              sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).status == 200 else 1)
+          except Exception:
+              sys.exit(1)
       interval: 30s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 15m
 
 volumes:
   pgdata:

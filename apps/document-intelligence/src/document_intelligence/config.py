@@ -27,8 +27,22 @@ class Settings(BaseSettings):
     # A inferência local do Marker é serializada (não é thread-safe). Este valor
     # limita quantas requisições ficam em processamento/fila por processo.
     max_concurrency: int = Field(default=1, ge=1, le=64)
+    # Requisições adicionais admitidas aguardando o worker. A capacidade total
+    # é ``max_concurrency + max_queue``; o excedente recebe HTTP 429 antes de o
+    # corpo do upload ser lido (evita acumular PDFs inteiros em memória).
+    max_queue: int = Field(default=2, ge=0, le=1024)
     timeout_s: int = Field(default=300, ge=1, le=3600)
-    max_pages: int | None = Field(default=None, ge=1)
+    # Limite de páginas explícito com default seguro: sem ele, um PDF grande
+    # poderia consumir a máquina inteira. Aplicado ANTES da inferência
+    # (inspeção com pypdfium2); acima disso → HTTP 422.
+    max_pages: int = Field(default=100, ge=1)
+
+    # Imagens detectadas pelo Marker (Picture/Figure/Diagram). O recorte é
+    # embutido como data URL quando cabe nos tetos abaixo; excedentes ficam
+    # sem `imageRef` e são sinalizados honestamente (metadata + warning).
+    include_images: bool = Field(default=True)
+    max_image_bytes: int = Field(default=262_144, ge=1)
+    max_total_image_bytes: int = Field(default=2_097_152, ge=1)
 
     # Modelos / processamento
     # Carrega os modelos do Marker no startup (recomendado). Se ``False``, o

@@ -1,9 +1,11 @@
 """Aplicação FastAPI do serviço Document Intelligence.
 
 Endpoints:
-    GET  /health      — status do serviço (não carrega modelos)
-    GET  /ready       — modelos carregados e recursos disponíveis
-    POST /documents/parse — recebe PDF via multipart e retorna JSON estruturado
+    GET  /health      — liveness: 200 enquanto o processo está vivo (sem modelos)
+    GET  /ready       — readiness: 200 só com modelos carregados, warmup
+                        concluído e memória suficiente; senão 503
+    POST /documents/parse — recebe PDF via multipart e retorna JSON estruturado;
+                        capacidade esgotada → 429 antes de ler o upload
 
 Os modelos do Marker são carregados uma única vez no startup (configurável por
 ``DI_PRELOAD_MODELS``) e reutilizados entre requisições. O processamento é
@@ -19,13 +21,22 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import psutil
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse
 
 from .config import settings
 from .logging import configure_logging, get_logger
 from .parser import CONTRACT_VERSION, MarkerParser
-from .queue import ProcessingQueue
+from .queue import AdmissionSlot, ProcessingQueue
 from .schemas import (
     DocumentInfo,
     HealthResponse,
@@ -51,7 +62,12 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 # Instâncias compartilhadas (carregadas no startup / first use).
 parser = MarkerParser()
-queue = ProcessingQueue(max_concurrency=settings.max_concurrency)
+# Capacidade = worker(s) + aguardando. Excedente recebe 429 antes de ler o
+# corpo do upload (não acumula PDFs em memória).
+queue = ProcessingQueue(
+    max_concurrency=settings.max_concurrency,
+    max_queue=settings.max_queue,
+)
 executor = ThreadPoolExecutor(
     max_workers=settings.max_concurrency,
     thread_name_prefix="di-marker",
@@ -112,6 +128,39 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rota de trabalho pesado protegida por admissão.
+_ADMISSION_PATH = "/documents/parse"
+_CAPACITY_DETAIL = "Serviço ocupado; tente novamente em instantes."
+
+
+@app.middleware("http")
+async def admission_control(request: Request, call_next: Any) -> Any:
+    """Admite a requisição **antes** de o corpo do upload ser lido.
+
+    Sem isso, cada requisição simultânea carregaria o PDF inteiro em memória
+    antes de entrar na fila. Quando a capacidade (``max_concurrency +
+    max_queue``) está esgotada, responde ``429`` sem ler o corpo. O slot é
+    liberado no ``finally`` se a rota não o tiver transferido ao worker.
+    """
+    if request.method != "POST" or request.url.path != _ADMISSION_PATH:
+        return await call_next(request)
+
+    slot = AdmissionSlot(queue)
+    if not slot.try_acquire():
+        logger.warning("capacidade_esgotada", capacidade=queue.capacity)
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"detail": _CAPACITY_DETAIL},
+            headers={"Retry-After": "5"},
+        )
+
+    request.state.admission_slot = slot
+    try:
+        return await call_next(request)
+    finally:
+        if not slot.transferred:
+            slot.release()
+
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 async def health() -> HealthResponse:
@@ -119,9 +168,22 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok", marker_available=_marker_importable())
 
 
-@app.get("/ready", response_model=ReadyResponse, tags=["health"])
-async def ready() -> ReadyResponse:
-    """Indica se o serviço está pronto para processar documentos."""
+@app.get(
+    "/ready",
+    response_model=ReadyResponse,
+    tags=["health"],
+    responses={
+        503: {"model": ReadyResponse, "description": "Ainda não pronto"}
+    },
+)
+async def ready(response: Response) -> ReadyResponse:
+    """Indica se o serviço está pronto para receber inferências.
+
+    Retorna **HTTP 200** somente quando os modelos estão carregados, o warmup
+    concluiu (quando habilitado) e há memória livre suficiente. Caso contrário,
+    **HTTP 503** com ``status: "not_ready"`` no corpo — sinal que orquestradores
+    usam para não rotear tráfego.
+    """
     checks: dict[str, str] = {}
     ready_status = "ready"
 
@@ -136,16 +198,20 @@ async def ready() -> ReadyResponse:
         if not parser.warm:
             ready_status = "not_ready"
 
-    # Recursos: memória livre e escrita no diretório temporário.
+    # Requisitos mínimos: memória livre.
     available_mb = int(psutil.virtual_memory().available / (1024 * 1024))
     checks["memoria_livre_mb"] = str(available_mb)
     if available_mb < settings.min_free_memory_mb:
         ready_status = "not_ready"
 
     checks["concorrencia_max"] = str(settings.max_concurrency)
+    checks["fila_em_uso"] = f"{queue.in_flight}/{queue.capacity}"
     checks["tamanho_maximo_arquivo_mb"] = str(settings.max_file_size_mb)
     checks["timeout_s"] = str(settings.timeout_s)
-    checks["max_paginas"] = str(settings.max_pages) if settings.max_pages else "sem limite"
+    checks["max_paginas"] = str(settings.max_pages)
+
+    if ready_status != "ready":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return ReadyResponse(
         status=ready_status,  # type: ignore[arg-type]
@@ -212,6 +278,7 @@ def _process_document(
 
 @app.post("/documents/parse", response_model=ParseResponse, tags=["documents"])
 async def parse_document(
+    request: Request,
     file: UploadFile = File(..., description="Arquivo PDF a ser processado"),
     document_id: str | None = Form(
         default=None, description="Identificador opcional de processamento"
@@ -219,20 +286,44 @@ async def parse_document(
 ) -> ParseResponse:
     """Recebe um PDF via ``multipart/form-data`` e retorna JSON estruturado.
 
-    Validações de segurança:
+    Fluxo e garantias:
+    - **admissão antes da leitura**: se a capacidade (worker + aguardando) está
+      esgotada, responde ``429`` sem carregar o corpo em memória;
     - somente PDFs válidos (assinatura ``%PDF-`` + magic bytes);
     - tamanho dentro do limite configurado (leitura em blocos, 413 cedo);
     - PDF não criptografado e dentro do limite de páginas;
     - nome de arquivo temporário aleatório com limpeza garantida.
+
+    O slot de admissão é liberado em todos os caminhos: erro de validação,
+    upload acima do limite, falha ao agendar o executor, cancelamento do
+    cliente e timeout. Quando o trabalho já está no worker, a liberação
+    acontece no callback do future — nunca antes de a thread terminar.
     """
     request_id = document_id or generate_document_id()
     start = time.perf_counter()
 
-    data = await _read_upload_bounded(file)
+    # O middleware de admissão já adquiriu o slot ANTES de ler o corpo. O
+    # fallback cobre chamadas diretas à rota sem o middleware (testes/embeds).
+    slot: AdmissionSlot | None = getattr(request.state, "admission_slot", None)
+    created_slot = slot is None
+    if slot is None:
+        slot = AdmissionSlot(queue)
+        if not slot.try_acquire():
+            logger.warning(
+                "capacidade_esgotada",
+                document_id=request_id,
+                capacidade=queue.capacity,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=_CAPACITY_DETAIL,
+                headers={"Retry-After": "5"},
+            )
 
-    await queue.acquire()
-    loop = asyncio.get_running_loop()
     try:
+        data = await _read_upload_bounded(file)
+
+        loop = asyncio.get_running_loop()
         future = loop.run_in_executor(
             executor,
             _process_document,
@@ -241,54 +332,55 @@ async def parse_document(
             file.content_type,
             request_id,
         )
-    except BaseException:
-        # Falha ao agendar (executor encerrando): não deixar o slot preso.
-        queue.release()
-        raise
-    # O slot só é liberado quando o trabalho na thread realmente termina:
-    # `wait_for` cancela o future do asyncio, mas não interrompe a thread já
-    # iniciada — liberar no `async with` deixaria a fila admitir trabalho
-    # enquanto o worker segue ocupado.
-    future.add_done_callback(lambda _: queue.release())
-    try:
-        response = await asyncio.wait_for(
-            asyncio.shield(future), timeout=settings.timeout_s
-        )
-    except EncryptedPDFError as exc:
-        logger.warning("pdf_criptografado", document_id=request_id)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-    except PageLimitError as exc:
-        logger.warning("pdf_acima_do_limite_de_paginas", document_id=request_id)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-    except SecurityError as exc:
-        logger.warning(
-            "rejeicao_por_seguranca",
-            document_id=request_id,
-            motivo=str(exc),
-            tamanho_bytes=len(data),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
-    except (asyncio.TimeoutError, TimeoutError) as exc:
-        logger.error(
-            "timeout_no_processamento",
-            document_id=request_id,
-            timeout_s=settings.timeout_s,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=(
-                f"O processamento excedeu o timeout de "
-                f"{settings.timeout_s}s"
-            ),
-        ) from exc
+        # O slot passa a ser liberado quando a thread realmente terminar —
+        # nem no fim da requisição, nem no timeout/cancelamento do cliente.
+        future.add_done_callback(lambda _: slot.release())
+        slot.transfer()
+
+        try:
+            response = await asyncio.wait_for(
+                asyncio.shield(future), timeout=settings.timeout_s
+            )
+        except EncryptedPDFError as exc:
+            logger.warning("pdf_criptografado", document_id=request_id)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except PageLimitError as exc:
+            logger.warning(
+                "pdf_acima_do_limite_de_paginas", document_id=request_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except SecurityError as exc:
+            logger.warning(
+                "rejeicao_por_seguranca",
+                document_id=request_id,
+                motivo=str(exc),
+                tamanho_bytes=len(data),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            logger.error(
+                "timeout_no_processamento",
+                document_id=request_id,
+                timeout_s=settings.timeout_s,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=(
+                    f"O processamento excedeu o timeout de "
+                    f"{settings.timeout_s}s"
+                ),
+            ) from exc
+    finally:
+        if created_slot and not slot.transferred:
+            slot.release()
 
     duracao_ms = int((time.perf_counter() - start) * 1000)
     log = logger.info if response.status == "completed" else logger.error

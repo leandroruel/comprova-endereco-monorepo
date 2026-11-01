@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -106,6 +107,77 @@ def _normalize_type(block_type: str | None) -> str:
     if not block_type:
         return "unknown"
     return _TYPE_MAP.get(block_type, "unknown")
+
+
+# ---------------------------------------------------------------------------
+# Imagens (Picture/Figure/Diagram).
+#
+# O ``JSONRenderer`` do Marker 2.1.0 popula ``JSONBlockOutput.images`` com o
+# recorte do bloco já em base64 (JPEG, ver ``marker.settings.OUTPUT_IMAGE_FORMAT``)
+# apenas para os tipos em ``JSONRenderer.image_blocks``. A chave do dicionário é
+# o id do bloco (``/page/N/Picture/M``). Embutimos o recorte como data URL
+# **com tetos** (por imagem e por documento): excedentes ficam sem ``imageRef``
+# e são sinalizados em ``metadata`` + ``warnings``, sem inventar referências.
+# ---------------------------------------------------------------------------
+_IMAGE_MIME_BY_FORMAT: dict[str, str] = {
+    "JPEG": "image/jpeg",
+    "JPG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+}
+
+
+def _image_mime_type() -> str:
+    """MIME do recorte de imagem conforme a configuração efetiva do Marker."""
+    try:
+        from marker.settings import settings as marker_settings
+
+        fmt = str(getattr(marker_settings, "OUTPUT_IMAGE_FORMAT", "JPEG")).upper()
+        return _IMAGE_MIME_BY_FORMAT.get(fmt, "image/jpeg")
+    except Exception:  # pragma: no cover - Marker ausente/atributo mudou
+        return "image/jpeg"
+
+
+@dataclass
+class _ImageBudget:
+    """Orçamento de bytes de imagem embutidos por documento."""
+
+    max_per_image: int
+    max_total: int
+    used: int = 0
+
+    def take(self, size_bytes: int) -> bool:
+        """Reserva ``size_bytes`` se couber nos dois tetos; senão recusa."""
+        if size_bytes <= 0 or size_bytes > self.max_per_image:
+            return False
+        if self.used + size_bytes > self.max_total:
+            return False
+        self.used += size_bytes
+        return True
+
+
+def _block_image_base64(block: Any) -> tuple[str, int] | None:
+    """Devolve ``(base64, size_bytes)`` do recorte do bloco, se houver.
+
+    Usa o id do próprio bloco como chave; se não houver correspondência exata e
+    o bloco tiver exatamente uma imagem, usa essa. Nunca inventa: devolve
+    ``None`` quando o Marker não forneceu recorte confiável.
+    """
+    images = getattr(block, "images", None)
+    if not isinstance(images, dict) or not images:
+        return None
+    # As chaves podem ser ``BlockId`` ou ``str``; normaliza para comparar.
+    lookup = {str(key): value for key, value in images.items()}
+    block_id = str(getattr(block, "id", ""))
+    candidate = lookup.get(block_id)
+    if not isinstance(candidate, str) or not candidate:
+        values = [value for value in lookup.values() if isinstance(value, str) and value]
+        if len(values) != 1:
+            return None
+        candidate = values[0]
+    # base64: 4 chars -> 3 bytes (descontando o padding '=').
+    padding = len(candidate) - len(candidate.rstrip("="))
+    return candidate, (len(candidate) * 3) // 4 - padding
 
 
 # ---------------------------------------------------------------------------
@@ -322,11 +394,21 @@ class MarkerParser:
                 markdown_output = self._markdown_renderer(document)
 
             page_count = len(document.pages)
-            if settings.max_pages is not None and page_count > settings.max_pages:
+            if page_count > settings.max_pages:
                 warnings.append(
                     f"PDF tem {page_count} páginas; o limite configurado é "
                     f"{settings.max_pages}. O processamento pode ter sido limitado."
                 )
+
+            # Orçamento de imagens compartilhado por todo o documento.
+            image_budget = (
+                _ImageBudget(
+                    max_per_image=settings.max_image_bytes,
+                    max_total=settings.max_total_image_bytes,
+                )
+                if settings.include_images
+                else None
+            )
 
             pages: list[Page] = []
             all_text_parts: list[str] = []
@@ -341,7 +423,11 @@ class MarkerParser:
 
                 elements: list[DocumentElement] = []
                 for block in page_node.children or []:
-                    elements.extend(self._block_to_elements(block, page_number))
+                    elements.extend(
+                        self._block_to_elements(
+                            block, page_number, image_budget, warnings
+                        )
+                    )
 
                 for element in elements:
                     if element.text:
@@ -411,15 +497,27 @@ class MarkerParser:
             )
 
     def _block_to_elements(
-        self, block: Any, page_number: int
+        self,
+        block: Any,
+        page_number: int,
+        image_budget: _ImageBudget | None = None,
+        warnings: list[str] | None = None,
     ) -> list[DocumentElement]:
-        """Converte um bloco (possivelmente container) em elementos."""
+        """Converte um bloco (possivelmente container) em elementos.
+
+        ``image_budget`` limita os bytes de imagem embutidos no documento;
+        ``warnings`` recebe avisos quando um recorte é recusado (tamanho).
+        """
         children = getattr(block, "children", None)
         # Containers sem HTML próprio: descemos para os filhos (preserva ordem).
         if children:
             elements: list[DocumentElement] = []
             for child in children:
-                elements.extend(self._block_to_elements(child, page_number))
+                elements.extend(
+                    self._block_to_elements(
+                        child, page_number, image_budget, warnings
+                    )
+                )
             return elements
 
         block_type = getattr(block, "block_type", None)
@@ -440,6 +538,18 @@ class MarkerParser:
         element_id = str(getattr(block, "id", "")) or f"p{page_number}-block"
         section_hierarchy = getattr(block, "section_hierarchy", None)
 
+        metadata: dict[str, Any] = {}
+        if block_type:
+            metadata["blockType"] = block_type
+        if section_hierarchy:
+            metadata["sectionHierarchy"] = section_hierarchy
+
+        image_ref: str | None = None
+        if normalized_type == "image":
+            image_ref = self._image_ref_for_block(
+                block, element_id, image_budget, metadata, warnings
+            )
+
         return [
             DocumentElement(
                 id=element_id,
@@ -448,14 +558,52 @@ class MarkerParser:
                 bbox=bbox,
                 confidence=None,
                 table=table,
-                metadata={
-                    "block_type": block_type,
-                    "section_hierarchy": section_hierarchy or {},
-                }
-                if block_type or section_hierarchy
-                else {},
+                image_ref=image_ref,
+                metadata=metadata,
             )
         ]
+
+    @staticmethod
+    def _image_ref_for_block(
+        block: Any,
+        element_id: str,
+        image_budget: _ImageBudget | None,
+        metadata: dict[str, Any],
+        warnings: list[str] | None,
+    ) -> str | None:
+        """Extrai o recorte do bloco como data URL, respeitando os tetos.
+
+        Devolve ``None`` quando a extração está desativada, o Marker não
+        forneceu recorte ou o recorte excede os limites — sempre registrando o
+        motivo em ``metadata`` (representação honesta, sem referência falsa).
+        """
+        if image_budget is None:
+            metadata["imageExtracted"] = False
+            metadata["imageSkippedReason"] = "disabled"
+            return None
+
+        found = _block_image_base64(block)
+        if found is None:
+            metadata["imageExtracted"] = False
+            metadata["imageSkippedReason"] = "not_available"
+            return None
+
+        base64_data, size_bytes = found
+        mime = _image_mime_type()
+        metadata["imageBytes"] = size_bytes
+        metadata["imageMimeType"] = mime
+        if not image_budget.take(size_bytes):
+            metadata["imageExtracted"] = False
+            metadata["imageSkippedReason"] = "size_limit"
+            if warnings is not None:
+                warnings.append(
+                    f"imagem do elemento {element_id} não embutida: "
+                    f"{size_bytes} bytes excedem o limite configurado."
+                )
+            return None
+
+        metadata["imageExtracted"] = True
+        return f"data:{mime};base64,{base64_data}"
 
     @staticmethod
     def _marker_version() -> str:
