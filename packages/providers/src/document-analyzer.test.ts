@@ -337,6 +337,58 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     })
   })
 
+  it('não aceita "ATENDIMENTO AO CLIENTE" como rótulo de destinatário', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135',
+        'ATENDIMENTO AO CLIENTE:',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('not_extracted')
+    expect(result.address.status).toBe('not_extracted')
+  })
+
+  it('aceita rótulo DESTINATARIO: como evidência do bloco estrutural', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135',
+        'DESTINATARIO:',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.value?.cep).toBe('25085135')
+  })
+
+  it('não usa bloco estrutural quando o titular rotulado é ambíguo', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Nome: Maria da Silva',
+        'Cliente: Joao da Silva',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135 | MEDIDOR: 6018930',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.status).toBe('not_extracted')
+    expect(result.address.status).toBe('not_extracted')
+  })
+
   it('não trata bloco estrutural sem CEP como endereço', async () => {
     const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
       data: pdfWithText([

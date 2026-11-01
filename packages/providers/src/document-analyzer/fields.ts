@@ -95,6 +95,7 @@ const HOLDER_LABELS: readonly string[] = [
   'CLIENTE',
   'RAZAOSOCIAL',
 ]
+const HOLDER_LABEL_SET: ReadonlySet<string> = new Set(HOLDER_LABELS)
 
 /** Janela máxima (em caracteres) antes de um `:` para procurar um rótulo. */
 const LABEL_WINDOW_CHARS = 80
@@ -370,8 +371,12 @@ const NON_NAME_RE =
  * rótulos de cliente/pagador. Um bloco só com CNPJ/inscrição estadual é
  * tratado como emitente e ignorado.
  */
-const RECIPIENT_MARKER_RE =
-  /\b(?:CPF|MEDIDOR|UNIDADE\s+CONSUMIDORA|CONTA\s+CONTRATO|INSTALACAO|CLIENTE|DESTINATARIO|PAGADOR)\b/
+const RECIPIENT_MARKER_RE = /\b(?:CPF|MEDIDOR|UNIDADE\s+CONSUMIDORA|CONTA\s+CONTRATO|INSTALACAO)\b/
+/**
+ * `CLIENTE`/`DESTINATARIO`/`PAGADOR` só valem como rótulo no início da linha;
+ * um texto incidental (`ATENDIMENTO AO CLIENTE:`) não é prova de destinatário.
+ */
+const RECIPIENT_LABEL_RE = /^(?:CLIENTE|DESTINATARIO|PAGADOR)\s*:/
 
 const looksLikeRecipientName = (line: string): boolean => {
   const normalized = normalizeText(line)
@@ -437,8 +442,10 @@ const recipientBlocksFromText = (text: string): readonly AddressSection[] => {
     // Sem marcador de destinatário nas linhas do bloco ou logo depois, é mais
     // provável ser o emitente (CNPJ/inscrição estadual). Não extraímos nada.
     const afterStart = index + 1 + collected.length
-    const evidence = normalizeText([...collected, ...lines.slice(afterStart, afterStart + 3)].join(' '))
-    if (!RECIPIENT_MARKER_RE.test(evidence)) continue
+    const evidenceLines = [...collected, ...lines.slice(afterStart, afterStart + 3)]
+    const evidence = normalizeText(evidenceLines.join(' '))
+    const hasRecipientLabel = evidenceLines.some((line) => RECIPIENT_LABEL_RE.test(normalizeText(line)))
+    if (!RECIPIENT_MARKER_RE.test(evidence) && !hasRecipientLabel) continue
 
     blocks.push({
       name: cleanRecipientName(nameLine),
@@ -516,6 +523,10 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
   // pessoa/empresa; um bloco de outro nome (ex.: emitente) é descartado por
   // inteiro, evitando misturar endereços de titulares diferentes.
   const labeledHolder = pickUnique(lines, HOLDER_LABELS)
+  const hasHolderLabel = lines.some((line) => HOLDER_LABEL_SET.has(line.label))
+  // Rótulos de titular conflitantes continuam sendo "rótulo presente": não é
+  // licença para um bloco estrutural assumir o endereço.
+  if (hasHolderLabel && labeledHolder === null) structuralSections = []
   if (labeledHolder !== null && structuralSections.length > 0) {
     const holderName = normalizeText(labeledHolder.value)
     const agrees = structuralSections.some(
@@ -637,10 +648,11 @@ const holderFromLines = (lines: readonly LabeledLine[], text: string): Extracted
   const nameLine = pickUnique(lines, HOLDER_LABELS)
   const explicitSections = addressSectionsFromText(text)
   // Rótulo de titular sempre vence; o bloco estrutural só é consultado quando
-  // não há nenhum rótulo de titular (senão um bloco de emitente poderia anular
-  // ou substituir o titular rotulado).
+  // não há nenhum rótulo de titular — mesmo ambíguo — senão um bloco de
+  // emitente poderia substituir o titular rotulado.
+  const hasHolderLabel = lines.some((line) => HOLDER_LABEL_SET.has(line.label))
   const sections =
-    explicitSections.length > 0 ? explicitSections : nameLine !== null ? [] : recipientBlocksFromText(text)
+    explicitSections.length > 0 ? explicitSections : hasHolderLabel ? [] : recipientBlocksFromText(text)
   const sectionName = pickSectionField(sections, (s) => s.name)
   const rawValue = resolveField(nameLine?.value ?? null, sectionName)
   if (rawValue === null) return null
