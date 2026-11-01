@@ -86,6 +86,16 @@ const KNOWN_LABELS: ReadonlySet<string> = new Set(
   ].map(labelOf),
 )
 
+/** Rótulos que identificam o titular do documento. */
+const HOLDER_LABELS: readonly string[] = [
+  'TITULAR',
+  'NOMEDOTITULAR',
+  'PAGADOR',
+  'NOME',
+  'CLIENTE',
+  'RAZAOSOCIAL',
+]
+
 /** Janela máxima (em caracteres) antes de um `:` para procurar um rótulo. */
 const LABEL_WINDOW_CHARS = 80
 /** Linha maior que isto não é um `Rótulo: valor` real. */
@@ -354,6 +364,14 @@ const addressSectionsFromText = (text: string): readonly AddressSection[] => {
 const NAME_LINE_RE = /^[A-Z][A-Z\s.'&-]{3,79}$/
 const NON_NAME_RE =
   /\b(?:DANF3E|FISCAL|DOCUMENTO|AUXILIAR|GRUPO|SUBGRUPO|RESIDENCIAL|CONTA|NOTA|CHAVE|PROTOCOLO|MEDIDOR|LEITURA|TOTAL)\b/
+/**
+ * Evidência de que o bloco estrutural é do **destinatário**, não do emitente:
+ * CPF (pessoa), medidor, unidade consumidora, conta contrato, instalação ou
+ * rótulos de cliente/pagador. Um bloco só com CNPJ/inscrição estadual é
+ * tratado como emitente e ignorado.
+ */
+const RECIPIENT_MARKER_RE =
+  /\b(?:CPF|MEDIDOR|UNIDADE\s+CONSUMIDORA|CONTA\s+CONTRATO|INSTALACAO|CLIENTE|DESTINATARIO|PAGADOR)\b/
 
 const looksLikeRecipientName = (line: string): boolean => {
   const normalized = normalizeText(line)
@@ -416,6 +434,11 @@ const recipientBlocksFromText = (text: string): readonly AddressSection[] => {
     if (city === null) continue
     const parts = splitStructuralStreet(street)
     if (parts.logradouro.length < 4) continue
+    // Sem marcador de destinatário nas linhas do bloco ou logo depois, é mais
+    // provável ser o emitente (CNPJ/inscrição estadual). Não extraímos nada.
+    const afterStart = index + 1 + collected.length
+    const evidence = normalizeText([...collected, ...lines.slice(afterStart, afterStart + 3)].join(' '))
+    if (!RECIPIENT_MARKER_RE.test(evidence)) continue
 
     blocks.push({
       name: cleanRecipientName(nameLine),
@@ -484,11 +507,29 @@ const resolveStreet = (labeled: string | null, section: string | null): string |
 }
 
 const addressFromLines = (lines: readonly LabeledLine[], text: string): ExtractedAddress | null => {
-  // Bloco rotulado tem prioridade; o bloco estrutural (DANF3E sem cabeçalho)
-  // só é usado quando não há nenhum endereço explicitamente rotulado, para não
-  // confundir o endereço do emitente com o do destinatário.
+  // Bloco rotulado tem prioridade. O bloco estrutural (DANF3E sem cabeçalho)
+  // só preenche os campos que não têm rótulo próprio: não sobrescreve nem
+  // anula valores rotulados, e não confunde emitente com destinatário.
   const explicitSections = addressSectionsFromText(text)
-  const sections = explicitSections.length > 0 ? explicitSections : recipientBlocksFromText(text)
+  let structuralSections = explicitSections.length > 0 ? [] : recipientBlocksFromText(text)
+  // Se há titular rotulado, o bloco estrutural só é usado quando é a mesma
+  // pessoa/empresa; um bloco de outro nome (ex.: emitente) é descartado por
+  // inteiro, evitando misturar endereços de titulares diferentes.
+  const labeledHolder = pickUnique(lines, HOLDER_LABELS)
+  if (labeledHolder !== null && structuralSections.length > 0) {
+    const holderName = normalizeText(labeledHolder.value)
+    const agrees = structuralSections.some(
+      (section) => section.name !== null && normalizeText(section.name) === holderName,
+    )
+    if (!agrees) structuralSections = []
+  }
+  const labeledLabels = new Set(lines.map((line) => line.label))
+  const sectionsFor = (names: readonly string[]): readonly AddressSection[] => {
+    if (explicitSections.length > 0) return explicitSections
+    return names.some((name) => labeledLabels.has(labelOf(name))) ? [] : structuralSections
+  }
+  const auditSection = explicitSections[0] ?? structuralSections[0]
+
   const streetLine = pickUnique(lines, ['ENDERECO', 'LOGRADOURO'])
   const numberLine = pickUnique(lines, ['NUMERO'])
   const complementLine = pickUnique(lines, ['COMPLEMENTO'])
@@ -498,15 +539,15 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
   const cepLine = pickUnique(lines, ['CEP'])
 
   const labeledStreet = streetLine?.value ?? null
-  const sectionStreet = pickSectionField(sections, (s) => s.street)
+  const sectionStreet = pickSectionField(sectionsFor(['ENDERECO', 'LOGRADOURO']), (s) => s.street)
   const streetValue = resolveStreet(labeledStreet, sectionStreet)
   const usingSectionStreet = streetValue !== null && sectionStreet !== null && streetValue === sectionStreet
   const parts = streetValue === null ? null : splitAddress(streetValue)
   const logradouro = usingSectionStreet
-    ? pickSectionField(sections, (s) => s.logradouro)
+    ? pickSectionField(sectionsFor(['ENDERECO', 'LOGRADOURO']), (s) => s.logradouro)
     : (parts?.logradouro ?? null)
   const embeddedNumber = usingSectionStreet
-    ? pickSectionField(sections, (s) => s.numero)
+    ? pickSectionField(sectionsFor(['NUMERO']), (s) => s.numero)
     : (parts?.numero ?? null)
   const labeledNumber = numberLine?.value ?? null
   const numero =
@@ -519,14 +560,14 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
           : null
   const complemento =
     complementLine?.value ??
-    (usingSectionStreet ? pickSectionField(sections, (s) => s.complemento) : null) ??
+    (usingSectionStreet ? pickSectionField(sectionsFor(['COMPLEMENTO']), (s) => s.complemento) : null) ??
     parts?.complemento ??
     null
 
   const cepValue = resolveField(
     cepLine?.value ?? null,
     pickSectionField(
-      sections,
+      sectionsFor(['CEP']),
       (s) => s.cep,
       (value) => value.replace(/\D+/g, ''),
     ),
@@ -537,17 +578,17 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
   const ufRaw =
     resolveField(
       stateLine?.value.trim() ?? null,
-      pickSectionField(sections, (s) => s.uf),
+      pickSectionField(sectionsFor(['UF', 'ESTADO']), (s) => s.uf),
     ) ?? ''
   const uf = /^[A-Za-z]{2}$/.test(ufRaw) ? normalizeUf(ufRaw) : null
   const cidadeValue = resolveField(
     cityLine?.value ?? null,
-    pickSectionField(sections, (s) => s.city),
+    pickSectionField(sectionsFor(['CIDADE', 'MUNICIPIO']), (s) => s.city),
   )
   const cidade = cidadeValue === null ? null : cap(normalizeText(cidadeValue), MAX_FIELD_CHARS)
   const bairroValue = resolveField(
     neighborhoodLine?.value ?? null,
-    pickSectionField(sections, (s) => s.neighborhood),
+    pickSectionField(sectionsFor(['BAIRRO']), (s) => s.neighborhood),
   )
 
   if (logradouro === null && cep === null && bairroValue === null && (cidade === null || uf === null)) {
@@ -580,9 +621,9 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
         cityLine?.raw,
         stateLine?.raw,
         cepLine?.raw,
-        // O bloco é a evidência de auditoria do que veio de uma seção explícita;
-        // repetições idênticas não precisam ser concatenadas.
-        sections[0]?.raw,
+        // O bloco é a evidência de auditoria do que veio de uma seção explícita
+        // ou estrutural; repetições idênticas não precisam ser concatenadas.
+        auditSection?.raw,
       ]
         .filter((line): line is string => line !== null && line !== undefined)
         .filter((line, index, all) => all.indexOf(line) === index)
@@ -593,16 +634,13 @@ const addressFromLines = (lines: readonly LabeledLine[], text: string): Extracte
 }
 
 const holderFromLines = (lines: readonly LabeledLine[], text: string): ExtractedHolder | null => {
-  const nameLine = pickUnique(lines, [
-    'TITULAR',
-    'NOMEDOTITULAR',
-    'PAGADOR',
-    'NOME',
-    'CLIENTE',
-    'RAZAOSOCIAL',
-  ])
+  const nameLine = pickUnique(lines, HOLDER_LABELS)
   const explicitSections = addressSectionsFromText(text)
-  const sections = explicitSections.length > 0 ? explicitSections : recipientBlocksFromText(text)
+  // Rótulo de titular sempre vence; o bloco estrutural só é consultado quando
+  // não há nenhum rótulo de titular (senão um bloco de emitente poderia anular
+  // ou substituir o titular rotulado).
+  const sections =
+    explicitSections.length > 0 ? explicitSections : nameLine !== null ? [] : recipientBlocksFromText(text)
   const sectionName = pickSectionField(sections, (s) => s.name)
   const rawValue = resolveField(nameLine?.value ?? null, sectionName)
   if (rawValue === null) return null

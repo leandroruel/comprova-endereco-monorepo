@@ -269,7 +269,7 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
         'R ALM GRENFALL 405 BL 1 LJ 4',
         'VILA SAO LUIS / DUQUE DE CAXIAS,',
         'RJ',
-        'CEP 25085-135',
+        'CEP 25085-135 | MEDIDOR: 6018930',
       ]),
       contentType: 'application/pdf',
     })
@@ -278,6 +278,58 @@ describe('makeDocumentAnalyzer (F1.2)', () => {
     expect(result.address.value).toMatchObject({
       logradouro: 'RUA ALM GRENFALL',
       numero: '405',
+      bairro: 'VILA SAO LUIS',
+      cidade: 'DUQUE DE CAXIAS',
+      uf: 'RJ',
+      cep: '25085135',
+    })
+  })
+
+  it('ignora bloco de emitente quando há titular rotulado', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'CONTA DE ENERGIA',
+        'Titular: Maria da Silva',
+        'Endereço: Rua das Flores 123',
+        'DISTRIBUIDORA EMITENTE SA',
+        'RUA DO EMITENTE 500',
+        'CENTRO / CIDADE EMITENTE - SP',
+        'CEP 99999-999',
+        'CNPJ: 11.222.333/0001-81',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value).toEqual({ name: 'Maria da Silva', raw: 'Titular: Maria da Silva' })
+    expect(result.address.value).toMatchObject({
+      logradouro: 'RUA DAS FLORES',
+      numero: '123',
+    })
+    // Nada do bloco do emitente (cidade/UF/CEP) vaza para o resultado.
+    expect(result.address.value?.cidade).toBeNull()
+    expect(result.address.value?.uf).toBeNull()
+    expect(result.address.value?.cep).toBeNull()
+  })
+
+  it('usa bloco estrutural do próprio titular só para campos sem rótulo', async () => {
+    const result = await analyzerAt('2026-10-22T12:00:00.000Z').analyze({
+      data: pdfWithText([
+        'DANF3E - DOCUMENTO AUXILIAR DA NOTA',
+        'Titular: JOAO DA SILVA',
+        'Endereço: Rua das Flores',
+        'JOAO DA SILVA',
+        'R ALM GRENFALL 405 BL 1 LJ 4',
+        'VILA SAO LUIS / DUQUE DE CAXIAS, RJ',
+        'CEP 25085-135 | MEDIDOR: 6018930',
+      ]),
+      contentType: 'application/pdf',
+    })
+
+    expect(result.holder.value?.name).toBe('JOAO DA SILVA')
+    expect(result.address.value).toMatchObject({
+      // O logradouro rotulado prevalece; o bloco só completa o que falta.
+      logradouro: 'RUA DAS FLORES',
+      numero: null,
       bairro: 'VILA SAO LUIS',
       cidade: 'DUQUE DE CAXIAS',
       uf: 'RJ',
