@@ -60,6 +60,14 @@ export const DocumentIntelligenceElementSchema = z.object({
   /** O Marker 2.1.0 não expõe confiança por bloco: sempre `null` hoje. */
   confidence: z.number().nullable(),
   table: DocumentIntelligenceTableSchema.nullable(),
+  /**
+   * Recorte do elemento gráfico como data URL (`data:image/...;base64,...`)
+   * quando o Marker fornece a imagem e ela cabe nos tetos do serviço
+   * (`DI_MAX_IMAGE_BYTES` / `DI_MAX_TOTAL_IMAGE_BYTES`). `null` quando não há
+   * extração — nesse caso `metadata.imageExtracted === false` e
+   * `metadata.imageSkippedReason` explica o motivo. Nunca é uma referência
+   * fictícia.
+   */
   imageRef: z.string().nullable(),
   metadata: z.record(z.string(), z.unknown()),
 })

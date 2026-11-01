@@ -31,11 +31,16 @@ HTTP usando `DOCUMENT_INTELLIGENCE_URL`.
 
 ### Fluxo interno de uma requisição
 
+0. **Admissão** (middleware): capacidade `DI_MAX_CONCURRENCY + DI_MAX_QUEUE`;
+   excedente → `429` **antes de ler o upload**. O slot só é liberado quando a
+   thread de inferência termina (inclusive em timeout/cancelamento).
 1. Validação de segurança (assinatura `%PDF-`, magic bytes, tamanho, nome do arquivo).
-2. Inspeção barata com `pypdfium2` (contagem de páginas, PDF criptografado).
+2. Inspeção barata com `pypdfium2` (contagem de páginas, PDF criptografado,
+   limite `DI_MAX_PAGES`) — **antes** de qualquer inferência.
 3. Escrita em arquivo temporário aleatório (`mkstemp`) com limpeza garantida.
 4. `PdfConverter.build_document` + `JSONRenderer` + `MarkdownRenderer`.
-5. Mapeamento para o contrato e remoção do temporário.
+5. Mapeamento para o contrato (incluindo recortes de imagem com teto de bytes)
+   e remoção do temporário.
 
 ## Requisitos
 
@@ -87,20 +92,28 @@ Marker/Surya para PDFs escaneados. Em produção com GPU, aponte
 
 Todas as variáveis usam o prefixo `DI_`.
 
-| Variável                | Default   | Descrição                                                 |
-| ----------------------- | --------- | --------------------------------------------------------- |
-| `DI_HOST`               | `0.0.0.0` | Host de escuta                                            |
-| `DI_PORT`               | `8000`    | Porta                                                     |
-| `DI_LOG_LEVEL`          | `info`    | `debug`/`info`/`warning`/`error`                          |
-| `DI_LOG_FILE`           | —         | Arquivo de log opcional (além do stdout JSON)             |
-| `DI_MAX_FILE_SIZE_MB`   | `30`      | Tamanho máximo do upload                                  |
-| `DI_MAX_CONCURRENCY`    | `1`       | Requisições admitidas por processo (ver limitações)       |
-| `DI_TIMEOUT_S`          | `300`     | Timeout por documento                                     |
-| `DI_MAX_PAGES`          | —         | Limite de páginas; acima disso → HTTP 422                 |
-| `DI_PRELOAD_MODELS`     | `true`    | Carrega modelos no startup                                |
-| `DI_WARMUP`             | `true`    | Roda um PDF sintético no startup para carregar layout/OCR |
-| `DI_TEMP_DIR`           | —         | Diretório dos temporários (default: sistema)              |
-| `DI_MIN_FREE_MEMORY_MB` | `512`     | Mínimo de memória livre para `/ready`                     |
+| Variável                   | Default   | Descrição                                                   |
+| -------------------------- | --------- | ----------------------------------------------------------- |
+| `DI_HOST`                  | `0.0.0.0` | Host de escuta                                              |
+| `DI_PORT`                  | `8000`    | Porta                                                       |
+| `DI_LOG_LEVEL`             | `info`    | `debug`/`info`/`warning`/`error`                            |
+| `DI_LOG_FILE`              | —         | Arquivo de log opcional (além do stdout JSON)               |
+| `DI_MAX_FILE_SIZE_MB`      | `30`      | Tamanho máximo do upload                                    |
+| `DI_MAX_CONCURRENCY`       | `1`       | Slots de processamento (inferência é serializada)           |
+| `DI_MAX_QUEUE`             | `2`       | Requisições admitidas aguardando o worker; excedente → 429  |
+| `DI_TIMEOUT_S`             | `300`     | Timeout por documento                                       |
+| `DI_MAX_PAGES`             | `100`     | Limite de páginas aplicado antes da inferência; acima → 422 |
+| `DI_INCLUDE_IMAGES`        | `true`    | Embute recortes de imagem como data URL                     |
+| `DI_MAX_IMAGE_BYTES`       | `262144`  | Teto por imagem embutida (256 KiB)                          |
+| `DI_MAX_TOTAL_IMAGE_BYTES` | `2097152` | Teto total de imagens por documento (2 MiB)                 |
+| `DI_PRELOAD_MODELS`        | `true`    | Carrega modelos no startup                                  |
+| `DI_WARMUP`                | `true`    | Roda um PDF sintético no startup para carregar layout/OCR   |
+| `DI_TEMP_DIR`              | —         | Diretório dos temporários (default: sistema)                |
+| `DI_MIN_FREE_MEMORY_MB`    | `512`     | Mínimo de memória livre para `/ready`                       |
+
+A capacidade de admissão é `DI_MAX_CONCURRENCY + DI_MAX_QUEUE`. Acima disso o
+serviço responde `429` **antes de ler o corpo do upload** — não existe fila
+ilimitada nem acúmulo de PDFs inteiros em memória.
 
 Cache de modelos (variáveis do Marker/Surya, não `DI_`):
 
@@ -111,7 +124,9 @@ Cache de modelos (variáveis do Marker/Surya, não `DI_`):
 
 ### `GET /health`
 
-Responde imediatamente. **Não** carrega modelos.
+**Liveness.** Responde `200` imediatamente enquanto o processo está vivo. **Não**
+carrega modelos nem depende de warmup — pode responder `200` durante o
+carregamento.
 
 ```json
 { "status": "ok", "service": "document-intelligence", "version": "0.1.0", "marker_available": true }
@@ -119,8 +134,21 @@ Responde imediatamente. **Não** carrega modelos.
 
 ### `GET /ready`
 
-Indica se os modelos estão carregados, se o aquecimento terminou e se há memória
-suficiente. Retorna `200` com `status: "ready" | "not_ready"`.
+**Readiness.** Retorna `200` **somente** quando modelos carregados, warmup
+concluído (se habilitado) e memória livre ≥ `DI_MIN_FREE_MEMORY_MB`. Caso
+contrário retorna **`503`** com `status: "not_ready"` no corpo.
+
+```json
+{
+  "status": "not_ready",
+  "modelsLoaded": false,
+  "checks": { "marker_modelos": "não carregados", "aquecimento": "em andamento" }
+}
+```
+
+Orquestradores devem usar `/ready` para decidir roteamento e `/health` apenas
+para reiniciar o processo. O `docker-compose.yml` usa `/ready` no healthcheck
+(readiness); o `Dockerfile` mantém `HEALTHCHECK` de liveness em `/health`.
 
 ### `POST /documents/parse`
 
@@ -130,8 +158,12 @@ Respostas:
 
 - `200` — contrato completo (`status: "completed"` ou `"failed"` se o Marker falhar).
 - `400` — não é PDF, arquivo vazio, nome com path traversal ou PDF corrompido.
-- `422` — PDF criptografado ou acima de `DI_MAX_PAGES`.
-- `504` — timeout de processamento.
+- `413` — upload acima de `DI_MAX_FILE_SIZE_MB` (aborta a leitura no limite).
+- `422` — PDF criptografado ou acima de `DI_MAX_PAGES` (inspeção prévia,
+  sem inferência).
+- `429` — capacidade esgotada (`DI_MAX_CONCURRENCY + DI_MAX_QUEUE`), com
+  `Retry-After: 5`. A rejeição acontece antes de o upload ser lido.
+- `504` — timeout de processamento (o slot continua ocupado até a thread terminar).
 - `500` — erro interno (sem stack trace no corpo).
 
 Exemplo:
@@ -209,6 +241,46 @@ Quando `type == "table"`, `table` traz:
 
 `headers` só é preenchido quando o Marker emite uma linha de cabeçalho (`<th>`).
 
+### Imagens (`type: "image"`)
+
+O Marker detecta `Picture`, `Figure`, `Diagram`, `PictureGroup`, `FigureGroup`,
+`ChemicalBlock`, `ComplexRegion` e `Handwriting`. Página e `bbox` são sempre
+preservados.
+
+Quando o renderer JSON do Marker fornece o recorte (`JSONBlockOutput.images`),
+o serviço o embute em `imageRef` como **data URL** (`data:image/jpeg;base64,...`),
+com dois tetos configuráveis:
+
+- `DI_MAX_IMAGE_BYTES` (default 256 KiB) por imagem;
+- `DI_MAX_TOTAL_IMAGE_BYTES` (default 2 MiB) por documento.
+
+```json
+{
+  "id": "/page/0/Picture/1",
+  "type": "image",
+  "bbox": { "x1": 28.2, "y1": 28.2, "x2": 269.7, "y2": 271.2 },
+  "imageRef": "data:image/jpeg;base64,/9j/4AAQSk...",
+  "metadata": {
+    "blockType": "Picture",
+    "imageExtracted": true,
+    "imageBytes": 19740,
+    "imageMimeType": "image/jpeg"
+  }
+}
+```
+
+Sem extração a representação é **honesta** — nunca há referência fictícia:
+
+| Situação                             | `imageRef` | `metadata.imageSkippedReason`       |
+| ------------------------------------ | ---------- | ----------------------------------- |
+| Recorte extraído e dentro dos tetos  | data URL   | —                                   |
+| Recorte maior que os tetos           | `null`     | `size_limit` (+ item em `warnings`) |
+| Tipo de imagem sem recorte confiável | `null`     | `not_available`                     |
+| `DI_INCLUDE_IMAGES=false`            | `null`     | `disabled`                          |
+
+Nada é persistido: os recortes existem apenas na resposta daquela requisição.
+Para desligar o conteúdo binário (payload menor), use `DI_INCLUDE_IMAGES=false`.
+
 ### `confidence`
 
 O Marker 2.1.0 não expõe confiança por bloco no renderer JSON; por isso o campo
@@ -243,6 +315,23 @@ Medições reais em CPU (Linux, sem GPU, fixtures de 1–2 páginas):
   inferência com um lock. `DI_MAX_CONCURRENCY` limita requisições em fila, mas o
   ganho de paralelismo exige **réplicas do serviço** ou um servidor Surya em GPU
   (`SURYA_INFERENCE_URL`).
+- **Admissão**: a capacidade total é `DI_MAX_CONCURRENCY + DI_MAX_QUEUE`
+  (default `1 + 2`). O excedente recebe `429` com `Retry-After` **antes** de o
+  corpo ser lido; não há fila ilimitada. Em timeout (`504`) o slot permanece
+  ocupado até a thread de inferência terminar, e o mesmo vale para cancelamento
+  do cliente — a capacidade nunca é liberada com trabalho ainda em execução.
+- **Limite de páginas**: `DI_MAX_PAGES` (default `100`, sem modo "ilimitado")
+  é verificado com `pypdfium2` **antes** de chamar o Marker; PDFs acima do
+  limite retornam `422` sem nenhuma inferência.
+- **Imagens**: os recortes são embutidos apenas se o renderer JSON do Marker os
+  fornecer e se couberem nos tetos (`DI_MAX_IMAGE_BYTES`,
+  `DI_MAX_TOTAL_IMAGE_BYTES`). Recortes acima do teto ficam sem `imageRef`
+  (`imageSkippedReason: "size_limit"` + warning). Não há OCR específico de QR
+  Code, endpoint separado de imagem nem armazenamento — o recorte viaja na
+  própria resposta.
+- **Healthcheck**: o Compose aceita um único `healthcheck` por serviço. O
+  Compose usa `/ready` (readiness, com `start_period` de 15 min para o warmup
+  em CPU) e o `Dockerfile` mantém `HEALTHCHECK` em `/health` (liveness).
 - Para produção com volume, prefira GPU (CUDA) ou múltiplas réplicas atrás de um
   load balancer. O `Dockerfile` usa CPU por padrão.
 - O serviço não deve ser exposto publicamente sem autenticação/rede interna.
@@ -262,6 +351,7 @@ pytest -m integration
 
 Fixtures versionadas em `src/document_intelligence/tests/fixtures/` são PDFs
 sintéticos (sem PII), gerados por `generate_fixtures.py`. Os testes de integração
-cobrem: PDF de texto multipágina, ordem/numeração/bbox, tabela, contrato e o
-endpoint HTTP completo. Testes rápidos cobrem: PDF inválido, vazio, path
-traversal, corrompido, limite de páginas, timeout (via HTTP) e parsing de HTML.
+cobrem: PDF de texto multipágina, ordem/numeração/bbox, tabela, **imagem real**,
+contrato e o endpoint HTTP completo. Testes rápidos cobrem: PDF inválido, vazio,
+path traversal, corrompido, limite de páginas (inclusive sem chamar o parser),
+timeout, admissão/429, cancelamento, liberação de slot e parsing de HTML.

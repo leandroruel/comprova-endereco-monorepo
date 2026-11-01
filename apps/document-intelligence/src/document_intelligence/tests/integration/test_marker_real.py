@@ -11,9 +11,12 @@ Os PDFs em ``tests/fixtures`` são sintéticos e não contêm dados reais.
 
 from __future__ import annotations
 
+import base64
+import io
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from document_intelligence.parser import CONTRACT_VERSION
 from document_intelligence.tests.conftest import requires_marker
@@ -99,6 +102,40 @@ def test_contrato_serializavel(parser, sample_text_pdf: Path) -> None:
     assert isinstance(dados["pages"], list)
     assert dados["pages"][0]["pageNumber"] == 1
     assert dados["pages"][0]["elements"][0]["id"]
+
+
+def test_pdf_com_imagem_extrai_recorte(parser, sample_image_pdf: Path) -> None:
+    """Marker detecta o gráfico e o recorte é devolvido como data URL."""
+    response = parser.parse(str(sample_image_pdf), "doc-imagem", size_bytes=1)
+    assert response.status == "completed"
+
+    imagens = [
+        element
+        for page in response.pages
+        for element in page.elements
+        if element.type == "image"
+    ]
+    assert imagens, "esperava um elemento gráfico detectado pelo Marker"
+
+    elemento = imagens[0]
+    # Página de origem e bounding box preservados.
+    pagina = next(page for page in response.pages if elemento in page.elements)
+    assert pagina.page_number >= 1
+    assert elemento.bbox is not None
+    assert elemento.bbox.x1 <= elemento.bbox.x2
+    assert elemento.bbox.y1 <= elemento.bbox.y2
+
+    # Referência utilizável (data URL) e imagem recuperável.
+    assert elemento.image_ref is not None
+    assert elemento.image_ref.startswith("data:image/")
+    raw = base64.b64decode(elemento.image_ref.split(",", 1)[1])
+    assert raw, "recorte vazio"
+    with Image.open(io.BytesIO(raw)) as imagem:
+        assert imagem.width > 0
+        assert imagem.height > 0
+
+    assert elemento.metadata["imageExtracted"] is True
+    assert elemento.metadata["imageBytes"] == len(raw)
 
 
 def test_duas_inferencias_concorrentes_nao_quebram(parser, sample_text_pdf: Path) -> None:

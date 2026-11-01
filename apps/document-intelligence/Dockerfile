@@ -70,6 +70,9 @@ USER nobody
 
 EXPOSE 8000
 
+# Liveness: o processo está vivo (não exige modelos carregados). Readiness
+# (/ready, 503 até modelos+warmup) é usada pelo orquestrador — no Compose, pelo
+# healthcheck do serviço em docker-compose.yml.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else sys.exit(1)"
 

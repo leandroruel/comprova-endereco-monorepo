@@ -131,6 +131,25 @@ def _assemble_single_page(content: bytes) -> bytes:
     return bytes(out)
 
 
+def build_image_pdf() -> bytes:
+    """PDF de uma página com uma imagem raster embutida (usa Pillow).
+
+    O Marker detecta o objeto como bloco ``Picture`` e fornece o recorte em
+    ``JSONBlockOutput.images`` (base64), exercitando a extração de imagens.
+    """
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (300, 300), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([30, 30, 270, 270], outline="black", width=8)
+    draw.ellipse([80, 80, 220, 220], fill="black")
+    buffer = BytesIO()
+    image.save(buffer, format="PDF")
+    return buffer.getvalue()
+
+
 def main() -> None:
     here = os.path.dirname(os.path.abspath(__file__))
     sample = build_pdf(
@@ -152,6 +171,9 @@ def main() -> None:
 
     with open(os.path.join(here, "sample_table.pdf"), "wb") as f:
         f.write(build_table_pdf())
+
+    with open(os.path.join(here, "sample_image.pdf"), "wb") as f:
+        f.write(build_image_pdf())
 
     print("fixtures geradas em", here)
 

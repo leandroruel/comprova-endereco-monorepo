@@ -1,8 +1,12 @@
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { EvidenceMultipartError, readEvidenceFile } from '../validations/evidence-intake.multipart.js'
-import { extractFiscalReferenceFromArtifact, type DebugTraceEvent } from '@comprova/providers'
-import type { FiscalReference } from '@comprova/core'
+import {
+  extractFiscalReferenceFromArtifact,
+  makeDocumentAnalyzer,
+  type DebugTraceEvent,
+} from '@comprova/providers'
+import type { DocumentAnalysisResult, FiscalReference } from '@comprova/core'
 
 const DEBUG_MAX_BYTES = 10 * 1024 * 1024 // 10 MB — suficiente para comprovantes
 
@@ -72,19 +76,107 @@ export const registerDebugNf3eQrCodeRoute = (
 
       const { events, sink } = collectSink()
 
+      // O PDF.js pode destacar (detach) o ArrayBuffer depois do parse. Como a
+      // rota roda duas extrações sobre o mesmo upload (referência fiscal e
+      // campos), cada parser recebe uma cópia independente dos bytes.
+      const referenceData = Uint8Array.from(file.data)
+      const analysisData = Uint8Array.from(file.data)
+
       let reference: FiscalReference
       try {
         reference = await extractFiscalReferenceFromArtifact(
-          { data: file.data, contentType: file.mimetype },
+          { data: referenceData, contentType: file.mimetype },
           { onDebug: sink },
         )
       } catch {
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Falha ao extrair referência fiscal do artefato')
       }
 
+      // O debugger é o lugar para inspecionar também a extração de campos do
+      // F1.2. É o mesmo analisador usado pelo worker; a rota apenas o executa
+      // sobre o mesmo artefato e expõe o resultado (sem persistir nada).
+      // Para imagens o analyzer repetiria a leitura de QR sem produzir
+      // titular/endereço (OCR ainda não implementado), então só roda em PDF.
+      let analysis: DocumentAnalysisResult | null = null
+      if (file.mimetype === 'application/pdf') {
+        try {
+          analysis = await makeDocumentAnalyzer().analyze({
+            data: analysisData,
+            contentType: file.mimetype,
+          })
+        } catch {
+          analysis = null
+        }
+      } else {
+        events.push({
+          code: 'ANALYSIS_SKIPPED',
+          level: 'info',
+          message: 'Extração de titular/endereço só é executada para PDF',
+        })
+      }
+
+      if (analysis === null) {
+        if (file.mimetype === 'application/pdf') {
+          events.push({
+            code: 'ANALYSIS_FAILED',
+            level: 'warning',
+            message: 'Análise de titular/endereço não pôde ser executada',
+          })
+        }
+      } else {
+        const { holder, address } = analysis
+        if (holder.status === 'extracted' && holder.value !== null) {
+          events.push({
+            code: 'HOLDER_EXTRACTED',
+            level: 'success',
+            message: `Titular extraído: ${holder.value.name ?? '—'}`,
+            details: { name: holder.value.name },
+          })
+        } else {
+          events.push({
+            code: 'HOLDER_NOT_EXTRACTED',
+            level: 'warning',
+            message: 'Titular não extraído: rótulo ausente ou ambíguo',
+          })
+        }
+        if (address.status === 'extracted' && address.value !== null) {
+          events.push({
+            code: 'ADDRESS_EXTRACTED',
+            level: 'success',
+            message: 'Endereço extraído',
+            details: {
+              logradouro: address.value.logradouro,
+              numero: address.value.numero,
+              complemento: address.value.complemento,
+              bairro: address.value.bairro,
+              cidade: address.value.cidade,
+              uf: address.value.uf,
+              cep: address.value.cep,
+            },
+          })
+        } else {
+          events.push({
+            code: 'ADDRESS_NOT_EXTRACTED',
+            level: 'warning',
+            message: 'Endereço não extraído: rótulo ausente ou ambíguo',
+          })
+        }
+      }
+
       return reply.code(200).send({
         events,
         reference,
+        analysis:
+          analysis === null
+            ? null
+            : {
+                status: analysis.status,
+                document: analysis.document,
+                holder: analysis.holder,
+                address: analysis.address,
+                limitations: analysis.limitations,
+                errorCodes: analysis.errorCodes,
+              },
       })
     },
   )
