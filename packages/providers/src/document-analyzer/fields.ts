@@ -442,10 +442,13 @@ const recipientBlocksFromText = (text: string): readonly AddressSection[] => {
     // Sem marcador de destinatário nas linhas do bloco ou logo depois, é mais
     // provável ser o emitente (CNPJ/inscrição estadual). Não extraímos nada.
     const afterStart = index + 1 + collected.length
-    const evidenceLines = [...collected, ...lines.slice(afterStart, afterStart + 3)]
-    const evidence = normalizeText(evidenceLines.join(' '))
-    const hasRecipientLabel = evidenceLines.some((line) => RECIPIENT_LABEL_RE.test(normalizeText(line)))
-    if (!RECIPIENT_MARKER_RE.test(evidence) && !hasRecipientLabel) continue
+    const evidence = normalizeText([...collected, ...lines.slice(afterStart, afterStart + 3)].join(' '))
+    // Marcador de destinatário (CPF/medidor/...) pode vir no bloco ou logo
+    // depois. Já um cabeçalho CLIENTE/DESTINATARIO/PAGADOR só vale quando está
+    // imediatamente antes do bloco: depois dele, o cabeçalho pode iniciar a
+    // seção seguinte.
+    const hasRecipientHeading = RECIPIENT_LABEL_RE.test(normalizeText(lines[index - 1] ?? ''))
+    if (!RECIPIENT_MARKER_RE.test(evidence) && !hasRecipientHeading) continue
 
     blocks.push({
       name: cleanRecipientName(nameLine),
