@@ -1,55 +1,172 @@
 import { useCallback, useRef, useState } from 'react'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import { debugNf3eQrCode, type DebugNf3eQrCodeResponse } from '@/api/client'
+import {
+  debugNf3eQrCode,
+  type DebugAddressDto,
+  type DebugAnalysisDto,
+  type DebugNf3eQrCodeResponse,
+} from '@/api/client'
 import { DashboardLayout } from '@/components/layout'
-import { Activity, FileText, Play, Search, Upload, UserRound } from 'lucide-react'
+import { ExecutionTrace } from '@/components/trace'
+import { FileText, Play, Upload } from 'lucide-react'
 
 const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png']
 
-type TraceLevel = 'info' | 'success' | 'warning' | 'error'
-
-const LEVEL_COLORS: Record<TraceLevel, string> = {
-  info: 'text-blue-700 bg-blue-50 border-blue-100',
-  success: 'text-emerald-700 bg-emerald-50 border-emerald-100',
-  warning: 'text-amber-700 bg-amber-50 border-amber-100',
-  error: 'text-red-700 bg-red-50 border-red-100',
+const FIELD_LABELS: Record<Exclude<keyof DebugAddressDto, 'raw'>, string> = {
+  logradouro: 'Logradouro',
+  numero: 'Número',
+  complemento: 'Complemento',
+  bairro: 'Bairro',
+  cidade: 'Cidade',
+  uf: 'UF',
+  cep: 'CEP',
 }
 
-function levelColor(level: TraceLevel): string {
-  return LEVEL_COLORS[level]
-}
+function DocumentPanel({ analysis }: { readonly analysis: DebugAnalysisDto }) {
+  const statusColor = (status: string): string => {
+    switch (status) {
+      case 'completed':
+      case 'analyzed':
+      case 'extracted':
+        return 'bg-emerald-50 text-emerald-700 border-emerald-100'
+      case 'not_extracted':
+        return 'bg-amber-50 text-amber-700 border-amber-100'
+      case 'inconclusive':
+        return 'bg-blue-50 text-blue-700 border-blue-100'
+      case 'unsupported':
+      case 'failed':
+        return 'bg-red-50 text-red-700 border-red-100'
+      default:
+        return 'bg-muted text-muted-foreground border-muted'
+    }
+  }
 
-function TraceEvent({ event }: { readonly event: DebugNf3eQrCodeResponse['events'][number] }) {
+  const address = analysis.address.value
+
   return (
-    <div className="flex gap-3">
-      <div className="flex h-2 w-2 shrink-0 items-center justify-center rounded-full">
-        <span className={cn('flex h-1.5 w-1.5 rounded-full', levelColor(event.level))} />
-      </div>
-      <div className="flex flex-col min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold uppercase tracking-wider">{event.code}</span>
-          <Badge variant="outline" className="text-[10px]">
-            {event.level}
-          </Badge>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          Documento analisado
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-2 gap-4 text-xs">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Status da análise</p>
+            <Badge variant="outline" className={statusColor(analysis.status)}>
+              {analysis.status}
+            </Badge>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Status do documento</p>
+            <Badge variant="outline" className={statusColor(analysis.document.status)}>
+              {analysis.document.status}
+            </Badge>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tipo</p>
+            <span className="font-mono">{analysis.document.kind}</span>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Vencimento / emissão</p>
+            <span className="font-mono">{analysis.document.issuedRaw ?? '—'}</span>
+          </div>
         </div>
-        <p className="text-sm text-foreground">{event.message}</p>
-        {event.details && (
-          <details className="mt-1 text-xs text-muted-foreground">
-            <summary className="cursor-pointer underline underline-offset-4 hover:text-foreground/70">
-              Detalhes
-            </summary>
-            <pre className="mt-1 p-2 rounded bg-muted text-[10px] overflow-auto max-h-32">
-              {JSON.stringify(event.details, null, 2)}
-            </pre>
-          </details>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Titular</p>
+          {analysis.holder.value !== null ? (
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium text-foreground">{analysis.holder.value.name ?? '—'}</p>
+              {analysis.holder.value.raw.length > 0 && (
+                <p className="font-mono text-[10px] text-muted-foreground">{analysis.holder.value.raw}</p>
+              )}
+            </div>
+          ) : (
+            <Badge variant="outline" className={statusColor(analysis.holder.status)}>
+              {analysis.holder.status}
+            </Badge>
+          )}
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Endereço</p>
+          {address !== null ? (
+            <div className="space-y-1">
+              <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                {(Object.keys(FIELD_LABELS) as Array<keyof typeof FIELD_LABELS>).map((field) => (
+                  <div key={field}>
+                    <p className="text-[10px] text-muted-foreground">{FIELD_LABELS[field]}</p>
+                    <span className="font-mono">{address[field] ?? '—'}</span>
+                  </div>
+                ))}
+              </div>
+              {address.raw.length > 0 && (
+                <p className="font-mono text-[10px] text-muted-foreground">raw: {address.raw}</p>
+              )}
+            </div>
+          ) : (
+            <Badge variant="outline" className={statusColor(analysis.address.status)}>
+              {analysis.address.status}
+            </Badge>
+          )}
+        </div>
+
+        {analysis.limitations.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Limitações</p>
+            <div className="flex flex-wrap gap-1">
+              {analysis.limitations.map((limitation) => (
+                <Badge key={limitation} variant="outline" className="text-[10px]">
+                  {limitation}
+                </Badge>
+              ))}
+            </div>
+          </div>
         )}
-      </div>
-    </div>
+
+        {analysis.errorCodes.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Códigos de erro</p>
+            <div className="flex flex-wrap gap-1">
+              {analysis.errorCodes.map((code) => (
+                <Badge key={code} variant="destructive" className="text-[10px]">
+                  {code}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Analisado em</p>
+          <span className="font-mono text-[10px]">{analysis.analyzedAt}</span>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
 function ReferencePanel({ reference }: { readonly reference: DebugNf3eQrCodeResponse['reference'] }) {
+  if (reference === null) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Referência fiscal extraída
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">Nenhuma referência fiscal extraída deste artefato.</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   const statusColor = (status: string): string => {
     switch (status) {
       case 'found':
@@ -143,97 +260,19 @@ function ReferencePanel({ reference }: { readonly reference: DebugNf3eQrCodeResp
   )
 }
 
-function ExtractionPanel({
-  analysis,
-}: {
-  readonly analysis: NonNullable<DebugNf3eQrCodeResponse['analysis']>
-}) {
-  const { holder, address } = analysis
-  const addressValue = address.status === 'extracted' ? address.value : null
-  const formattedCep =
-    addressValue?.cep !== null && addressValue?.cep !== undefined
-      ? addressValue.cep.replace(/^(\d{5})(\d{3})$/, '$1-$2')
-      : null
-  const street = addressValue
-    ? [addressValue.logradouro, addressValue.numero].filter(Boolean).join(', ')
-    : null
-  const district = addressValue
-    ? [addressValue.complemento, addressValue.bairro].filter(Boolean).join(' - ')
-    : null
-  const city = addressValue ? [addressValue.cidade, addressValue.uf].filter(Boolean).join('/') : null
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <UserRound className="h-4 w-4" />
-          Titular e endereço
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Titular</p>
-          {holder.status === 'extracted' && holder.value?.name ? (
-            <p className="text-sm font-medium">{holder.value.name}</p>
-          ) : (
-            <Badge variant="outline" className="mt-1 text-[10px]">
-              {holder.status}
-            </Badge>
-          )}
-        </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Endereço</p>
-          {addressValue ? (
-            <div className="mt-1 space-y-0.5 text-sm">
-              {street && <p className="font-medium">{street}</p>}
-              {district && <p>{district}</p>}
-              {city && <p>{city}</p>}
-              {formattedCep && <p className="font-mono text-xs">CEP {formattedCep}</p>}
-            </div>
-          ) : (
-            <Badge variant="outline" className="mt-1 text-[10px]">
-              {address.status}
-            </Badge>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-4 border-t border-border pt-3 text-xs">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Status da análise</p>
-            <span className="font-mono">{analysis.status}</span>
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Emissão</p>
-            <span className="font-mono">{analysis.document.issuedAt ?? '—'}</span>
-          </div>
-        </div>
-        {analysis.errorCodes.length > 0 && (
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Códigos de erro</p>
-            <div className="flex flex-wrap gap-1">
-              {analysis.errorCodes.map((code) => (
-                <Badge key={code} variant="destructive" className="text-[10px]">
-                  {code}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [response, setResponse] = useState<DebugNf3eQrCodeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
 
   const handleFile = useCallback((selectedFile: File | null) => {
     setFile(selectedFile)
     setError(null)
     setResponse(null)
+    setElapsedMs(null)
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -242,8 +281,11 @@ export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string
     setUploading(true)
     setError(null)
     setResponse(null)
+    setElapsedMs(null)
+    const startedAt = performance.now()
     try {
       const result = await debugNf3eQrCode(file)
+      setElapsedMs(Math.round(performance.now() - startedAt))
       setResponse(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido ao processar o documento')
@@ -262,12 +304,11 @@ export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string
 
   return (
     <DashboardLayout activePage="debug-nf3e-qrcode" onNavigate={onNavigate}>
-      <div className="space-y-6">
+      <div className="mx-auto w-full max-w-7xl space-y-6">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">QRCode NF3e debugger</h1>
           <p className="text-sm text-muted-foreground">
-            Envie um comprovante (PDF, JPEG ou PNG) e acompanhe a extração da referência fiscal, do titular e
-            do endereço
+            Envie um comprovante (PDF, JPEG ou PNG) e acompanhe cada passo da extração da referência fiscal
           </p>
         </div>
 
@@ -323,51 +364,31 @@ export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string
           </CardContent>
         </Card>
 
+        {uploading && <ExecutionTrace events={[]} loading />}
+
         {response && (
           <>
+            {response.analysis ? (
+              <DocumentPanel analysis={response.analysis} />
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Documento analisado
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    A análise completa não está disponível nesta resposta. O trace abaixo continua válido;
+                    reinicie a API para carregar o contrato atual do analyzer.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
             <ReferencePanel reference={response.reference} />
 
-            {response.analysis && <ExtractionPanel analysis={response.analysis} />}
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-4 w-4" />
-                  Trace de execução
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="border-t border-border max-h-[500px] overflow-auto">
-                  {response.events.length === 0 ? (
-                    <div className="p-8 text-center text-muted-foreground">
-                      <Search className="mb-2 h-6 w-6 opacity-50" />
-                      <p>Nenhum evento registrado</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {response.events.map((event, index) => (
-                        <div
-                          key={index}
-                          className="border-l-2 pl-4 py-2 border-l-transparent"
-                          style={{
-                            borderLeftColor:
-                              event.level === 'error'
-                                ? 'hsl(var(--destructive))'
-                                : event.level === 'warning'
-                                  ? 'hsl(var(--warning))'
-                                  : event.level === 'success'
-                                    ? 'hsl(var(--success))'
-                                    : 'hsl(var(--primary))',
-                          }}
-                        >
-                          <TraceEvent event={event} />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <ExecutionTrace events={response.events} elapsedMs={elapsedMs ?? undefined} />
           </>
         )}
       </div>

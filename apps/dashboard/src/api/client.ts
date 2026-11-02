@@ -330,6 +330,40 @@ export interface DebugTraceEventDto {
   readonly details?: Readonly<Record<string, unknown>>
 }
 
+export interface DebugAddressDto {
+  readonly logradouro: string | null
+  readonly numero: string | null
+  readonly complemento: string | null
+  readonly bairro: string | null
+  readonly cidade: string | null
+  readonly uf: string | null
+  readonly cep: string | null
+  readonly raw: string
+}
+
+export interface DebugAnalysisDto {
+  readonly status: string
+  readonly document: {
+    readonly status: string
+    readonly kind: string
+    readonly issuedAt: string | null
+    readonly issuedRaw: string | null
+  }
+  readonly address: {
+    readonly status: string
+    readonly value: DebugAddressDto | null
+    readonly raw: string | null
+  }
+  readonly holder: {
+    readonly status: string
+    readonly value: { readonly name: string | null; readonly raw: string } | null
+    readonly raw: string | null
+  }
+  readonly limitations: string[]
+  readonly errorCodes: string[]
+  readonly analyzedAt: string
+}
+
 export interface DebugNf3eQrCodeResponse {
   readonly events: DebugTraceEventDto[]
   readonly reference: {
@@ -343,43 +377,35 @@ export interface DebugNf3eQrCodeResponse {
     readonly limitations: string[]
     readonly errorCodes: string[]
     readonly fingerprint: string | null
-  }
-  readonly analysis: {
-    readonly status: string
-    readonly document: {
-      readonly status: string
-      readonly kind: string
-      readonly issuedAt: string | null
-      readonly issuedRaw: string | null
-    }
-    readonly holder: {
-      readonly status: string
-      readonly value: { readonly name: string | null; readonly raw: string } | null
-      readonly raw: string | null
-    }
-    readonly address: {
-      readonly status: string
-      readonly value: {
-        readonly logradouro: string | null
-        readonly numero: string | null
-        readonly complemento: string | null
-        readonly bairro: string | null
-        readonly cidade: string | null
-        readonly uf: string | null
-        readonly cep: string | null
-        readonly raw: string
-      } | null
-      readonly raw: string | null
-    }
-    readonly limitations: string[]
-    readonly errorCodes: string[]
   } | null
+  /** `null` em servidores antigos ou quando o analyzer não devolve o contrato. */
+  readonly analysis: DebugAnalysisDto | null
 }
 
 /**
  * POST /v1/debug/nf3e/qrcode — endpoint administrativo protegido por API key
  * (`validate:write`). Retorna o trace da extração da referência fiscal.
  */
+const isDebugAnalysis = (value: unknown): value is DebugAnalysisDto => {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  const document = candidate.document as Record<string, unknown> | null | undefined
+  const address = candidate.address as Record<string, unknown> | null | undefined
+  const holder = candidate.holder as Record<string, unknown> | null | undefined
+  return (
+    typeof candidate.status === 'string' &&
+    typeof document?.status === 'string' &&
+    typeof document.kind === 'string' &&
+    typeof address?.status === 'string' &&
+    typeof address.value !== 'undefined' &&
+    typeof holder?.status === 'string' &&
+    typeof holder.value !== 'undefined' &&
+    Array.isArray(candidate.limitations) &&
+    Array.isArray(candidate.errorCodes) &&
+    typeof candidate.analyzedAt === 'string'
+  )
+}
+
 export async function debugNf3eQrCode(file: File): Promise<DebugNf3eQrCodeResponse> {
   const body = new FormData()
   body.append('file', file, file.name)
@@ -395,7 +421,14 @@ export async function debugNf3eQrCode(file: File): Promise<DebugNf3eQrCodeRespon
     const problem = (await res.json().catch(() => ({}))) as { code?: string; title?: string }
     throw new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`)
   }
-  return (await res.json()) as DebugNf3eQrCodeResponse
+  // O JSON é externo: normaliza campos opcionais para que a página nunca
+  // quebre por causa de um servidor numa versão anterior ao contrato atual.
+  const json = (await res.json()) as Partial<DebugNf3eQrCodeResponse>
+  return {
+    events: Array.isArray(json.events) ? json.events : [],
+    reference: json.reference ?? null,
+    analysis: isDebugAnalysis(json.analysis) ? json.analysis : null,
+  }
 }
 
 export interface MeDto {

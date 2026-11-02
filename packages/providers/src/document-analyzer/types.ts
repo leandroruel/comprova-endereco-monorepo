@@ -1,3 +1,4 @@
+import type { DebugTraceSink } from '../debug-trace.js'
 import type { DocumentAnalysisResult } from '@comprova/core'
 
 export interface DocumentAnalyzerInput {
@@ -14,6 +15,8 @@ export interface DocumentAnalyzer {
 
 export interface DocumentAnalyzerOptions {
   readonly now?: () => Date
+  /** Diagnóstico opcional; o trace não altera a decisão do analyzer. */
+  readonly trace?: DebugTraceSink
 }
 
 /** Sinaliza indisponibilidade do analisador/provider, não documento inválido. */

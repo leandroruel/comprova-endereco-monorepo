@@ -27,6 +27,15 @@ const adminNavItems: readonly NavItem[] = [
   { id: 'debug-nf3e-qrcode', label: 'QRCode NF3e debugger', icon: <Activity className="h-4 w-4" /> },
 ]
 
+/** Rótulo do segundo nível do breadcrumb; o Fast path é o default de validações. */
+const PAGE_LABELS: Readonly<Record<string, string>> = {
+  validations: 'Fast path',
+  bulk: 'Busca em lote',
+  'debug-nf3e-qrcode': 'QRCode NF3e debugger',
+  profile: 'Perfil',
+  settings: 'Configurações',
+}
+
 const initialsOf = (name: string): string => {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   const first = parts[0]?.[0] ?? ''
@@ -176,7 +185,7 @@ export function DashboardLayout({
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span className="font-medium text-foreground">Validações</span>
             <ChevronRight className="h-3 w-3" />
-            <span>Fast path</span>
+            <span>{PAGE_LABELS[active] ?? 'Fast path'}</span>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-xs">

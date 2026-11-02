@@ -7,6 +7,7 @@ import {
 import { analyzeDocument } from './analyze.js'
 import { failedResult } from './results.js'
 import { documentAnalysisResultSchema } from './schema.js'
+import { emitDebug } from '../debug-trace.js'
 import { DocumentAnalyzerUnavailableError } from './types.js'
 import type { DocumentAnalyzer, DocumentAnalyzerOptions } from './types.js'
 
@@ -44,6 +45,7 @@ export {
  */
 export const makeDocumentAnalyzer = (options: DocumentAnalyzerOptions = {}): DocumentAnalyzer => {
   const now = options.now ?? (() => new Date())
+  const trace = options.trace
   return {
     id: DOCUMENT_ANALYZER_ID,
     version: DOCUMENT_ANALYZER_VERSION,
@@ -51,9 +53,15 @@ export const makeDocumentAnalyzer = (options: DocumentAnalyzerOptions = {}): Doc
     analyze: async (input) => {
       let result: DocumentAnalysisResult
       try {
-        result = await analyzeDocument(input, now())
+        result = await analyzeDocument(input, now(), trace)
       } catch (error) {
         if (error instanceof DocumentAnalyzerUnavailableError) throw error
+        emitDebug(trace, {
+          code: 'analyzer.failed',
+          level: 'error',
+          message: 'O analyzer falhou inesperadamente.',
+          details: { reason: error instanceof Error ? error.message : String(error) },
+        })
         result = failedResult(now(), 'ANALYZER_FAILED')
       }
       return documentAnalysisResultSchema.parse(result)
