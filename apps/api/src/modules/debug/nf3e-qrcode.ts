@@ -100,7 +100,10 @@ export const registerDebugNf3eQrCodeRoute = (
       let analysis: DocumentAnalysisResult | null = null
       if (file.mimetype === 'application/pdf') {
         try {
-          analysis = await makeDocumentAnalyzer().analyze({
+          // O mesmo analyzer do worker, mas com o sink ligado: cada etapa da
+          // extração vira um evento da timeline do debugger. O trace é só
+          // diagnóstico e não altera a decisão.
+          analysis = await makeDocumentAnalyzer({ trace: sink }).analyze({
             data: analysisData,
             contentType: file.mimetype,
           })
@@ -176,6 +179,7 @@ export const registerDebugNf3eQrCodeRoute = (
                 address: analysis.address,
                 limitations: analysis.limitations,
                 errorCodes: analysis.errorCodes,
+                analyzedAt: analysis.analyzedAt,
               },
       })
     },
