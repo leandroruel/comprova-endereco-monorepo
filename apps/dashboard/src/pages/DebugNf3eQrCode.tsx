@@ -9,6 +9,7 @@ import {
 } from '@/api/client'
 import { DashboardLayout } from '@/components/layout'
 import { ExecutionTrace } from '@/components/trace'
+import type { SessionUser } from '@/api/auth'
 import { FileText, Play, Upload } from 'lucide-react'
 
 const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png']
@@ -260,7 +261,13 @@ function ReferencePanel({ reference }: { readonly reference: DebugNf3eQrCodeResp
   )
 }
 
-export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string) => void }) {
+export function DebugNf3eQrCodePage({
+  onNavigate,
+  user,
+}: {
+  onNavigate?: (page: string) => void
+  user?: SessionUser
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -303,7 +310,13 @@ export function DebugNf3eQrCodePage({ onNavigate }: { onNavigate?: (page: string
   const isAccepted = (f: File | null): boolean => f !== null && ACCEPTED_TYPES.includes(f.type)
 
   return (
-    <DashboardLayout activePage="debug-nf3e-qrcode" onNavigate={onNavigate}>
+    <DashboardLayout
+      activePage="debug-nf3e-qrcode"
+      onNavigate={onNavigate}
+      userName={user?.name ?? undefined}
+      userEmail={user?.email ?? undefined}
+      userRole={user?.role ?? undefined}
+    >
       <div className="mx-auto w-full max-w-7xl space-y-6">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">QRCode NF3e debugger</h1>

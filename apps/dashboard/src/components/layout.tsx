@@ -43,21 +43,35 @@ const initialsOf = (name: string): string => {
   return (first + last).toUpperCase() || '?'
 }
 
+/**
+ * Nome exibido no menu: o nome do usuário quando existir; senão a parte local
+ * do e-mail; só então o rótulo genérico. Nunca assume que o e-mail é o nome.
+ */
+const displayNameOf = (userName?: string, userEmail?: string): string => {
+  const name = userName?.trim()
+  if (name !== undefined && name.length > 0) return name
+  const email = userEmail?.trim()
+  if (email === undefined || email.length === 0) return 'Conta'
+  const local = email.split('@')[0]?.trim()
+  return local !== undefined && local.length > 0 ? local : email
+}
+
 const menuItemClass =
   'flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 motion-reduce:transition-none'
 
 function UserMenu({
+  userName,
   userEmail,
   onNavigate,
   onLogout,
 }: {
+  readonly userName?: string
   readonly userEmail?: string
   readonly onNavigate?: (page: string) => void
   readonly onLogout?: () => void
 }) {
-  const hasIdentity = userEmail !== undefined && userEmail.length > 0
-  const displayName = hasIdentity ? (userEmail.split('@')[0] ?? userEmail) : 'Conta'
-  const showEmail = hasIdentity && userEmail.includes('@')
+  const displayName = displayNameOf(userName, userEmail)
+  const showEmail = userEmail !== undefined && userEmail.includes('@')
 
   return (
     <DropdownMenu.Root>
@@ -118,6 +132,7 @@ function UserMenu({
 export function DashboardLayout({
   children,
   onLogout,
+  userName,
   userEmail,
   userRole,
   onNavigate,
@@ -125,6 +140,7 @@ export function DashboardLayout({
 }: {
   children: ReactNode
   onLogout?: () => void
+  userName?: string
   userEmail?: string
   userRole?: string
   onNavigate?: (page: string) => void
@@ -176,7 +192,7 @@ export function DashboardLayout({
         </nav>
 
         <div className="border-t border-sidebar-border p-4">
-          <UserMenu userEmail={userEmail} onNavigate={onNavigate} onLogout={onLogout} />
+          <UserMenu userName={userName} userEmail={userEmail} onNavigate={onNavigate} onLogout={onLogout} />
         </div>
       </aside>
 

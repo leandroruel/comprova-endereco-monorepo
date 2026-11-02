@@ -63,6 +63,29 @@ describe('DashboardLayout', () => {
     await expect.element(trigger.getByText('C', { exact: true })).toBeVisible()
   })
 
+  it('prefere o nome do usuário ao apelido derivado do e-mail', async () => {
+    await render(
+      <DashboardLayout userName="Leandro Rocha" userEmail="leandro@empresa.com">
+        conteúdo
+      </DashboardLayout>,
+    )
+
+    const trigger = userMenu()
+    // O nome vem do `userName`; o e-mail continua como linha secundária.
+    await expect.element(trigger.getByText('Leandro Rocha', { exact: true })).toBeVisible()
+    await expect.element(trigger.getByText('leandro@empresa.com', { exact: true })).toBeVisible()
+    await expect.element(trigger.getByText('LR', { exact: true })).toBeVisible()
+    await expect(trigger.getByText('leandro', { exact: true })).not.toBeInTheDocument()
+  })
+
+  it('não usa "Conta" quando recebe nome mesmo sem e-mail', async () => {
+    await render(<DashboardLayout userName="Leandro">conteúdo</DashboardLayout>)
+
+    const trigger = userMenu()
+    await expect.element(trigger.getByText('Leandro', { exact: true })).toBeVisible()
+    await expect(trigger.getByText('Conta', { exact: true })).not.toBeInTheDocument()
+  })
+
   it('abre o menu com Perfil e Configurações e encaminha a navegação', async () => {
     const onNavigate = vi.fn()
     await render(

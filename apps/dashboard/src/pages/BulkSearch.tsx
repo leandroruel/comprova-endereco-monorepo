@@ -5,6 +5,7 @@ import { Badge, Button, Card, CardContent, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, Download, FileText, Upload, XCircle } from 'lucide-react'
 import { API_BASE, API_KEY } from '@/api/client'
+import type { SessionUser } from '@/api/auth'
 
 interface BatchItem {
   position: number
@@ -70,7 +71,13 @@ function exportBatch(id: string, format: 'csv' | 'json') {
   window.open(`${API_BASE}/v1/batches/${id}/export?format=${format}`, '_blank')
 }
 
-export function BulkSearchPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
+export function BulkSearchPage({
+  onNavigate,
+  user,
+}: {
+  onNavigate?: (page: string) => void
+  user?: SessionUser
+}) {
   const [rawText, setRawText] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -123,7 +130,13 @@ export function BulkSearchPage({ onNavigate }: { onNavigate?: (page: string) => 
   }
 
   return (
-    <DashboardLayout activePage="bulk" onNavigate={handleNavigate}>
+    <DashboardLayout
+      activePage="bulk"
+      onNavigate={handleNavigate}
+      userName={user?.name ?? undefined}
+      userEmail={user?.email ?? undefined}
+      userRole={user?.role ?? undefined}
+    >
       <div className="space-y-6">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Busca em lote</h1>

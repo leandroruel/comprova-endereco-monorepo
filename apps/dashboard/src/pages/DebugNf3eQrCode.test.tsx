@@ -110,4 +110,15 @@ describe('DebugNf3eQrCodePage', () => {
     await expect.element(page.getByText('01001000')).toBeVisible()
     await expect.element(page.getByText('10/11/2026')).toBeVisible()
   })
+
+  it('mostra o usuário logado no menu do sidemenu, não o rótulo "Conta"', async () => {
+    respondWith({ events: [], reference })
+
+    await render(<DebugNf3eQrCodePage user={{ name: 'Leandro Rocha', email: 'leandro@empresa.com' }} />)
+
+    const trigger = page.getByRole('button', { name: 'Menu do usuário' })
+    await expect.element(trigger.getByText('Leandro Rocha', { exact: true })).toBeVisible()
+    await expect.element(trigger.getByText('leandro@empresa.com', { exact: true })).toBeVisible()
+    await expect(trigger.getByText('Conta', { exact: true })).not.toBeInTheDocument()
+  })
 })

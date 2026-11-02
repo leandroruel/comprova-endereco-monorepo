@@ -116,7 +116,8 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
     <DashboardLayout
       activePage="validations"
       onNavigate={handleNavigate}
-      userEmail={session.user.name}
+      userName={session.user.name}
+      userEmail={session.user.email}
       userRole={userRole}
       onLogout={() => {
         void authClient.signOut().then(() => {
