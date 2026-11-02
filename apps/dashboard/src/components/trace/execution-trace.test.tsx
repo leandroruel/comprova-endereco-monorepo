@@ -140,6 +140,48 @@ describe('ExecutionTrace', () => {
     await expect.element(detail.getByText('result', { exact: true })).not.toBeInTheDocument()
   })
 
+  it('empilha o header sticky acima dos ícones da timeline', async () => {
+    await page.viewport(1280, 900)
+    await render(<ExecutionTrace events={events} />)
+
+    const header = document.querySelector<HTMLElement>('[data-testid="trace-header"]')
+    const icons = [...document.querySelectorAll<HTMLElement>('[data-testid="trace-step-icon"]')]
+    expect(header).not.toBeNull()
+    expect(icons.length).toBeGreaterThan(0)
+
+    // O CSS do app não é carregado no ambiente de teste, então lemos a camada
+    // declarada nos utilitários `z-*`. O header sticky precisa pintar acima de
+    // qualquer camada da timeline (linha do conector e ícones).
+    const declaredZIndex = (element: HTMLElement): number | null => {
+      const match = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(element.className)
+      return match === null ? null : Number(match[1])
+    }
+    const headerZIndex = declaredZIndex(header!)
+    const maxTimelineZIndex = Math.max(...icons.map((icon) => declaredZIndex(icon) ?? 0))
+
+    expect(headerZIndex).not.toBeNull()
+    expect(headerZIndex!).toBeGreaterThan(maxTimelineZIndex)
+  })
+
+  it('dá scroll independente para a lista e para o detalhe no desktop', async () => {
+    await page.viewport(1280, 900)
+    await render(<ExecutionTrace events={events} />)
+
+    const list = document.querySelector<HTMLElement>('[data-testid="trace-timeline-scroll"]')
+    const detail = document.querySelector<HTMLElement>('[data-testid="trace-detail-scroll"]')
+    expect(list).not.toBeNull()
+    expect(detail).not.toBeNull()
+
+    // O ambiente de teste não carrega o CSS do app; a garantia aqui é a
+    // invariante: cada coluna limita a altura e rola por conta própria.
+    for (const column of [list!, detail!]) {
+      expect(column.className).toContain('lg:overflow-y-auto')
+      expect(column.className).toContain('lg:max-h-[calc(100dvh-15rem)]')
+    }
+    expect(list!.querySelector('[role="tablist"]')).not.toBeNull()
+    expect(detail!.querySelector('[data-testid="trace-detail"]')).not.toBeNull()
+  })
+
   it('mostra estado vazio sem eventos', async () => {
     await page.viewport(1280, 900)
     await render(<ExecutionTrace events={[]} />)

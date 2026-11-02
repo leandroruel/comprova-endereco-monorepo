@@ -43,6 +43,7 @@ export function TraceStepItem({
         )}
       >
         <span
+          data-testid="trace-step-icon"
           className={cn(
             'relative z-20 mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-card',
             selected ? 'border-border' : 'border-transparent',

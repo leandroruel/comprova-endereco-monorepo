@@ -164,7 +164,10 @@ export function ExecutionTrace({ events, loading = false, elapsedMs }: Execution
   if (loading) return <TraceSkeleton />
 
   const header = (
-    <div className="z-20 rounded-t-xl border-b border-border bg-card px-5 pb-4 pt-4 lg:sticky lg:top-14">
+    <div
+      data-testid="trace-header"
+      className="z-30 rounded-t-xl border-b border-border bg-card px-5 pb-4 pt-4 lg:sticky lg:top-14"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -244,7 +247,13 @@ export function ExecutionTrace({ events, loading = false, elapsedMs }: Execution
         </div>
       ) : (
         <div className="grid lg:grid-cols-[minmax(0,23rem)_minmax(0,1fr)]">
-          <div className="min-w-0 border-b border-border lg:border-b-0 lg:border-r">
+          {/* Cada coluna rola por conta própria: a lista não empurra o painel
+              de resultado para fora da tela. Altura = viewport menos o header
+              do app, o header sticky do card e a folga inferior. */}
+          <div
+            data-testid="trace-timeline-scroll"
+            className="min-w-0 border-b border-border lg:max-h-[calc(100dvh-15rem)] lg:overflow-y-auto lg:overscroll-contain lg:border-b-0 lg:border-r"
+          >
             <TraceTimeline
               entries={filtered}
               selectedIndex={activeIndex}
@@ -264,7 +273,10 @@ export function ExecutionTrace({ events, loading = false, elapsedMs }: Execution
             />
           </div>
 
-          <div className="hidden min-w-0 lg:block">
+          <div
+            data-testid="trace-detail-scroll"
+            className="hidden min-w-0 lg:block lg:max-h-[calc(100dvh-15rem)] lg:overflow-y-auto lg:overscroll-contain"
+          >
             {activeEntry !== null && (
               <TraceStepDetail
                 entry={activeEntry}
