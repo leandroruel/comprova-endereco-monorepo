@@ -8,7 +8,7 @@ import {
   type DebugNf3eQrCodeResponse,
 } from '@/api/client'
 import { DashboardLayout } from '@/components/layout'
-import { ExecutionTrace } from '@/components/trace'
+import { ExecutionTrace, TraceMetricsCard } from '@/components/trace'
 import type { SessionUser } from '@/api/auth'
 import { FileText, Play, Upload } from 'lucide-react'
 
@@ -421,6 +421,14 @@ export function DebugNf3eQrCodePage({
             <ReferencePanel reference={response.reference} />
 
             <ExecutionTrace events={response.events} elapsedMs={elapsedMs ?? undefined} />
+
+            {response.events.length > 0 ? (
+              <TraceMetricsCard
+                events={response.events}
+                elapsedMs={elapsedMs}
+                provenance={response.analysis?.provenance ?? undefined}
+              />
+            ) : null}
           </>
         )}
       </div>

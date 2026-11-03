@@ -1,4 +1,5 @@
 export { ExecutionTrace, TraceSkeleton, type ExecutionTraceProps } from './ExecutionTrace'
+export { TraceMetricsCard, type TraceMetricsCardProps } from './TraceMetricsCard'
 export { JsonViewer, type JsonViewerProps } from './JsonViewer'
 export { TraceFilters } from './TraceFilters'
 export { TraceStepDetail } from './TraceStepDetail'
