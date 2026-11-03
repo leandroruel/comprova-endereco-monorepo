@@ -156,8 +156,16 @@ const ADDRESS_COMPARE_FIELDS = [
 const valuesAgree = (a: string | null, b: string | null): boolean =>
   a === null || b === null || normalizeText(a) === normalizeText(b)
 
+/** CEP compara apenas dígitos: `01001-000` e `01001000` são o mesmo CEP. */
+const cepDigits = (value: string | null): string | null => {
+  const digits = value?.replace(/\D+/g, '') ?? ''
+  return digits.length > 0 ? digits : null
+}
+
 const addressesAgree = (a: ExtractedAddress, b: ExtractedAddress): boolean =>
-  ADDRESS_COMPARE_FIELDS.every((field) => valuesAgree(a[field], b[field]))
+  ADDRESS_COMPARE_FIELDS.every((field) =>
+    field === 'cep' ? valuesAgree(cepDigits(a.cep), cepDigits(b.cep)) : valuesAgree(a[field], b[field]),
+  )
 
 const addressCompleteness = (value: ExtractedAddress): number =>
   ADDRESS_COMPARE_FIELDS.filter((field) => value[field] !== null).length
@@ -174,7 +182,10 @@ const addressCompleteness = (value: ExtractedAddress): number =>
 const resolveAddress = (candidates: readonly SourcedAddress[]): ResolvedField<ExtractedAddress> => {
   const first = candidates[0]
   if (first === undefined) return { value: null, source: null, conflict: false }
-  if (candidates.some((candidate) => !addressesAgree(first.value, candidate.value))) {
+  const diverges = candidates.some((candidate, index) =>
+    candidates.slice(index + 1).some((other) => !addressesAgree(candidate.value, other.value)),
+  )
+  if (diverges) {
     return { value: null, source: null, conflict: true }
   }
   let best = first
@@ -562,7 +573,7 @@ const analyzePdf = async (
     const limitations = [...(baseFields?.limitations ?? []), ...merged.limitations]
     // Uma falha do Marker permanece observável mesmo quando a análise conclui
     // com a camada local.
-    if (markerFailureKind !== null) limitations.push(`MARKER_${markerFailureKind.toUpperCase()}`)
+    limitations.push(...markerExtraCodes)
 
     // Sem texto utilizável e sem campos de tabela, não há evidência a extrair.
     // Um conflito entre fontes também é evidência: nesse caso o resultado

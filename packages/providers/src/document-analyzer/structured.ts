@@ -218,18 +218,18 @@ type GroupAddress =
   | { readonly kind: 'ambiguous' }
   | { readonly kind: 'value'; readonly value: ExtractedAddress }
 
+const canonicalField = (value: string | null): string => (value === null ? '\u0000' : normalizeText(value))
+
 const addressKey = (address: ExtractedAddress): string =>
   [
-    address.logradouro,
-    address.numero,
-    address.complemento,
-    address.bairro,
-    address.cidade,
-    address.uf,
-    address.cep,
-  ]
-    .map((value) => value ?? '\u0000')
-    .join('\u0001')
+    canonicalField(address.logradouro),
+    canonicalField(address.numero),
+    canonicalField(address.complemento),
+    canonicalField(address.bairro),
+    canonicalField(address.cidade),
+    canonicalField(address.uf),
+    canonicalField(address.cep === null ? null : address.cep.replace(/\D+/g, '')),
+  ].join('\u0001')
 
 /**
  * Endereço explícito: a célula rotulada como endereço de fornecimento contém o
@@ -262,6 +262,13 @@ const explicitAddress = (candidate: { readonly value: string; readonly raw: stri
  */
 const genericAddress = (group: readonly TableCandidate[]): GroupAddress => {
   const street = pickUniqueCandidate(group, ['LOGRADOURO', 'ENDERECO'])
+  // Logradouro com valores divergentes é ambiguidade, não ausência parcial.
+  if (
+    street === null &&
+    group.some((candidate) => candidate.label === 'LOGRADOURO' || candidate.label === 'ENDERECO')
+  ) {
+    return { kind: 'ambiguous' }
+  }
   const number = pickUniqueCandidate(group, ['NUMERO'])
   const complement = pickUniqueCandidate(group, ['COMPLEMENTO'])
   const neighborhood = pickUniqueCandidate(group, ['BAIRRO'])
@@ -279,8 +286,10 @@ const genericAddress = (group: readonly TableCandidate[]): GroupAddress => {
     cep !== null
   if (!hasAny) return { kind: 'none' }
 
-  // Endereço parcial: apenas cidade/UF sem logradouro não é suficiente.
-  if (street === null && city === null && uf === null) return { kind: 'none' }
+  // Endereço parcial: sem logradouro, CEP ou bairro, cidade e UF são exigidas juntas.
+  if (street === null && cep === null && neighborhood === null && (city === null || uf === null)) {
+    return { kind: 'none' }
+  }
 
   return {
     kind: 'value',
