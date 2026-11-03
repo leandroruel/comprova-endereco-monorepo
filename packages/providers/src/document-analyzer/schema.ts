@@ -86,6 +86,15 @@ export const documentAnalysisResultSchema = z
     limitations: z.array(z.string()),
     errorCodes: z.array(z.string()),
     analyzedAt: z.iso.datetime(),
+    provenance: z
+      .object({
+        provider: z.enum(['local', 'marker']),
+        markerVersion: z.string().min(1).optional(),
+        pages: z.number().int().nonnegative().optional(),
+        processingTimeMs: z.number().int().nonnegative().optional(),
+        fallback: z.boolean().optional(),
+      })
+      .optional(),
   })
   .superRefine((result, ctx) => {
     const add = (path: readonly (string | number)[], message: string): void => {

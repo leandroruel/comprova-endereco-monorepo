@@ -362,6 +362,14 @@ export interface DebugAnalysisDto {
   readonly limitations: string[]
   readonly errorCodes: string[]
   readonly analyzedAt: string
+  /** Presente a partir do contrato v4; `null`/ausente em servidores antigos. */
+  readonly provenance?: {
+    readonly provider: string
+    readonly markerVersion?: string
+    readonly pages?: number
+    readonly processingTimeMs?: number
+    readonly fallback?: boolean
+  } | null
 }
 
 export interface DebugNf3eQrCodeResponse {

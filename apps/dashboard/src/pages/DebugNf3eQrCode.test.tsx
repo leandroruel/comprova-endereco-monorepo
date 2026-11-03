@@ -67,6 +67,7 @@ const analysis: NonNullable<DebugNf3eQrCodeResponse['analysis']> = {
   limitations: [],
   errorCodes: [],
   analyzedAt: '2026-10-30T00:00:00.000Z',
+  provenance: { provider: 'marker', pages: 2, fallback: false },
 }
 
 describe('DebugNf3eQrCodePage', () => {
@@ -109,6 +110,8 @@ describe('DebugNf3eQrCodePage', () => {
     await expect.element(page.getByText('RUA DAS FLORES')).toBeVisible()
     await expect.element(page.getByText('01001000')).toBeVisible()
     await expect.element(page.getByText('10/11/2026')).toBeVisible()
+    // A proveniência (fonte do texto) é exposta no debugger.
+    await expect.element(page.getByText(/marker · 2p/)).toBeVisible()
   })
 
   it('mostra o usuário logado no menu do sidemenu, não o rótulo "Conta"', async () => {

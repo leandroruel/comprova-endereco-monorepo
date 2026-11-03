@@ -8,10 +8,7 @@ import {
 import type { Logger } from '@comprova/observability'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import {
-  DocumentIntelligenceError,
-  type DocumentIntelligenceClient,
-} from '../../services/document-intelligence-client.js'
+import { DocumentIntelligenceError, type DocumentIntelligenceClient } from '@comprova/providers'
 import { requireWriteScope } from '../../plugins/scope.js'
 import {
   EVIDENCE_MULTIPART_OVERHEAD_BYTES,

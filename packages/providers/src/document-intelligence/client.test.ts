@@ -4,7 +4,7 @@ import {
   DocumentIntelligenceError,
   makeDocumentIntelligenceClient,
   type DocumentIntelligenceClientConfig,
-} from '../../src/services/document-intelligence-client.js'
+} from './client.js'
 
 const silentLogger: Logger = {
   debug: () => undefined,

@@ -1,6 +1,7 @@
 import {
   redactFiscalReference,
   type DocumentAnalysisDimension,
+  type DocumentAnalysisProvenance,
   type DocumentAnalysisResult,
   type ExtractedAddress,
   type ExtractedHolder,
@@ -18,8 +19,15 @@ import {
   inconclusiveFiscalReference,
 } from '../fiscal/reference.js'
 import { fieldsFromPdfText } from './fields.js'
+import {
+  addressFromTableCandidates,
+  extractTableCandidates,
+  holderFromTableCandidates,
+  type TableCandidate,
+} from './structured.js'
 import { baseResult, inconclusiveResult, invalidResult, unsupportedResult } from './results.js'
 import type { DocumentAnalyzerInput } from './types.js'
+import { MarkerAdapterError, type MarkerParseResult } from './marker.js'
 
 /**
  * Limites de orquestração, não de parsing. O PDF.js faz a leitura; o Comprova
@@ -30,6 +38,22 @@ const MAX_TEXT_CHARS = 1_000_000
 const MIN_TEXT_CHARS = 8
 const MAX_IMAGE_PIXELS = FISCAL_REFERENCE_MAX_IMAGE_PIXELS
 
+/**
+ * Interface mínima do adapter Marker necessária pelo analyzer. Desacopla
+ * `analyze.ts` da implementação concreta em `marker.ts`.
+ */
+export interface MarkerAdapter {
+  readonly parse: (
+    input: {
+      readonly data: Uint8Array
+      readonly filename: string
+      readonly documentId: string
+      readonly signal?: AbortSignal | undefined
+    },
+    trace?: DebugTraceSink,
+  ) => Promise<MarkerParseResult>
+}
+
 const withFiscalReference = (
   result: DocumentAnalysisResult,
   reference: FiscalReference,
@@ -38,6 +62,15 @@ const withFiscalReference = (
   // A URL do QR nunca é persistida. O fingerprint/documentId continuam.
   fiscalReference: redactFiscalReference(reference),
 })
+
+/**
+ * Anexa a proveniência (fonte do texto/fallback) a qualquer resultado —
+ * inclusive inconclusivo — para que o caminho percorrido seja observável.
+ */
+const withProvenance = (
+  result: DocumentAnalysisResult,
+  provenance: DocumentAnalysisProvenance | undefined,
+): DocumentAnalysisResult => (provenance === undefined ? result : { ...result, provenance })
 
 const debugReferenceSummary = (reference: FiscalReference): Record<string, unknown> => ({
   status: reference.status,
@@ -65,11 +98,73 @@ const emitAnalysisResult = (trace: DebugTraceSink | undefined, result: DocumentA
   })
 }
 
+/**
+ * Constrói o objeto de proveniência para o resultado da análise.
+ */
+const buildProvenance = (
+  provider: 'local' | 'marker',
+  overrides?: {
+    readonly markerVersion?: string
+    readonly pages?: number
+    readonly processingTimeMs?: number
+    readonly fallback?: boolean
+  },
+): DocumentAnalysisProvenance => ({
+  provider,
+  ...(overrides?.markerVersion === undefined ? {} : { markerVersion: overrides.markerVersion }),
+  ...(overrides?.pages === undefined ? {} : { pages: overrides.pages }),
+  ...(overrides?.processingTimeMs === undefined ? {} : { processingTimeMs: overrides.processingTimeMs }),
+  ...(overrides?.fallback === undefined ? {} : { fallback: overrides.fallback }),
+})
+
+/**
+ * Completa campos ausentes (`not_extracted`) usando candidatos de tabela do
+ * Marker, sem sobrescrever valores já extraídos do texto. Conflitos entre
+ * texto e tabela são tratados como ambiguidade (campo fica nulo).
+ */
+const mergeTableCandidates = (
+  fields: {
+    readonly address: ExtractedAddress | null
+    readonly holder: ExtractedHolder | null
+  },
+  tables: readonly TableCandidate[],
+): {
+  readonly address: ExtractedAddress | null
+  readonly holder: ExtractedHolder | null
+  readonly limitations: readonly string[]
+} => {
+  let address = fields.address
+  let holder = fields.holder
+
+  if (address === null) {
+    const tableAddress = addressFromTableCandidates(tables)
+    if (tableAddress !== null) {
+      // Endereço veio apenas da tabela; registrar como evidência complementar.
+      address = tableAddress
+    }
+  }
+
+  if (holder === null) {
+    const tableHolder = holderFromTableCandidates(tables)
+    if (tableHolder !== null) {
+      holder = tableHolder
+    }
+  }
+
+  return { address, holder, limitations: [] }
+}
+
 const analyzePdf = async (
   data: Uint8Array,
   now: Date,
   trace?: DebugTraceSink,
+  marker?: MarkerAdapter | null,
 ): Promise<DocumentAnalysisResult> => {
+  // O PDF.js (via unpdf) pode destacar (detach) o ArrayBuffer do Uint8Array
+  // durante o parse. Guardamos uma cópia independente logo no início para
+  // poder reutilizar os bytes depois, por exemplo para o OCR do Marker.
+  const dataCopy = Uint8Array.from(data)
+
   let pdf: Awaited<ReturnType<typeof getDocumentProxy>>
   try {
     // O PDF.js recusa `Buffer` explicitamente, mesmo sendo um `Uint8Array`.
@@ -120,30 +215,34 @@ const analyzePdf = async (
     // 1) Camada textual: primeira tentativa determinística. O mesmo texto que
     // alimenta os campos do F1.2 é usado para reconhecer a URL de consulta ou
     // a chave de acesso — sem decodificar QR, renderizar página ou chamar VLM.
-    let text: string | null = null
+    let localText: string | null = null
     try {
       const extracted = await extractText(pdf, { mergePages: true })
-      text = extracted.text
+      localText = extracted.text
     } catch {
-      text = null
+      localText = null
     }
 
-    const normalized = text?.trim() ?? ''
+    const normalizedLocal = localText?.trim() ?? ''
+    const localTextSufficient = normalizedLocal.length >= MIN_TEXT_CHARS
+
     emitDebug(trace, {
       code: 'pdf.text',
-      level: text === null ? 'warning' : normalized.length >= MIN_TEXT_CHARS ? 'success' : 'warning',
+      level: localText === null ? 'warning' : localTextSufficient ? 'success' : 'warning',
       message:
-        text === null
+        localText === null
           ? 'Não foi possível extrair a camada textual do PDF.'
-          : normalized.length >= MIN_TEXT_CHARS
-            ? `Camada textual extraída (${normalized.length} caracteres).`
+          : localTextSufficient
+            ? `Camada textual extraída (${normalizedLocal.length} caracteres).`
             : 'O PDF não tem camada textual utilizável.',
-      details: { chars: normalized.length, minChars: MIN_TEXT_CHARS },
+      details: { chars: normalizedLocal.length, minChars: MIN_TEXT_CHARS },
     })
 
+    // 2) Referência fiscal: camada textual + QR (caminho determinístico,
+    // inalterado pelo Marker). O QR nunca é extraído pelo OCR do Marker.
     const textReference =
-      normalized.length >= MIN_TEXT_CHARS && normalized.length <= MAX_TEXT_CHARS
-        ? extractFiscalReferenceFromText(normalized)
+      normalizedLocal.length >= MIN_TEXT_CHARS && normalizedLocal.length <= MAX_TEXT_CHARS
+        ? extractFiscalReferenceFromText(normalizedLocal)
         : null
     const textFound = textReference?.status === 'found' ? textReference : null
     if (textReference !== null) {
@@ -157,15 +256,9 @@ const analyzePdf = async (
         details: debugReferenceSummary(textReference),
       })
     }
-    // A referência textual só dispensa o QR quando já é completa para a
-    // consulta: documento identificado E autorizador reconhecido. Chave
-    // isolada (`UNKNOWN_ISSUER`) ou URL sem chave ainda dependem do QR, que é
-    // o artefato canônico do emitente e costuma trazer o autorizador.
+
     const textIsComplete = textFound !== null && textFound.documentId !== null && textFound.issuer !== null
 
-    // 2) QR raster embutido: fallback determinístico já existente (F2.2b). Um
-    // PDF escaneado pode não ter camada textual e ainda conter o QR como
-    // imagem; e a referência textual incompleta não basta para a consulta.
     let fiscalReference: FiscalReference
     if (textIsComplete && textFound !== null) {
       fiscalReference = textFound
@@ -181,11 +274,6 @@ const analyzePdf = async (
         maxImagePixels: MAX_IMAGE_PIXELS,
         onDebug: trace,
       })
-      // Evidências compatíveis se completam (chave do texto + autorizador do
-      // QR, por exemplo). Um QR só com autorizador não substitui a chave já
-      // lida do texto, e duas chaves divergentes não são combinadas.
-      // QR ilegível/ausente: a referência textual (ainda que incompleta) é
-      // melhor evidência do que o resultado físico do QR.
       fiscalReference = textFound === null ? qrReference : combineFiscalReferences(textFound, qrReference)
       emitDebug(trace, {
         code: 'fiscal.reference',
@@ -198,46 +286,187 @@ const analyzePdf = async (
       })
     }
 
-    if (text === null) {
-      const result = withFiscalReference(
-        inconclusiveResult(now, 'PDF_TEXT_EXTRACTION_FAILED'),
-        fiscalReference,
+    // 3) Decidir fonte de texto para extração de campos.
+    //
+    // Política de fallback explícita:
+    //   a) Camada local suficiente → usar unpdf, não chama o Marker.
+    //   b) Camada local insuficiente + Marker disponível → chamar Marker.
+    //      Se Marker falhar, fallback para o texto local (mesmo insuficiente)
+    //      com limitação registrada.
+    //   c) Camada local insuficiente + Marker indisponível → usar texto local
+    //      com limitação (sem OCR).
+    let bestText: string
+    let provenance: DocumentAnalysisProvenance | undefined
+    let markerResult: MarkerParseResult | null = null
+    let markerFailureKind: string | null = null
+
+    if (localTextSufficient) {
+      bestText = normalizedLocal
+      // Proveniência só é registrada quando o Document Intelligence está
+      // configurado; sem ele o resultado permanece idêntico ao contrato v3.
+      provenance = marker !== null && marker !== undefined ? buildProvenance('local') : undefined
+      emitDebug(trace, {
+        code: 'text.local',
+        level: 'info',
+        message: 'Usando camada textual local (unpdf); Marker não necessário.',
+        details: { chars: bestText.length },
+      })
+    } else if (marker !== null && marker !== undefined) {
+      // Chamar Marker para OCR/layout.
+      try {
+        // O PDF.js pode destacar (detach) o ArrayBuffer durante o parse do
+        // unpdf; usamos a cópia independente (`dataCopy`) para o OCR do Marker.
+        markerResult = await marker.parse(
+          { data: dataCopy, filename: 'document.pdf', documentId: 'analysis' },
+          trace,
+        )
+        bestText = markerResult.text
+        provenance = buildProvenance('marker', {
+          markerVersion: markerResult.markerVersion,
+          pages: markerResult.pages,
+          processingTimeMs: markerResult.processingTimeMs,
+        })
+        emitDebug(trace, {
+          code: 'text.marker',
+          level: 'success',
+          message: 'Usando texto extraído pelo Marker (OCR/layout).',
+          details: { chars: bestText.length, pages: markerResult.pages },
+        })
+      } catch (error) {
+        markerFailureKind = error instanceof MarkerAdapterError ? error.kind : 'unknown'
+        if (error instanceof MarkerAdapterError) {
+          emitDebug(trace, {
+            code: 'marker.fallback',
+            level: 'warning',
+            message: `Marker indisponível (${error.kind}); fallback para a camada local.`,
+            details: { kind: error.kind },
+          })
+        } else {
+          emitDebug(trace, {
+            code: 'marker.fallback',
+            level: 'warning',
+            message: 'Marker falhou inesperadamente; fallback para a camada local.',
+            details: { reason: error instanceof Error ? error.message : String(error) },
+          })
+        }
+        // Fallback explícito para o texto local, mesmo quando insuficiente.
+        bestText = normalizedLocal
+        provenance = buildProvenance('local', { fallback: true })
+        emitDebug(trace, {
+          code: 'text.fallback',
+          level: 'warning',
+          message: 'Fallback para a camada textual local após falha do Marker.',
+          details: { chars: bestText.length },
+        })
+      }
+    } else {
+      // Camada insuficiente e Marker não configurado: usar texto local com
+      // limitação (não há OCR disponível). Sem Document Intelligence não há
+      // proveniência a registrar (comportamento do contrato v3).
+      bestText = normalizedLocal
+      provenance = undefined
+      emitDebug(trace, {
+        code: 'text.fallback',
+        level: 'warning',
+        message: 'Camada textual insuficiente e Document Intelligence não configurado.',
+        details: { chars: bestText.length, minChars: MIN_TEXT_CHARS },
+      })
+    }
+
+    // Códigos extras para manter a limitação observável sem perder o código
+    // principal anterior (`NO_TEXT_LAYER`/`PDF_TEXT_EXTRACTION_FAILED`).
+    const markerExtraCodes: string[] = []
+    if (markerFailureKind !== null) {
+      markerExtraCodes.push(`MARKER_${markerFailureKind.toUpperCase()}`)
+    } else if (markerResult !== null) {
+      markerExtraCodes.push('OCR_NO_USABLE_TEXT')
+    }
+
+    // 4) Se o texto local é nulo (não conseguiu extrair de jeito nenhum), o
+    // documento não tem texto extraível nem OCR produziu resultado.
+    if (localText === null && markerResult === null) {
+      const base = inconclusiveResult(now, 'PDF_TEXT_EXTRACTION_FAILED')
+      const result = withProvenance(
+        withFiscalReference(
+          {
+            ...base,
+            limitations: [...base.limitations, ...markerExtraCodes],
+            errorCodes: [...base.errorCodes, ...markerExtraCodes],
+          },
+          fiscalReference,
+        ),
+        provenance,
       )
       emitAnalysisResult(trace, result)
       return result
     }
-    if (normalized.length < MIN_TEXT_CHARS) {
-      const result = withFiscalReference(inconclusiveResult(now, 'NO_TEXT_LAYER'), fiscalReference)
-      emitAnalysisResult(trace, result)
-      return result
-    }
-    if (normalized.length > MAX_TEXT_CHARS) {
-      const result = withFiscalReference(inconclusiveResult(now, 'TEXT_TOO_LONG'), fiscalReference)
+
+    // Se o melhor texto disponível ainda é insuficiente, não há campos para
+    // extrair. Isso pode acontecer quando o fallback para o texto local
+    // continua abaixo do mínimo.
+    if (bestText.length < MIN_TEXT_CHARS) {
+      const base = inconclusiveResult(now, 'NO_TEXT_LAYER')
+      const result = withProvenance(
+        withFiscalReference(
+          {
+            ...base,
+            limitations: [...base.limitations, ...markerExtraCodes],
+            errorCodes: [...base.errorCodes, ...markerExtraCodes],
+          },
+          fiscalReference,
+        ),
+        provenance,
+      )
       emitAnalysisResult(trace, result)
       return result
     }
 
-    const fields = fieldsFromPdfText(normalized)
+    if (bestText.length > MAX_TEXT_CHARS) {
+      const result = withProvenance(
+        withFiscalReference(inconclusiveResult(now, 'TEXT_TOO_LONG'), fiscalReference),
+        provenance,
+      )
+      emitAnalysisResult(trace, result)
+      return result
+    }
+
+    // 5) Extrair campos do texto escolhido.
+    const fields = fieldsFromPdfText(bestText)
+    let addressValue = fields.address
+    let holderValue = fields.holder
+    const limitations = [...fields.limitations]
+
+    // 6) Se Marker foi usado e campos ainda estão ausentes, tentar extração
+    // estruturada de tabelas (sem sobrescrever valores do texto).
+    if (markerResult !== null) {
+      const tableCandidates = extractTableCandidates(markerResult.tables)
+      const merged = mergeTableCandidates({ address: addressValue, holder: holderValue }, tableCandidates)
+      addressValue = merged.address
+      holderValue = merged.holder
+      if (merged.limitations.length > 0) limitations.push(...merged.limitations)
+    }
+
     const address: DocumentAnalysisDimension<ExtractedAddress> =
-      fields.address === null
+      addressValue === null
         ? { status: 'not_extracted', value: null, raw: null }
-        : { status: 'extracted', value: fields.address, raw: fields.address.raw }
+        : { status: 'extracted', value: addressValue, raw: addressValue.raw }
     const holder: DocumentAnalysisDimension<ExtractedHolder> =
-      fields.holder === null
+      holderValue === null
         ? { status: 'not_extracted', value: null, raw: null }
-        : { status: 'extracted', value: fields.holder, raw: fields.holder.raw }
+        : { status: 'extracted', value: holderValue, raw: holderValue.raw }
 
     emitDebug(trace, {
       code: 'document.fields',
       level: address.status === 'extracted' || holder.status === 'extracted' ? 'success' : 'info',
-      message: `Campos extraídos do texto (endereço: ${address.status}; titular: ${holder.status}).`,
+      message: `Campos extraídos (endereço: ${address.status}; titular: ${holder.status}; fonte: ${provenance?.provider ?? 'local'}).`,
       details: {
         kind: fields.kind,
         issuedAt: fields.issuedAt,
         issuedRaw: fields.issuedRaw,
         address: address.value,
         holder: holder.value,
-        limitations: fields.limitations,
+        limitations,
+        provenance,
       },
     })
 
@@ -253,8 +482,9 @@ const analyzePdf = async (
         },
         address,
         holder,
-        limitations: fields.limitations,
+        limitations,
         errorCodes: [],
+        provenance,
       },
       fiscalReference,
     )
@@ -270,8 +500,9 @@ export const analyzeDocument = async (
   input: DocumentAnalyzerInput,
   now: Date,
   trace?: DebugTraceSink,
+  marker?: MarkerAdapter | null,
 ): Promise<DocumentAnalysisResult> => {
-  if (input.contentType === 'application/pdf') return analyzePdf(input.data, now, trace)
+  if (input.contentType === 'application/pdf') return analyzePdf(input.data, now, trace, marker ?? null)
 
   const fiscalReference = await extractFiscalReferenceFromArtifact({
     data: input.data,
@@ -290,3 +521,8 @@ export const analyzeDocument = async (
   emitAnalysisResult(trace, result)
   return result
 }
+
+/**
+ * Erro tipado do adapter Marker, reexportado para uso do caller.
+ */
+export { MarkerAdapterError }

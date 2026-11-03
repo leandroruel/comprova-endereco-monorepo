@@ -21,11 +21,17 @@
 
 import type { FiscalReference } from './fiscal-reference.js'
 
-export const DOCUMENT_ANALYSIS_CONTRACT_VERSION = '3'
+export const DOCUMENT_ANALYSIS_CONTRACT_VERSION = '4'
 
-/** Implementação MVP: texto de PDF + QR/referência fiscal, sem OCR. */
+/**
+ * text_document (PDF textual via unpdf) com fallback explícito para o
+ * serviço Document Intelligence (Marker). A identidade do analyzer se mantém
+ * estável; a versão/contrato são bumpadas de forma aditiva (campo opcional
+ * `provenance`). Linhas `pending` antigas com contrato anterior ficam órfãs
+ * (consequência documentada em ADR-0039).
+ */
 export const DOCUMENT_ANALYZER_ID = 'text_document'
-export const DOCUMENT_ANALYZER_VERSION = '1.2.0'
+export const DOCUMENT_ANALYZER_VERSION = '1.3.0'
 
 export const DOCUMENT_ANALYSIS_STATUSES = [
   'pending',
@@ -120,6 +126,19 @@ export interface DocumentAnalysisDimension<T> {
   readonly raw: string | null
 }
 
+/**
+ * Proveniência da extração: qual provedor produziu o texto e metadados de
+ * rastreamento. Campo opcional e aditivo — resultados antigos (contrato 3)
+ * não o possuem.
+ */
+export interface DocumentAnalysisProvenance {
+  readonly provider: 'local' | 'marker'
+  readonly markerVersion?: string
+  readonly pages?: number
+  readonly processingTimeMs?: number
+  readonly fallback?: boolean
+}
+
 export interface DocumentAnalysisResult {
   readonly contractVersion: string
   readonly analyzer: {
@@ -144,6 +163,11 @@ export interface DocumentAnalysisResult {
   readonly limitations: readonly string[]
   readonly errorCodes: readonly string[]
   readonly analyzedAt: string
+  /**
+   * Proveniência da extração (quem produziu o texto, fallback, etc.).
+   * Opcional: ausente em resultados do contrato anterior.
+   */
+  readonly provenance?: DocumentAnalysisProvenance
 }
 
 export const isTerminalDocumentAnalysisStatus = (

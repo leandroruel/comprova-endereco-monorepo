@@ -75,6 +75,14 @@ function DocumentPanel({ analysis }: { readonly analysis: DebugAnalysisDto }) {
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Vencimento / emissão</p>
             <span className="font-mono">{analysis.document.issuedRaw ?? '—'}</span>
           </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Fonte do texto</p>
+            <span className="font-mono">
+              {analysis.provenance?.provider ?? 'local'}
+              {analysis.provenance?.fallback === true ? ' (fallback)' : ''}
+              {analysis.provenance?.pages !== undefined ? ` · ${analysis.provenance.pages}p` : ''}
+            </span>
+          </div>
         </div>
 
         <div>

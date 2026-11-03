@@ -41,7 +41,7 @@ export interface DocumentIntelligenceClientConfig {
 }
 
 export interface ParsePdfInput {
-  readonly data: Buffer
+  readonly data: Uint8Array
   readonly filename: string
   readonly documentId: string
   readonly signal?: AbortSignal | undefined
