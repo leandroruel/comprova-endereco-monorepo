@@ -43,8 +43,9 @@ export {
 
 /**
  * Cria o analyzer. Quando `options.documentIntelligence` é fornecido, o
- * adapter Marker é criado e usado como fonte de texto quando a camada local
- * (unpdf) for insuficiente. Quando ausente, o analyzer usa apenas `unpdf`.
+ * adapter Marker é criado e usado para complementar a camada local (unpdf)
+ * quando ela não entrega titular e endereço. Quando ausente, o analyzer usa
+ * apenas `unpdf`.
  */
 export const makeDocumentAnalyzer = (options: DocumentAnalyzerOptions = {}): DocumentAnalyzer => {
   const now = options.now ?? (() => new Date())

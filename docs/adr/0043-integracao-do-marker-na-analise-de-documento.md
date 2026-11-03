@@ -56,16 +56,23 @@ validade. Ele só fornece texto/layout.
 
 ### 3. Política de fallback explícita (`analyze.ts`)
 
-A seleção da fonte textual é determinística e observável:
+A seleção da fonte textual é determinística e observável. Tamanho de texto
+sozinho não decide: o gatilho é a evidência extraída da camada local.
 
-1. **Camada local suficiente** (`unpdf`, ≥ 8 caracteres): usar o texto local e
-   **não** chamar o Marker. Registra `provenance.provider = 'local'` apenas
-   quando o Document Intelligence está configurado.
-2. **Camada local insuficiente + Marker configurado**: chamar o Marker. Em
-   sucesso, usar o texto do Marker (`provider = 'marker'`). Em falha, cair para
-   o texto local mesmo insuficiente, com `provenance.fallback = true` e código
-   `MARKER_<KIND>` adicional a `NO_TEXT_LAYER`.
-3. **Camada local insuficiente + Marker ausente**: manter o comportamento do
+1. **Camada local suficiente** (`unpdf`, ≥ 8 caracteres e com titular **e**
+   endereço extraídos): usar o texto local e **não** chamar o Marker. Registra
+   `provenance.provider = 'local'` apenas quando o Document Intelligence está
+   configurado.
+2. **Camada local utilizável mas incompleta + Marker configurado**: chamar o
+   Marker para complementar. O texto local continua sendo o texto-base
+   (`provider = 'local'`) e os campos das duas fontes são comparados: valores
+   equivalentes são mantidos, divergentes viram ausência com
+   `FIELD_CONFLICT_ADDRESS`/`FIELD_CONFLICT_HOLDER`.
+3. **Camada local inutilizável + Marker configurado**: usar o texto do Marker
+   como base (`provider = 'marker'`) e completar com suas tabelas. Em falha,
+   cair para o texto local mesmo insuficiente, com `provenance.fallback = true`
+   e código `MARKER_<KIND>` adicional a `NO_TEXT_LAYER`.
+4. **Camada local insuficiente + Marker ausente**: manter o comportamento do
    contrato anterior (`NO_TEXT_LAYER`), sem proveniência.
 
 Códigos diferenciados: indisponível (`MARKER_UNAVAILABLE`), timeout
@@ -77,11 +84,15 @@ OCR em conclusão silenciosa.
 ### 4. Extração estruturada (`structured.ts`)
 
 `extractTableCandidates` converte células de tabela do Marker em candidatos
-`rótulo: valor` (conjunto genérico de rótulos, sem regra por distribuidora).
-`addressFromTableCandidates`/`holderFromTableCandidates` só completam campos que
-o texto deixou ausentes; rótulos repetidos com valores divergentes são
-ambíguos (resultado `null`), e o endereço de correspondência não é confundido
-com o de fornecimento.
+`rótulo: valor`. Os rótulos são classificados pelo papel: só
+`TITULAR`/`CLIENTE`/`CONSUMIDOR`/`PAGADOR`/`DESTINATARIO` produzem titular;
+`NOME`, `EMPRESA`, `FORNECEDOR` e `RAZÃO SOCIAL` são genéricos e não identificam
+o consumidor. Endereço genérico (`ENDEREÇO`, `CIDADE`, `CEP`, ...) só é usado
+com contexto de consumidor e sem contexto de distribuidora na mesma tabela;
+rótulos explícitos de fornecimento/instalação têm prioridade. Rótulos repetidos
+com valores divergentes são ambíguos (resultado `null`), o endereço de
+correspondência não é confundido com o de fornecimento e fontes distintas não
+são mescladas.
 
 ### 5. QR e referência fiscal inalterados
 
@@ -94,8 +105,10 @@ permanece.
 
 `DocumentAnalysisResult` ganha o campo **opcional** `provenance`
 (`provider: 'local' | 'marker'`, `markerVersion?`, `pages?`,
-`processingTimeMs?`, `fallback?`). Bump: contrato `3 → 4`, analyzer
-`1.2.0 → 1.3.0`; `DOCUMENT_ANALYZER_ID` continua `text_document`.
+`processingTimeMs?`, `fallback?`, `fields?`). `provenance.fields` registra a
+origem por campo (`local`/`marker`/`marker_table`) apenas quando ela difere do
+texto-base. Bump: contrato `3 → 4`, analyzer `1.2.0 → 1.3.0`;
+`DOCUMENT_ANALYZER_ID` continua `text_document`.
 
 A tabela `evidence_analysis` continua append-only e indexada por
 (`artifact_id`, `analyzer`, `analyzer_version`, `contract_version`). Linhas

@@ -67,9 +67,10 @@ const stopValidationRetention =
 // o worker avisa e não sobe o loop, em vez de falhar silenciosamente.
 //
 // O analyzer usa a camada textual local (unpdf) como fonte preferencial e o
-// serviço Document Intelligence (Marker) como fallback/OCR quando ela é
-// insuficiente. Sem `DOCUMENT_INTELLIGENCE_URL`, o cliente fica desabilitado e
-// o analyzer opera exatamente como antes (nenhuma chamada externa).
+// serviço Document Intelligence (Marker) quando a camada local não entrega
+// titular e endereço (complemento/OCR). Sem `DOCUMENT_INTELLIGENCE_URL`, o
+// cliente fica desabilitado e o analyzer opera exatamente como antes (nenhuma
+// chamada externa).
 const documentIntelligence = makeDocumentIntelligenceClient({
   url: env.documentIntelligenceUrl,
   timeoutMs: env.documentIntelligenceTimeoutMs ?? 360_000,
