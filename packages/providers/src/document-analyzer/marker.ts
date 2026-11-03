@@ -57,7 +57,9 @@ const mapClientError = (error: DocumentIntelligenceError): MarkerAdapterError =>
     case 'unavailable':
       return new MarkerAdapterError('unavailable', 'Serviço Document Intelligence indisponível')
     case 'busy':
-      return new MarkerAdapterError('unavailable', 'Serviço Document Intelligence com capacidade esgotada')
+      // Capacidade esgotada do serviço (HTTP 429): transitório, o chamador
+      // pode tentar novamente mais tarde. Nunca mapeia para indisponível.
+      return new MarkerAdapterError('busy', 'Serviço Document Intelligence com capacidade esgotada')
     case 'too_large':
       return new MarkerAdapterError('unsupported', 'Documento excede o tamanho limite do serviço')
     case 'rejected':
@@ -207,8 +209,11 @@ export const makeMarkerAdapter = (
 
     const text = typeof response.content.text === 'string' ? response.content.text : ''
     const normalized = text.trim()
+    const pagesText = extractTextFromPages(response.pages)
 
-    if (normalized.length === 0) {
+    // Só considera que não há texto quando nem o conteúdo de leitura nem o
+    // texto das páginas produziram algo utilizável.
+    if (normalized.length === 0 && pagesText.trim().length === 0) {
       const error = new MarkerAdapterError('no_text', 'Marker não extraiu texto utilizável do documento')
       emitDebug(trace, {
         code: 'marker.no_text',
@@ -219,9 +224,9 @@ export const makeMarkerAdapter = (
       throw error
     }
 
-    const pagesText = extractTextFromPages(response.pages)
     // O texto do `content.text` já vem em ordem de leitura do Marker. Usamos
-    // as páginas apenas para contagem e tabelas.
+    // as páginas apenas quando o conteúdo está em branco e para contagem +
+    // tabelas.
     const finalText = normalized.length > 0 ? normalized : pagesText
 
     emitDebug(trace, {

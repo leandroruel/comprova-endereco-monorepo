@@ -149,6 +149,16 @@ describe('análise com fallback para o Marker (F1.2)', () => {
     expect(result.provenance).toMatchObject({ provider: 'local', fallback: true })
   })
 
+  it('capacidade esgotada (busy/429) é reportada como MARKER_BUSY, não MARKER_UNAVAILABLE', async () => {
+    const parsePdf = vi.fn(async () => {
+      throw new DocumentIntelligenceError('busy', 'capacity exhausted')
+    })
+    const result = await analyzeWith(client(parsePdf), '')
+
+    expect(result.errorCodes).toContain('MARKER_BUSY')
+    expect(result.errorCodes).not.toContain('MARKER_UNAVAILABLE')
+  })
+
   it('resultado parcial do Marker (texto curto): inconclusivo com código de OCR', async () => {
     const parsePdf = vi.fn(async () => diResponse({ content: { text: 'ab' } }))
     const result = await analyzeWith(client(parsePdf), '')

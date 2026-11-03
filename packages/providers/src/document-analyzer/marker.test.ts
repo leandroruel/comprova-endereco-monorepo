@@ -129,6 +129,60 @@ describe('MarkerAdapter', () => {
     expect(result.text).toBe('Tabela de consumo')
   })
 
+  it('usa texto das páginas quando content.text está em branco', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          validPayload({
+            content: { text: '' },
+            pages: [
+              {
+                pageNumber: 1,
+                width: 612,
+                height: 792,
+                elements: [
+                  {
+                    id: 'el-1',
+                    type: 'text',
+                    text: 'Texto extraído das páginas',
+                    bbox: { x1: 1, y1: 1, x2: 2, y2: 2 },
+                    confidence: null,
+                    table: null,
+                    imageRef: null,
+                    metadata: {},
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    )
+    const adapter = makeMarkerAdapter(client())
+
+    const result = await adapter.parse(input)
+
+    expect(result.text).toBe('Texto extraído das páginas')
+  })
+
+  it('lança no_text quando nem content.text nem páginas têm texto', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          validPayload({
+            content: { text: '   ' },
+            pages: [{ pageNumber: 1, width: 612, height: 792, elements: [] }],
+          }),
+        ),
+      ),
+    )
+    const adapter = makeMarkerAdapter(client())
+
+    await expect(adapter.parse(input)).rejects.toMatchObject({ kind: 'no_text' })
+  })
+
   it('mapeia status failed do serviço para parsing_failed', async () => {
     vi.stubGlobal(
       'fetch',
@@ -191,14 +245,14 @@ describe('MarkerAdapter', () => {
     await expect(adapter.parse(input)).rejects.toMatchObject({ kind: 'unavailable' })
   })
 
-  it('mapeia 429 (capacidade) para unavailable', async () => {
+  it('mapeia 429 (capacidade) para busy, não unavailable', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('busy', { status: 429 })),
     )
     const adapter = makeMarkerAdapter(client())
 
-    await expect(adapter.parse(input)).rejects.toMatchObject({ kind: 'unavailable' })
+    await expect(adapter.parse(input)).rejects.toMatchObject({ kind: 'busy' })
   })
 
   it('mapeia timeout do cliente para timeout', async () => {

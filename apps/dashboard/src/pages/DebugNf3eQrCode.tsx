@@ -45,6 +45,16 @@ function DocumentPanel({ analysis }: { readonly analysis: DebugAnalysisDto }) {
 
   const address = analysis.address.value
 
+  // A proveniência só existe a partir do contrato v4 e apenas quando o
+  // Document Intelligence está configurado. Sem ela, `local` só é uma
+  // afirmação válida quando a extração local realmente rodou e não achou texto
+  // utilizável (`NO_TEXT_LAYER`). Resultados que retornam antes de qualquer
+  // provedor de texto (PDF inválido, criptografado, páginas demais) não têm
+  // fonte de texto e devem mostrar `—`.
+  const localTextRan =
+    analysis.errorCodes.includes('NO_TEXT_LAYER') || analysis.limitations.includes('NO_TEXT_LAYER')
+  const textSource = analysis.provenance?.provider ?? (localTextRan ? 'local' : '—')
+
   return (
     <Card>
       <CardHeader>
@@ -78,7 +88,7 @@ function DocumentPanel({ analysis }: { readonly analysis: DebugAnalysisDto }) {
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Fonte do texto</p>
             <span className="font-mono">
-              {analysis.provenance?.provider ?? 'local'}
+              {textSource}
               {analysis.provenance?.fallback === true ? ' (fallback)' : ''}
               {analysis.provenance?.pages !== undefined ? ` · ${analysis.provenance.pages}p` : ''}
             </span>

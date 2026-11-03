@@ -15,13 +15,15 @@ import type { DocumentIntelligenceTable } from '@comprova/contracts'
 
 /**
  * Candidato extraído de uma célula de tabela. `page` é o número da página
- * (1-based) quando disponível.
+ * (1-based) quando disponível. `source` identifica a tabela e linha de origem
+ * para evitar combinar campos de endereço de fontes distintas.
  */
 export interface TableCandidate {
   readonly label: string
   readonly value: string
   readonly raw: string
   readonly page: number
+  readonly source: string
 }
 
 const labelOf = (value: string): string => normalizeText(value).replace(/[^A-Z0-9]/g, '')
@@ -81,12 +83,36 @@ export const extractTableCandidates = (
 ): readonly TableCandidate[] => {
   const candidates: TableCandidate[] = []
 
-  for (const table of tables) {
+  for (const [ti, table] of tables.entries()) {
     const headers = table.headers
-    const dataRows = headers.length > 0 ? table.rows : table.rows.slice(1)
-    const effectiveHeaders = headers.length > 0 ? headers : (table.rows[0] ?? [])
+    let effectiveHeaders: readonly string[]
+    let firstDataRowIndex: number
 
-    for (const row of dataRows) {
+    if (headers.length > 0) {
+      // Cabeçalhos explícitos: usam-nos como rótulos de coluna; todas as
+      // linhas são dados.
+      effectiveHeaders = headers
+      firstDataRowIndex = 0
+    } else if (
+      table.rows.length > 0 &&
+      table.rows[0]?.every((cell) => TABLE_LABELS.has(labelOf(cell))) === true
+    ) {
+      // Sem cabeçalhos explícitos: só usa a primeira linha como cabeçalho se
+      // todas as suas células forem rótulos conhecidos. Senão, não infere
+      // colunas nem produz candidatos desta tabela.
+      effectiveHeaders = table.rows[0] ?? []
+      firstDataRowIndex = 1
+    } else {
+      continue
+    }
+
+    for (let ri = firstDataRowIndex; ri < table.rows.length; ri += 1) {
+      const row = table.rows[ri]
+      if (row === undefined) continue
+      // Fonte = tabela de origem. Candidatos de tabelas distintas nunca se
+      // mesclam; dentro de uma mesma tabela a regra de ambiguidade (rótulo com
+      // valores divergentes → ausência) continua valendo.
+      const source = `t${ti}`
       for (let i = 0; i < effectiveHeaders.length; i += 1) {
         const header = effectiveHeaders[i] ?? ''
         const value = row[i] ?? ''
@@ -100,6 +126,7 @@ export const extractTableCandidates = (
           value: value.trim(),
           raw: `${header.trim()}: ${value.trim()}`,
           page: 0, // O schema atual do DI não expõe página por tabela
+          source,
         })
       }
     }
@@ -138,43 +165,70 @@ export const pickUniqueCandidate = (
 export const addressFromTableCandidates = (
   candidates: readonly TableCandidate[],
 ): ExtractedAddress | null => {
-  const street = pickUniqueCandidate(candidates, ['LOGRADOURO', 'ENDERECO'])
-  const number = pickUniqueCandidate(candidates, ['NUMERO'])
-  const complement = pickUniqueCandidate(candidates, ['COMPLEMENTO'])
-  const neighborhood = pickUniqueCandidate(candidates, ['BAIRRO'])
-  const city = pickUniqueCandidate(candidates, ['CIDADE', 'MUNICIPIO'])
-  const uf = pickUniqueCandidate(candidates, ['UF', 'ESTADO'])
-  const cep = pickUniqueCandidate(candidates, ['CEP'])
-
-  // Se nenhum campo foi encontrado, não há endereço na tabela.
-  if (
-    street === null &&
-    number === null &&
-    complement === null &&
-    neighborhood === null &&
-    city === null &&
-    uf === null &&
-    cep === null
-  ) {
-    return null
+  // Agrupa candidatos por fonte (tabela de origem) para evitar combinar campos
+  // de endereço de fontes distintas, ex.: endereço da distribuidora no
+  // cabeçalho com o do cliente no corpo. Cada fonte é avaliada de forma
+  // independente; só se combina campos dentro de uma mesma fonte.
+  const bySource = new Map<string, TableCandidate[]>()
+  for (const c of candidates) {
+    const group = bySource.get(c.source) ?? []
+    group.push(c)
+    bySource.set(c.source, group)
   }
 
-  // Endereço parcial: apenas cidade/UF sem logradouro não é suficiente.
-  if (street === null && city === null && uf === null) return null
+  // Cada fonte é avaliada isoladamente. Se duas fontes distintas produzirem
+  // endereços diferentes, não há evidência de qual é o endereço de
+  // fornecimento: o resultado é ambiguidade (ausência), nunca a escolha
+  // arbitrária da fonte mais completa.
+  const byFields = new Map<string, ExtractedAddress>()
+  for (const group of bySource.values()) {
+    const street = pickUniqueCandidate(group, ['LOGRADOURO', 'ENDERECO'])
+    const number = pickUniqueCandidate(group, ['NUMERO'])
+    const complement = pickUniqueCandidate(group, ['COMPLEMENTO'])
+    const neighborhood = pickUniqueCandidate(group, ['BAIRRO'])
+    const city = pickUniqueCandidate(group, ['CIDADE', 'MUNICIPIO'])
+    const uf = pickUniqueCandidate(group, ['UF', 'ESTADO'])
+    const cep = pickUniqueCandidate(group, ['CEP'])
 
-  return {
-    logradouro: street?.value ?? null,
-    numero: number?.value ?? null,
-    complemento: complement?.value ?? null,
-    bairro: neighborhood?.value ?? null,
-    cidade: city?.value ?? null,
-    uf: uf?.value?.toUpperCase() ?? null,
-    cep: cep?.value ?? null,
-    raw: [street, number, complement, neighborhood, city, uf, cep]
-      .filter((c) => c !== null)
-      .map((c) => c!.raw)
-      .join('; '),
+    // Se nenhum campo foi encontrado nesta fonte, ignora-a.
+    if (
+      street === null &&
+      number === null &&
+      complement === null &&
+      neighborhood === null &&
+      city === null &&
+      uf === null &&
+      cep === null
+    ) {
+      continue
+    }
+
+    // Endereço parcial: apenas cidade/UF sem logradouro não é suficiente.
+    if (street === null && city === null && uf === null) continue
+
+    const addr: ExtractedAddress = {
+      logradouro: street?.value ?? null,
+      numero: number?.value ?? null,
+      complemento: complement?.value ?? null,
+      bairro: neighborhood?.value ?? null,
+      cidade: city?.value ?? null,
+      uf: uf?.value?.toUpperCase() ?? null,
+      cep: cep?.value ?? null,
+      raw: [street, number, complement, neighborhood, city, uf, cep]
+        .filter((c) => c !== null)
+        .map((c) => c!.raw)
+        .join('; '),
+    }
+
+    const key = [addr.logradouro, addr.numero, addr.complemento, addr.bairro, addr.cidade, addr.uf, addr.cep]
+      .map((v) => v ?? '\u0000')
+      .join('\u0001')
+    byFields.set(key, addr)
   }
+
+  // Nenhuma fonte com endereço utilizável ou fontes divergentes → ausência.
+  if (byFields.size !== 1) return null
+  return [...byFields.values()][0] ?? null
 }
 
 /**

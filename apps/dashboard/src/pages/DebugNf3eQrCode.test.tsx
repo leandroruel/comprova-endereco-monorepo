@@ -114,6 +114,57 @@ describe('DebugNf3eQrCodePage', () => {
     await expect.element(page.getByText(/marker · 2p/)).toBeVisible()
   })
 
+  it('mostra "—" como fonte quando nenhum provedor de texto rodou', async () => {
+    respondWith({
+      events: [],
+      reference,
+      analysis: {
+        ...analysis,
+        status: 'invalid',
+        document: { status: 'invalid', kind: 'unknown', issuedAt: null, issuedRaw: null },
+        address: { status: 'unknown', value: null, raw: null },
+        holder: { status: 'unknown', value: null, raw: null },
+        limitations: ['PDF_INVALID'],
+        errorCodes: ['PDF_INVALID'],
+        provenance: null,
+      },
+    })
+
+    const screen = await render(<DebugNf3eQrCodePage />)
+    await selectFile(screen.container, pdf())
+    await userEvent.click(page.getByRole('button', { name: 'Analisar documento' }))
+
+    await expect.element(page.getByText('Fonte do texto')).toBeVisible()
+    const invalidSource = page.getByText('Fonte do texto').element().parentElement
+    expect(invalidSource?.textContent).toContain('—')
+    expect(invalidSource?.textContent).not.toContain('local')
+  })
+
+  it('mantém "local" quando a extração local rodou e não achou texto (NO_TEXT_LAYER)', async () => {
+    respondWith({
+      events: [],
+      reference,
+      analysis: {
+        ...analysis,
+        status: 'inconclusive',
+        document: { status: 'inconclusive', kind: 'unknown', issuedAt: null, issuedRaw: null },
+        address: { status: 'unknown', value: null, raw: null },
+        holder: { status: 'unknown', value: null, raw: null },
+        limitations: ['NO_TEXT_LAYER'],
+        errorCodes: ['NO_TEXT_LAYER'],
+        provenance: null,
+      },
+    })
+
+    const screen = await render(<DebugNf3eQrCodePage />)
+    await selectFile(screen.container, pdf())
+    await userEvent.click(page.getByRole('button', { name: 'Analisar documento' }))
+
+    await expect.element(page.getByText('Fonte do texto')).toBeVisible()
+    const localSource = page.getByText('Fonte do texto').element().parentElement
+    expect(localSource?.textContent).toContain('local')
+  })
+
   it('mostra o usuário logado no menu do sidemenu, não o rótulo "Conta"', async () => {
     respondWith({ events: [], reference })
 
