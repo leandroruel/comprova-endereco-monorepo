@@ -210,7 +210,14 @@ export const makeMarkerAdapter = (
     const text = typeof response.content.text === 'string' ? response.content.text : ''
     const normalized = text.trim()
     const pagesText = extractTextFromPages(response.pages)
-    const hasTables = response.pages.some((page) => page.elements.some((element) => element.table !== null))
+    const hasTables = response.pages.some((page) =>
+      page.elements.some(
+        (element) =>
+          element.table !== null &&
+          (element.table.headers.some((header) => header.trim().length > 0) ||
+            element.table.rows.some((row) => row.some((cell) => cell.trim().length > 0))),
+      ),
+    )
 
     // Só considera que não há texto quando nem o conteúdo de leitura, o texto
     // das páginas nem as tabelas produziram algo utilizável.

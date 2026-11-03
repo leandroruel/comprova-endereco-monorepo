@@ -218,18 +218,41 @@ type GroupAddress =
   | { readonly kind: 'ambiguous' }
   | { readonly kind: 'value'; readonly value: ExtractedAddress }
 
-const canonicalField = (value: string | null): string => (value === null ? '\u0000' : normalizeText(value))
+const cepDigits = (value: string | null): string | null => {
+  const digits = value?.replace(/\D+/g, '') ?? ''
+  return digits.length > 0 ? digits : null
+}
 
-const addressKey = (address: ExtractedAddress): string =>
-  [
-    canonicalField(address.logradouro),
-    canonicalField(address.numero),
-    canonicalField(address.complemento),
-    canonicalField(address.bairro),
-    canonicalField(address.cidade),
-    canonicalField(address.uf),
-    canonicalField(address.cep === null ? null : address.cep.replace(/\D+/g, '')),
-  ].join('\u0001')
+const valuesAgree = (a: string | null, b: string | null): boolean =>
+  a === null || b === null || normalizeText(a) === normalizeText(b)
+
+const ADDRESS_COMPARE_FIELDS = [
+  'logradouro',
+  'numero',
+  'complemento',
+  'bairro',
+  'cidade',
+  'uf',
+  'cep',
+] as const
+
+/** Dois endereços de tabela são considerados a mesma fonte quando têm pelo
+ * menos um campo comum preenchido e todos os campos comuns coincidem.
+ * Sem sobreposição de campos preenchidos, são endereços de fontes distintas
+ * e não se mesclam. */
+const tableAddressesAreSame = (a: ExtractedAddress, b: ExtractedAddress): boolean => {
+  let hasCommonField = false
+  for (const field of ADDRESS_COMPARE_FIELDS) {
+    const av = a[field] ?? null
+    const bv = b[field] ?? null
+    if (av !== null && bv !== null) {
+      hasCommonField = true
+      const agree = field === 'cep' ? valuesAgree(cepDigits(av), cepDigits(bv)) : valuesAgree(av, bv)
+      if (!agree) return false
+    }
+  }
+  return hasCommonField
+}
 
 /**
  * Endereço explícito: a célula rotulada como endereço de fornecimento contém o
@@ -274,7 +297,9 @@ const genericAddress = (group: readonly TableCandidate[]): GroupAddress => {
   const neighborhood = pickUniqueCandidate(group, ['BAIRRO'])
   const city = pickUniqueCandidate(group, ['CIDADE', 'MUNICIPIO'])
   const uf = pickUniqueCandidate(group, ['UF', 'ESTADO'])
-  const cep = pickUniqueCandidate(group, ['CEP'])
+  const cepCandidate = pickUniqueCandidate(group, ['CEP'])
+  const cep =
+    cepCandidate !== null && cepCandidate.value.replace(/\D+/g, '').length === 8 ? cepCandidate : null
 
   const hasAny =
     street !== null ||
@@ -347,19 +372,30 @@ export const addressFromTableCandidates = (
     bySource.set(candidate.source, group)
   }
 
-  const addresses = new Map<string, ExtractedAddress>()
+  const resolved: ExtractedAddress[] = []
   for (const group of bySource.values()) {
-    const resolved = addressFromGroup(group)
+    const groupResolved = addressFromGroup(group)
     // Rótulo explícito ambíguo contamina o resultado: não há como provar qual
     // endereço é o de fornecimento.
-    if (resolved.kind === 'ambiguous') return null
-    if (resolved.kind === 'none') continue
-    addresses.set(addressKey(resolved.value), resolved.value)
+    if (groupResolved.kind === 'ambiguous') return null
+    if (groupResolved.kind === 'none') continue
+    resolved.push(groupResolved.value)
   }
 
-  // Nenhuma fonte com endereço utilizável ou fontes divergentes → ausência.
-  if (addresses.size !== 1) return null
-  return [...addresses.values()][0] ?? null
+  // Nenhuma fonte com endereço utilizável → ausência.
+  if (resolved.length === 0) return null
+
+  // Dedup: dois endereços com pelo menos um campo comum preenchido e valores
+  // coincidentes são considerados a mesma fonte. Campos nulos não dividem.
+  // Fontes distintas sem sobreposição não se mesclam.
+  const unique = resolved.filter(
+    (addr, index) =>
+      !resolved.some((other, otherIndex) => otherIndex < index && tableAddressesAreSame(addr, other)),
+  )
+
+  // Fontes com endereços divergentes → ausência; nenhuma é escolhida arbitrariamente.
+  if (unique.length !== 1) return null
+  return unique[0] ?? null
 }
 
 /**
