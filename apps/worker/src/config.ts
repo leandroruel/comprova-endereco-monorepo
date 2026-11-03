@@ -21,6 +21,13 @@ export interface WorkerEnv {
   readonly storeStreetViewImages?: boolean
   /** Limite de bytes que o analisador F1.2 carrega em memória. */
   readonly evidenceAnalysisMaxBytes: number
+  /**
+   * Serviço Document Intelligence (Marker) usado como fallback/OCR quando a
+   * camada textual local é insuficiente. Ausente = analyzer apenas local.
+   */
+  readonly documentIntelligenceUrl?: string
+  readonly documentIntelligenceTimeoutMs?: number
+  readonly documentIntelligenceMaxFileSizeMb?: number
 }
 
 export const findRepoRoot = (startDir: string): string => {
@@ -48,6 +55,7 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     s3Bucket: nonEmpty(env.S3_BUCKET),
     s3AccessKeyId: nonEmpty(env.S3_ACCESS_KEY_ID),
     s3SecretAccessKey: nonEmpty(env.S3_SECRET_ACCESS_KEY),
+    documentIntelligenceUrl: nonEmpty(env.DOCUMENT_INTELLIGENCE_URL),
   }
 
   const parsedAnalysisMaxBytes = Number(
@@ -63,11 +71,30 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     )
   }
 
+  // Timeout do cliente HTTP do Document Intelligence. Deve ficar ACIMA do
+  // `DI_TIMEOUT_S` do serviço (300 s por padrão) para que o 504 estruturado
+  // chegue antes do abort. Mesmo limite máximo da API.
+  const parsedDiTimeoutMs = Number(nonEmpty(env.DOCUMENT_INTELLIGENCE_TIMEOUT_MS) ?? 360_000)
+  if (!Number.isInteger(parsedDiTimeoutMs) || parsedDiTimeoutMs <= 0 || parsedDiTimeoutMs > 3_600_000) {
+    throw new Error('DOCUMENT_INTELLIGENCE_TIMEOUT_MS must be an integer between 1 and 3600000')
+  }
+
+  const parsedDiMaxFileSizeMb = Number(nonEmpty(env.DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB) ?? 30)
+  if (
+    !Number.isInteger(parsedDiMaxFileSizeMb) ||
+    parsedDiMaxFileSizeMb <= 0 ||
+    parsedDiMaxFileSizeMb > 1024
+  ) {
+    throw new Error('DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB must be an integer between 1 and 1024')
+  }
+
   return {
     databaseUrl,
     policyVersion: env.POLICY_VERSION ?? '2026.14.1',
     repoRoot: findRepoRoot(process.cwd()),
     evidenceAnalysisMaxBytes: parsedAnalysisMaxBytes,
+    documentIntelligenceTimeoutMs: parsedDiTimeoutMs,
+    documentIntelligenceMaxFileSizeMb: parsedDiMaxFileSizeMb,
     vlmEnabled: env.VLM_ENABLED === 'true',
     logLevel: env.LOG_LEVEL ?? 'info',
     logFile: nonEmpty(env.LOG_FILE),

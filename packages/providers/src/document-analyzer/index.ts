@@ -4,12 +4,13 @@ import {
   DOCUMENT_ANALYZER_VERSION,
   type DocumentAnalysisResult,
 } from '@comprova/core'
-import { analyzeDocument } from './analyze.js'
+import { analyzeDocument, type MarkerAdapter } from './analyze.js'
+import { makeMarkerAdapter } from './marker.js'
 import { failedResult } from './results.js'
 import { documentAnalysisResultSchema } from './schema.js'
 import { emitDebug } from '../debug-trace.js'
 import { DocumentAnalyzerUnavailableError } from './types.js'
-import type { DocumentAnalyzer, DocumentAnalyzerOptions } from './types.js'
+import type { DocumentAnalyzer, DocumentAnalyzerInput, DocumentAnalyzerOptions } from './types.js'
 
 /**
  * F1.2 — analisador de documento.
@@ -27,7 +28,9 @@ import type { DocumentAnalyzer, DocumentAnalyzerOptions } from './types.js'
  *   - `schema.ts`: validação do resultado persistido;
  *   - `fields.ts`: extração/normalização de endereço, titular e competência;
  *   - `results.ts`: construtores dos resultados terminais;
- *   - `analyze.ts`: análise de PDF/texto e despacho por content-type.
+ *   - `analyze.ts`: análise de PDF/texto e despacho por content-type;
+ *   - `marker.ts`: adapter do serviço Document Intelligence;
+ *   - `structured.ts`: extração de tabelas e blocos.
  */
 
 export { DocumentAnalyzerUnavailableError }
@@ -39,21 +42,28 @@ export {
 } from './results.js'
 
 /**
- * MVP: um único analisador que decide pelo content-type já sniffado no intake.
- * Futuras implementações (OCR/VLM) implementam a mesma interface e são
- * injetadas no worker sem mudar o contrato persistido.
+ * Cria o analyzer. Quando `options.documentIntelligence` é fornecido, o
+ * adapter Marker é criado e usado para complementar a camada local (unpdf)
+ * quando ela não entrega titular e endereço. Quando ausente, o analyzer usa
+ * apenas `unpdf`.
  */
 export const makeDocumentAnalyzer = (options: DocumentAnalyzerOptions = {}): DocumentAnalyzer => {
   const now = options.now ?? (() => new Date())
   const trace = options.trace
+
+  let markerAdapter: MarkerAdapter | null = null
+  if (options.documentIntelligence !== undefined && options.documentIntelligence !== null) {
+    markerAdapter = makeMarkerAdapter(options.documentIntelligence)
+  }
+
   return {
     id: DOCUMENT_ANALYZER_ID,
     version: DOCUMENT_ANALYZER_VERSION,
     contractVersion: DOCUMENT_ANALYSIS_CONTRACT_VERSION,
-    analyze: async (input) => {
+    analyze: async (input: DocumentAnalyzerInput) => {
       let result: DocumentAnalysisResult
       try {
-        result = await analyzeDocument(input, now(), trace)
+        result = await analyzeDocument(input, now(), trace, markerAdapter)
       } catch (error) {
         if (error instanceof DocumentAnalyzerUnavailableError) throw error
         emitDebug(trace, {

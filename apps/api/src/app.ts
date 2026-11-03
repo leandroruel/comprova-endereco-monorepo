@@ -45,7 +45,7 @@ import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerDocumentRoutes } from './modules/documents/documents.routes.js'
-import { makeDocumentIntelligenceClient } from './services/document-intelligence-client.js'
+import { makeDocumentIntelligenceClient } from '@comprova/providers'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'
@@ -247,7 +247,12 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         evidenceMaxConcurrency,
         logger: deps.logger,
       })
-      registerDebugNf3eQrCodeRoute(v1, requireWriteScope)
+      registerDebugNf3eQrCodeRoute(v1, requireWriteScope, {
+        // O debugger reflete o pipeline real: o mesmo cliente do Document
+        // Intelligence (Marker) usado pela rota /documents/parse. Desabilitado
+        // quando a URL não está configurada.
+        documentIntelligence: documentIntelligence.enabled ? documentIntelligence : null,
+      })
       registerDocumentRoutes(v1, {
         client: documentIntelligence,
         maxBytes: documentIntelligenceMaxBytes,

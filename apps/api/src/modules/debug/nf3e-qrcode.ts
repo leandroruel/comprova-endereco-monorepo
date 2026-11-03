@@ -5,8 +5,18 @@ import {
   extractFiscalReferenceFromArtifact,
   makeDocumentAnalyzer,
   type DebugTraceEvent,
+  type DocumentIntelligenceClient,
 } from '@comprova/providers'
 import type { DocumentAnalysisResult, FiscalReference } from '@comprova/core'
+
+export interface DebugNf3eQrCodeDeps {
+  /**
+   * Cliente do Document Intelligence. Quando disponível, o debugger usa o
+   * MESMO pipeline do worker (unpdf + Marker como fallback). Quando ausente,
+   * o analyzer roda apenas com a camada local.
+   */
+  readonly documentIntelligence: DocumentIntelligenceClient | null
+}
 
 const DEBUG_MAX_BYTES = 10 * 1024 * 1024 // 10 MB — suficiente para comprovantes
 
@@ -37,6 +47,7 @@ const sendProblem = (reply: FastifyReply, status: number, code: string, message:
 export const registerDebugNf3eQrCodeRoute = (
   app: FastifyInstance,
   requireWriteScope: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | void>,
+  deps: DebugNf3eQrCodeDeps,
 ): void => {
   // Guard no nível da rota: `addHook` no mesmo contexto do `v1` vazaria o
   // scope de escrita para TODAS as rotas do plugin (inclusive leituras).
@@ -103,7 +114,10 @@ export const registerDebugNf3eQrCodeRoute = (
           // O mesmo analyzer do worker, mas com o sink ligado: cada etapa da
           // extração vira um evento da timeline do debugger. O trace é só
           // diagnóstico e não altera a decisão.
-          analysis = await makeDocumentAnalyzer({ trace: sink }).analyze({
+          analysis = await makeDocumentAnalyzer({
+            trace: sink,
+            documentIntelligence: deps.documentIntelligence,
+          }).analyze({
             data: analysisData,
             contentType: file.mimetype,
           })
@@ -180,6 +194,7 @@ export const registerDebugNf3eQrCodeRoute = (
                 limitations: analysis.limitations,
                 errorCodes: analysis.errorCodes,
                 analyzedAt: analysis.analyzedAt,
+                provenance: analysis.provenance ?? null,
               },
       })
     },

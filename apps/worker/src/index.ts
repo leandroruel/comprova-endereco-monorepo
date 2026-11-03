@@ -1,7 +1,11 @@
 import { systemClock } from '@comprova/core'
 import { createDbPool } from '@comprova/db'
 import { createLogger } from '@comprova/observability'
-import { makeDocumentAnalyzer, makeNf3eFiscalAdapter } from '@comprova/providers'
+import {
+  makeDocumentAnalyzer,
+  makeDocumentIntelligenceClient,
+  makeNf3eFiscalAdapter,
+} from '@comprova/providers'
 import { Worker } from '@temporalio/worker'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -61,7 +65,32 @@ const stopValidationRetention =
 // A análise atravessa tenants (fila global) e por isso usa o pool de
 // manutenção. Sem `DATABASE_ADMIN_URL`, a RLS esconderia as linhas `pending`:
 // o worker avisa e não sobe o loop, em vez de falhar silenciosamente.
-const documentAnalyzer = makeDocumentAnalyzer()
+//
+// O analyzer usa a camada textual local (unpdf) como fonte preferencial e o
+// serviço Document Intelligence (Marker) quando a camada local não entrega
+// titular e endereço (complemento/OCR). Sem `DOCUMENT_INTELLIGENCE_URL`, o
+// cliente fica desabilitado e o analyzer opera exatamente como antes (nenhuma
+// chamada externa).
+const documentIntelligence = makeDocumentIntelligenceClient({
+  url: env.documentIntelligenceUrl,
+  timeoutMs: env.documentIntelligenceTimeoutMs ?? 360_000,
+  maxFileSizeMb: env.documentIntelligenceMaxFileSizeMb ?? 30,
+  logger,
+})
+const documentAnalyzer = makeDocumentAnalyzer({
+  documentIntelligence: documentIntelligence.enabled ? documentIntelligence : null,
+})
+if (documentIntelligence.enabled) {
+  logger.info(
+    { url: env.documentIntelligenceUrl, timeoutMs: env.documentIntelligenceTimeoutMs },
+    'document intelligence (marker) enabled for evidence analysis',
+  )
+} else {
+  logger.info(
+    { reason: 'DOCUMENT_INTELLIGENCE_URL_MISSING' },
+    'document intelligence disabled: analyzer uses local text layer only',
+  )
+}
 const s3Configured = hasS3Config(env)
 const stopEvidenceAnalysis =
   adminRetentionPool !== null && s3Configured

@@ -4,6 +4,7 @@ import {
   DOCUMENT_ANALYZER_ID,
   DOCUMENT_ANALYZER_VERSION,
   UPLOADED_DOCUMENT_SOURCE,
+  uploadedDocumentCheckerVersion,
   type DocumentAnalysisResult,
 } from '@comprova/core'
 import { and, createDbPool, eq, runMigrations, withTenant } from '@comprova/db'
@@ -561,9 +562,15 @@ describe('F1.3 — verificação do documento enviado', () => {
     const artifactId = artifacts[0]?.artifactId
     expect(artifactId).toBeDefined()
 
+    // Versão sintética, garantidamente diferente da atual: o teste simula uma
+    // nova análise do mesmo artefato. A unique key de `evidence_analysis` é
+    // (artifact_id, analyzer, analyzer_version, contract_version), então uma
+    // versão igual à atual colidiria com a linha já gravada pelo worker.
+    const nextAnalyzerVersion = `${DOCUMENT_ANALYZER_VERSION}-next`
+
     const nextResult = {
       ...baseResult,
-      analyzer: { id: DOCUMENT_ANALYZER_ID, version: '1.3.0' },
+      analyzer: { id: DOCUMENT_ANALYZER_ID, version: nextAnalyzerVersion },
       analyzedAt: '2026-10-22T13:00:00.000Z',
       address: {
         status: 'extracted' as const,
@@ -586,14 +593,14 @@ describe('F1.3 — verificação do documento enviado', () => {
       tenantId: tenantA,
       artifactId: artifactId as string,
       analyzer: DOCUMENT_ANALYZER_ID,
-      analyzerVersion: '1.3.0',
+      analyzerVersion: nextAnalyzerVersion,
       contractVersion: DOCUMENT_ANALYSIS_CONTRACT_VERSION,
       status: 'completed',
       result: nextResult,
       analyzedAt: new Date('2026-10-22T13:00:00.000Z'),
     })
 
-    await runVerification({ analyzerVersion: '1.3.0' })
+    await runVerification({ analyzerVersion: nextAnalyzerVersion })
     const rows = await verificationRowsOf(validationId)
     expect(rows).toHaveLength(2)
 
@@ -601,7 +608,9 @@ describe('F1.3 — verificação do documento enviado', () => {
     const newRow = rows.find((row) => verificationOf(row).analysis_id === secondAnalysisId)
     expect(verificationOf(oldRow).address).toBe('matches')
     expect(verificationOf(newRow).address).toBe('differs')
-    expect(newRow?.checkerVersion).toBe('1.0.0+1.3.0+c3')
+    expect(newRow?.checkerVersion).toBe(
+      uploadedDocumentCheckerVersion(nextAnalyzerVersion, DOCUMENT_ANALYSIS_CONTRACT_VERSION),
+    )
 
     const get = await getValidation(validationId, keyA)
     expect(get.json().evidence_verification.analysis_id).toBe(secondAnalysisId)

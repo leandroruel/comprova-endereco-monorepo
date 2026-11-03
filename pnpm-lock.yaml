@@ -532,12 +532,18 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.1151.0
         version: 3.1151.0
+      '@comprova/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@comprova/core':
         specifier: workspace:*
         version: link:../core
       '@comprova/db':
         specifier: workspace:*
         version: link:../db
+      '@comprova/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@napi-rs/canvas':
         specifier: ^1.0.13
         version: 1.0.13

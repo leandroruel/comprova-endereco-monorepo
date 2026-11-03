@@ -1,6 +1,7 @@
 import {
   DOCUMENT_ANALYSIS_DOCUMENT_STATUSES,
   DOCUMENT_ANALYSIS_EXTRACTION_STATUSES,
+  DOCUMENT_ANALYSIS_FIELD_SOURCES,
   DOCUMENT_ANALYSIS_KINDS,
   DOCUMENT_ANALYSIS_TERMINAL_STATUSES,
   FISCAL_REFERENCE_CONTRACT_VERSION,
@@ -86,6 +87,21 @@ export const documentAnalysisResultSchema = z
     limitations: z.array(z.string()),
     errorCodes: z.array(z.string()),
     analyzedAt: z.iso.datetime(),
+    provenance: z
+      .object({
+        provider: z.enum(['local', 'marker']),
+        markerVersion: z.string().min(1).optional(),
+        pages: z.number().int().nonnegative().optional(),
+        processingTimeMs: z.number().int().nonnegative().optional(),
+        fallback: z.boolean().optional(),
+        fields: z
+          .object({
+            address: z.enum(DOCUMENT_ANALYSIS_FIELD_SOURCES).optional(),
+            holder: z.enum(DOCUMENT_ANALYSIS_FIELD_SOURCES).optional(),
+          })
+          .optional(),
+      })
+      .optional(),
   })
   .superRefine((result, ctx) => {
     const add = (path: readonly (string | number)[], message: string): void => {
