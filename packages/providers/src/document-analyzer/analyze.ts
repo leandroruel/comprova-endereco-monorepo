@@ -1,6 +1,9 @@
 import {
+  normalizeText,
   redactFiscalReference,
   type DocumentAnalysisDimension,
+  type DocumentAnalysisFieldSource,
+  type DocumentAnalysisFieldSources,
   type DocumentAnalysisProvenance,
   type DocumentAnalysisResult,
   type ExtractedAddress,
@@ -18,7 +21,7 @@ import {
   FISCAL_REFERENCE_MAX_PDF_PAGES,
   inconclusiveFiscalReference,
 } from '../fiscal/reference.js'
-import { fieldsFromPdfText } from './fields.js'
+import { fieldsFromPdfText, type PdfFields } from './fields.js'
 import {
   addressFromTableCandidates,
   extractTableCandidates,
@@ -118,40 +121,160 @@ const buildProvenance = (
 })
 
 /**
- * Completa campos ausentes (`not_extracted`) usando candidatos de tabela do
- * Marker, sem sobrescrever valores já extraídos do texto. Conflitos entre
- * texto e tabela são tratados como ambiguidade (campo fica nulo).
+ * Fonte de um campo. `marker_table` indica candidato extraído das tabelas
+ * estruturadas do Marker.
  */
-const mergeTableCandidates = (
-  fields: {
-    readonly address: ExtractedAddress | null
-    readonly holder: ExtractedHolder | null
-  },
-  tables: readonly TableCandidate[],
-): {
+type FieldSource = DocumentAnalysisFieldSource
+
+interface SourcedAddress {
+  readonly source: FieldSource
+  readonly value: ExtractedAddress
+}
+
+interface SourcedHolder {
+  readonly source: FieldSource
+  readonly value: ExtractedHolder
+}
+
+interface ResolvedField<T> {
+  readonly value: T | null
+  readonly source: FieldSource | null
+  readonly conflict: boolean
+}
+
+const ADDRESS_COMPARE_FIELDS = [
+  'logradouro',
+  'numero',
+  'complemento',
+  'bairro',
+  'cidade',
+  'uf',
+  'cep',
+] as const
+
+/** Dois valores só divergem quando ambos existem e são diferentes. */
+const valuesAgree = (a: string | null, b: string | null): boolean =>
+  a === null || b === null || normalizeText(a) === normalizeText(b)
+
+const addressesAgree = (a: ExtractedAddress, b: ExtractedAddress): boolean =>
+  ADDRESS_COMPARE_FIELDS.every((field) => valuesAgree(a[field], b[field]))
+
+const addressCompleteness = (value: ExtractedAddress): number =>
+  ADDRESS_COMPARE_FIELDS.filter((field) => value[field] !== null).length
+
+/**
+ * Resolve o endereço entre fontes (texto local, texto do Marker, tabelas).
+ *
+ * - Só uma fonte → usa.
+ * - Fontes compatíveis (campos presentes concordam) → usa a mais completa,
+ *   preservando o `raw` da fonte escolhida.
+ * - Fontes divergentes → `null` (ambiguidade); nenhuma é escolhida
+ *   arbitrariamente.
+ */
+const resolveAddress = (candidates: readonly SourcedAddress[]): ResolvedField<ExtractedAddress> => {
+  const first = candidates[0]
+  if (first === undefined) return { value: null, source: null, conflict: false }
+  if (candidates.some((candidate) => !addressesAgree(first.value, candidate.value))) {
+    return { value: null, source: null, conflict: true }
+  }
+  let best = first
+  for (const candidate of candidates.slice(1)) {
+    if (addressCompleteness(candidate.value) > addressCompleteness(best.value)) best = candidate
+  }
+  return { value: best.value, source: best.source, conflict: false }
+}
+
+/** Mesma regra do endereço: nomes divergentes entre fontes → ambiguidade. */
+const resolveHolder = (candidates: readonly SourcedHolder[]): ResolvedField<ExtractedHolder> => {
+  const first = candidates[0]
+  if (first === undefined) return { value: null, source: null, conflict: false }
+  const nameOf = (holder: ExtractedHolder): string | null =>
+    holder.name === null ? null : normalizeText(holder.name)
+  if (candidates.some((candidate) => !valuesAgree(nameOf(first.value), nameOf(candidate.value)))) {
+    return { value: null, source: null, conflict: true }
+  }
+  let best = first
+  for (const candidate of candidates.slice(1)) {
+    if (best.value.name === null && candidate.value.name !== null) best = candidate
+  }
+  return { value: best.value, source: best.source, conflict: false }
+}
+
+interface MergedFields {
   readonly address: ExtractedAddress | null
   readonly holder: ExtractedHolder | null
+  readonly addressSource: FieldSource | null
+  readonly holderSource: FieldSource | null
   readonly limitations: readonly string[]
-} => {
-  let address = fields.address
-  let holder = fields.holder
+  readonly conflicts: readonly ('address' | 'holder')[]
+}
 
-  if (address === null) {
+/**
+ * Combina as fontes de campo disponíveis (texto local, texto do Marker e
+ * tabelas do Marker) com comparação explícita. Campos já extraídos do texto
+ * não são substituídos por outro valor sem verificação; divergência entre
+ * fontes vira ausência + limitação observável.
+ */
+const mergeFieldCandidates = (
+  textFields: readonly { readonly source: 'local' | 'marker'; readonly fields: PdfFields | null }[],
+  tables: readonly TableCandidate[],
+): MergedFields => {
+  const addressCandidates: SourcedAddress[] = []
+  const holderCandidates: SourcedHolder[] = []
+
+  for (const { source, fields } of textFields) {
+    if (fields === null) continue
+    if (fields.address !== null) addressCandidates.push({ source, value: fields.address })
+    if (fields.holder !== null) holderCandidates.push({ source, value: fields.holder })
+  }
+
+  if (tables.length > 0) {
     const tableAddress = addressFromTableCandidates(tables)
-    if (tableAddress !== null) {
-      // Endereço veio apenas da tabela; registrar como evidência complementar.
-      address = tableAddress
-    }
-  }
-
-  if (holder === null) {
+    if (tableAddress !== null) addressCandidates.push({ source: 'marker_table', value: tableAddress })
     const tableHolder = holderFromTableCandidates(tables)
-    if (tableHolder !== null) {
-      holder = tableHolder
-    }
+    if (tableHolder !== null) holderCandidates.push({ source: 'marker_table', value: tableHolder })
   }
 
-  return { address, holder, limitations: [] }
+  const address = resolveAddress(addressCandidates)
+  const holder = resolveHolder(holderCandidates)
+  const limitations: string[] = []
+  const conflicts: ('address' | 'holder')[] = []
+  if (address.conflict) {
+    limitations.push('FIELD_CONFLICT_ADDRESS')
+    conflicts.push('address')
+  }
+  if (holder.conflict) {
+    limitations.push('FIELD_CONFLICT_HOLDER')
+    conflicts.push('holder')
+  }
+
+  return {
+    address: address.value,
+    holder: holder.value,
+    addressSource: address.source,
+    holderSource: holder.source,
+    limitations,
+    conflicts,
+  }
+}
+
+/**
+ * Origem por campo só é registrada quando difere da fonte do texto-base
+ * (`provenance.provider`). Sem mistura, o resultado permanece idêntico ao
+ * contrato anterior.
+ */
+const fieldSourcesOf = (
+  merged: MergedFields,
+  provider: 'local' | 'marker',
+): DocumentAnalysisFieldSources | undefined => {
+  const address =
+    merged.addressSource !== null && merged.addressSource !== provider ? merged.addressSource : null
+  const holder = merged.holderSource !== null && merged.holderSource !== provider ? merged.holderSource : null
+  if (address === null && holder === null) return undefined
+  return {
+    ...(address === null ? {} : { address }),
+    ...(holder === null ? {} : { holder }),
+  }
 }
 
 const analyzePdf = async (
@@ -224,15 +347,15 @@ const analyzePdf = async (
     }
 
     const normalizedLocal = localText?.trim() ?? ''
-    const localTextSufficient = normalizedLocal.length >= MIN_TEXT_CHARS
+    const localTextNonEmpty = normalizedLocal.length >= MIN_TEXT_CHARS
 
     emitDebug(trace, {
       code: 'pdf.text',
-      level: localText === null ? 'warning' : localTextSufficient ? 'success' : 'warning',
+      level: localText === null ? 'warning' : localTextNonEmpty ? 'success' : 'warning',
       message:
         localText === null
           ? 'Não foi possível extrair a camada textual do PDF.'
-          : localTextSufficient
+          : localTextNonEmpty
             ? `Camada textual extraída (${normalizedLocal.length} caracteres).`
             : 'O PDF não tem camada textual utilizável.',
       details: { chars: normalizedLocal.length, minChars: MIN_TEXT_CHARS },
@@ -286,33 +409,44 @@ const analyzePdf = async (
       })
     }
 
-    // 3) Decidir fonte de texto para extração de campos.
+    // 3) Decidir fonte de texto e quando acionar o Marker.
     //
     // Política de fallback explícita:
-    //   a) Camada local suficiente → usar unpdf, não chama o Marker.
-    //   b) Camada local insuficiente + Marker disponível → chamar Marker.
-    //      Se Marker falhar, fallback para o texto local (mesmo insuficiente)
-    //      com limitação registrada.
-    //   c) Camada local insuficiente + Marker indisponível → usar texto local
-    //      com limitação (sem OCR).
-    let bestText: string
+    //   a) Camada local entrega titular E endereço → usar unpdf, sem Marker.
+    //   b) Camada local utilizável mas incompleta + Marker disponível → chamar
+    //      o Marker para complementar. O texto local continua sendo o
+    //      texto-base e nenhum campo local é substituído sem comparação.
+    //   c) Camada local inutilizável (vazia/curta) + Marker → usar o texto do
+    //      Marker como base.
+    //   d) Marker falha ou não está configurado → fallback para a camada local
+    //      com limitação observável.
+    const localUsable = normalizedLocal.length >= MIN_TEXT_CHARS && normalizedLocal.length <= MAX_TEXT_CHARS
+    const localOversized = normalizedLocal.length > MAX_TEXT_CHARS
+    const localFields = localUsable ? fieldsFromPdfText(normalizedLocal) : null
+    // Tamanho de texto, sozinho, não é evidência de conteúdo: um PDF com apenas
+    // `CONTA DE ENERGIA` passa do mínimo e não tem titular nem endereço. O
+    // Marker só é dispensado quando a camada local fornece os dois campos que o
+    // analyzer precisa extrair.
+    const localEnough = localFields !== null && localFields.address !== null && localFields.holder !== null
+    const markerConfigured = marker !== null && marker !== undefined
+
     let provenance: DocumentAnalysisProvenance | undefined
     let markerResult: MarkerParseResult | null = null
     let markerFailureKind: string | null = null
 
-    if (localTextSufficient) {
-      bestText = normalizedLocal
-      // Proveniência só é registrada quando o Document Intelligence está
-      // configurado; sem ele o resultado permanece idêntico ao contrato v3.
-      provenance = marker !== null && marker !== undefined ? buildProvenance('local') : undefined
+    if (localEnough || localOversized) {
+      // Documento acima do limite não é enviado ao Marker: o custo do OCR não
+      // se justifica, o resultado terminal continua `TEXT_TOO_LONG`.
       emitDebug(trace, {
         code: 'text.local',
-        level: 'info',
-        message: 'Usando camada textual local (unpdf); Marker não necessário.',
-        details: { chars: bestText.length },
+        level: localEnough ? 'success' : 'warning',
+        message: localEnough
+          ? 'Camada textual local fornece titular e endereço; Marker não necessário.'
+          : 'Camada textual local excede o limite; Marker não consultado.',
+        details: { chars: normalizedLocal.length },
       })
-    } else if (marker !== null && marker !== undefined) {
-      // Chamar Marker para OCR/layout.
+    } else if (markerConfigured) {
+      // Chamar Marker para OCR/layout e/ou tabelas.
       try {
         // O PDF.js pode destacar (detach) o ArrayBuffer durante o parse do
         // unpdf; usamos a cópia independente (`dataCopy`) para o OCR do Marker.
@@ -320,17 +454,13 @@ const analyzePdf = async (
           { data: dataCopy, filename: 'document.pdf', documentId: 'analysis' },
           trace,
         )
-        bestText = markerResult.text
-        provenance = buildProvenance('marker', {
-          markerVersion: markerResult.markerVersion,
-          pages: markerResult.pages,
-          processingTimeMs: markerResult.processingTimeMs,
-        })
         emitDebug(trace, {
           code: 'text.marker',
           level: 'success',
-          message: 'Usando texto extraído pelo Marker (OCR/layout).',
-          details: { chars: bestText.length, pages: markerResult.pages },
+          message: localUsable
+            ? 'Marker consultado para complementar campos ausentes da camada local.'
+            : 'Usando texto extraído pelo Marker (OCR/layout).',
+          details: { chars: markerResult.text.length, pages: markerResult.pages },
         })
       } catch (error) {
         markerFailureKind = error instanceof MarkerAdapterError ? error.kind : 'unknown'
@@ -349,28 +479,45 @@ const analyzePdf = async (
             details: { reason: error instanceof Error ? error.message : String(error) },
           })
         }
-        // Fallback explícito para o texto local, mesmo quando insuficiente.
-        bestText = normalizedLocal
-        provenance = buildProvenance('local', { fallback: true })
         emitDebug(trace, {
           code: 'text.fallback',
           level: 'warning',
           message: 'Fallback para a camada textual local após falha do Marker.',
-          details: { chars: bestText.length },
+          details: { chars: normalizedLocal.length },
         })
       }
     } else {
       // Camada insuficiente e Marker não configurado: usar texto local com
       // limitação (não há OCR disponível). Sem Document Intelligence não há
       // proveniência a registrar (comportamento do contrato v3).
-      bestText = normalizedLocal
-      provenance = undefined
       emitDebug(trace, {
         code: 'text.fallback',
         level: 'warning',
         message: 'Camada textual insuficiente e Document Intelligence não configurado.',
-        details: { chars: bestText.length, minChars: MIN_TEXT_CHARS },
+        details: { chars: normalizedLocal.length, minChars: MIN_TEXT_CHARS },
       })
+    }
+
+    const markerText = markerResult?.text.trim() ?? ''
+    const markerTextUsable = markerText.length >= MIN_TEXT_CHARS && markerText.length <= MAX_TEXT_CHARS
+    // Texto-base: a camada local utilizável continua sendo a base (o Marker só
+    // complementa); o texto do Marker só vira base quando a camada local não
+    // serve.
+    const provider: 'local' | 'marker' = !localUsable && markerTextUsable ? 'marker' : 'local'
+    const bestText = provider === 'marker' ? markerText : normalizedLocal
+
+    if (provider === 'marker' && markerResult !== null) {
+      provenance = buildProvenance('marker', {
+        markerVersion: markerResult.markerVersion,
+        pages: markerResult.pages,
+        processingTimeMs: markerResult.processingTimeMs,
+      })
+    } else if (markerConfigured) {
+      // Proveniência só é registrada quando o Document Intelligence está
+      // configurado; sem ele o resultado permanece idêntico ao contrato v3.
+      provenance = buildProvenance('local', markerFailureKind === null ? {} : { fallback: true })
+    } else {
+      provenance = undefined
     }
 
     // Códigos extras para manter a limitação observável sem perder o código
@@ -378,7 +525,7 @@ const analyzePdf = async (
     const markerExtraCodes: string[] = []
     if (markerFailureKind !== null) {
       markerExtraCodes.push(`MARKER_${markerFailureKind.toUpperCase()}`)
-    } else if (markerResult !== null) {
+    } else if (markerResult !== null && !markerTextUsable) {
       markerExtraCodes.push('OCR_NO_USABLE_TEXT')
     }
 
@@ -401,10 +548,27 @@ const analyzePdf = async (
       return result
     }
 
-    // Se o melhor texto disponível ainda é insuficiente, não há campos para
-    // extrair. Isso pode acontecer quando o fallback para o texto local
-    // continua abaixo do mínimo.
-    if (bestText.length < MIN_TEXT_CHARS) {
+    // 4) Combinar as fontes de campo disponíveis (texto local, texto do Marker
+    // e tabelas do Marker) antes de decidir o status. A comparação é explícita:
+    // valores equivalentes são mantidos, divergentes não são escolhidos.
+    const markerFields = markerTextUsable ? fieldsFromPdfText(markerText) : null
+    const textFields: { readonly source: 'local' | 'marker'; readonly fields: PdfFields | null }[] = []
+    if (localFields !== null) textFields.push({ source: 'local', fields: localFields })
+    if (markerFields !== null) textFields.push({ source: 'marker', fields: markerFields })
+    const tableCandidates = markerResult === null ? [] : extractTableCandidates(markerResult.tables)
+    const merged = mergeFieldCandidates(textFields, tableCandidates)
+
+    const baseFields = provider === 'marker' ? markerFields : localFields
+    const limitations = [...(baseFields?.limitations ?? []), ...merged.limitations]
+    // Uma falha do Marker permanece observável mesmo quando a análise conclui
+    // com a camada local.
+    if (markerFailureKind !== null) limitations.push(`MARKER_${markerFailureKind.toUpperCase()}`)
+
+    // Sem texto utilizável e sem campos de tabela, não há evidência a extrair.
+    // Um conflito entre fontes também é evidência: nesse caso o resultado
+    // continua `completed` com a limitação `FIELD_CONFLICT_*`.
+    const hasMergedField = merged.address !== null || merged.holder !== null
+    if (bestText.length < MIN_TEXT_CHARS && !hasMergedField && merged.conflicts.length === 0) {
       const base = inconclusiveResult(now, 'NO_TEXT_LAYER')
       const result = withProvenance(
         withFiscalReference(
@@ -430,43 +594,60 @@ const analyzePdf = async (
       return result
     }
 
-    // 5) Extrair campos do texto escolhido.
-    const fields = fieldsFromPdfText(bestText)
-    let addressValue = fields.address
-    let holderValue = fields.holder
-    const limitations = [...fields.limitations]
-
-    // 6) Se Marker foi usado e campos ainda estão ausentes, tentar extração
-    // estruturada de tabelas (sem sobrescrever valores do texto).
-    if (markerResult !== null) {
-      const tableCandidates = extractTableCandidates(markerResult.tables)
-      const merged = mergeTableCandidates({ address: addressValue, holder: holderValue }, tableCandidates)
-      addressValue = merged.address
-      holderValue = merged.holder
-      if (merged.limitations.length > 0) limitations.push(...merged.limitations)
-    }
+    // Origem por campo só aparece quando difere do texto-base; sem mistura o
+    // resultado permanece idêntico ao contrato anterior.
+    const fieldSources = fieldSourcesOf(merged, provider)
+    const finalProvenance: DocumentAnalysisProvenance | undefined =
+      fieldSources === undefined
+        ? provenance
+        : { ...(provenance ?? buildProvenance(provider)), fields: fieldSources }
 
     const address: DocumentAnalysisDimension<ExtractedAddress> =
-      addressValue === null
+      merged.address === null
         ? { status: 'not_extracted', value: null, raw: null }
-        : { status: 'extracted', value: addressValue, raw: addressValue.raw }
+        : { status: 'extracted', value: merged.address, raw: merged.address.raw }
     const holder: DocumentAnalysisDimension<ExtractedHolder> =
-      holderValue === null
+      merged.holder === null
         ? { status: 'not_extracted', value: null, raw: null }
-        : { status: 'extracted', value: holderValue, raw: holderValue.raw }
+        : { status: 'extracted', value: merged.holder, raw: merged.holder.raw }
+
+    emitDebug(trace, {
+      code: 'fields.merge',
+      level: merged.conflicts.length > 0 ? 'warning' : 'info',
+      message:
+        merged.conflicts.length > 0
+          ? `Fontes de campo divergentes: ${merged.conflicts.join(', ')}.`
+          : 'Fontes de campo combinadas sem divergência.',
+      details: {
+        provider,
+        addressSource: merged.addressSource,
+        holderSource: merged.holderSource,
+        conflicts: merged.conflicts,
+        tables: tableCandidates.length,
+        limitations: merged.limitations,
+      },
+    })
+    if (merged.conflicts.length > 0) {
+      emitDebug(trace, {
+        code: 'fields.conflict',
+        level: 'warning',
+        message: 'Campos divergentes entre texto e tabela foram mantidos como ausentes.',
+        details: { fields: merged.conflicts, limitations: merged.limitations },
+      })
+    }
 
     emitDebug(trace, {
       code: 'document.fields',
       level: address.status === 'extracted' || holder.status === 'extracted' ? 'success' : 'info',
-      message: `Campos extraídos (endereço: ${address.status}; titular: ${holder.status}; fonte: ${provenance?.provider ?? 'local'}).`,
+      message: `Campos extraídos (endereço: ${address.status}; titular: ${holder.status}; fonte: ${provider}).`,
       details: {
-        kind: fields.kind,
-        issuedAt: fields.issuedAt,
-        issuedRaw: fields.issuedRaw,
+        kind: baseFields?.kind ?? 'unknown',
+        issuedAt: baseFields?.issuedAt ?? null,
+        issuedRaw: baseFields?.issuedRaw ?? null,
         address: address.value,
         holder: holder.value,
         limitations,
-        provenance,
+        provenance: finalProvenance,
       },
     })
 
@@ -476,15 +657,15 @@ const analyzePdf = async (
         status: 'completed',
         document: {
           status: 'analyzed',
-          kind: fields.kind,
-          issuedAt: fields.issuedAt,
-          issuedRaw: fields.issuedRaw,
+          kind: baseFields?.kind ?? 'unknown',
+          issuedAt: baseFields?.issuedAt ?? null,
+          issuedRaw: baseFields?.issuedRaw ?? null,
         },
         address,
         holder,
         limitations,
         errorCodes: [],
-        provenance,
+        provenance: finalProvenance,
       },
       fiscalReference,
     )

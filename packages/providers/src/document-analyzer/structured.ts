@@ -6,17 +6,25 @@
  * mesma regra de ambiguidade do extrator baseado em texto (`fields.ts`):
  * rótulos repetidos com valores diferentes → ausência de extração.
  *
+ * Uma conta de energia pode trazer dados da distribuidora e do consumidor na
+ * mesma página. Por isso os rótulos são classificados pelo papel que
+ * representam: só os explícitos de titular/consumidor produzem titular, e
+ * endereço genérico (`ENDEREÇO`, `CIDADE`, `CEP`, ...) só é usado quando há
+ * evidência contextual de que pertence ao consumidor. Sem essa evidência, o
+ * campo fica ausente.
+ *
  * Não infere campos, não escolhe arbitrariamente entre múltiplos valores e não
  * altera a semântica do `DocumentAnalysisResult`.
  */
 
 import { normalizeText, type ExtractedAddress, type ExtractedHolder } from '@comprova/core'
 import type { DocumentIntelligenceTable } from '@comprova/contracts'
+import { splitAddress } from './fields.js'
 
 /**
  * Candidato extraído de uma célula de tabela. `page` é o número da página
- * (1-based) quando disponível. `source` identifica a tabela e linha de origem
- * para evitar combinar campos de endereço de fontes distintas.
+ * (1-based) quando disponível. `source` identifica a tabela de origem para
+ * evitar combinar campos de fontes distintas.
  */
 export interface TableCandidate {
   readonly label: string
@@ -29,21 +37,49 @@ export interface TableCandidate {
 const labelOf = (value: string): string => normalizeText(value).replace(/[^A-Z0-9]/g, '')
 
 /**
- * Rótulos reconhecidos em tabelas. São intencionalmente genéricos para não
- * criar regras específicas de uma distribuidora.
+ * Rótulos explícitos do titular/consumidor. São a única fonte aceitável para o
+ * campo `holder`: `NOME`, `EMPRESA`, `FORNECEDOR` e `RAZÃO SOCIAL` são
+ * genéricos e podem identificar a distribuidora.
  */
-const TABLE_LABELS: ReadonlySet<string> = new Set(
+const HOLDER_LABELS: ReadonlySet<string> = new Set(
   [
-    // Unidade / instalação
-    'UNIDADECONSUMIDORA',
-    'INSTALACAO',
-    'NUMEROINSTALACAO',
-    'NUMEROUNIDADE',
-    'CODIGOUNIDADE',
-    // Medidor
-    'MEDIDOR',
-    'NUMEROMEDIDOR',
-    // Endereço
+    'TITULAR',
+    'NOMEDOTITULAR',
+    'CLIENTE',
+    'NOMEDOCLIENTE',
+    'CONSUMIDOR',
+    'NOMEDOCONSUMIDOR',
+    'PAGADOR',
+    'NOMEDOPAGADOR',
+    'DESTINATARIO',
+    'NOMEDODESTINATARIO',
+  ].map(labelOf),
+)
+
+/**
+ * Rótulos explícitos de endereço de fornecimento/instalação. Quando aparecem,
+ * são a evidência de que o endereço pertence ao consumidor.
+ */
+const SUPPLY_ADDRESS_LABELS: ReadonlySet<string> = new Set(
+  [
+    'ENDERECODEFORNECIMENTO',
+    'ENDERECODEINSTALACAO',
+    'ENDERECODOCONSUMIDOR',
+    'ENDERECODOCLIENTE',
+    'ENDERECODAUNIDADE',
+    'ENDERECODAUC',
+    'ENDERECODOIMOVEL',
+    'ENDERECODEENTREGA',
+    'ENDERECODOLOCAL',
+    'LOCALDASINSTALACAO',
+    'LOCALDAINSTALACAO',
+    'ENDERECOINSTALACAO',
+  ].map(labelOf),
+)
+
+/** Campos de endereço sem semântica própria: exigem contexto do consumidor. */
+const GENERIC_ADDRESS_LABELS: ReadonlySet<string> = new Set(
+  [
     'ENDERECO',
     'LOGRADOURO',
     'NUMERO',
@@ -54,20 +90,45 @@ const TABLE_LABELS: ReadonlySet<string> = new Set(
     'UF',
     'ESTADO',
     'CEP',
-    // Titular
-    'TITULAR',
-    'NOMEDOTITULAR',
-    'PAGADOR',
-    'NOME',
-    'CLIENTE',
-    'RAZAOSOCIAL',
-    // Concessionária/distribuidora
+  ].map(labelOf),
+)
+
+/**
+ * Rótulos que apontam para a distribuidora/emitente. Quando um deles aparece
+ * na mesma tabela, os campos genéricos de endereço não podem ser atribuídos ao
+ * consumidor (a tabela mistura os dois papéis).
+ */
+const DISTRIBUTOR_LABELS: ReadonlySet<string> = new Set(
+  [
     'CONCESSIONARIA',
     'DISTRIBUIDORA',
     'EMPRESA',
     'FORNECEDOR',
+    'RAZAOSOCIAL',
+    'NOMEDAEMPRESA',
+    'NOMEEMPRESARIAL',
   ].map(labelOf),
 )
+
+/** Unidade/instalação: identificam a UC, não o endereço nem o titular. */
+const INSTALLATION_LABELS: ReadonlySet<string> = new Set(
+  ['UNIDADECONSUMIDORA', 'INSTALACAO', 'NUMEROINSTALACAO', 'NUMEROUNIDADE', 'CODIGOUNIDADE'].map(labelOf),
+)
+
+/**
+ * Rótulos reconhecidos em tabelas (para detectar a linha de cabeçalho). O
+ * significado de cada grupo é aplicado depois, em `addressFromTableCandidates`
+ * e `holderFromTableCandidates`.
+ */
+const TABLE_LABELS: ReadonlySet<string> = new Set([
+  ...HOLDER_LABELS,
+  ...SUPPLY_ADDRESS_LABELS,
+  ...GENERIC_ADDRESS_LABELS,
+  ...DISTRIBUTOR_LABELS,
+  ...INSTALLATION_LABELS,
+  // Medidor
+  ...['MEDIDOR', 'NUMEROMEDIDOR'].map(labelOf),
+])
 
 const isBlank = (value: string): boolean => value.trim().length === 0
 
@@ -152,61 +213,78 @@ export const pickUniqueCandidate = (
   return matches.every((m) => m.value === first.value) ? { value: first.value, raw: first.raw } : null
 }
 
+type GroupAddress =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'ambiguous' }
+  | { readonly kind: 'value'; readonly value: ExtractedAddress }
+
+const addressKey = (address: ExtractedAddress): string =>
+  [
+    address.logradouro,
+    address.numero,
+    address.complemento,
+    address.bairro,
+    address.cidade,
+    address.uf,
+    address.cep,
+  ]
+    .map((value) => value ?? '\u0000')
+    .join('\u0001')
+
 /**
- * Extrai endereço de fornecimento a partir de candidatos de tabela.
- * Retorna `null` quando não há evidência suficiente ou há ambiguidade.
- *
- * Regras:
- * - Não confunde endereço de cobrança/correspondência com endereço de
- *   fornecimento sem distinção explícita (rótulo `ENDERECODECORRESPONDENCIA`
- *   é ignorado para endereço de instalação).
- * - Múltiplos valores distintos para o mesmo rótulo → `null` (ambiguidade).
+ * Endereço explícito: a célula rotulada como endereço de fornecimento contém o
+ * endereço inteiro (rua + número), então é interpretada como uma unidade. Os
+ * campos genéricos da mesma tabela não entram: podem ser da distribuidora.
  */
-export const addressFromTableCandidates = (
-  candidates: readonly TableCandidate[],
-): ExtractedAddress | null => {
-  // Agrupa candidatos por fonte (tabela de origem) para evitar combinar campos
-  // de endereço de fontes distintas, ex.: endereço da distribuidora no
-  // cabeçalho com o do cliente no corpo. Cada fonte é avaliada de forma
-  // independente; só se combina campos dentro de uma mesma fonte.
-  const bySource = new Map<string, TableCandidate[]>()
-  for (const c of candidates) {
-    const group = bySource.get(c.source) ?? []
-    group.push(c)
-    bySource.set(c.source, group)
+const explicitAddress = (candidate: { readonly value: string; readonly raw: string }): GroupAddress => {
+  const parts = splitAddress(candidate.value)
+  if (isBlank(parts.logradouro)) return { kind: 'ambiguous' }
+  return {
+    kind: 'value',
+    value: {
+      logradouro: parts.logradouro,
+      numero: parts.numero,
+      complemento: parts.complemento,
+      bairro: null,
+      cidade: null,
+      uf: null,
+      cep: null,
+      raw: candidate.raw,
+    },
   }
+}
 
-  // Cada fonte é avaliada isoladamente. Se duas fontes distintas produzirem
-  // endereços diferentes, não há evidência de qual é o endereço de
-  // fornecimento: o resultado é ambiguidade (ausência), nunca a escolha
-  // arbitrária da fonte mais completa.
-  const byFields = new Map<string, ExtractedAddress>()
-  for (const group of bySource.values()) {
-    const street = pickUniqueCandidate(group, ['LOGRADOURO', 'ENDERECO'])
-    const number = pickUniqueCandidate(group, ['NUMERO'])
-    const complement = pickUniqueCandidate(group, ['COMPLEMENTO'])
-    const neighborhood = pickUniqueCandidate(group, ['BAIRRO'])
-    const city = pickUniqueCandidate(group, ['CIDADE', 'MUNICIPIO'])
-    const uf = pickUniqueCandidate(group, ['UF', 'ESTADO'])
-    const cep = pickUniqueCandidate(group, ['CEP'])
+/**
+ * Endereço genérico: só é atribuído ao consumidor quando a tabela tem contexto
+ * de consumidor (titular/cliente/consumidor) e não tem contexto de
+ * distribuidora. Caso contrário, não há evidência de que o endereço não é o da
+ * concessionária.
+ */
+const genericAddress = (group: readonly TableCandidate[]): GroupAddress => {
+  const street = pickUniqueCandidate(group, ['LOGRADOURO', 'ENDERECO'])
+  const number = pickUniqueCandidate(group, ['NUMERO'])
+  const complement = pickUniqueCandidate(group, ['COMPLEMENTO'])
+  const neighborhood = pickUniqueCandidate(group, ['BAIRRO'])
+  const city = pickUniqueCandidate(group, ['CIDADE', 'MUNICIPIO'])
+  const uf = pickUniqueCandidate(group, ['UF', 'ESTADO'])
+  const cep = pickUniqueCandidate(group, ['CEP'])
 
-    // Se nenhum campo foi encontrado nesta fonte, ignora-a.
-    if (
-      street === null &&
-      number === null &&
-      complement === null &&
-      neighborhood === null &&
-      city === null &&
-      uf === null &&
-      cep === null
-    ) {
-      continue
-    }
+  const hasAny =
+    street !== null ||
+    number !== null ||
+    complement !== null ||
+    neighborhood !== null ||
+    city !== null ||
+    uf !== null ||
+    cep !== null
+  if (!hasAny) return { kind: 'none' }
 
-    // Endereço parcial: apenas cidade/UF sem logradouro não é suficiente.
-    if (street === null && city === null && uf === null) continue
+  // Endereço parcial: apenas cidade/UF sem logradouro não é suficiente.
+  if (street === null && city === null && uf === null) return { kind: 'none' }
 
-    const addr: ExtractedAddress = {
+  return {
+    kind: 'value',
+    value: {
       logradouro: street?.value ?? null,
       numero: number?.value ?? null,
       complemento: complement?.value ?? null,
@@ -215,35 +293,73 @@ export const addressFromTableCandidates = (
       uf: uf?.value?.toUpperCase() ?? null,
       cep: cep?.value ?? null,
       raw: [street, number, complement, neighborhood, city, uf, cep]
-        .filter((c) => c !== null)
-        .map((c) => c!.raw)
+        .filter((candidate) => candidate !== null)
+        .map((candidate) => candidate!.raw)
         .join('; '),
-    }
+    },
+  }
+}
 
-    const key = [addr.logradouro, addr.numero, addr.complemento, addr.bairro, addr.cidade, addr.uf, addr.cep]
-      .map((v) => v ?? '\u0000')
-      .join('\u0001')
-    byFields.set(key, addr)
+const addressFromGroup = (group: readonly TableCandidate[]): GroupAddress => {
+  const hasExplicitSupply = group.some((candidate) => SUPPLY_ADDRESS_LABELS.has(candidate.label))
+  if (hasExplicitSupply) {
+    // Rótulos explícitos podem ter mais de um tipo (fornecimento/entrega); só
+    // vale quando todos concordam no valor.
+    const supply = pickUniqueCandidate(group, [...SUPPLY_ADDRESS_LABELS])
+    return supply === null ? { kind: 'ambiguous' } : explicitAddress(supply)
   }
 
-  // Nenhuma fonte com endereço utilizável ou fontes divergentes → ausência.
-  if (byFields.size !== 1) return null
-  return [...byFields.values()][0] ?? null
+  const hasConsumerContext = group.some((candidate) => HOLDER_LABELS.has(candidate.label))
+  const hasDistributorContext = group.some((candidate) => DISTRIBUTOR_LABELS.has(candidate.label))
+  if (!hasConsumerContext || hasDistributorContext) return { kind: 'none' }
+
+  return genericAddress(group)
 }
 
 /**
- * Extrai titular a partir de candidatos de tabela.
+ * Extrai endereço de fornecimento a partir de candidatos de tabela.
  * Retorna `null` quando não há evidência suficiente ou há ambiguidade.
+ *
+ * Regras:
+ * - Rótulo explícito de fornecimento/instalação vence; os campos genéricos da
+ *   mesma tabela não são misturados a ele.
+ * - Sem rótulo explícito, o endereço genérico exige contexto de consumidor e a
+ *   ausência de contexto de distribuidora na mesma tabela.
+ * - Múltiplos valores distintos para o mesmo rótulo → `null` (ambiguidade).
+ * - Fontes (tabelas) distintas com endereços divergentes → `null`.
+ */
+export const addressFromTableCandidates = (
+  candidates: readonly TableCandidate[],
+): ExtractedAddress | null => {
+  const bySource = new Map<string, TableCandidate[]>()
+  for (const candidate of candidates) {
+    const group = bySource.get(candidate.source) ?? []
+    group.push(candidate)
+    bySource.set(candidate.source, group)
+  }
+
+  const addresses = new Map<string, ExtractedAddress>()
+  for (const group of bySource.values()) {
+    const resolved = addressFromGroup(group)
+    // Rótulo explícito ambíguo contamina o resultado: não há como provar qual
+    // endereço é o de fornecimento.
+    if (resolved.kind === 'ambiguous') return null
+    if (resolved.kind === 'none') continue
+    addresses.set(addressKey(resolved.value), resolved.value)
+  }
+
+  // Nenhuma fonte com endereço utilizável ou fontes divergentes → ausência.
+  if (addresses.size !== 1) return null
+  return [...addresses.values()][0] ?? null
+}
+
+/**
+ * Extrai titular a partir de candidatos de tabela. Só rótulos explícitos de
+ * titular/cliente/consumidor/pagador são aceitos; rótulos genéricos como
+ * `NOME`, `EMPRESA` ou `FORNECEDOR` não identificam o consumidor.
  */
 export const holderFromTableCandidates = (candidates: readonly TableCandidate[]): ExtractedHolder | null => {
-  const holder = pickUniqueCandidate(candidates, [
-    'TITULAR',
-    'NOMEDOTITULAR',
-    'PAGADOR',
-    'NOME',
-    'CLIENTE',
-    'RAZAOSOCIAL',
-  ])
+  const holder = pickUniqueCandidate(candidates, [...HOLDER_LABELS])
   if (holder === null) return null
   return { name: holder.value, raw: holder.raw }
 }
@@ -255,11 +371,5 @@ export const holderFromTableCandidates = (candidates: readonly TableCandidate[])
 export const installationNumberFromTableCandidates = (
   candidates: readonly TableCandidate[],
 ): { readonly value: string; readonly raw: string } | null => {
-  return pickUniqueCandidate(candidates, [
-    'UNIDADECONSUMIDORA',
-    'INSTALACAO',
-    'NUMEROINSTALACAO',
-    'NUMEROUNIDADE',
-    'CODIGOUNIDADE',
-  ])
+  return pickUniqueCandidate(candidates, [...INSTALLATION_LABELS])
 }

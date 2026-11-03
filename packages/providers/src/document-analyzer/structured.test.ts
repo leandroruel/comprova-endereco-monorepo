@@ -87,11 +87,11 @@ describe('pickUniqueCandidate', () => {
 })
 
 describe('addressFromTableCandidates', () => {
-  it('monta endereço a partir de rótulos distintos', () => {
+  it('monta endereço a partir de rótulos distintos com contexto de consumidor', () => {
     const candidates = extractTableCandidates([
       table(
-        ['Logradouro', 'Número', 'Bairro', 'Cidade', 'UF', 'CEP'],
-        [['Rua das Flores', '123', 'Centro', 'São Paulo', 'SP', '01001-000']],
+        ['Titular', 'Logradouro', 'Número', 'Bairro', 'Cidade', 'UF', 'CEP'],
+        [['Maria da Silva', 'Rua das Flores', '123', 'Centro', 'São Paulo', 'SP', '01001-000']],
       ),
     ])
 
@@ -109,18 +109,66 @@ describe('addressFromTableCandidates', () => {
   })
 
   it('retorna null quando há apenas número sem logradouro/cidade', () => {
-    const candidates = extractTableCandidates([table(['Número'], [['123']])])
+    const candidates = extractTableCandidates([table(['Titular', 'Número'], [['Maria da Silva', '123']])])
 
     expect(addressFromTableCandidates(candidates)).toBeNull()
   })
 
   it('retorna null quando o logradouro é ambíguo', () => {
-    const candidates = extractTableCandidates([table(['Logradouro'], [['Rua A, 1'], ['Rua B, 2']])])
-
-    const address = addressFromTableCandidates(candidates)
+    const candidates = extractTableCandidates([
+      table(
+        ['Titular', 'Logradouro'],
+        [
+          ['Maria da Silva', 'Rua A, 1'],
+          ['Maria da Silva', 'Rua B, 2'],
+        ],
+      ),
+    ])
 
     // Sem logradouro único e sem cidade/UF, não há endereço.
-    expect(address).toBeNull()
+    expect(addressFromTableCandidates(candidates)).toBeNull()
+  })
+
+  it('não usa endereço genérico sem contexto de consumidor', () => {
+    // Rótulos genéricos (`ENDEREÇO`, `CIDADE`, `CEP`, ...) podem ser da
+    // distribuidora. Sem titular/cliente/consumidor na mesma tabela, não há
+    // evidência de que o endereço seja o de fornecimento.
+    const candidates = extractTableCandidates([
+      table(
+        ['Logradouro', 'Número', 'Cidade', 'UF', 'CEP'],
+        [['Rua das Flores', '123', 'São Paulo', 'SP', '01001-000']],
+      ),
+    ])
+
+    expect(addressFromTableCandidates(candidates)).toBeNull()
+  })
+
+  it('não usa endereço genérico quando a tabela também tem dados da distribuidora', () => {
+    // Conta de energia com emitente e consumidor na mesma página: a presença
+    // de `Empresa`/`Fornecedor` impede atribuir o endereço genérico ao
+    // consumidor.
+    const candidates = extractTableCandidates([
+      table(
+        ['Empresa', 'Logradouro', 'Número', 'Cidade', 'UF'],
+        [['Distribuidora Exemplo S.A.', 'Rua do Emitente', '1', 'Campinas', 'SP']],
+      ),
+    ])
+
+    expect(addressFromTableCandidates(candidates)).toBeNull()
+  })
+
+  it('prioriza endereço de fornecimento explícito e ignora o genérico da distribuidora', () => {
+    const candidates = extractTableCandidates([
+      table(
+        ['Concessionária', 'Logradouro', 'Número', 'Endereço de Fornecimento'],
+        [['Distribuidora Exemplo S.A.', 'Rua do Emitente', '1', 'Rua das Flores, 123']],
+      ),
+    ])
+
+    expect(addressFromTableCandidates(candidates)).toMatchObject({
+      logradouro: 'Rua das Flores',
+      numero: '123',
+    })
   })
 
   it('não confunde endereço de correspondência com fornecimento', () => {
@@ -137,8 +185,8 @@ describe('addressFromTableCandidates', () => {
     // Tabela A tem o logradouro; tabela B tem cidade/UF. Combinar as duas
     // produziria um endereço que não existe em nenhuma fonte.
     const candidates = extractTableCandidates([
-      table(['Logradouro', 'Número'], [['Rua da Distribuidora', '1']]),
-      table(['Cidade', 'UF'], [['Campinas', 'SP']]),
+      table(['Titular', 'Logradouro', 'Número'], [['Maria da Silva', 'Rua das Flores', '123']]),
+      table(['Titular', 'Cidade', 'UF'], [['Maria da Silva', 'Campinas', 'SP']]),
     ])
 
     expect(addressFromTableCandidates(candidates)).toBeNull()
@@ -146,10 +194,10 @@ describe('addressFromTableCandidates', () => {
 
   it('retorna null quando fontes distintas produzem endereços divergentes', () => {
     const candidates = extractTableCandidates([
-      table(['Logradouro'], [['Rua Incompleta']]),
+      table(['Titular', 'Logradouro'], [['Maria da Silva', 'Rua Incompleta']]),
       table(
-        ['Logradouro', 'Número', 'Cidade', 'UF', 'CEP'],
-        [['Rua Completa', '42', 'São Paulo', 'SP', '01001-000']],
+        ['Titular', 'Logradouro', 'Número', 'Cidade', 'UF', 'CEP'],
+        [['Maria da Silva', 'Rua Completa', '42', 'São Paulo', 'SP', '01001-000']],
       ),
     ])
 
@@ -159,8 +207,8 @@ describe('addressFromTableCandidates', () => {
   })
 
   it('aceita o endereço quando fontes distintas concordam', () => {
-    const row = ['Rua das Flores', '123', 'Centro', 'São Paulo', 'SP', '01001-000']
-    const headers = ['Logradouro', 'Número', 'Bairro', 'Cidade', 'UF', 'CEP']
+    const row = ['Maria da Silva', 'Rua das Flores', '123', 'Centro', 'São Paulo', 'SP', '01001-000']
+    const headers = ['Titular', 'Logradouro', 'Número', 'Bairro', 'Cidade', 'UF', 'CEP']
     const candidates = extractTableCandidates([table(headers, [row]), table(headers, [row])])
 
     expect(addressFromTableCandidates(candidates)).toMatchObject({
@@ -176,6 +224,27 @@ describe('addressFromTableCandidates', () => {
 describe('holderFromTableCandidates', () => {
   it('extrai o titular de rótulo claro', () => {
     const candidates = extractTableCandidates([table(['Titular'], [['Maria da Silva']])])
+    expect(holderFromTableCandidates(candidates)).toMatchObject({ name: 'Maria da Silva' })
+  })
+
+  it('não trata NOME, EMPRESA ou FORNECEDOR como titular', () => {
+    // Rótulos genéricos aparecem tanto no bloco do consumidor quanto no da
+    // distribuidora; sem semântica de titular não há extração.
+    const candidates = extractTableCandidates([
+      table(
+        ['Nome', 'Empresa', 'Fornecedor', 'Razão Social'],
+        [['Distribuidora Exemplo S.A.', 'Distribuidora Exemplo S.A.', 'EDP', 'Distribuidora Exemplo S.A.']],
+      ),
+    ])
+
+    expect(holderFromTableCandidates(candidates)).toBeNull()
+  })
+
+  it('distingue titular de consumidor e distribuidora na mesma tabela', () => {
+    const candidates = extractTableCandidates([
+      table(['Distribuidora', 'Cliente'], [['Distribuidora Exemplo S.A.', 'Maria da Silva']]),
+    ])
+
     expect(holderFromTableCandidates(candidates)).toMatchObject({ name: 'Maria da Silva' })
   })
 

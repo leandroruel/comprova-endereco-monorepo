@@ -74,6 +74,25 @@ const client = (
   parsePdf,
 })
 
+/** Página do contrato do DI com uma única tabela estruturada. */
+const tablePage = (headers: string[], rows: string[][]) => ({
+  pageNumber: 1,
+  width: 612,
+  height: 792,
+  elements: [
+    {
+      id: 'table-1',
+      type: 'table' as const,
+      text: null,
+      bbox: null,
+      confidence: null,
+      table: { headers, rows, cells: [], bbox: null },
+      imageRef: null,
+      metadata: {},
+    },
+  ],
+})
+
 const analyzeWith = async (
   marker: DocumentIntelligenceClient | null,
   localText: string,
@@ -243,5 +262,101 @@ describe('análise com fallback para o Marker (F1.2)', () => {
     expect(result.status).toBe('completed')
     expect(result.address.status).toBe('not_extracted')
     expect(result.provenance).toMatchObject({ provider: 'marker' })
+  })
+
+  it('texto local acima do mínimo sem titular/endereço aciona o Marker', async () => {
+    // `CONTA DE ENERGIA` passa do limite de 8 caracteres, mas não traz
+    // evidência suficiente para os campos: o Marker precisa ser consultado.
+    const parsePdf = vi.fn(async () => diResponse())
+    const result = await analyzeWith(
+      client(parsePdf),
+      'CONTA DE ENERGIA\nCompetência: 01/10/2026\nValor: R$ 100,00',
+    )
+
+    expect(parsePdf).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe('completed')
+    // O texto local utilizável continua sendo a base; o Marker só complementa.
+    expect(result.provenance).toMatchObject({ provider: 'local' })
+    expect(result.provenance?.fields).toEqual({ address: 'marker', holder: 'marker' })
+    expect(result.address.value?.cep).toBe('01001000')
+    expect(result.holder.value?.name).toBe('Maria da Silva')
+  })
+
+  it('mantém o endereço quando texto local e tabela concordam', async () => {
+    const parsePdf = vi.fn(async () =>
+      diResponse({
+        content: { text: 'CONTA DE ENERGIA' },
+        pages: [
+          tablePage(['Titular', 'Endereço de Fornecimento'], [['Maria da Silva', 'Rua das Flores, 123']]),
+        ],
+      }),
+    )
+    const result = await analyzeWith(
+      client(parsePdf),
+      [
+        'Endereço: Rua das Flores, 123',
+        'Bairro: Centro',
+        'Cidade: São Paulo',
+        'UF: SP',
+        'CEP: 01001-000',
+      ].join('\n'),
+    )
+
+    expect(parsePdf).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe('completed')
+    // Endereço do texto local (mais completo) preservado; o titular veio da
+    // tabela do Marker, e a origem fica registrada para auditoria.
+    expect(result.address.status).toBe('extracted')
+    expect(result.address.value).toMatchObject({ bairro: 'CENTRO', cidade: 'SAO PAULO', cep: '01001000' })
+    expect(result.address.raw).toContain('Rua das Flores')
+    expect(result.holder.value?.name).toBe('Maria da Silva')
+    expect(result.provenance).toMatchObject({ provider: 'local', fields: { holder: 'marker_table' } })
+    expect(result.limitations).not.toContain('FIELD_CONFLICT_ADDRESS')
+  })
+
+  it('não escolhe entre endereço do texto e da tabela quando divergem', async () => {
+    const parsePdf = vi.fn(async () =>
+      diResponse({
+        content: { text: 'CONTA DE ENERGIA' },
+        pages: [
+          tablePage(['Titular', 'Endereço de Fornecimento'], [['Maria da Silva', 'Rua das Acácias, 999']]),
+        ],
+      }),
+    )
+    const codes: string[] = []
+    const result = await analyzeWith(
+      client(parsePdf),
+      [
+        'Endereço: Rua das Flores, 123',
+        'Bairro: Centro',
+        'Cidade: São Paulo',
+        'UF: SP',
+        'CEP: 01001-000',
+      ].join('\n'),
+      (event) => codes.push(event.code),
+    )
+
+    expect(result.status).toBe('completed')
+    // Fontes divergentes: nenhum dos dois endereços é escolhido.
+    expect(result.address.status).toBe('not_extracted')
+    expect(result.limitations).toContain('FIELD_CONFLICT_ADDRESS')
+    // O titular, que só existe na tabela, continua extraído.
+    expect(result.holder.value?.name).toBe('Maria da Silva')
+    expect(result.provenance).toMatchObject({ provider: 'local', fields: { holder: 'marker_table' } })
+    expect(codes).toContain('fields.conflict')
+  })
+
+  it('Marker falha com camada local utilizável: conclui com o texto local e registra a limitação', async () => {
+    const parsePdf = vi.fn(async () => {
+      throw new DocumentIntelligenceError('unavailable', 'service down')
+    })
+    const result = await analyzeWith(client(parsePdf), 'CONTA DE ENERGIA\nCompetência: 01/10/2026')
+
+    expect(parsePdf).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe('completed')
+    expect(result.address.status).toBe('not_extracted')
+    expect(result.holder.status).toBe('not_extracted')
+    expect(result.limitations).toContain('MARKER_UNAVAILABLE')
+    expect(result.provenance).toMatchObject({ provider: 'local', fallback: true })
   })
 })

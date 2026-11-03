@@ -166,6 +166,43 @@ describe('MarkerAdapter', () => {
     expect(result.text).toBe('Texto extraído das páginas')
   })
 
+  it('usa texto das páginas quando content.text está ausente', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          validPayload({
+            content: {},
+            pages: [
+              {
+                pageNumber: 1,
+                width: 612,
+                height: 792,
+                elements: [
+                  {
+                    id: 'el-1',
+                    type: 'text',
+                    text: 'Texto extraído das páginas',
+                    bbox: { x1: 1, y1: 1, x2: 2, y2: 2 },
+                    confidence: null,
+                    table: null,
+                    imageRef: null,
+                    metadata: {},
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    )
+    const adapter = makeMarkerAdapter(client())
+
+    const result = await adapter.parse(input)
+
+    expect(result.text).toBe('Texto extraído das páginas')
+  })
+
   it('lança no_text quando nem content.text nem páginas têm texto', async () => {
     vi.stubGlobal(
       'fetch',

@@ -171,13 +171,13 @@ const pickUnique = (lines: readonly LabeledLine[], names: readonly string[]): La
   return matches.every((line) => line.value === first.value) ? first : null
 }
 
-interface AddressParts {
+export interface AddressParts {
   readonly logradouro: string
   readonly numero: string | null
   readonly complemento: string | null
 }
 
-const splitAddress = (value: string): AddressParts => {
+export const splitAddress = (value: string): AddressParts => {
   const parts = value
     .split(',')
     .map((part) => part.trim())

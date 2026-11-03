@@ -127,6 +127,24 @@ export interface DocumentAnalysisDimension<T> {
 }
 
 /**
+ * Origem de um campo quando texto local, texto do Marker e tabelas do Marker
+ * coexistem. `marker_table` identifica candidatos extraídos de tabelas.
+ */
+export const DOCUMENT_ANALYSIS_FIELD_SOURCES = ['local', 'marker', 'marker_table'] as const
+
+export type DocumentAnalysisFieldSource = (typeof DOCUMENT_ANALYSIS_FIELD_SOURCES)[number]
+
+/**
+ * Origem por campo. O `provider` continua indicando a fonte do texto-base; este
+ * mapa registra quando um campo veio de outra fonte (ex.: endereço do texto
+ * local e titular complementado pelo Marker). Ausente quando não há mistura.
+ */
+export interface DocumentAnalysisFieldSources {
+  readonly address?: DocumentAnalysisFieldSource
+  readonly holder?: DocumentAnalysisFieldSource
+}
+
+/**
  * Proveniência da extração: qual provedor produziu o texto e metadados de
  * rastreamento. Campo opcional e aditivo — resultados antigos (contrato 3)
  * não o possuem.
@@ -137,6 +155,7 @@ export interface DocumentAnalysisProvenance {
   readonly pages?: number
   readonly processingTimeMs?: number
   readonly fallback?: boolean
+  readonly fields?: DocumentAnalysisFieldSources
 }
 
 export interface DocumentAnalysisResult {
