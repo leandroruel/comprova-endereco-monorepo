@@ -139,14 +139,35 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const documentIntelligenceMaxBytes = documentIntelligenceMaxFileSizeMb * 1024 * 1024
 
   await app.register(helmet)
+  const allowedOrigins = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000']
+
   await app.register(cors, {
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['content-type', 'authorization', 'cookie'],
     exposedHeaders: ['set-cookie'],
     preflight: true,
     preflightContinue: false,
+  })
+
+  // Fallback de CORS no onResponse: garante que os cabeçalhos CORS estejam
+  // sempre presentes, mesmo quando o plugin @fastify/cors não os aplica (ex.:
+  // respostas de erro, 404, 500, ou qualquer comportamento inesperado do
+  // plugin). Isso evita que o navegador bloqueie a requisição por falta do
+  // cabeçalho Access-Control-Allow-Origin.
+  app.addHook('onResponse', (request, reply) => {
+    const origin = (request.headers as Record<string, string | undefined>)['origin']
+    if (!origin) return
+    if (!allowedOrigins.includes(origin)) return
+    // Se o plugin já definiu o cabeçalho, não sobrescreve.
+    if (reply.getHeader('access-control-allow-origin')) return
+    reply.header('access-control-allow-origin', origin)
+    reply.header('access-control-allow-credentials', 'true')
+    reply.header('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+    reply.header('access-control-allow-headers', 'content-type, authorization, cookie')
+    reply.header('access-control-expose-headers', 'set-cookie')
+    reply.header('vary', 'Origin')
   })
   await app.register(multipart, {
     limits: { fileSize: evidenceMaxBytes, files: 1, fields: 0, parts: 1 },
