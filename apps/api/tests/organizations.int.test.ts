@@ -258,7 +258,7 @@ describe('Verifier Onboarding', () => {
     expect(listRes.statusCode).toBe(200)
     const members = listRes.json()
     expect(members.length).toBeGreaterThanOrEqual(1)
-    expect(members.some((m: any) => m.userEmail === 'member@exemplo.com')).toBe(true)
+    expect((members as Array<{ userEmail: string }>).some((m) => m.userEmail === 'member@exemplo.com')).toBe(true)
   })
 
   it('não deve permitir que não-admin adicione membros', async () => {
