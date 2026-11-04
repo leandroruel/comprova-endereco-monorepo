@@ -70,6 +70,10 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
     const prefix = keyPrefixOf(plaintext)
     const keyHash = hasher.hash(plaintext)
 
+    const expiresAt = create.expiresInDays
+      ? new Date(Date.now() + create.expiresInDays * 24 * 60 * 60 * 1000)
+      : null
+
     const insertedKeys = await db
       .insert(t.apiKey)
       .values({
@@ -79,6 +83,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
         keyHash,
         scopes: create.scopes,
         keyType: create.keyType,
+        expiresAt,
       })
       .returning()
 
@@ -96,6 +101,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
         scopes: apiKey.scopes,
         keyType: apiKey.keyType,
         revokedAt: apiKey.revokedAt?.toISOString() ?? null,
+        expiresAt: apiKey.expiresAt?.toISOString() ?? null,
         lastUsedAt: apiKey.lastUsedAt?.toISOString() ?? null,
         createdAt: apiKey.createdAt.toISOString(),
       },
@@ -120,6 +126,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
         scopes: t.apiKey.scopes,
         keyType: t.apiKey.keyType,
         revokedAt: t.apiKey.revokedAt,
+        expiresAt: t.apiKey.expiresAt,
         lastUsedAt: t.apiKey.lastUsedAt,
         createdAt: t.apiKey.createdAt,
       })
@@ -139,6 +146,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
       scopes: row.scopes,
       keyType: row.keyType,
       revokedAt: row.revokedAt?.toISOString() ?? null,
+      expiresAt: row.expiresAt?.toISOString() ?? null,
       lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
     }))

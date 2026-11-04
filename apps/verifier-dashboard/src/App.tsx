@@ -98,9 +98,9 @@ export default function App() {
       ) : route === 'members' ? (
         <MembersPage user={user} />
       ) : route === 'integrations' ? (
-        <IntegrationsPage user={user} />
+        <IntegrationsPage tenantId={organizations[0]?.tenantId ?? ''} />
       ) : (
-        <DashboardPage user={user} />
+        <DashboardPage user={user} setRoute={(r: string) => setRoute(r as Route)} />
       )}
     </Layout>
   )

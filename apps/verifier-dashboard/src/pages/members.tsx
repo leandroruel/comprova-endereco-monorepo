@@ -56,10 +56,18 @@ export function MembersPage({ user }: MembersPageProps) {
     },
   })
 
-  if (orgsLoading || !activeOrg) {
+  if (orgsLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Spinner className="mr-2" /> Carregando…
+      </div>
+    )
+  }
+
+  if (!activeOrg) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Nenhuma organização encontrada.</p>
       </div>
     )
   }

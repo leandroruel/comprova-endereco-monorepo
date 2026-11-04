@@ -91,6 +91,7 @@ export const ApiKeyDtoSchema = z.object({
   scopes: z.array(z.string()),
   keyType: z.string(),
   revokedAt: z.string().nullable(),
+  expiresAt: z.string().nullable(),
   lastUsedAt: z.string().nullable(),
   createdAt: z.string(),
 })

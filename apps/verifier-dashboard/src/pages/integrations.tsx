@@ -1,15 +1,14 @@
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createApiKey, listApiKeys, revokeApiKey } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Badge, Spinner } from '@/components/ui'
 import { FileKey, AlertCircle, CheckCircle2, Trash2, Copy, Clock, Link } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 interface IntegrationsPageProps {
-  user: { id: string; email: string; name: string; role: string }
+  tenantId: string
 }
 
-export function IntegrationsPage({ user }: IntegrationsPageProps) {
+export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState(['validate:read', 'validate:write', 'verify:m2m'])
   const [showSecret, setShowSecret] = useState<{ apiKeyId: string; secret: string } | null>(null)
@@ -17,15 +16,15 @@ export function IntegrationsPage({ user }: IntegrationsPageProps) {
   const [success, setSuccess] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: keysData, isLoading: keysLoading } = useQuery({
-    queryKey: ['api-keys'],
-    queryFn: listApiKeys,
+  const { data: keysData, isLoading: keysLoading, isError: keysError, error: keysErr } = useQuery({
+    queryKey: ['api-keys', tenantId],
+    queryFn: () => listApiKeys(tenantId),
   })
 
   const createKeyMutation = useMutation({
     mutationFn: createApiKey,
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+      queryClient.invalidateQueries({ queryKey: ['api-keys', tenantId] })
       setName('')
       setScopes(['validate:read', 'validate:write', 'verify:m2m'])
       setShowSecret({ apiKeyId: result.apiKey.apiKeyId, secret: result.secret })
@@ -39,9 +38,9 @@ export function IntegrationsPage({ user }: IntegrationsPageProps) {
   })
 
   const revokeMutation = useMutation({
-    mutationFn: revokeApiKey,
+    mutationFn: (apiKeyId: string) => revokeApiKey(tenantId, apiKeyId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+      queryClient.invalidateQueries({ queryKey: ['api-keys', tenantId] })
       setSuccess('Credencial revogada com sucesso')
       setError(null)
     },
@@ -57,6 +56,7 @@ export function IntegrationsPage({ user }: IntegrationsPageProps) {
     setSuccess(null)
     if (!name.trim()) return
     void createKeyMutation.mutateAsync({
+      tenantId,
       name,
       scopes,
       keyType: 'm2m',
@@ -71,15 +71,30 @@ export function IntegrationsPage({ user }: IntegrationsPageProps) {
     void revokeMutation.mutateAsync(apiKeyId)
   }
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text)
-    setSuccess('Copiado para a área de transferência')
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setError(null)
+      setSuccess('Copiado para a área de transferência')
+    } catch {
+      setSuccess(null)
+      setError('Não foi possível copiar. Copie o segredo manualmente.')
+    }
   }
 
   if (keysLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Spinner className="mr-2" /> Carregando credenciais…
+      </div>
+    )
+  }
+
+  if (keysError) {
+    return (
+      <div className="flex items-center gap-2 p-4 text-sm text-destructive">
+        <AlertCircle className="h-4 w-4" />
+        {keysErr instanceof Error ? keysErr.message : 'Erro ao carregar credenciais'}
       </div>
     )
   }
@@ -130,7 +145,7 @@ export function IntegrationsPage({ user }: IntegrationsPageProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleCopy(key.keyPrefix)}
+                          onClick={() => void handleCopy(key.keyPrefix)}
                           title="Copiar prefixo"
                         >
                           <Copy className="h-3 w-3" />
@@ -299,7 +314,7 @@ export function IntegrationsPage({ user }: IntegrationsPageProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleCopy(showSecret.secret)}
+                      onClick={() => void handleCopy(showSecret.secret)}
                     >
                       <Copy className="h-3 w-3 mr-1" />
                       Copiar segredo

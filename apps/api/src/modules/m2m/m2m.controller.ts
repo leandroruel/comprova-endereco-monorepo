@@ -1,8 +1,7 @@
-import type { FastifyReply, FastifyRequest } from 'fastify'
+import type { FastifyReply } from 'fastify'
 import type { ApiKeyDto } from '@comprova/contracts'
 import type { z } from 'zod'
 import type {
-  ApiKeyIdParams,
   ApiKeyCreatedResponse,
   M2MControllerDeps,
 } from './m2m.schema.js'

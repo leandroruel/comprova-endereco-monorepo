@@ -185,6 +185,7 @@ export async function addMember(
 
 /** POST /m2m/api-keys — cria uma credencial M2M. Retorna o segredo em claro apenas agora. */
 export async function createApiKey(body: {
+  tenantId: string
   name: string
   scopes?: string[]
   keyType?: 'user' | 'm2m'
@@ -210,7 +211,7 @@ export async function createApiKey(body: {
 }
 
 /** GET /m2m/api-keys — lista credenciais da organização (sem segredo). */
-export async function listApiKeys(): Promise<{
+export async function listApiKeys(tenantId: string): Promise<{
   apiKeys: Array<{
     apiKeyId: string
     tenantId: string
@@ -223,12 +224,17 @@ export async function listApiKeys(): Promise<{
     createdAt: string
   }>
 }> {
-  return apiRequest('/m2m/api-keys', { method: 'GET' })
+  const query = new URLSearchParams({ tenantId })
+  return apiRequest(`/m2m/api-keys?${query.toString()}`, { method: 'GET' })
 }
 
 /** DELETE /m2m/api-keys/:apiKeyId — revoga uma credencial M2M. */
-export async function revokeApiKey(apiKeyId: string): Promise<{ revoked: boolean }> {
+export async function revokeApiKey(
+  tenantId: string,
+  apiKeyId: string,
+): Promise<{ revoked: boolean }> {
   return apiRequest(`/m2m/api-keys/${apiKeyId}`, {
     method: 'DELETE',
+    body: JSON.stringify({ tenantId }),
   })
 }

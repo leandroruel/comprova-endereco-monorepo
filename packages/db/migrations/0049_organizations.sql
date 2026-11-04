@@ -15,8 +15,9 @@ ALTER TABLE tenant ADD COLUMN terms_accepted_by text;
 ALTER TABLE tenant ADD COLUMN terms_version text;
 
 -- Constraint de valores válidos para `type` e `onboarding_status`.
-ALTER TABLE tenant ADD CONSTRAINT tenant_type_check CHECK (type IN ('technical', 'organization'));
-ALTER TABLE tenant ADD CONSTRAINT tenant_onboarding_status_check CHECK (onboarding_status IN ('pending', 'completed', 'suspended'));
+-- NOT VALID para não bloquear gravações enquanto valida a tabela existente.
+ALTER TABLE tenant ADD CONSTRAINT tenant_type_check CHECK (type IN ('technical', 'organization')) NOT VALID;
+ALTER TABLE tenant ADD CONSTRAINT tenant_onboarding_status_check CHECK (onboarding_status IN ('pending', 'completed', 'suspended')) NOT VALID;
 
 -- Índices para consultas frequentes por tipo/status.
 CREATE INDEX idx_tenant_type ON tenant (type);
@@ -68,6 +69,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON organization_invitation TO app_user;
 -- sem sessão de usuário, autenticação por bearer token puro).
 ALTER TABLE api_key ADD COLUMN key_type text NOT NULL DEFAULT 'user';
 ALTER TABLE api_key ADD CONSTRAINT api_key_key_type_check CHECK (key_type IN ('user', 'm2m'));
+
+-- Expiração opcional da credencial M2M. Quando preenchida, a credencial deixa
+-- de ser aceita após o instante registrado (ver `authenticate`).
+ALTER TABLE api_key ADD COLUMN expires_at timestamptz;
 
 -- A aplicação precisa gerenciar credenciais de API.
 GRANT SELECT, INSERT, UPDATE, DELETE ON api_key TO app_user;

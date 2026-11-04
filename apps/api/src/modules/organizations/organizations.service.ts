@@ -449,25 +449,39 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
       throw new Error('user is already a member')
     }
 
-    // Marca o convite como aceito
-    await db
-      .update(t.organizationInvitation)
-      .set({ acceptedAt: new Date(), acceptedBy: userId })
-      .where(eq(t.organizationInvitation.organizationInvitationId, invitation.organizationInvitationId))
+    // Marca o convite como aceito e adiciona o membro em uma única transação
+    const result = await db.transaction(async (tx) => {
+      const claimed = await tx
+        .update(t.organizationInvitation)
+        .set({ acceptedAt: new Date(), acceptedBy: userId })
+        .where(
+          and(
+            eq(t.organizationInvitation.organizationInvitationId, invitation.organizationInvitationId),
+            isNull(t.organizationInvitation.acceptedAt),
+          ),
+        )
+        .returning()
 
-    // Adiciona o usuário como membro
-    const insertedMembers = await db
-      .insert(t.organizationMember)
-      .values({
-        organizationMemberId: randomUUID(),
-        tenantId: invitation.tenantId,
-        userId,
-        role: invitation.role,
-        invitedBy: null,
-      })
-      .returning()
+      if (claimed.length === 0) {
+        throw new Error('invitation not found or already accepted')
+      }
 
-    const member = insertedMembers[0]
+      // Adiciona o usuário como membro
+      const insertedMembers = await tx
+        .insert(t.organizationMember)
+        .values({
+          organizationMemberId: randomUUID(),
+          tenantId: invitation.tenantId,
+          userId,
+          role: invitation.role,
+          invitedBy: null,
+        })
+        .returning()
+
+      return insertedMembers[0]
+    })
+
+    const member = result
     if (!member) {
       throw new Error('failed to create membership')
     }

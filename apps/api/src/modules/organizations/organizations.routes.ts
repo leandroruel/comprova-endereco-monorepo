@@ -1,19 +1,30 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { Db } from '@comprova/db'
+import { PROBLEM_CONTENT_TYPE, problems } from '@comprova/contracts'
 import { makeOrganizationsController } from './organizations.controller.js'
 import {
   CompleteOnboardingBody,
   CreateOrganizationBody,
   OrganizationResponse,
   OrganizationMemberResponse,
+  ProblemResponse,
   AddMemberBody,
   InviteMemberBody,
   AcceptInvitationBody,
   TenantIdParams,
 } from './organizations.schema.js'
 import { requireOrganizationAccess, requireAdminOrOwner } from '../../plugins/organization.js'
+
+const requireSessionUser = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply | void> => {
+  if (request.sessionUser === undefined) {
+    return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+  }
+}
 
 export type OrganizationsRoutesDeps = {
   readonly db: Db
@@ -32,6 +43,7 @@ export const registerOrganizationsRoutes = (
   app.post(
     '/organizations',
     {
+      preHandler: requireSessionUser,
       schema: {
         body: CreateOrganizationBody,
         response: { 201: OrganizationResponse },
@@ -57,6 +69,7 @@ export const registerOrganizationsRoutes = (
   app.get(
     '/organizations',
     {
+      preHandler: requireSessionUser,
       schema: {
         response: { 200: z.array(OrganizationResponse) },
       },
@@ -114,9 +127,9 @@ export const registerOrganizationsRoutes = (
         body: AddMemberBody,
         response: {
           201: OrganizationMemberResponse,
-          403: z.object({}),
-          404: z.object({}),
-          409: z.object({}),
+          403: ProblemResponse,
+          404: ProblemResponse,
+          409: ProblemResponse,
         },
       },
     },
@@ -177,6 +190,7 @@ export const registerOrganizationsRoutes = (
   app.post(
     '/organizations/invitations/accept',
     {
+      preHandler: requireSessionUser,
       schema: {
         body: AcceptInvitationBody,
         response: { 200: OrganizationMemberResponse },

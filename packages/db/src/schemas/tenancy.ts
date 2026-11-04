@@ -37,6 +37,7 @@ export const apiKey = pgTable(
     scopes: text('scopes').array().notNull().default(['validate:read', 'validate:write']),
     keyType: text('key_type').notNull().default('user'),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

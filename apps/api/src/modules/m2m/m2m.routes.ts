@@ -2,13 +2,13 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { Db } from '@comprova/db'
+import { ProblemSchema } from '@comprova/contracts'
 import { makeM2MController } from './m2m.controller.js'
 import {
   CreateApiKeyBody,
   ApiKeyIdParams,
   ApiKeyCreatedResponse,
   ApiKeyDtoSchema,
-  sendProblem,
 } from './m2m.schema.js'
 
 export type M2MRoutesDeps = {
@@ -31,7 +31,7 @@ export const registerM2MRoutes = (
         response: { 201: ApiKeyCreatedResponse },
       },
     },
-    async (request: any, reply) => {
+    async (request, reply) => {
       return controller.create(
         {
           tenantId: request.body.tenantId,
@@ -54,7 +54,7 @@ export const registerM2MRoutes = (
         response: { 200: ApiKeyDtoSchema },
       },
     },
-    async (request: any, reply) => {
+    async (request, reply) => {
       return controller.list(
         request.query.tenantId,
         request.sessionUser!.id,
@@ -71,12 +71,12 @@ export const registerM2MRoutes = (
         body: z.object({ tenantId: z.string().uuid() }),
         response: {
           200: z.object({ revoked: z.boolean() }),
-          403: z.object({}),
-          404: z.object({}),
+          403: ProblemSchema,
+          404: ProblemSchema,
         },
       },
     },
-    async (request: any, reply) => {
+    async (request, reply) => {
       return controller.revoke(
         request.body.tenantId,
         request.params.apiKeyId,

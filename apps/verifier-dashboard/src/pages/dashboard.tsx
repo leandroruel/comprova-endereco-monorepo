@@ -7,9 +7,10 @@ import { Users, FileKey, RefreshCw } from 'lucide-react'
 
 interface DashboardPageProps {
   user: { id: string; email: string; name: string; role: string }
+  setRoute: (route: string) => void
 }
 
-export function DashboardPage({ user }: DashboardPageProps) {
+export function DashboardPage({ user, setRoute }: DashboardPageProps) {
   const queryClient = useQueryClient()
 
   const { data: orgs, isLoading: orgsLoading } = useQuery({
@@ -41,7 +42,7 @@ export function DashboardPage({ user }: DashboardPageProps) {
 
   const { data: apiKeysData, isLoading: keysLoading, refetch: refetchKeys } = useQuery({
     queryKey: ['api-keys', tenantId],
-    queryFn: () => listApiKeys(),
+    queryFn: () => listApiKeys(tenantId!),
     enabled: !!tenantId,
   })
 
@@ -145,7 +146,9 @@ export function DashboardPage({ user }: DashboardPageProps) {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Seu papel</span>
-              <Badge variant="secondary">{user.role}</Badge>
+              <Badge variant="secondary">
+                {membersData?.find((m) => m.userId === user.id)?.role ?? '—'}
+              </Badge>
             </div>
           </CardContent>
         </Card>
@@ -215,7 +218,11 @@ export function DashboardPage({ user }: DashboardPageProps) {
               </Table>
             )}
             <div className="mt-4">
-              <Button variant="outline" size="sm" onClick={() => {}}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRoute('members')}
+              >
                 <Users className="mr-2 h-4 w-4" />
                 Gerenciar membros
               </Button>
@@ -238,7 +245,7 @@ export function DashboardPage({ user }: DashboardPageProps) {
                 <p className="text-sm text-muted-foreground">
                   Nenhuma credencial de API criada
                 </p>
-                <Button variant="outline" size="sm" onClick={() => {}}>
+                <Button variant="outline" size="sm" onClick={() => setRoute('integrations')}>
                   <FileKey className="mr-2 h-4 w-4" />
                   Criar primeira credencial
                 </Button>

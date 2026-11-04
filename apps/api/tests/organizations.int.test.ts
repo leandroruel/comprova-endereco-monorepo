@@ -1,5 +1,4 @@
 import { createDbPool, runMigrations } from '@comprova/db'
-import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import {
   startTestDb,
@@ -193,29 +192,38 @@ describe('Verifier Onboarding', () => {
     expect(org.termsAcceptedAt).not.toBeNull()
   })
 
-  it('não deve permitir que não-owner complete o onboarding de outra organização', async () => {
-    // Cria organização onde o member é owner
+  it('não deve permitir que não-owner complete o onboarding', async () => {
+    // Cria organização com o owner
     const createRes = await injectWithSession(
       'POST',
       '/v1/organizations',
       {
-        name: 'Org do Membro',
-        email: 'member@exemplo.com',
+        name: 'Org Onboarding Não-Owner',
+        email: 'owner@exemplo.com',
         termsVersion: '1.0.0',
       },
-      memberSessionCookie,
+      ownerSessionCookie,
     )
     expect(createRes.statusCode).toBe(201)
-    const memberOrgTenantId = createRes.json().tenantId
+    const tenantId = createRes.json().tenantId
 
-    // O member é owner dessa org, então pode completar
+    // Owner adiciona o member como membro simples
+    const addRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${tenantId}/members`,
+      { email: 'member@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(addRes.statusCode).toBe(201)
+
+    // O membro tenta completar o onboarding (não é owner) → 403
     const res = await injectWithSession(
       'POST',
-      `/v1/organizations/${memberOrgTenantId}/onboarding/complete`,
+      `/v1/organizations/${tenantId}/onboarding/complete`,
       { termsVersion: '1.0.0' },
       memberSessionCookie,
     )
-    expect(res.statusCode).toBe(200)
+    expect(res.statusCode).toBe(403)
   })
 
   it('deve adicionar e listar membros', async () => {
@@ -254,6 +262,15 @@ describe('Verifier Onboarding', () => {
   })
 
   it('não deve permitir que não-admin adicione membros', async () => {
+    // Adiciona o member como membro de orgTenantId para passar no guard de membership
+    const addMemberRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgTenantId}/members`,
+      { email: 'member@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(addMemberRes.statusCode).toBe(201)
+
     const res = await injectWithSession(
       'POST',
       `/v1/organizations/${orgTenantId}/members`,

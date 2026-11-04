@@ -27,6 +27,7 @@ interface ApiKeyRow {
   readonly status: string
   readonly rateLimitRps: number
   readonly burst: number
+  readonly expiresAt: Date | null
 }
 
 const unauthorized = (reply: FastifyReply): FastifyReply =>
@@ -87,6 +88,7 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
         status: t.tenant.status,
         rateLimitRps: t.tenant.rateLimitRps,
         burst: t.tenant.burst,
+        expiresAt: t.apiKey.expiresAt,
       })
       .from(t.apiKey)
       .innerJoin(t.tenant, eq(t.apiKey.tenantId, t.tenant.tenantId))
@@ -94,6 +96,11 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
 
     const match = rows.find((row) => hasher.verify(row.keyHash, bearer))
     if (match === undefined || match.status !== 'active') {
+      return unauthorized(reply)
+    }
+
+    // Rejeita chaves expiradas.
+    if (match.expiresAt !== null && match.expiresAt !== undefined && new Date(match.expiresAt) < new Date()) {
       return unauthorized(reply)
     }
 
