@@ -16,7 +16,13 @@ export const createAuth = (db: Db, secret: string) =>
       },
     }),
     secret,
-    trustedOrigins: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
+    trustedOrigins: [
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://admin.localhost:5173',
+      'http://verifier.localhost:5174',
+      'http://localhost:3000',
+    ],
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,

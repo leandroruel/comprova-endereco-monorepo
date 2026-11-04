@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3000/v1'
+const API_BASE = '/v1'
 
 /** Headers comuns para requisições autenticadas por sessão (cookie). */
 function authHeaders(): HeadersInit {
@@ -38,7 +38,7 @@ export async function getMe(): Promise<{
   name: string
   role: string
 } | null> {
-  const res = await fetch('http://localhost:3000/api/me', {
+  const res = await fetch('/api/me', {
     method: 'GET',
     credentials: 'include',
   })

@@ -2,7 +2,7 @@
 // a raiz do repo — ver README e `.env.example`). Sem ela a API responde 401.
 // Atenção: isto é uma facilidade de desenvolvimento — num dashboard público a
 // chave não pode viver no bundle (precisaria de sessão/BFF).
-export const API_BASE = 'http://localhost:3000'
+export const API_BASE = ''
 
 const apiKey = import.meta.env.VITE_API_KEY ?? ''
 if (apiKey === '' && import.meta.env.DEV && import.meta.env.MODE !== 'test') {
