@@ -28,13 +28,9 @@ const forbidden = (reply: FastifyReply): FastifyReply =>
  * Deve rodar como `preHandler` de rotas montadas DEPOIS do
  * `makeSessionMiddleware` (que preenche `request.sessionUser`).
  */
-export const requireOrganizationAccess = (
-  db: t.Db,
-) =>
-  async (
-    request: FastifyRequest,
-    reply: FastifyReply,
-  ): Promise<FastifyReply | void> => {
+export const requireOrganizationAccess =
+  (db: t.Db) =>
+  async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
     const sessionUser = request.sessionUser
     if (sessionUser === undefined) {
       return unauthorized(reply)
@@ -51,10 +47,7 @@ export const requireOrganizationAccess = (
       })
       .from(t.organizationMember)
       .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, sessionUser.id),
-        ),
+        and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, sessionUser.id)),
       )
       .limit(1)
 
@@ -80,10 +73,7 @@ export const requireOrganizationAccess = (
  */
 export const requireOrgRole =
   (allowedRoles: readonly string[]) =>
-  async (
-    request: FastifyRequest,
-    reply: FastifyReply,
-  ): Promise<FastifyReply | void> => {
+  async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
     const organization = request.organization
     if (organization === undefined) {
       return unauthorized(reply)

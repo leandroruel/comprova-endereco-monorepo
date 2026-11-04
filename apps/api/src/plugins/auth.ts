@@ -46,7 +46,11 @@ const cacheGet = (prefixHash: string, now: number): TenantContext | null => {
     return null
   }
   // Re-chave expirou: invalida a entrada do cache mesmo antes do TTL.
-  if (hit.ctx.expiresAt !== null && hit.ctx.expiresAt !== undefined && new Date(hit.ctx.expiresAt) < new Date()) {
+  if (
+    hit.ctx.expiresAt !== null &&
+    hit.ctx.expiresAt !== undefined &&
+    new Date(hit.ctx.expiresAt) < new Date()
+  ) {
     verifiedPrefixes.delete(prefixHash)
     return null
   }

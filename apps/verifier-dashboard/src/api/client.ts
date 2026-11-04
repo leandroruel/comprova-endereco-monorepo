@@ -8,10 +8,7 @@ function authHeaders(): HeadersInit {
 }
 
 /** Faz uma requisição à API e lança em caso de erro HTTP. */
-async function apiRequest<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include',
@@ -26,10 +23,9 @@ async function apiRequest<T>(
       title?: string
       detail?: string
     }
-    throw Object.assign(
-      new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`),
-      { status: res.status },
-    )
+    throw Object.assign(new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`), {
+      status: res.status,
+    })
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -88,28 +84,28 @@ export async function createOrganization(body: {
 }
 
 /** GET /organizations — lista organizações às quais o usuário pertence. */
-export async function listOrganizations(): Promise<Array<{
-  tenantId: string
-  name: string
-  type: string
-  status: string
-  onboardingStatus: string
-  termsAcceptedAt: string | null
-  termsAcceptedBy: string | null
-  termsVersion: string | null
-  dataRegion: string
-  rateLimitRps: number
-  burst: number
-  monthlyQuota: number | null
-  createdAt: string
-}>> {
+export async function listOrganizations(): Promise<
+  Array<{
+    tenantId: string
+    name: string
+    type: string
+    status: string
+    onboardingStatus: string
+    termsAcceptedAt: string | null
+    termsAcceptedBy: string | null
+    termsVersion: string | null
+    dataRegion: string
+    rateLimitRps: number
+    burst: number
+    monthlyQuota: number | null
+    createdAt: string
+  }>
+> {
   return apiRequest('/organizations', { method: 'GET' })
 }
 
 /** GET /organizations/:tenantId — obtém uma organização. */
-export async function getOrganization(
-  tenantId: string,
-): Promise<{
+export async function getOrganization(tenantId: string): Promise<{
   tenantId: string
   name: string
   legalName: string | null
@@ -152,16 +148,18 @@ export async function completeOnboarding(
 }
 
 /** GET /organizations/:tenantId/members — lista membros da organização. */
-export async function listMembers(tenantId: string): Promise<Array<{
-  organizationMemberId: string
-  tenantId: string
-  userId: string
-  userEmail: string
-  userName: string
-  role: string
-  joinedAt: string
-  invitedBy: string | null
-}>> {
+export async function listMembers(tenantId: string): Promise<
+  Array<{
+    organizationMemberId: string
+    tenantId: string
+    userId: string
+    userEmail: string
+    userName: string
+    role: string
+    joinedAt: string
+    invitedBy: string | null
+  }>
+> {
   return apiRequest(`/organizations/${tenantId}/members`, { method: 'GET' })
 }
 
@@ -231,10 +229,7 @@ export async function listApiKeys(tenantId: string): Promise<{
 }
 
 /** DELETE /m2m/api-keys/:apiKeyId — revoga uma credencial M2M. */
-export async function revokeApiKey(
-  tenantId: string,
-  apiKeyId: string,
-): Promise<{ revoked: boolean }> {
+export async function revokeApiKey(tenantId: string, apiKeyId: string): Promise<{ revoked: boolean }> {
   return apiRequest(`/m2m/api-keys/${apiKeyId}`, {
     method: 'DELETE',
     body: JSON.stringify({ tenantId }),

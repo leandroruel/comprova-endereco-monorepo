@@ -1,10 +1,6 @@
 import { createDbPool, runMigrations } from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
-import {
-  startTestDb,
-  startTestRedis,
-  TEST_APP_DB_PASSWORD,
-} from '@comprova/testing'
+import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import Redis from 'ioredis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
@@ -107,15 +103,11 @@ beforeAll(async () => {
   memberSessionCookie = await loginAndGetCookie('member@exemplo.com', 'SenhaForte123!')
 
   // Cria uma organização via API (simulando onboarding)
-  const createRes = await injectWithSession(
-    'POST',
-    '/v1/organizations',
-    {
-      name: 'Organização Teste',
-      email: 'owner@exemplo.com',
-      termsVersion: '1.0.0',
-    },
-  )
+  const createRes = await injectWithSession('POST', '/v1/organizations', {
+    name: 'Organização Teste',
+    email: 'owner@exemplo.com',
+    termsVersion: '1.0.0',
+  })
   expect(createRes.statusCode).toBe(201)
   const org = createRes.json()
   orgTenantId = org.tenantId
@@ -132,15 +124,11 @@ afterAll(async () => {
 
 describe('Verifier Onboarding', () => {
   it('deve criar uma organização e associar o usuário como owner', async () => {
-    const res = await injectWithSession(
-      'POST',
-      '/v1/organizations',
-      {
-        name: 'Nova Organização',
-        email: 'owner@exemplo.com',
-        termsVersion: '2.0.0',
-      },
-    )
+    const res = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Nova Organização',
+      email: 'owner@exemplo.com',
+      termsVersion: '2.0.0',
+    })
     expect(res.statusCode).toBe(201)
     const org = res.json()
     expect(org.name).toBe('Nova Organização')
@@ -227,15 +215,11 @@ describe('Verifier Onboarding', () => {
   })
 
   it('deve adicionar e listar membros', async () => {
-    const createRes = await injectWithSession(
-      'POST',
-      '/v1/organizations',
-      {
-        name: 'Org Membros',
-        email: 'owner@exemplo.com',
-        termsVersion: '1.0.0',
-      },
-    )
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Membros',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
     expect(createRes.statusCode).toBe(201)
     const memberOrgTenantId = createRes.json().tenantId
 
@@ -258,7 +242,9 @@ describe('Verifier Onboarding', () => {
     expect(listRes.statusCode).toBe(200)
     const members = listRes.json()
     expect(members.length).toBeGreaterThanOrEqual(1)
-    expect((members as Array<{ userEmail: string }>).some((m) => m.userEmail === 'member@exemplo.com')).toBe(true)
+    expect((members as Array<{ userEmail: string }>).some((m) => m.userEmail === 'member@exemplo.com')).toBe(
+      true,
+    )
   })
 
   it('não deve permitir que não-admin adicione membros', async () => {

@@ -4,22 +4,14 @@ import { z } from 'zod'
 import type { Db } from '@comprova/db'
 import { ProblemSchema } from '@comprova/contracts'
 import { makeM2MController } from './m2m.controller.js'
-import {
-  CreateApiKeyBody,
-  ApiKeyIdParams,
-  ApiKeyCreatedResponse,
-  ApiKeyDtoSchema,
-} from './m2m.schema.js'
+import { CreateApiKeyBody, ApiKeyIdParams, ApiKeyCreatedResponse, ApiKeyDtoSchema } from './m2m.schema.js'
 
 export type M2MRoutesDeps = {
   readonly db: Db
   readonly apiKeyPepper: string
 }
 
-export const registerM2MRoutes = (
-  instance: FastifyInstance,
-  deps: M2MRoutesDeps,
-): void => {
+export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps): void => {
   const app = instance.withTypeProvider<ZodTypeProvider>()
   const controller = makeM2MController(deps)
 
@@ -55,11 +47,7 @@ export const registerM2MRoutes = (
       },
     },
     async (request, reply) => {
-      return controller.list(
-        request.query.tenantId,
-        request.sessionUser!.id,
-        reply,
-      )
+      return controller.list(request.query.tenantId, request.sessionUser!.id, reply)
     },
   )
 
@@ -77,12 +65,7 @@ export const registerM2MRoutes = (
       },
     },
     async (request, reply) => {
-      return controller.revoke(
-        request.body.tenantId,
-        request.params.apiKeyId,
-        request.sessionUser!.id,
-        reply,
-      )
+      return controller.revoke(request.body.tenantId, request.params.apiKeyId, request.sessionUser!.id, reply)
     },
   )
 }

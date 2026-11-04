@@ -21,10 +21,7 @@ import {
 import { refCep, refCnefeAddress, refKnownSharedAddress } from './reference-address.js'
 import { subject } from './subjects.js'
 import { apiKey, tenant } from './tenancy.js'
-import {
-  organizationInvitation,
-  organizationMember,
-} from './organizations.js'
+import { organizationInvitation, organizationMember } from './organizations.js'
 import { auditLog, usageEvent } from './usage.js'
 import { validation, validationIdempotency } from './validations.js'
 

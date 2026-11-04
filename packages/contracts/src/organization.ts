@@ -1,11 +1,7 @@
 import { z } from 'zod'
 
 export const OrganizationTypeSchema = z.enum(['technical', 'organization'])
-export const OrganizationOnboardingStatusSchema = z.enum([
-  'pending',
-  'completed',
-  'suspended',
-])
+export const OrganizationOnboardingStatusSchema = z.enum(['pending', 'completed', 'suspended'])
 export const OrganizationMemberRoleSchema = z.enum(['owner', 'admin', 'member'])
 export const ApiKeyTypeSchema = z.enum(['user', 'm2m'])
 
@@ -58,9 +54,7 @@ export const CreateOrganizationMemberRequestSchema = z.object({
   role: OrganizationMemberRoleSchema.default('member'),
 })
 
-export type CreateOrganizationMemberRequest = z.infer<
-  typeof CreateOrganizationMemberRequestSchema
->
+export type CreateOrganizationMemberRequest = z.infer<typeof CreateOrganizationMemberRequestSchema>
 
 export const OrganizationInvitationDtoSchema = z.object({
   organizationInvitationId: z.uuid(),
@@ -97,4 +91,3 @@ export const ApiKeyDtoSchema = z.object({
 })
 
 export type ApiKeyDto = z.infer<typeof ApiKeyDtoSchema>
-

@@ -1,7 +1,17 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createApiKey, listApiKeys, revokeApiKey } from '@/api/client'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Badge, Spinner } from '@/components/ui'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Button,
+  Input,
+  Badge,
+  Spinner,
+} from '@/components/ui'
 import { FileKey, AlertCircle, CheckCircle2, Trash2, Copy, Clock, Link } from 'lucide-react'
 
 interface IntegrationsPageProps {
@@ -16,7 +26,12 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
   const [success, setSuccess] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: keysData, isLoading: keysLoading, isError: keysError, error: keysErr } = useQuery({
+  const {
+    data: keysData,
+    isLoading: keysLoading,
+    isError: keysError,
+    error: keysErr,
+  } = useQuery({
     queryKey: ['api-keys', tenantId],
     queryFn: () => listApiKeys(tenantId),
     enabled: tenantId.length > 0,
@@ -122,8 +137,8 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
         <div>
           <h1 className="text-xl font-semibold">Integrações M2M</h1>
           <p className="text-sm text-muted-foreground">
-            Gerencie credenciais de API para integração máquina-a-máquina com o Comprova.
-            O segredo é exibido apenas no momento da criação.
+            Gerencie credenciais de API para integração máquina-a-máquina com o Comprova. O segredo é exibido
+            apenas no momento da criação.
           </p>
         </div>
       </div>
@@ -134,16 +149,12 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
             <CardTitle className="flex items-center gap-2">
               <FileKey className="h-4 w-4" /> Credenciais de API
             </CardTitle>
-            <CardDescription>
-              Chaves ativas para acesso M2M à API Comprova
-            </CardDescription>
+            <CardDescription>Chaves ativas para acesso M2M à API Comprova</CardDescription>
           </CardHeader>
           <CardContent>
             {keys.length === 0 ? (
               <div className="text-center py-8">
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma credencial criada ainda
-                </p>
+                <p className="text-sm text-muted-foreground">Nenhuma credencial criada ainda</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -172,8 +183,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
                       </p>
                       {key.lastUsedAt && (
                         <p className="text-xs text-muted-foreground">
-                          Última utilização:{' '}
-                          {new Date(key.lastUsedAt).toLocaleDateString('pt-BR')}
+                          Última utilização: {new Date(key.lastUsedAt).toLocaleDateString('pt-BR')}
                         </p>
                       )}
                     </div>
@@ -187,7 +197,11 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
                         onClick={() => handleRevoke(key.apiKeyId)}
                         disabled={revokeMutation.isPending}
                       >
-                        {revokeMutation.isPending ? <Spinner className="mr-1 h-3 w-3" /> : <Trash2 className="h-3 w-3" />}
+                        {revokeMutation.isPending ? (
+                          <Spinner className="mr-1 h-3 w-3" />
+                        ) : (
+                          <Trash2 className="h-3 w-3" />
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -202,9 +216,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
             <CardTitle className="flex items-center gap-2">
               <Link className="h-4 w-4" /> Criar credencial
             </CardTitle>
-            <CardDescription>
-              Gere uma nova chave de API M2M
-            </CardDescription>
+            <CardDescription>Gere uma nova chave de API M2M</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form onSubmit={handleCreate}>
@@ -223,9 +235,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Escopos
-                  </label>
+                  <label className="text-xs font-medium text-muted-foreground">Escopos</label>
                   <div className="flex items-center gap-2">
                     <input
                       id="scope-read"
@@ -281,16 +291,13 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
                     </label>
                   </div>
                   <p className="text-[10px] text-muted-foreground">
-                    O escopo <span className="font-medium">verify:m2m</span> é necessário para operações M2M sem sessão de usuário.
+                    O escopo <span className="font-medium">verify:m2m</span> é necessário para operações M2M
+                    sem sessão de usuário.
                   </p>
                 </div>
               </div>
 
-              <Button
-                type="submit"
-                disabled={createKeyMutation.isPending || !name.trim()}
-                className="w-full"
-              >
+              <Button type="submit" disabled={createKeyMutation.isPending || !name.trim()} className="w-full">
                 {createKeyMutation.isPending ? (
                   <Spinner className="mr-2" />
                 ) : (
@@ -326,11 +333,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
                     {showSecret.secret}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleCopy(showSecret.secret)}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => void handleCopy(showSecret.secret)}>
                       <Copy className="h-3 w-3 mr-1" />
                       Copiar segredo
                     </Button>

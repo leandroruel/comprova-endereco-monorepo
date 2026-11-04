@@ -1,12 +1,5 @@
 import { useState } from 'react'
-import {
-  LogOut,
-  LayoutDashboard,
-  Users,
-  ShieldCheck,
-  Menu,
-  X,
-} from 'lucide-react'
+import { LogOut, LayoutDashboard, Users, ShieldCheck, Menu, X } from 'lucide-react'
 
 interface LayoutProps {
   user: { id: string; email: string; name: string; role: string }
@@ -29,7 +22,9 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
 
   return (
     <div className="min-h-screen bg-background lg:flex">
-      <nav className={`fixed left-0 top-0 h-full w-64 bg-card border-r border-border z-20 transform transition-transform duration-200 md:translate-x-0 lg:static lg:inset-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-[-100%]'}`}>
+      <nav
+        className={`fixed left-0 top-0 h-full w-64 bg-card border-r border-border z-20 transform transition-transform duration-200 md:translate-x-0 lg:static lg:inset-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-[-100%]'}`}
+      >
         <div className="flex items-center justify-between h-14 px-6 border-b border-background">
           <div className="flex items-center gap-2">
             <span className="text-xl font-bold tracking-tight">comprova</span>
@@ -83,14 +78,13 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
 
       {/* Overlay para mobile */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-10 bg-black/50 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 z-10 bg-black/50 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* Conteúdo principal */}
-      <div className={`lg:flex-1 lg:min-w-0 min-h-screen ${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200 md:pl-64 lg:pl-0`}>
+      <div
+        className={`lg:flex-1 lg:min-w-0 min-h-screen ${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200 md:pl-64 lg:pl-0`}
+      >
         {/* Header mobile */}
         <div className="lg:hidden flex items-center justify-between h-14 px-4 border-b border-background">
           <button

@@ -1,15 +1,7 @@
 import { and, eq, isNull } from '@comprova/db'
 import * as t from '@comprova/db'
-import {
-  newApiKey,
-  keyPrefixOf,
-  makeApiKeyHasher,
-  type Db,
-} from '@comprova/db'
-import {
-  type ApiKeyDto,
-  type CreateApiKeyRequest,
-} from '@comprova/contracts'
+import { newApiKey, keyPrefixOf, makeApiKeyHasher, type Db } from '@comprova/db'
+import { type ApiKeyDto, type CreateApiKeyRequest } from '@comprova/contracts'
 import { randomUUID } from 'node:crypto'
 
 export class AuthorizationError extends Error {
@@ -40,12 +32,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
     const member = await db
       .select({ userId: t.organizationMember.userId, role: t.organizationMember.role })
       .from(t.organizationMember)
-      .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, userId),
-        ),
-      )
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
       .limit(1)
 
     if (member.length === 0) {
@@ -119,10 +106,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
   /**
    * Lista API keys da organização (sem expor o segredo).
    */
-  const listApiKeys = async (
-    tenantId: string,
-    userId: string,
-  ): Promise<ApiKeyDto[]> => {
+  const listApiKeys = async (tenantId: string, userId: string): Promise<ApiKeyDto[]> => {
     await ensureMembership(tenantId, userId)
 
     const rows = await db
@@ -138,12 +122,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
         createdAt: t.apiKey.createdAt,
       })
       .from(t.apiKey)
-      .where(
-        and(
-          eq(t.apiKey.tenantId, tenantId),
-          isNull(t.apiKey.revokedAt),
-        ),
-      )
+      .where(and(eq(t.apiKey.tenantId, tenantId), isNull(t.apiKey.revokedAt)))
 
     return rows.map((row) => ({
       apiKeyId: row.apiKeyId,
@@ -162,22 +141,14 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
   /**
    * Revoga uma API key da organização.
    */
-  const revokeApiKey = async (
-    tenantId: string,
-    apiKeyId: string,
-    userId: string,
-  ): Promise<boolean> => {
+  const revokeApiKey = async (tenantId: string, apiKeyId: string, userId: string): Promise<boolean> => {
     await ensureMembership(tenantId, userId, 'admin')
 
     const [updated] = await db
       .update(t.apiKey)
       .set({ revokedAt: new Date() })
       .where(
-        and(
-          eq(t.apiKey.apiKeyId, apiKeyId),
-          eq(t.apiKey.tenantId, tenantId),
-          isNull(t.apiKey.revokedAt),
-        ),
+        and(eq(t.apiKey.apiKeyId, apiKeyId), eq(t.apiKey.tenantId, tenantId), isNull(t.apiKey.revokedAt)),
       )
       .returning({ apiKeyId: t.apiKey.apiKeyId })
 

@@ -75,11 +75,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     })
 
     // Busca o tenant criado para retornar o DTO
-    const [newTenant] = await db
-      .select()
-      .from(t.tenant)
-      .where(eq(t.tenant.tenantId, tenantId))
-      .limit(1)
+    const [newTenant] = await db.select().from(t.tenant).where(eq(t.tenant.tenantId, tenantId)).limit(1)
 
     if (!newTenant) {
       throw new Error('failed to create organization')
@@ -117,12 +113,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     const member = await db
       .select({ role: t.organizationMember.role })
       .from(t.organizationMember)
-      .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, userId),
-        ),
-      )
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
       .limit(1)
 
     if (member.length === 0) {
@@ -154,9 +145,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
   /**
    * Lista organizações às quais o usuário pertence.
    */
-  const listOrganizationsByUser = async (
-    userId: string,
-  ): Promise<OrganizationDto[]> => {
+  const listOrganizationsByUser = async (userId: string): Promise<OrganizationDto[]> => {
     const rows = await db
       .select({
         tenantId: t.tenant.tenantId,
@@ -184,29 +173,17 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
    * Busca uma organização pelo ID. Retorna null se não existir ou se o
    * usuário não for membro.
    */
-  const getOrganization = async (
-    tenantId: string,
-    userId: string,
-  ): Promise<OrganizationDto | null> => {
+  const getOrganization = async (tenantId: string, userId: string): Promise<OrganizationDto | null> => {
     // Verifica membership
     const member = await db
       .select({ userId: t.organizationMember.userId })
       .from(t.organizationMember)
-      .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, userId),
-        ),
-      )
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
       .limit(1)
 
     if (member.length === 0) return null
 
-    const [tenant] = await db
-      .select()
-      .from(t.tenant)
-      .where(eq(t.tenant.tenantId, tenantId))
-      .limit(1)
+    const [tenant] = await db.select().from(t.tenant).where(eq(t.tenant.tenantId, tenantId)).limit(1)
 
     if (!tenant) return null
     return mapTenantToDto(tenant)
@@ -225,12 +202,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     const inviter = await db
       .select({ role: t.organizationMember.role })
       .from(t.organizationMember)
-      .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, inviterUserId),
-        ),
-      )
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, inviterUserId)))
       .limit(1)
 
     if (inviter.length === 0) {
@@ -257,12 +229,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     const existing = await db
       .select({ userId: t.organizationMember.userId })
       .from(t.organizationMember)
-      .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, user.id),
-        ),
-      )
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, user.id)))
       .limit(1)
 
     if (existing.length > 0) {
@@ -300,20 +267,12 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
   /**
    * Lista membros de uma organização (somente membros da organização).
    */
-  const listMembers = async (
-    tenantId: string,
-    userId: string,
-  ): Promise<OrganizationMemberDto[]> => {
+  const listMembers = async (tenantId: string, userId: string): Promise<OrganizationMemberDto[]> => {
     // Verifica membership
     const member = await db
       .select({ userId: t.organizationMember.userId })
       .from(t.organizationMember)
-      .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, userId),
-        ),
-      )
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
       .limit(1)
 
     if (member.length === 0) return []
@@ -360,12 +319,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     const inviter = await db
       .select({ role: t.organizationMember.role })
       .from(t.organizationMember)
-      .where(
-        and(
-          eq(t.organizationMember.tenantId, tenantId),
-          eq(t.organizationMember.userId, inviterUserId),
-        ),
-      )
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, inviterUserId)))
       .limit(1)
 
     if (inviter.length === 0) {
@@ -410,19 +364,11 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
    * Aceita um convite: adiciona o usuário como membro da organização.
    * O token é consumido (marcado como aceito).
    */
-  const acceptInvitation = async (
-    token: string,
-    userId: string,
-  ): Promise<OrganizationMemberDto> => {
+  const acceptInvitation = async (token: string, userId: string): Promise<OrganizationMemberDto> => {
     const [invitation] = await db
       .select()
       .from(t.organizationInvitation)
-      .where(
-        and(
-          eq(t.organizationInvitation.token, token),
-          isNull(t.organizationInvitation.acceptedAt),
-        ),
-      )
+      .where(and(eq(t.organizationInvitation.token, token), isNull(t.organizationInvitation.acceptedAt)))
       .limit(1)
 
     if (!invitation) {
@@ -438,10 +384,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
       .select({ userId: t.organizationMember.userId })
       .from(t.organizationMember)
       .where(
-        and(
-          eq(t.organizationMember.tenantId, invitation.tenantId),
-          eq(t.organizationMember.userId, userId),
-        ),
+        and(eq(t.organizationMember.tenantId, invitation.tenantId), eq(t.organizationMember.userId, userId)),
       )
       .limit(1)
 

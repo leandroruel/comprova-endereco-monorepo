@@ -18,7 +18,9 @@ export default function App() {
     name: string
     role: string
   } | null>(null)
-  const [organizations, setOrganizations] = useState<Array<{ tenantId: string; onboardingStatus: string }>>([])
+  const [organizations, setOrganizations] = useState<Array<{ tenantId: string; onboardingStatus: string }>>(
+    [],
+  )
   const [loading, setLoading] = useState(true)
 
   const resolveRoute = useCallback(async () => {
@@ -35,8 +37,7 @@ export default function App() {
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => [])
         })()
-        const list: Array<{ tenantId: string; onboardingStatus: string }> =
-          Array.isArray(orgs) ? orgs : []
+        const list: Array<{ tenantId: string; onboardingStatus: string }> = Array.isArray(orgs) ? orgs : []
         setOrganizations(list)
 
         const hasOrg = list.length > 0

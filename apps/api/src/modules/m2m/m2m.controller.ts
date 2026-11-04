@@ -2,10 +2,7 @@ import type { FastifyReply } from 'fastify'
 import type { ApiKeyDto, CreateApiKeyRequest } from '@comprova/contracts'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import type { z } from 'zod'
-import type {
-  ApiKeyCreatedResponse,
-  M2MControllerDeps,
-} from './m2m.schema.js'
+import type { ApiKeyCreatedResponse, M2MControllerDeps } from './m2m.schema.js'
 import { sendProblem } from './m2m.schema.js'
 import { makeM2MService } from './m2m.service.js'
 import { AuthorizationError } from './m2m.service.js'
@@ -30,16 +27,23 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       reply: FastifyReply,
     ): Promise<ApiKeyCreatedResponseType | FastifyReply> => {
       try {
-        const result = await service.createApiKey(request.tenantId, {
-          name: request.name,
-          scopes: request.scopes,
-          keyType: request.keyType,
-          expiresInDays: request.expiresInDays,
-        }, request.userId)
+        const result = await service.createApiKey(
+          request.tenantId,
+          {
+            name: request.name,
+            scopes: request.scopes,
+            keyType: request.keyType,
+            expiresInDays: request.expiresInDays,
+          },
+          request.userId,
+        )
         return reply.code(201).send(result)
       } catch (error) {
         if (error instanceof AuthorizationError) {
-          return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problem(403, 'FORBIDDEN', error.message))
+          return reply
+            .code(403)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(403, 'FORBIDDEN', error.message))
         }
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao criar credencial')
       }

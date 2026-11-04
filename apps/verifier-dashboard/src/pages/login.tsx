@@ -29,7 +29,13 @@ function PasswordStrength({ password }: { password: string }) {
           <div
             className={cn(
               'h-full rounded-full transition-all duration-300',
-              strength === 0 ? 'bg-muted' : strength === 1 ? 'bg-red-500' : strength === 2 ? 'bg-amber-500' : 'bg-emerald-500',
+              strength === 0
+                ? 'bg-muted'
+                : strength === 1
+                  ? 'bg-red-500'
+                  : strength === 2
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500',
             )}
             style={{ width: password.length === 0 ? 0 : `${(score / 5) * 100}%` }}
           />

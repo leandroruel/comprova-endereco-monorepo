@@ -89,10 +89,7 @@ export const registerOrganizationsRoutes = (
       },
     },
     async (request, reply) => {
-      return controller.get(
-        { tenantId: request.params.tenantId, userId: request.sessionUser!.id },
-        reply,
-      )
+      return controller.get({ tenantId: request.params.tenantId, userId: request.sessionUser!.id }, reply)
     },
   )
 

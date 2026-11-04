@@ -1,7 +1,23 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { addMember, listMembers } from '@/api/client'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Table, TableHeader, TableBody, TableRow, TableHead, TableCell, Badge, Spinner } from '@/components/ui'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Button,
+  Input,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  Badge,
+  Spinner,
+} from '@/components/ui'
 import { Users, Plus, AlertCircle, Mail } from 'lucide-react'
 
 interface MembersPageProps {
@@ -85,9 +101,7 @@ export function MembersPage({ user }: MembersPageProps) {
             <CardTitle className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Lista de membros
             </CardTitle>
-            <CardDescription>
-              Usuários cadastrados nesta organização
-            </CardDescription>
+            <CardDescription>Usuários cadastrados nesta organização</CardDescription>
           </CardHeader>
           <CardContent>
             {membersLoading ? (
@@ -95,9 +109,7 @@ export function MembersPage({ user }: MembersPageProps) {
                 <Spinner /> Carregando membros…
               </div>
             ) : members?.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                Nenhum membro cadastrado
-              </p>
+              <p className="text-sm text-muted-foreground text-center py-4">Nenhum membro cadastrado</p>
             ) : (
               <div className="overflow-auto">
                 <Table>
@@ -124,9 +136,7 @@ export function MembersPage({ user }: MembersPageProps) {
                           <span className="text-sm text-muted-foreground break-all">{m.userEmail}</span>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={m.role === 'owner' ? 'default' : 'secondary'}>
-                            {m.role}
-                          </Badge>
+                          <Badge variant={m.role === 'owner' ? 'default' : 'secondary'}>{m.role}</Badge>
                         </TableCell>
                         <TableCell>
                           <span className="text-sm text-muted-foreground">
@@ -147,9 +157,7 @@ export function MembersPage({ user }: MembersPageProps) {
             <CardTitle className="flex items-center gap-2">
               <Plus className="h-4 w-4" /> Adicionar membro
             </CardTitle>
-            <CardDescription>
-              Convide um novo usuário para a organização
-            </CardDescription>
+            <CardDescription>Convide um novo usuário para a organização</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form
@@ -207,7 +215,11 @@ export function MembersPage({ user }: MembersPageProps) {
                   disabled={addMemberMutation.isPending || !newEmail.trim()}
                   className="w-full"
                 >
-                  {addMemberMutation.isPending ? <Spinner className="mr-2" /> : <Plus className="mr-2 h-4 w-4" />}
+                  {addMemberMutation.isPending ? (
+                    <Spinner className="mr-2" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
                   Adicionar
                 </Button>
               </div>

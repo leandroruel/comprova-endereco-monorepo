@@ -21,9 +21,7 @@ export const organizationMember = pgTable(
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
     invitedBy: text('invited_by'),
   },
-  (t) => [
-    unique('organization_member_tenant_user_uq').on(t.tenantId, t.userId),
-  ],
+  (t) => [unique('organization_member_tenant_user_uq').on(t.tenantId, t.userId)],
 )
 
 /**
@@ -46,9 +44,7 @@ export const organizationInvitation = pgTable(
     acceptedBy: text('accepted_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
-    uniqueIndex('organization_invitation_token_uq').on(t.token),
-  ],
+  (t) => [uniqueIndex('organization_invitation_token_uq').on(t.token)],
 )
 
 export type OrganizationMember = typeof organizationMember.$inferSelect

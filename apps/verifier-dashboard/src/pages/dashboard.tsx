@@ -2,7 +2,22 @@ import { useQuery } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { getOrganization, listMembers, listApiKeys } from '@/api/client'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Badge, Table, TableHeader, TableBody, TableRow, TableHead, TableCell, Button, Spinner } from '@/components/ui'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Badge,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  Button,
+  Spinner,
+} from '@/components/ui'
 import { Users, FileKey, RefreshCw } from 'lucide-react'
 
 interface DashboardPageProps {
@@ -13,7 +28,11 @@ interface DashboardPageProps {
 export function DashboardPage({ user, setRoute }: DashboardPageProps) {
   const queryClient = useQueryClient()
 
-  const { data: orgs, isLoading: orgsLoading, isError: orgsError } = useQuery({
+  const {
+    data: orgs,
+    isLoading: orgsLoading,
+    isError: orgsError,
+  } = useQuery({
     queryKey: ['organizations'],
     queryFn: async () => {
       const res = await fetch('http://localhost:3000/v1/organizations', {
@@ -40,7 +59,11 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
     enabled: !!tenantId,
   })
 
-  const { data: apiKeysData, isLoading: keysLoading, refetch: refetchKeys } = useQuery({
+  const {
+    data: apiKeysData,
+    isLoading: keysLoading,
+    refetch: refetchKeys,
+  } = useQuery({
     queryKey: ['api-keys', tenantId],
     queryFn: () => listApiKeys(tenantId!),
     enabled: !!tenantId,
@@ -68,9 +91,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
             <p className="text-sm text-destructive">
               {(orgsError as unknown as Error | undefined)?.message ?? 'Erro ao carregar organizações'}
             </p>
-            <Button onClick={() => window.location.reload()}>
-              Tentar novamente
-            </Button>
+            <Button onClick={() => window.location.reload()}>Tentar novamente</Button>
           </CardContent>
         </Card>
       </div>
@@ -113,9 +134,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
         <Card>
           <CardHeader>
             <CardTitle>Status do onboarding</CardTitle>
-            <CardDescription>
-              Estado atual do cadastro da organização
-            </CardDescription>
+            <CardDescription>Estado atual do cadastro da organização</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between">
@@ -165,9 +184,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Seu papel</span>
-              <Badge variant="secondary">
-                {membersData?.find((m) => m.userId === user.id)?.role ?? '—'}
-              </Badge>
+              <Badge variant="secondary">{membersData?.find((m) => m.userId === user.id)?.role ?? '—'}</Badge>
             </div>
           </CardContent>
         </Card>
@@ -192,15 +209,11 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
             <CardTitle className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Membros da organização
             </CardTitle>
-            <CardDescription>
-              Gerencie quem tem acesso à sua organização
-            </CardDescription>
+            <CardDescription>Gerencie quem tem acesso à sua organização</CardDescription>
           </CardHeader>
           <CardContent>
             {membersData?.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                Nenhum membro cadastrado
-              </p>
+              <p className="text-sm text-muted-foreground text-center py-4">Nenhum membro cadastrado</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -222,9 +235,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={m.role === 'owner' ? 'default' : 'secondary'}>
-                          {m.role}
-                        </Badge>
+                        <Badge variant={m.role === 'owner' ? 'default' : 'secondary'}>{m.role}</Badge>
                       </TableCell>
                       <TableCell>
                         <span className="text-sm text-muted-foreground">
@@ -237,11 +248,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
               </Table>
             )}
             <div className="mt-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setRoute('members')}
-              >
+              <Button variant="outline" size="sm" onClick={() => setRoute('members')}>
                 <Users className="mr-2 h-4 w-4" />
                 Gerenciar membros
               </Button>
@@ -254,16 +261,12 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
             <CardTitle className="flex items-center gap-2">
               <FileKey className="h-4 w-4" /> Credenciais de API (M2M)
             </CardTitle>
-            <CardDescription>
-              Chaves para integração máquina-a-máquina com a API Comprova
-            </CardDescription>
+            <CardDescription>Chaves para integração máquina-a-máquina com a API Comprova</CardDescription>
           </CardHeader>
           <CardContent>
             {m2mKeys.length === 0 ? (
               <div className="space-y-3 text-center py-6">
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma credencial de API criada
-                </p>
+                <p className="text-sm text-muted-foreground">Nenhuma credencial de API criada</p>
                 <Button variant="outline" size="sm" onClick={() => setRoute('integrations')}>
                   <FileKey className="mr-2 h-4 w-4" />
                   Criar primeira credencial

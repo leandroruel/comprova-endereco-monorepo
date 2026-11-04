@@ -1,8 +1,26 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createOrganization, completeOnboarding } from '@/api/client'
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Separator, Spinner } from '@/components/ui'
-import { Mail, FileText, ShieldCheck, AlertCircle, CheckCircle2, ArrowRight, LayoutDashboard } from 'lucide-react'
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Input,
+  Separator,
+  Spinner,
+} from '@/components/ui'
+import {
+  Mail,
+  FileText,
+  ShieldCheck,
+  AlertCircle,
+  CheckCircle2,
+  ArrowRight,
+  LayoutDashboard,
+} from 'lucide-react'
 
 interface OrganizationSummary {
   tenantId: string
@@ -39,8 +57,7 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   })
 
   const completeMutation = useMutation({
-    mutationFn: ({ tenantId, tv }: { tenantId: string; tv: string }) =>
-      completeOnboarding(tenantId, tv),
+    mutationFn: ({ tenantId, tv }: { tenantId: string; tv: string }) => completeOnboarding(tenantId, tv),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
       onComplete()
@@ -96,8 +113,8 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
               <LayoutDashboard className="h-5 w-5" /> Bem-vindo ao Comprova Verifier
             </CardTitle>
             <CardDescription>
-              Cadastre sua organização para começar a usar a infraestrutura de
-              verificação de evidências do Comprova.
+              Cadastre sua organização para começar a usar a infraestrutura de verificação de evidências do
+              Comprova.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -120,11 +137,7 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
               </div>
             </div>
             <Separator />
-            <Button
-              onClick={() => setStep('create')}
-              className="w-full"
-              disabled={loading}
-            >
+            <Button onClick={() => setStep('create')} className="w-full" disabled={loading}>
               {loading ? <Spinner className="mr-2" /> : <ArrowRight className="mr-2 h-4 w-4" />}
               Criar organização
             </Button>
@@ -149,8 +162,8 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
               <Mail className="h-5 w-5" /> Dados da organização
             </CardTitle>
             <CardDescription>
-              Informe os dados da sua organização Verifier. O CPF/CNPJ é usado
-              apenas como dado organizacional, nunca como identificador interno.
+              Informe os dados da sua organização Verifier. O CPF/CNPJ é usado apenas como dado
+              organizacional, nunca como identificador interno.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -254,19 +267,17 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
               <FileText className="h-5 w-5" /> Aceite dos termos
             </CardTitle>
             <CardDescription>
-              Antes de concluir o onboarding, leia e aceite os termos e políticas
-              aplicáveis à sua organização.
+              Antes de concluir o onboarding, leia e aceite os termos e políticas aplicáveis à sua
+              organização.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="border border-border rounded-lg p-4 bg-muted/50">
               <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
               <p className="text-sm text-foreground">
-                Ao concordar, você autoriza o Comprova a tratar os dados de sua
-                organização para fins de verificação de evidências e emissão de
-                credenciais verificáveis. Os dados pessoais e organizacionais são
-                mantidos separadamente e nunca são compartilhados com outras
-                organizações.
+                Ao concordar, você autoriza o Comprova a tratar os dados de sua organização para fins de
+                verificação de evidências e emissão de credenciais verificáveis. Os dados pessoais e
+                organizacionais são mantidos separadamente e nunca são compartilhados com outras organizações.
               </p>
             </div>
 
@@ -288,11 +299,7 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
               <Button type="button" variant="outline" onClick={() => setStep('create')}>
                 Voltar
               </Button>
-              <Button
-                onClick={handleComplete}
-                disabled={loading || !termsAccepted}
-                className="w-auto"
-              >
+              <Button onClick={handleComplete} disabled={loading || !termsAccepted} className="w-auto">
                 {loading ? <Spinner className="mr-2" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                 Concluir onboarding
               </Button>
@@ -319,8 +326,7 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
             </div>
             <h2 className="text-xl font-semibold">Onboarding concluído</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Sua organização está pronta. Você já pode gerenciar membros e
-              integrações.
+              Sua organização está pronta. Você já pode gerenciar membros e integrações.
             </p>
             <div className="mt-8">
               <Button
@@ -352,9 +358,7 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
         <CardContent className="text-center p-10">
           <ShieldCheck className="h-8 w-8 text-emerald-600 mb-3" />
           <h2 className="text-lg font-semibold">Organização já configurada</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Sua organização já completou o onboarding.
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">Sua organização já completou o onboarding.</p>
           <Button onClick={() => onComplete()} className="mt-4">
             Ir para o painel
           </Button>

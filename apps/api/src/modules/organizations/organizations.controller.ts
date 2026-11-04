@@ -1,9 +1,6 @@
 import type { FastifyReply } from 'fastify'
 import type { Db } from '@comprova/db'
-import type {
-  OrganizationMemberResponseType,
-  OrganizationResponseType,
-} from './organizations.schema.js'
+import type { OrganizationMemberResponseType, OrganizationResponseType } from './organizations.schema.js'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import { makeOrganizationsService } from './organizations.service.js'
 
@@ -19,9 +16,7 @@ const sendProblem = (
     .type(PROBLEM_CONTENT_TYPE)
     .send(problem(status, code, title, detail))
 
-export const makeOrganizationsController = (deps: {
-  readonly db: Db
-}) => {
+export const makeOrganizationsController = (deps: { readonly db: Db }) => {
   const service = makeOrganizationsService(deps)
 
   type CreateOrgInput = {
