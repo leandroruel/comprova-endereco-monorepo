@@ -1,4 +1,4 @@
-import { and, eq, isNull, withTenant } from '@comprova/db'
+import { and, eq, gte, isNull, or, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { newApiKey, keyPrefixOf, makeApiKeyHasher, type Db } from '@comprova/db'
 import { type ApiKeyDto, type CreateApiKeyRequest } from '@comprova/contracts'
@@ -143,7 +143,15 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
         createdAt: t.apiKey.createdAt,
       })
       .from(t.apiKey)
-      .where(and(eq(t.apiKey.tenantId, tenantId), isNull(t.apiKey.revokedAt)))
+      .where(
+        and(
+          eq(t.apiKey.tenantId, tenantId),
+          isNull(t.apiKey.revokedAt),
+          // Exclui chaves expiradas (mas não revogadas): não as apresenta como
+          // ativas. Chaves sem expiração (expiresAt IS NULL) seguem listadas.
+          or(isNull(t.apiKey.expiresAt), gte(t.apiKey.expiresAt, new Date())),
+        ),
+      )
 
     return rows.map((row) => ({
       apiKeyId: row.apiKeyId,
