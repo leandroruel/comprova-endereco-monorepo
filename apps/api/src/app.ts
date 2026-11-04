@@ -139,7 +139,13 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const documentIntelligenceMaxBytes = documentIntelligenceMaxFileSizeMb * 1024 * 1024
 
   await app.register(helmet)
-  const allowedOrigins = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000']
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://admin.localhost:5173',
+    'http://verifier.localhost:5174',
+    'http://localhost:3000',
+  ]
 
   await app.register(cors, {
     origin: allowedOrigins,
