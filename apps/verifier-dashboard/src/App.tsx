@@ -104,8 +104,12 @@ export default function App() {
 
   const handleLogout = useCallback(async () => {
     await authClient.signOut()
+    // Limpa o cache de consultas compartilhado para que uma sessão subsequente
+    // não renderize dados em cache do usuário anterior.
+    queryClient.clear()
     setUser(null)
     setOrganizations([])
+    setActiveOrgId(null)
     setRoute('login' as Route)
   }, [])
 
