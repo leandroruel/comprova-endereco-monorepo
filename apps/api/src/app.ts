@@ -140,12 +140,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   await app.register(helmet)
   await app.register(cors, {
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true)
-      const allowed = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000']
-      if (allowed.includes(origin)) return cb(null, origin)
-      return cb(new Error('Not allowed by CORS'), false)
-    },
+    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
     credentials: true,
   })
   await app.register(multipart, {
