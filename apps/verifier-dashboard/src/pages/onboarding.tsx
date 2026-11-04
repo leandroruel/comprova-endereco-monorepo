@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createOrganization, completeOnboarding } from '@/api/client'
 import {
@@ -25,6 +25,8 @@ import {
 interface OrganizationSummary {
   tenantId: string
   onboardingStatus: string
+  termsVersion: string | null
+  role: string | null
 }
 
 interface OnboardingPageProps {
@@ -41,6 +43,11 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   const [email, setEmail] = useState(user.email)
   const [termsVersion, setTermsVersion] = useState('1.0.0')
   const [termsAccepted, setTermsAccepted] = useState(false)
+
+  useEffect(() => {
+    const pending = organizations.find((o) => o.onboardingStatus === 'pending')
+    if (pending?.termsVersion) setTermsVersion(pending.termsVersion)
+  }, [organizations])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const queryClient = useQueryClient()
@@ -348,6 +355,22 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   // Se já tem org concluída, redireciona
   const pendingOrg = organizations.find((o) => o.onboardingStatus === 'pending')
   if (pendingOrg) {
+    if (pendingOrg.role !== 'owner') {
+      return (
+        <div className="max-w-2xl mx-auto">
+          <Card className="animate-fade-in">
+            <CardContent className="text-center p-10">
+              <ShieldCheck className="h-8 w-8 text-amber-600 mb-3" />
+              <h2 className="text-lg font-semibold">Onboarding em andamento</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                O proprietário da organização ainda precisa concluir o aceite dos termos. Você será notificado
+                quando estiver disponível.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
     setStep('terms')
     return null
   }

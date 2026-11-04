@@ -83,7 +83,7 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
 
       {/* Conteúdo principal */}
       <div
-        className={`lg:flex-1 lg:min-w-0 min-h-screen ${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200 md:pl-64 lg:pl-0`}
+        className={`lg:flex-1 lg:min-w-0 min-h-screen sm:${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200 md:pl-64 lg:pl-0`}
       >
         {/* Header mobile */}
         <div className="lg:hidden flex items-center justify-between h-14 px-4 border-b border-background">

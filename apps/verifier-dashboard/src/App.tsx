@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { authClient } from '@/api/auth'
 import { getMe } from '@/api/client'
 import { Layout } from '@/components/layout'
+import { Button, Card, CardContent } from '@/components/ui'
 import { LoginPage } from '@/pages/login'
 import { OnboardingPage } from '@/pages/onboarding'
 import { DashboardPage } from '@/pages/dashboard'
@@ -18,9 +19,10 @@ export default function App() {
     name: string
     role: string
   } | null>(null)
-  const [organizations, setOrganizations] = useState<Array<{ tenantId: string; onboardingStatus: string }>>(
-    [],
-  )
+  const [organizations, setOrganizations] = useState<
+    Array<{ tenantId: string; onboardingStatus: string; termsVersion: string | null; role: string | null }>
+  >([])
+  const [organizationsError, setOrganizationsError] = useState<Error | null>(null)
   const [loading, setLoading] = useState(true)
 
   const resolveRoute = useCallback(async () => {
@@ -29,19 +31,25 @@ export default function App() {
       const me = await getMe()
       if (me) {
         setUser(me)
-        const orgs = await (() => {
+        const orgs = await (async () => {
           // lista organizações do usuário para decidir a rota inicial
-          return fetch('http://localhost:3000/v1/organizations', {
+          const res = await fetch('http://localhost:3000/v1/organizations', {
             credentials: 'include',
           })
-            .then((r) => (r.ok ? r.json() : []))
-            .catch(() => [])
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          return res.json()
         })()
-        const list: Array<{ tenantId: string; onboardingStatus: string }> = Array.isArray(orgs) ? orgs : []
+        const list: Array<{
+          tenantId: string
+          onboardingStatus: string
+          termsVersion: string | null
+          role: string | null
+        }> = Array.isArray(orgs) ? orgs : []
         setOrganizations(list)
+        setOrganizationsError(null)
 
         const hasOrg = list.length > 0
-        const completed = list.some((o) => o.onboardingStatus === 'completed')
+        const completed = list[0]?.onboardingStatus === 'completed'
 
         if (!hasOrg) {
           setRoute('onboarding')
@@ -53,8 +61,9 @@ export default function App() {
       } else {
         setRoute('login')
       }
-    } catch {
-      setRoute('login')
+    } catch (err) {
+      setOrganizationsError(err instanceof Error ? err : new Error(String(err)))
+      setRoute(route) // preserve current route on failure
     } finally {
       setLoading(false)
     }
@@ -82,6 +91,23 @@ export default function App() {
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
           <span className="text-sm text-muted-foreground">Carregando sessão…</span>
         </div>
+      </div>
+    )
+  }
+
+  if (organizationsError) {
+    return (
+      <div className="max-w-md mx-auto">
+        <Card>
+          <CardContent className="text-center p-10">
+            <p className="text-sm text-destructive">
+              {organizationsError instanceof Error
+                ? organizationsError.message
+                : 'Erro ao carregar organizações'}
+            </p>
+            <Button onClick={() => void resolveRoute()}>Tentar novamente</Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }

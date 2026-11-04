@@ -32,6 +32,7 @@ export const OrganizationDtoSchema = z.object({
   burst: z.number(),
   monthlyQuota: z.number().nullable(),
   createdAt: z.string(),
+  role: z.string().nullable(),
 })
 
 export type OrganizationDto = z.infer<typeof OrganizationDtoSchema>

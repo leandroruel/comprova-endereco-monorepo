@@ -97,6 +97,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
       burst: newTenant.burst,
       monthlyQuota: newTenant.monthlyQuota ?? null,
       createdAt: newTenant.createdAt.toISOString(),
+      role: 'owner',
     }
   }
 
@@ -161,10 +162,12 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
         burst: t.tenant.burst,
         monthlyQuota: t.tenant.monthlyQuota,
         createdAt: t.tenant.createdAt,
+        role: t.organizationMember.role,
       })
       .from(t.organizationMember)
       .innerJoin(t.tenant, eq(t.organizationMember.tenantId, t.tenant.tenantId))
       .where(eq(t.organizationMember.userId, userId))
+      .orderBy(t.tenant.createdAt)
 
     return rows.map(mapTenantRowToDto)
   }
@@ -467,6 +470,7 @@ function mapTenantToDto(tenant: {
   burst: number
   monthlyQuota: bigint | number | null
   createdAt: Date
+  role?: string | null
 }): OrganizationDto {
   return {
     tenantId: tenant.tenantId,
@@ -484,6 +488,7 @@ function mapTenantToDto(tenant: {
     burst: tenant.burst,
     monthlyQuota: tenant.monthlyQuota !== null ? Number(tenant.monthlyQuota) : null,
     createdAt: tenant.createdAt.toISOString(),
+    role: tenant.role ?? null,
   }
 }
 
@@ -501,6 +506,7 @@ function mapTenantRowToDto(row: {
   burst: number
   monthlyQuota: bigint | number | null
   createdAt: Date
+  role: string
 }): OrganizationDto {
   return mapTenantToDto(row)
 }

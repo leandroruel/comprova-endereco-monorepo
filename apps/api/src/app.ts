@@ -51,6 +51,7 @@ import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'
 import { registerOrganizationsRoutes } from './modules/organizations/organizations.routes.js'
 import { registerM2MRoutes } from './modules/m2m/m2m.routes.js'
+import { AuthorizationError } from './modules/m2m/m2m.service.js'
 import { requireWriteScope } from './plugins/scope.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
 import { makeSigningKeyProvider } from './services/signing-key-provider.factory.js'
@@ -186,6 +187,13 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
             err instanceof Error ? err.message : undefined,
           ),
         )
+      return
+    }
+    if (err instanceof AuthorizationError) {
+      reply
+        .code(403)
+        .type(PROBLEM_CONTENT_TYPE)
+        .send(problem(403, 'FORBIDDEN', err.message))
       return
     }
     deps.logger.error(
