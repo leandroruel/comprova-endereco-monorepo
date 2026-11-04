@@ -21,9 +21,9 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="min-h-screen bg-background lg:flex">
+    <div className="h-screen bg-background lg:flex">
       <nav
-        className={`fixed left-0 top-0 h-full w-64 bg-card border-r border-border z-20 transform transition-transform duration-200 md:translate-x-0 lg:static lg:inset-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-[-100%]'}`}
+        className={`fixed inset-y-0 left-0 w-64 bg-card border-r border-border z-20 transform transition-transform duration-200 md:translate-x-0 lg:static lg:inset-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-[-100%]'}`}
       >
         <div className="flex items-center justify-between h-14 px-6 border-b border-background">
           <div className="flex items-center gap-2">
@@ -83,7 +83,7 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
 
       {/* Conteúdo principal */}
       <div
-        className={`lg:flex-1 lg:min-w-0 min-h-screen sm:${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200 md:pl-64 lg:pl-0`}
+        className={`flex-1 min-w-0 h-full sm:${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200 md:pl-64 lg:pl-0`}
       >
         {/* Header mobile */}
         <div className="lg:hidden flex items-center justify-between h-14 px-4 border-b border-background">
@@ -104,7 +104,7 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
           </div>
         </div>
 
-        <main className="p-6 lg:p-8">{children}</main>
+        <main className="p-6 lg:p-8 h-full overflow-y-auto">{children}</main>
       </div>
     </div>
   )
