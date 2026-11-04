@@ -1,5 +1,5 @@
 import { PROBLEM_CONTENT_TYPE, problems } from '@comprova/contracts'
-import { and, eq } from '@comprova/db'
+import { and, eq, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 
@@ -41,15 +41,18 @@ export const requireOrganizationAccess =
       return forbidden(reply)
     }
 
-    const membership = await db
-      .select({
-        role: t.organizationMember.role,
-      })
-      .from(t.organizationMember)
-      .where(
-        and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, sessionUser.id)),
-      )
-      .limit(1)
+    // Consulta dentro de `withTenant` para definir `app.tenant_id` e assim
+    // satisfazer a política RLS de `organization_member` (defesa em
+    // profundidade; o filtro da aplicação por si só não bastaria).
+    const membership = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .select({ role: t.organizationMember.role })
+        .from(t.organizationMember)
+        .where(
+          and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, sessionUser.id)),
+        )
+        .limit(1)
+    })
 
     if (membership.length === 0) {
       return forbidden(reply)

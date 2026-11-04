@@ -104,6 +104,12 @@ const EnvSchema = z.object({
   DOCUMENT_INTELLIGENCE_URL: z.url().optional(),
   DOCUMENT_INTELLIGENCE_TIMEOUT_MS: z.coerce.number().int().positive().max(3_600_000).optional(),
   DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).optional(),
+  /**
+   * Versão vigente dos termos de onboarding, definida pelo servidor. O
+   * frontend deve expô-la como não editável e registrá-la no aceite; o
+   * conteúdo jurídico depende de aprovação jurídica (Fase 1 prepara o fluxo).
+   */
+  TERMS_VERSION: z.string().min(1).max(100).optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

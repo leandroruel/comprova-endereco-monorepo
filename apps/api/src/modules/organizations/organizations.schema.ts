@@ -5,7 +5,6 @@ export const CreateOrganizationBody = z.object({
   name: z.string().min(1).max(200),
   legalName: z.string().min(1).max(200).optional(),
   document: z.string().min(1).max(20).optional(),
-  email: z.string().email(),
   termsVersion: z.string().min(1).max(100),
   dataRegion: z.string().min(1).max(10).default('sa-east-1'),
 })
@@ -71,6 +70,18 @@ export const ProblemResponse = z.object({
   request_id: z.string().optional(),
 })
 
+/** Resposta de criação de convite: inclui o token apenas uma vez (na criação). */
+export const OrganizationInvitationCreatedResponse = z.object({
+  organizationInvitationId: z.uuid(),
+  tenantId: z.string().uuid(),
+  email: z.string(),
+  role: z.string(),
+  expiresAt: z.string(),
+  createdAt: z.string(),
+  /** O segredo do convite, retornado apenas uma vez na criação. */
+  token: z.string(),
+})
+
 export type CreateOrganizationInput = z.infer<typeof CreateOrganizationBody>
 export type CompleteOnboardingInput = z.infer<typeof CompleteOnboardingBody>
 export type AddMemberInput = z.infer<typeof AddMemberBody>
@@ -79,6 +90,7 @@ export type AcceptInvitationInput = z.infer<typeof AcceptInvitationBody>
 export type TenantIdParamsInput = z.infer<typeof TenantIdParams>
 export type OrganizationResponseType = z.infer<typeof OrganizationResponse>
 export type OrganizationMemberResponseType = z.infer<typeof OrganizationMemberResponse>
+export type OrganizationInvitationCreatedResponseType = z.infer<typeof OrganizationInvitationCreatedResponse>
 
 export interface OrganizationsControllerDeps {
   readonly db: Db

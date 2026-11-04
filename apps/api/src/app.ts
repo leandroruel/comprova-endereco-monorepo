@@ -14,6 +14,7 @@ import {
   type Db,
 } from '@comprova/db'
 import { makeS3ObjectStore, makeUnavailableObjectStore, type ObjectStore } from '@comprova/providers'
+import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import multipart from '@fastify/multipart'
@@ -28,7 +29,7 @@ import {
 import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import { DEFAULT_EVIDENCE_MAX_CONCURRENCY, type AppConfig } from './config.js'
-import { makeAuthenticate } from './plugins/auth.js'
+import { makeAuthenticate, setRedisClient } from './plugins/auth.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
 import { createAuth } from './auth.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
@@ -157,6 +158,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     preflightContinue: false,
   })
 
+  await app.register(cookie, {
+    secret: deps.config.API_KEY_PEPPER,
+  })
+
   // Fallback de CORS no onResponse: garante que os cabeçalhos CORS estejam
   // sempre presentes, mesmo quando o plugin @fastify/cors não os aplica (ex.:
   // respostas de erro, 404, 500, ou qualquer comportamento inesperado do
@@ -247,6 +252,8 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   const hasher = makeApiKeyHasher(deps.config.API_KEY_PEPPER)
   const authenticate = makeAuthenticate(deps.db, hasher)
+  // Invalidação compartilhada de chaves revogadas entre instâncias da API.
+  setRedisClient(deps.redis)
   const rateLimit = makeRateLimiter(deps.redis)
 
   // Provider de assinatura por tenant resolvido no boot. `local` (default)
@@ -265,8 +272,9 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     credentialTtlSeconds: fastPath.policy.credential_ttl_seconds,
   }
   const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
-  registerAuthRoutes(app, auth)
   app.addHook('preHandler', makeSessionMiddleware(auth))
+  app.addHook('preHandler', authenticate)
+  registerAuthRoutes(app, auth)
   const deepTrigger = {
     config: {
       enabled: deps.config.TEMPORAL_ENABLED,
@@ -279,7 +287,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   await app.register(
     async (v1) => {
-      v1.addHook('preHandler', authenticate)
       v1.addHook('preHandler', rateLimit)
       registerValidationRoutes(v1, {
         db: deps.db,
@@ -304,7 +311,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         logger: deps.logger,
       })
       registerMeRoute(v1, requireWriteScope)
-      registerOrganizationsRoutes(v1, { db: deps.db })
+      registerOrganizationsRoutes(v1, {
+        db: deps.db,
+        termsVersion: deps.config.TERMS_VERSION ?? '1.0.0',
+      })
       registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })

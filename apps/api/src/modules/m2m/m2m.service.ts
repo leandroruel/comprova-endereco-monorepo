@@ -1,13 +1,23 @@
-import { and, eq, isNull } from '@comprova/db'
+import { and, eq, isNull, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { newApiKey, keyPrefixOf, makeApiKeyHasher, type Db } from '@comprova/db'
 import { type ApiKeyDto, type CreateApiKeyRequest } from '@comprova/contracts'
 import { randomUUID } from 'node:crypto'
+import { markRevokedInCache } from '../../plugins/auth.js'
+import { validateScopesForKeyType } from '../../plugins/scope.js'
 
 export class AuthorizationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'AuthorizationError'
+  }
+}
+
+/** Escopo desconhecido ou não permitido para o tipo de chave. */
+export class InvalidScopeError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'InvalidScopeError'
   }
 }
 
@@ -29,11 +39,13 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
     userId: string,
     requiredRole?: 'owner' | 'admin' | 'member',
   ): Promise<void> => {
-    const member = await db
-      .select({ userId: t.organizationMember.userId, role: t.organizationMember.role })
-      .from(t.organizationMember)
-      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
-      .limit(1)
+    const member = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .select({ userId: t.organizationMember.userId, role: t.organizationMember.role })
+        .from(t.organizationMember)
+        .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
+        .limit(1)
+    })
 
     if (member.length === 0) {
       throw new AuthorizationError('user is not a member of this organization')
@@ -58,6 +70,15 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
     create: CreateApiKeyRequest,
     userId: string,
   ): Promise<{ apiKey: ApiKeyDto; secret: string }> => {
+    // Rejeita escopos desconhecidos e escopos não permitidos para o tipo de
+    // chave antes de qualquer outra operação (defesa no backend, nunca confie
+    // na interface).
+    try {
+      validateScopesForKeyType(create.keyType, create.scopes)
+    } catch (error) {
+      throw new InvalidScopeError(error instanceof Error ? error.message : String(error))
+    }
+
     await ensureMembership(tenantId, userId, 'admin')
 
     const plaintext = newApiKey()
@@ -151,6 +172,12 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
         and(eq(t.apiKey.apiKeyId, apiKeyId), eq(t.apiKey.tenantId, tenantId), isNull(t.apiKey.revokedAt)),
       )
       .returning({ apiKeyId: t.apiKey.apiKeyId })
+
+    if (updated) {
+      // Invalida imediatamente o cache de autenticação para esta chave,
+      // incluindo em instâncias distribuídas via Redis.
+      await markRevokedInCache(apiKeyId)
+    }
 
     return updated !== undefined
   }

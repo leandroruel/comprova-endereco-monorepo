@@ -37,14 +37,14 @@ export const organizationInvitation = pgTable(
       .notNull()
       .references(() => tenant.tenantId),
     email: text('email').notNull(),
-    token: text('token').notNull().unique(),
+    tokenHash: text('token_hash').notNull(),
     role: text('role').notNull().default('member'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     acceptedBy: text('accepted_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('organization_invitation_token_uq').on(t.token)],
+  (t) => [uniqueIndex('organization_invitation_token_hash_uq').on(t.tokenHash)],
 )
 
 export type OrganizationMember = typeof organizationMember.$inferSelect

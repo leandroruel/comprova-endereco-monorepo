@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createOrganization, completeOnboarding } from '@/api/client'
+import { createOrganization, completeOnboarding, getTermsVersion } from '@/api/client'
 import {
   Button,
   Card,
@@ -41,13 +41,20 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   const [legalName, setLegalName] = useState('')
   const [document, setDocument] = useState('')
   const [email, setEmail] = useState(user.email)
-  const [termsVersion, setTermsVersion] = useState('1.0.0')
+  const [termsVersion, setTermsVersion] = useState<string>('1.0.0')
   const [termsAccepted, setTermsAccepted] = useState(false)
 
+  // A versão vigente dos termos de onboarding é definida pelo servidor. O
+  // cliente apenas a consome e registra a manifestação de aceite, sem escolher
+  // livremente a versão (o conteúdo jurídico depende de aprovação jurídica).
   useEffect(() => {
-    const pending = organizations.find((o) => o.onboardingStatus === 'pending')
-    if (pending?.termsVersion) setTermsVersion(pending.termsVersion)
-  }, [organizations])
+    getTermsVersion()
+      .then(({ version }) => setTermsVersion(version))
+      .catch(() => {
+        // Falha ao buscar a versão do servidor: mantém o valor default e a UI
+        // segue preparada; o fluxo depende da definição do conteúdo jurídico.
+      })
+  }, [])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const queryClient = useQueryClient()
@@ -86,7 +93,6 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
         name,
         legalName: legalName || undefined,
         document: document || undefined,
-        email,
         termsVersion,
       })
     } finally {
@@ -229,15 +235,13 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground" htmlFor="termsVersion">
-                    Versão dos termos
+                    Versão dos termos (definida pelo servidor)
                   </label>
-                  <Input
-                    id="termsVersion"
-                    value={termsVersion}
-                    onChange={(e) => setTermsVersion(e.target.value)}
-                    placeholder="1.0.0"
-                    required
-                  />
+                  <Input id="termsVersion" value={termsVersion} readOnly placeholder="1.0.0" required />
+                  <p className="text-xs text-muted-foreground">
+                    A versão é definida pelo servidor e registrada no aceite; o conteúdo jurídico depende de
+                    aprovação jurídica.
+                  </p>
                 </div>
               </div>
 

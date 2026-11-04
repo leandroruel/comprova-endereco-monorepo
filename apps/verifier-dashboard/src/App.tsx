@@ -30,9 +30,17 @@ export default function App() {
     role: string
   } | null>(null)
   const [organizations, setOrganizations] = useState<
-    Array<{ tenantId: string; onboardingStatus: string; termsVersion: string | null; role: string | null }>
+    Array<{
+      tenantId: string
+      name: string
+      onboardingStatus: string
+      termsVersion: string | null
+      role: string | null
+    }>
   >([])
   const [organizationsError, setOrganizationsError] = useState<Error | null>(null)
+  /** Organização ativa explicitamente selecionada pelo usuário (não apenas a primeira da lista). */
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   const resolveRoute = useCallback(async () => {
@@ -51,12 +59,19 @@ export default function App() {
         })()
         const list: Array<{
           tenantId: string
+          name: string
           onboardingStatus: string
           termsVersion: string | null
           role: string | null
         }> = Array.isArray(orgs) ? orgs : []
         setOrganizations(list)
         setOrganizationsError(null)
+
+        // Seleciona explicitamente a primeira organização apenas se nenhuma
+        // organização ativa já estiver definida (preserve a seleção do usuário).
+        if (!activeOrgId && list.length > 0) {
+          setActiveOrgId(list[0]?.tenantId ?? null)
+        }
 
         const hasOrg = list.length > 0
         const completed = list[0]?.onboardingStatus === 'completed'
@@ -121,15 +136,27 @@ export default function App() {
       ) : !user ? (
         <LoginPage onSuccess={handleAuthSuccess} />
       ) : (
-        <Layout user={user} onLogout={handleLogout} currentRoute={route} setRoute={setRoute}>
+        <Layout
+          user={user}
+          onLogout={handleLogout}
+          currentRoute={route}
+          setRoute={setRoute}
+          organizations={organizations}
+          activeOrgId={activeOrgId}
+          setActiveOrgId={setActiveOrgId}
+        >
           {route === 'onboarding' ? (
             <OnboardingPage user={user} organizations={organizations} onComplete={resolveRoute} />
           ) : route === 'members' ? (
-            <MembersPage user={user} />
+            <MembersPage user={user} activeOrgId={activeOrgId} />
           ) : route === 'integrations' ? (
-            <IntegrationsPage tenantId={organizations[0]?.tenantId ?? ''} />
+            <IntegrationsPage tenantId={activeOrgId ?? organizations[0]?.tenantId ?? ''} />
           ) : (
-            <DashboardPage user={user} setRoute={(r: string) => setRoute(r as Route)} />
+            <DashboardPage
+              user={user}
+              activeOrgId={activeOrgId}
+              setRoute={(r: string) => setRoute(r as Route)}
+            />
           )}
         </Layout>
       )}

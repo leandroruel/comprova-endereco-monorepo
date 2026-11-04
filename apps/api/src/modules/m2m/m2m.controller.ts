@@ -5,7 +5,7 @@ import type { z } from 'zod'
 import type { ApiKeyCreatedResponse, M2MControllerDeps } from './m2m.schema.js'
 import { sendProblem } from './m2m.schema.js'
 import { makeM2MService } from './m2m.service.js'
-import { AuthorizationError } from './m2m.service.js'
+import { AuthorizationError, InvalidScopeError } from './m2m.service.js'
 
 export type ApiKeyCreatedResponseType = z.infer<typeof ApiKeyCreatedResponse>
 
@@ -39,6 +39,12 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
         )
         return reply.code(201).send(result)
       } catch (error) {
+        if (error instanceof InvalidScopeError) {
+          return reply
+            .code(400)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(400, 'INVALID_SCOPE', error.message))
+        }
         if (error instanceof AuthorizationError) {
           return reply
             .code(403)

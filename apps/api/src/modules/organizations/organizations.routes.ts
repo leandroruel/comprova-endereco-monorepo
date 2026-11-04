@@ -9,6 +9,7 @@ import {
   CreateOrganizationBody,
   OrganizationResponse,
   OrganizationMemberResponse,
+  OrganizationInvitationCreatedResponse,
   ProblemResponse,
   AddMemberBody,
   InviteMemberBody,
@@ -28,6 +29,8 @@ const requireSessionUser = async (
 
 export type OrganizationsRoutesDeps = {
   readonly db: Db
+  /** Versão vigente dos termos, definida pelo servidor (config `TERMS_VERSION`). */
+  readonly termsVersion: string
 }
 
 export const registerOrganizationsRoutes = (
@@ -56,7 +59,6 @@ export const registerOrganizationsRoutes = (
           name: request.body.name,
           legalName: request.body.legalName,
           document: request.body.document,
-          email: request.body.email,
           termsVersion: request.body.termsVersion,
           dataRegion: request.body.dataRegion,
           userId,
@@ -76,6 +78,22 @@ export const registerOrganizationsRoutes = (
     },
     async (request, reply) => {
       return controller.listByUser(request.sessionUser!.id, reply)
+    },
+  )
+
+  // Versão vigente dos termos de onboarding, definida pelo servidor. O
+  // frontend deve consumir este endpoint e registrar a manifestação de
+  // aceite sem permitir que o cliente escolha livremente a versão.
+  app.get(
+    '/organizations/terms-version',
+    {
+      preHandler: requireSessionUser,
+      schema: {
+        response: { 200: z.object({ version: z.string() }) },
+      },
+    },
+    async (_request, reply) => {
+      return reply.code(200).send({ version: deps.termsVersion })
     },
   )
 
@@ -167,7 +185,11 @@ export const registerOrganizationsRoutes = (
       schema: {
         params: TenantIdParams,
         body: InviteMemberBody,
-        response: { 201: OrganizationMemberResponse, 403: z.object({}), 404: z.object({}) },
+        response: {
+          201: OrganizationInvitationCreatedResponse,
+          403: ProblemResponse,
+          404: ProblemResponse,
+        },
       },
     },
     async (request, reply) => {

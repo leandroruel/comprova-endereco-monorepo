@@ -1,6 +1,10 @@
 import type { FastifyReply } from 'fastify'
 import type { Db } from '@comprova/db'
-import type { OrganizationMemberResponseType, OrganizationResponseType } from './organizations.schema.js'
+import type {
+  OrganizationMemberResponseType,
+  OrganizationResponseType,
+  OrganizationInvitationCreatedResponseType,
+} from './organizations.schema.js'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import { makeOrganizationsService } from './organizations.service.js'
 
@@ -23,7 +27,6 @@ export const makeOrganizationsController = (deps: { readonly db: Db }) => {
     name: string
     legalName?: string
     document?: string
-    email: string
     termsVersion: string
     dataRegion?: string
     userId: string
@@ -66,7 +69,6 @@ export const makeOrganizationsController = (deps: { readonly db: Db }) => {
             name: input.name,
             legalName: input.legalName,
             document: input.document,
-            email: input.email,
             termsVersion: input.termsVersion,
             dataRegion: input.dataRegion ?? 'sa-east-1',
           },
@@ -142,11 +144,22 @@ export const makeOrganizationsController = (deps: { readonly db: Db }) => {
         if (message === 'only owners and admins can add members') {
           return sendProblem(reply, 403, 'FORBIDDEN', 'Apenas owners e admins podem adicionar membros')
         }
+        if (message === 'only the owner can grant the owner role') {
+          return sendProblem(reply, 403, 'FORBIDDEN', 'Apenas o owner pode conceder o papel de owner')
+        }
         if (message === 'user not found') {
           return sendProblem(reply, 404, 'USER_NOT_FOUND', 'Usuário não encontrado')
         }
         if (message === 'user is already a member') {
           return sendProblem(reply, 409, 'MEMBER_ALREADY_EXISTS', 'Usuário já é membro')
+        }
+        if (message === 'a organização já possui um proprietário') {
+          return sendProblem(
+            reply,
+            403,
+            'ORGANIZATION_ALREADY_HAS_OWNER',
+            'A organização já possui um proprietário',
+          )
         }
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao adicionar membro')
       }
@@ -163,7 +176,7 @@ export const makeOrganizationsController = (deps: { readonly db: Db }) => {
     createInvitation: async (
       input: CreateInvitationInput,
       reply: FastifyReply,
-    ): Promise<OrganizationMemberResponseType | FastifyReply> => {
+    ): Promise<OrganizationInvitationCreatedResponseType | FastifyReply> => {
       try {
         const invitation = await service.createInvitation(
           input.tenantId,
@@ -173,19 +186,29 @@ export const makeOrganizationsController = (deps: { readonly db: Db }) => {
           input.expiresInDays ?? 7,
         )
         return reply.code(201).send({
-          organizationMemberId: invitation.organizationInvitationId,
+          organizationInvitationId: invitation.organizationInvitationId,
           tenantId: invitation.tenantId,
-          userId: '',
-          userEmail: invitation.email,
-          userName: '',
+          email: invitation.email,
           role: invitation.role,
-          joinedAt: invitation.createdAt,
-          invitedBy: null,
+          expiresAt: invitation.expiresAt,
+          createdAt: invitation.createdAt,
+          token: invitation.token,
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (message === 'only owners and admins can create invitations') {
           return sendProblem(reply, 403, 'FORBIDDEN', 'Apenas owners e admins podem criar convites')
+        }
+        if (message === 'only the owner can grant the owner role') {
+          return sendProblem(reply, 403, 'FORBIDDEN', 'Apenas o owner pode conceder o papel de owner')
+        }
+        if (message === 'a organização já possui um proprietário') {
+          return sendProblem(
+            reply,
+            403,
+            'ORGANIZATION_ALREADY_HAS_OWNER',
+            'A organização já possui um proprietário',
+          )
         }
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao criar convite')
       }
@@ -208,6 +231,9 @@ export const makeOrganizationsController = (deps: { readonly db: Db }) => {
         }
         if (message === 'user is already a member') {
           return sendProblem(reply, 409, 'MEMBER_ALREADY_EXISTS', 'Usuário já é membro')
+        }
+        if (message === 'invitation not addressed to this user') {
+          return sendProblem(reply, 403, 'FORBIDDEN', 'Convite não endereçado a este usuário')
         }
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao aceitar convite')
       }

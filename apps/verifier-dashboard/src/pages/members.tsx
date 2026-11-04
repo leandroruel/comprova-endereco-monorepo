@@ -22,9 +22,10 @@ import { Users, Plus, AlertCircle, Mail } from 'lucide-react'
 
 interface MembersPageProps {
   user: { id: string; email: string; name: string; role: string }
+  activeOrgId?: string | null
 }
 
-export function MembersPage({ user }: MembersPageProps) {
+export function MembersPage({ user, activeOrgId }: MembersPageProps) {
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState<'owner' | 'admin' | 'member'>('member')
   const [error, setError] = useState<string | null>(null)
@@ -43,7 +44,9 @@ export function MembersPage({ user }: MembersPageProps) {
     enabled: !!user,
   })
 
-  const activeOrg = orgs?.[0]
+  // Organização ativa selecionada explicitamente; fallback para a primeira da
+  // lista apenas quando nenhuma seleção estiver definida.
+  const activeOrg = orgs?.find((o: { tenantId: string }) => o.tenantId === activeOrgId) ?? orgs?.[0]
   const tenantId: string | null = activeOrg?.tenantId ?? null
 
   const { data: members, isLoading: membersLoading } = useQuery({

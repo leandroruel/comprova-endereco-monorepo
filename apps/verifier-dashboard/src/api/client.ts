@@ -52,12 +52,16 @@ export async function getMe(): Promise<{
   }
 }
 
+/** GET /organizations/terms-version — versão vigente dos termos (definida pelo servidor). */
+export async function getTermsVersion(): Promise<{ version: string }> {
+  return apiRequest('/organizations/terms-version', { method: 'GET' })
+}
+
 /** POST /organizations — cria uma organização Verifier. */
 export async function createOrganization(body: {
   name: string
   legalName?: string
   document?: string
-  email: string
   termsVersion: string
   dataRegion?: string
 }): Promise<{

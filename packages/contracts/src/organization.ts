@@ -9,7 +9,6 @@ export const CreateOrganizationRequestSchema = z.object({
   name: z.string().min(1).max(200),
   legalName: z.string().min(1).max(200).optional(),
   document: z.string().min(1).max(20).optional(), // CPF/CNPJ sem máscara
-  email: z.string().email(),
   termsVersion: z.string().min(1).max(100),
   dataRegion: z.string().min(1).max(10).default('sa-east-1'),
 })
@@ -68,6 +67,21 @@ export const OrganizationInvitationDtoSchema = z.object({
 })
 
 export type OrganizationInvitationDto = z.infer<typeof OrganizationInvitationDtoSchema>
+
+/** Resposta de criação de convite: inclui o token apenas uma vez (na criação).
+ * O token nunca é exposto novamente em listagens ou respostas posteriores. */
+export const OrganizationInvitationCreatedDtoSchema = z.object({
+  organizationInvitationId: z.uuid(),
+  tenantId: z.uuid(),
+  email: z.string(),
+  role: z.string(),
+  expiresAt: z.string(),
+  createdAt: z.string(),
+  /** O segredo do convite, retornado apenas uma vez na criação. */
+  token: z.string(),
+})
+
+export type OrganizationInvitationCreatedDto = z.infer<typeof OrganizationInvitationCreatedDtoSchema>
 
 export const CreateApiKeyRequestSchema = z.object({
   name: z.string().min(1).max(100),

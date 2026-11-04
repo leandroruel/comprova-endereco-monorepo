@@ -6,6 +6,9 @@ interface LayoutProps {
   onLogout: () => void
   currentRoute: Route
   setRoute: (route: Route) => void
+  organizations: Array<{ tenantId: string; name: string; onboardingStatus: string; role: string | null }>
+  activeOrgId: string | null
+  setActiveOrgId: (id: string | null) => void
   children: React.ReactNode
 }
 
@@ -17,7 +20,16 @@ const navItems: Array<{ label: string; route: Route; icon: React.ElementType }> 
   { label: 'Integrações', route: 'integrations', icon: ShieldCheck },
 ]
 
-export function Layout({ user, onLogout, currentRoute, setRoute, children }: LayoutProps) {
+export function Layout({
+  user,
+  onLogout,
+  currentRoute,
+  setRoute,
+  organizations,
+  activeOrgId,
+  setActiveOrgId,
+  children,
+}: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
@@ -42,6 +54,18 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
             <p className="px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Organização
             </p>
+            <select
+              value={activeOrgId ?? ''}
+              onChange={(e) => setActiveOrgId(e.target.value || null)}
+              className="w-full rounded-lg border border-input bg-input px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Selecionar organização</option>
+              {organizations.map((org) => (
+                <option key={org.tenantId} value={org.tenantId}>
+                  {org.name} ({org.role})
+                </option>
+              ))}
+            </select>
             {navItems.map((item) => (
               <button
                 key={item.route}

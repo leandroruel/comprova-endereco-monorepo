@@ -6,6 +6,8 @@ import { bytea } from './custom-types.js'
 export const tenant = pgTable('tenant', {
   tenantId: uuid('tenant_id').primaryKey(),
   name: text('name').notNull(),
+  legalName: text('legal_name'),
+  document: text('document'),
   status: text('status').notNull().default('active'),
   type: text('type').notNull().default('technical'),
   onboardingStatus: text('onboarding_status').notNull().default('completed'),

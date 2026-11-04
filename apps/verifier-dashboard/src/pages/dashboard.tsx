@@ -23,9 +23,10 @@ import { Users, FileKey, RefreshCw } from 'lucide-react'
 interface DashboardPageProps {
   user: { id: string; email: string; name: string; role: string }
   setRoute: (route: string) => void
+  activeOrgId?: string | null
 }
 
-export function DashboardPage({ user, setRoute }: DashboardPageProps) {
+export function DashboardPage({ user, setRoute, activeOrgId }: DashboardPageProps) {
   const queryClient = useQueryClient()
 
   const {
@@ -44,7 +45,9 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
     enabled: !!user,
   })
 
-  const activeOrg = orgs?.[0]
+  // Organização ativa selecionada explicitamente; fallback para a primeira da
+  // lista apenas quando nenhuma seleção estiver definida.
+  const activeOrg = orgs?.find((o: { tenantId: string }) => o.tenantId === activeOrgId) ?? orgs?.[0]
   const tenantId = activeOrg?.tenantId ?? null
 
   const { data: organization, isLoading: orgLoading } = useQuery({

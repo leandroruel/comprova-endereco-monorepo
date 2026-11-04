@@ -97,6 +97,8 @@ beforeAll(async () => {
   // Cadastra usuários via Better Auth
   await signUp('owner@exemplo.com', 'SenhaForte123!', 'Dono da Organização')
   await signUp('member@exemplo.com', 'SenhaForte123!', 'Membro da Organização')
+  await signUp('invitee@exemplo.com', 'SenhaForte123!', 'Convidado do Convite')
+  await signUp('outro@exemplo.com', 'SenhaForte123!', 'Outro Usuário')
 
   // Faz login para obter cookies de sessão
   ownerSessionCookie = await loginAndGetCookie('owner@exemplo.com', 'SenhaForte123!')
@@ -343,6 +345,314 @@ describe('Verifier M2M Integration', () => {
       '/v1/m2m/api-keys/00000000-0000-4000-8000-000000000000',
       { tenantId: orgTenantId },
       ownerSessionCookie,
+    )
+    expect(res.statusCode).toBe(404)
+  })
+})
+
+describe('Verifier Convites e aceitação', () => {
+  let inviteeSessionCookie: string
+
+  beforeAll(async () => {
+    inviteeSessionCookie = await loginAndGetCookie('invitee@exemplo.com', 'SenhaForte123!')
+  })
+
+  it('deve criar um convite e devolver o token apenas uma vez', async () => {
+    const createRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgTenantId}/invitations`,
+      { email: 'invitee@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const body = createRes.json()
+    expect(body.token).toBeDefined()
+    expect(typeof body.token).toBe('string')
+    expect(body.email).toBe('invitee@exemplo.com')
+    expect(body.role).toBe('member')
+  })
+
+  it('não permite que admin crie convite com role owner', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Admin Convite',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const adminOrgId = createRes.json().tenantId
+
+    // O owner promove o member a admin.
+    const promoteRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${adminOrgId}/members`,
+      { email: 'member@exemplo.com', role: 'admin' },
+      ownerSessionCookie,
+    )
+    expect(promoteRes.statusCode).toBe(201)
+
+    // O admin tenta convidar outro como owner → deve ser rejeitado.
+    const res = await injectWithSession(
+      'POST',
+      `/v1/organizations/${adminOrgId}/invitations`,
+      { email: 'outro@exemplo.com', role: 'owner' },
+      memberSessionCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('não permite que admin adicione membro com role owner', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Admin Membro',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const adminOrgId = createRes.json().tenantId
+
+    await injectWithSession(
+      'POST',
+      `/v1/organizations/${adminOrgId}/members`,
+      { email: 'member@exemplo.com', role: 'admin' },
+      ownerSessionCookie,
+    )
+
+    const res = await injectWithSession(
+      'POST',
+      `/v1/organizations/${adminOrgId}/members`,
+      { email: 'outro@exemplo.com', role: 'owner' },
+      memberSessionCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('owner consegue adicionar membro e admin (papéis permitidos)', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Owner Ops',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const orgId = createRes.json().tenantId
+
+    const m = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgId}/members`,
+      { email: 'member@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(m.statusCode).toBe(201)
+
+    const a = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgId}/members`,
+      { email: 'outro@exemplo.com', role: 'admin' },
+      ownerSessionCookie,
+    )
+    expect(a.statusCode).toBe(201)
+  })
+
+  it('não permite criar um segundo proprietário (modelo de owner único)', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Single Owner',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const orgId = createRes.json().tenantId
+
+    const res = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgId}/members`,
+      { email: 'outro@exemplo.com', role: 'owner' },
+      ownerSessionCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('destinatário correto consegue aceitar o convite', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Convite Aceito',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const orgId = createRes.json().tenantId
+
+    const inviteRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgId}/invitations`,
+      { email: 'invitee@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(inviteRes.statusCode).toBe(201)
+    const token = inviteRes.json().token
+
+    const res = await injectWithSession(
+      'POST',
+      '/v1/organizations/invitations/accept',
+      { token },
+      inviteeSessionCookie,
+    )
+    expect(res.statusCode).toBe(200)
+    const member = res.json()
+    expect(member.userEmail).toBe('invitee@exemplo.com')
+    expect(member.role).toBe('member')
+    expect(member.userName).toBe('Convidado do Convite')
+  })
+
+  it('outra conta não consegue aceitar convite endereçado a outro destinatário', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Convite Outro',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const orgId = createRes.json().tenantId
+
+    const inviteRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgId}/invitations`,
+      { email: 'invitee@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(inviteRes.statusCode).toBe(201)
+    const token = inviteRes.json().token
+
+    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    const res = await injectWithSession(
+      'POST',
+      '/v1/organizations/invitations/accept',
+      { token },
+      otherCookie,
+    )
+    // O RLS oculta o convite de quem não é o destinatário (não vazia existência).
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('convite já utilizado é rejeitado na segunda aceitação', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Convite Usado',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const orgId = createRes.json().tenantId
+
+    const inviteRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgId}/invitations`,
+      { email: 'invitee@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(inviteRes.statusCode).toBe(201)
+    const token = inviteRes.json().token
+
+    const first = await injectWithSession(
+      'POST',
+      '/v1/organizations/invitations/accept',
+      { token },
+      inviteeSessionCookie,
+    )
+    expect(first.statusCode).toBe(200)
+
+    const second = await injectWithSession(
+      'POST',
+      '/v1/organizations/invitations/accept',
+      { token },
+      inviteeSessionCookie,
+    )
+    expect(second.statusCode).toBe(404)
+  })
+
+  it('duas tentativas concorrentes não consomem o mesmo convite duas vezes', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Convite Concorrente',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const orgId = createRes.json().tenantId
+
+    const inviteRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgId}/invitations`,
+      { email: 'invitee@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(inviteRes.statusCode).toBe(201)
+    const token = inviteRes.json().token
+
+    const results = await Promise.all([
+      injectWithSession('POST', '/v1/organizations/invitations/accept', { token }, inviteeSessionCookie),
+      injectWithSession('POST', '/v1/organizations/invitations/accept', { token }, inviteeSessionCookie),
+    ])
+    const statuses = results.map((r) => r.statusCode).sort()
+    expect(statuses).toEqual([200, 404])
+  })
+
+  it('não permite que não-admin crie convite', async () => {
+    const res = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgTenantId}/invitations`,
+      { email: 'outro@exemplo.com', role: 'member' },
+      inviteeSessionCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+})
+
+describe('Verifier Isolamento (RLS)', () => {
+  let orgBTenantId: string
+
+  beforeAll(async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Organização B',
+      email: 'owner@exemplo.com',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    orgBTenantId = createRes.json().tenantId
+  })
+
+  it('usuário de outra organização não consegue consultar membros da orgB', async () => {
+    const memberCookie = await loginAndGetCookie('member@exemplo.com', 'SenhaForte123!')
+    const res = await injectWithSession(
+      'GET',
+      `/v1/organizations/${orgBTenantId}/members`,
+      undefined,
+      memberCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('usuário de outra organização não consegue adicionar membros na orgB', async () => {
+    const memberCookie = await loginAndGetCookie('member@exemplo.com', 'SenhaForte123!')
+    const res = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgBTenantId}/members`,
+      { email: 'outro@exemplo.com', role: 'member' },
+      memberCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('convite não pode ser aceito por quem não é o destinatário (isolamento de convite)', async () => {
+    const inviteRes = await injectWithSession(
+      'POST',
+      `/v1/organizations/${orgBTenantId}/invitations`,
+      { email: 'invitee@exemplo.com', role: 'member' },
+      ownerSessionCookie,
+    )
+    expect(inviteRes.statusCode).toBe(201)
+    const token = inviteRes.json().token
+
+    // O member da organização A não é o destinatário do convite da orgB.
+    const memberCookie = await loginAndGetCookie('member@exemplo.com', 'SenhaForte123!')
+    const res = await injectWithSession(
+      'POST',
+      '/v1/organizations/invitations/accept',
+      { token },
+      memberCookie,
     )
     expect(res.statusCode).toBe(404)
   })
