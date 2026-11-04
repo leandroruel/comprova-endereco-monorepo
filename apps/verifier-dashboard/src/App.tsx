@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { authClient } from '@/api/auth'
 import { getMe } from '@/api/client'
 import { Layout } from '@/components/layout'
@@ -10,6 +11,15 @@ import { MembersPage } from '@/pages/members'
 import { IntegrationsPage } from '@/pages/integrations'
 
 type Route = 'login' | 'onboarding' | 'dashboard' | 'members' | 'integrations'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
+})
 
 export default function App() {
   const [route, setRoute] = useState<Route>('login')
@@ -84,53 +94,45 @@ export default function App() {
     setRoute('login' as Route)
   }, [])
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="flex items-center gap-2">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          <span className="text-sm text-muted-foreground">Carregando sessão…</span>
-        </div>
-      </div>
-    )
-  }
-
-  if (organizationsError) {
-    return (
-      <div className="max-w-md mx-auto">
-        <Card>
-          <CardContent className="text-center p-10">
-            <p className="text-sm text-destructive">
-              {organizationsError instanceof Error
-                ? organizationsError.message
-                : 'Erro ao carregar organizações'}
-            </p>
-            <Button onClick={() => void resolveRoute()}>Tentar novamente</Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  if (route === 'login') {
-    return <LoginPage onSuccess={handleAuthSuccess} />
-  }
-
-  if (!user) {
-    return <LoginPage onSuccess={handleAuthSuccess} />
-  }
-
   return (
-    <Layout user={user} onLogout={handleLogout} currentRoute={route} setRoute={setRoute}>
-      {route === 'onboarding' ? (
-        <OnboardingPage user={user} organizations={organizations} onComplete={resolveRoute} />
-      ) : route === 'members' ? (
-        <MembersPage user={user} />
-      ) : route === 'integrations' ? (
-        <IntegrationsPage tenantId={organizations[0]?.tenantId ?? ''} />
+    <QueryClientProvider client={queryClient}>
+      {loading ? (
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <div className="flex items-center gap-2">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            <span className="text-sm text-muted-foreground">Carregando sessão…</span>
+          </div>
+        </div>
+      ) : organizationsError ? (
+        <div className="max-w-md mx-auto">
+          <Card>
+            <CardContent className="text-center p-10">
+              <p className="text-sm text-destructive">
+                {organizationsError instanceof Error
+                  ? organizationsError.message
+                  : 'Erro ao carregar organizações'}
+              </p>
+              <Button onClick={() => void resolveRoute()}>Tentar novamente</Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : route === 'login' ? (
+        <LoginPage onSuccess={handleAuthSuccess} />
+      ) : !user ? (
+        <LoginPage onSuccess={handleAuthSuccess} />
       ) : (
-        <DashboardPage user={user} setRoute={(r: string) => setRoute(r as Route)} />
+        <Layout user={user} onLogout={handleLogout} currentRoute={route} setRoute={setRoute}>
+          {route === 'onboarding' ? (
+            <OnboardingPage user={user} organizations={organizations} onComplete={resolveRoute} />
+          ) : route === 'members' ? (
+            <MembersPage user={user} />
+          ) : route === 'integrations' ? (
+            <IntegrationsPage tenantId={organizations[0]?.tenantId ?? ''} />
+          ) : (
+            <DashboardPage user={user} setRoute={(r: string) => setRoute(r as Route)} />
+          )}
+        </Layout>
       )}
-    </Layout>
+    </QueryClientProvider>
   )
 }
