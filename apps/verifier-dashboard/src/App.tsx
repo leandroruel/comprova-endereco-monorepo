@@ -84,6 +84,7 @@ export default function App() {
           setRoute('dashboard')
         }
       } else {
+        setOrganizationsError(null)
         setRoute('login')
       }
     } catch (err) {
