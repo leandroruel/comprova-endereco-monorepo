@@ -1,5 +1,5 @@
 import type { FastifyReply } from 'fastify'
-import type { ApiKeyDto } from '@comprova/contracts'
+import type { ApiKeyDto, CreateApiKeyRequest } from '@comprova/contracts'
 import type { z } from 'zod'
 import type {
   ApiKeyCreatedResponse,
@@ -10,12 +10,21 @@ import { makeM2MService } from './m2m.service.js'
 
 export type ApiKeyCreatedResponseType = z.infer<typeof ApiKeyCreatedResponse>
 
+interface CreateApiKeyInput {
+  readonly tenantId: string
+  readonly userId: string
+  readonly name: CreateApiKeyRequest['name']
+  readonly scopes: CreateApiKeyRequest['scopes']
+  readonly keyType: CreateApiKeyRequest['keyType']
+  readonly expiresInDays: CreateApiKeyRequest['expiresInDays']
+}
+
 export const makeM2MController = (deps: M2MControllerDeps) => {
   const service = makeM2MService(deps)
 
   return {
     create: async (
-      request: any,
+      request: CreateApiKeyInput,
       reply: FastifyReply,
     ): Promise<ApiKeyCreatedResponseType | FastifyReply> => {
       try {
