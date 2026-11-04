@@ -142,6 +142,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   await app.register(cors, {
     origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['content-type', 'authorization', 'cookie'],
+    exposedHeaders: ['set-cookie'],
+    preflight: true,
+    preflightContinue: false,
   })
   await app.register(multipart, {
     limits: { fileSize: evidenceMaxBytes, files: 1, fields: 0, parts: 1 },
