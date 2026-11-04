@@ -139,7 +139,15 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const documentIntelligenceMaxBytes = documentIntelligenceMaxFileSizeMb * 1024 * 1024
 
   await app.register(helmet)
-  await app.register(cors, { origin: true, credentials: true })
+  await app.register(cors, {
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true)
+      const allowed = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000']
+      if (allowed.includes(origin)) return cb(null, origin)
+      return cb(new Error('Not allowed by CORS'), false)
+    },
+    credentials: true,
+  })
   await app.register(multipart, {
     limits: { fileSize: evidenceMaxBytes, files: 1, fields: 0, parts: 1 },
     throwFileSizeLimit: true,
