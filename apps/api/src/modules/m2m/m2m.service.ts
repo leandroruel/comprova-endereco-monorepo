@@ -12,6 +12,13 @@ import {
 } from '@comprova/contracts'
 import { randomUUID } from 'node:crypto'
 
+export class AuthorizationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AuthorizationError'
+  }
+}
+
 export interface M2MServiceDeps {
   readonly db: Db
   readonly apiKeyPepper: string
@@ -42,7 +49,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
       .limit(1)
 
     if (member.length === 0) {
-      throw new Error('user is not a member of this organization')
+      throw new AuthorizationError('user is not a member of this organization')
     }
 
     if (requiredRole) {
@@ -50,7 +57,7 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
       const userLevel = hierarchy.indexOf(member[0]!.role)
       const minLevel = hierarchy.indexOf(requiredRole)
       if (userLevel < minLevel) {
-        throw new Error('insufficient role for this operation')
+        throw new AuthorizationError('insufficient role for this operation')
       }
     }
   }

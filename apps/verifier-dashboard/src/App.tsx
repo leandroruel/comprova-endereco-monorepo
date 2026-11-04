@@ -35,10 +35,12 @@ export default function App() {
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => [])
         })()
-        setOrganizations(Array.isArray(orgs) ? orgs : [])
+        const list: Array<{ tenantId: string; onboardingStatus: string }> =
+          Array.isArray(orgs) ? orgs : []
+        setOrganizations(list)
 
-        const hasOrg = organizations.length > 0
-        const completed = organizations.some((o) => o.onboardingStatus === 'completed')
+        const hasOrg = list.length > 0
+        const completed = list.some((o) => o.onboardingStatus === 'completed')
 
         if (!hasOrg) {
           setRoute('onboarding')
@@ -55,7 +57,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [organizations])
+  }, [])
 
   useEffect(() => {
     resolveRoute()

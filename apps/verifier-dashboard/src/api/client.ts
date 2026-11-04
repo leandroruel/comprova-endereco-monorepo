@@ -26,7 +26,10 @@ async function apiRequest<T>(
       title?: string
       detail?: string
     }
-    throw new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`)
+    throw Object.assign(
+      new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`),
+      { status: res.status },
+    )
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -126,8 +129,7 @@ export async function getOrganization(
   try {
     return await apiRequest(`/organizations/${tenantId}`, { method: 'GET' })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    if (message.includes('404')) return null
+    if ((err as { status?: number } | null)?.status === 404) return null
     throw err
   }
 }

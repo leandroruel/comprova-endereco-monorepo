@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { addMember, listMembers } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Table, TableHeader, TableBody, TableRow, TableHead, TableCell, Badge, Spinner } from '@/components/ui'
@@ -9,7 +9,6 @@ interface MembersPageProps {
 }
 
 export function MembersPage({ user }: MembersPageProps) {
-  const [tenantId, setTenantId] = useState<string | null>(null)
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState<'owner' | 'admin' | 'member'>('member')
   const [error, setError] = useState<string | null>(null)
@@ -29,9 +28,7 @@ export function MembersPage({ user }: MembersPageProps) {
   })
 
   const activeOrg = orgs?.[0]
-  useCallback(() => {
-    if (activeOrg?.tenantId) setTenantId(activeOrg.tenantId)
-  }, [activeOrg])
+  const tenantId: string | null = activeOrg?.tenantId ?? null
 
   const { data: members, isLoading: membersLoading } = useQuery({
     queryKey: ['members', tenantId],

@@ -340,6 +340,12 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   }
 
   // Se já tem org concluída, redireciona
+  const pendingOrg = organizations.find((o) => o.onboardingStatus === 'pending')
+  if (pendingOrg) {
+    setStep('terms')
+    return null
+  }
+
   return (
     <div className="max-w-2xl mx-auto">
       <Card className="animate-fade-in">

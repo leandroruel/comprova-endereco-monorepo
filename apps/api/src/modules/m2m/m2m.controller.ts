@@ -1,5 +1,6 @@
 import type { FastifyReply } from 'fastify'
 import type { ApiKeyDto, CreateApiKeyRequest } from '@comprova/contracts'
+import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import type { z } from 'zod'
 import type {
   ApiKeyCreatedResponse,
@@ -7,6 +8,7 @@ import type {
 } from './m2m.schema.js'
 import { sendProblem } from './m2m.schema.js'
 import { makeM2MService } from './m2m.service.js'
+import { AuthorizationError } from './m2m.service.js'
 
 export type ApiKeyCreatedResponseType = z.infer<typeof ApiKeyCreatedResponse>
 
@@ -36,8 +38,10 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
         }, request.userId)
         return reply.code(201).send(result)
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        return sendProblem(reply, 500, 'INTERNAL_ERROR', message)
+        if (error instanceof AuthorizationError) {
+          return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problem(403, 'FORBIDDEN', error.message))
+        }
+        return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao criar credencial')
       }
     },
 

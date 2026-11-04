@@ -28,8 +28,8 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="min-h-screen bg-background">
-      <nav className="fixed left-0 top-0 h-full w-64 bg-card border-r border-border z-20 transform translate-x-0 transition-transform duration-200 md:translate-x-0 lg:static lg:inset-0">
+    <div className="min-h-screen bg-background lg:flex">
+      <nav className={`fixed left-0 top-0 h-full w-64 bg-card border-r border-border z-20 transform transition-transform duration-200 md:translate-x-0 lg:static lg:inset-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-[-100%]'}`}>
         <div className="flex items-center justify-between h-14 px-6 border-b border-background">
           <div className="flex items-center gap-2">
             <span className="text-xl font-bold tracking-tight">comprova</span>
@@ -90,7 +90,7 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
       )}
 
       {/* Conteúdo principal */}
-      <div className={`md:pl-64 lg:pl-0 min-h-screen ${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200`}>
+      <div className={`lg:flex-1 lg:min-w-0 min-h-screen ${sidebarOpen ? 'translate-x-[256px]' : ''} transition-transform duration-200 md:pl-64 lg:pl-0`}>
         {/* Header mobile */}
         <div className="lg:hidden flex items-center justify-between h-14 px-4 border-b border-background">
           <button
