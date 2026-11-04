@@ -32,7 +32,6 @@ CREATE INDEX IF NOT EXISTS idx_tenant_document ON tenant (document);
 -- usada por `listOrganizationsByUser`.
 ALTER TABLE organization_member ENABLE ROW LEVEL SECURITY;
 ALTER TABLE organization_member FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS organization_member_isolation ON organization_member;
 CREATE POLICY organization_member_isolation ON organization_member
   USING (tenant_id = app_tenant_id() OR user_id = app_user_id())
   WITH CHECK (tenant_id = app_tenant_id());
@@ -43,7 +42,6 @@ CREATE POLICY organization_member_isolation ON organization_member
 -- localizar o convite pelo token antes de saber o tenant.
 ALTER TABLE organization_invitation ENABLE ROW LEVEL SECURITY;
 ALTER TABLE organization_invitation FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS organization_invitation_isolation ON organization_invitation;
 CREATE POLICY organization_invitation_isolation ON organization_invitation
   USING (tenant_id = app_tenant_id() OR email = app_user_email())
   WITH CHECK (tenant_id = app_tenant_id());
