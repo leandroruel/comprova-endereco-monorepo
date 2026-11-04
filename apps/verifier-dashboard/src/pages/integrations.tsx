@@ -19,6 +19,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
   const { data: keysData, isLoading: keysLoading, isError: keysError, error: keysErr } = useQuery({
     queryKey: ['api-keys', tenantId],
     queryFn: () => listApiKeys(tenantId),
+    enabled: tenantId.length > 0,
   })
 
   const createKeyMutation = useMutation({
@@ -95,6 +96,20 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
       <div className="flex items-center gap-2 p-4 text-sm text-destructive">
         <AlertCircle className="h-4 w-4" />
         {keysErr instanceof Error ? keysErr.message : 'Erro ao carregar credenciais'}
+      </div>
+    )
+  }
+
+  if (tenantId.length === 0) {
+    return (
+      <div className="max-w-md mx-auto">
+        <Card>
+          <CardContent className="text-center p-10">
+            <p className="text-sm text-muted-foreground">
+              Nenhuma organização selecionada. Selecione uma organização para gerenciar credenciais M2M.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     )
   }

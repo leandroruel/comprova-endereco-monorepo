@@ -4,15 +4,9 @@ import {
   LayoutDashboard,
   Users,
   ShieldCheck,
-  FileKey,
-  Mail,
-  ChevronRight,
   Menu,
   X,
-  CircleUser,
 } from 'lucide-react'
-import { Button } from '@/components/ui'
-import { Badge } from '@/components/ui'
 
 interface LayoutProps {
   user: { id: string; email: string; name: string; role: string }
@@ -122,6 +116,6 @@ export function Layout({ user, onLogout, currentRoute, setRoute, children }: Lay
   )
 }
 
-function Separator({ className, ...props }: React.ComponentPropsWithoutRef<'hr'>) {
+function Separator({ className: _className, ...props }: React.ComponentPropsWithoutRef<'hr'>) {
   return <hr className="my-4 h-px bg-border" {...props} />
 }

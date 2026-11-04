@@ -11,6 +11,7 @@ export interface TenantContext {
   readonly scopes: readonly string[]
   readonly rateLimitRps: number
   readonly burst: number
+  readonly expiresAt: Date | null
 }
 
 declare module 'fastify' {
@@ -41,6 +42,11 @@ const cacheGet = (prefixHash: string, now: number): TenantContext | null => {
   const hit = verifiedPrefixes.get(prefixHash)
   if (hit === undefined) return null
   if (hit.expiresAt < now) {
+    verifiedPrefixes.delete(prefixHash)
+    return null
+  }
+  // Re-chave expirou: invalida a entrada do cache mesmo antes do TTL.
+  if (hit.ctx.expiresAt !== null && hit.ctx.expiresAt !== undefined && new Date(hit.ctx.expiresAt) < new Date()) {
     verifiedPrefixes.delete(prefixHash)
     return null
   }
@@ -110,6 +116,7 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
       scopes: match.scopes,
       rateLimitRps: match.rateLimitRps,
       burst: match.burst,
+      expiresAt: match.expiresAt,
     }
     cachePut(prefixHash, ctx, now)
     request.tenant = ctx

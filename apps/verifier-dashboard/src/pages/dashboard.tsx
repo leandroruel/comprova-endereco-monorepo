@@ -13,13 +13,13 @@ interface DashboardPageProps {
 export function DashboardPage({ user, setRoute }: DashboardPageProps) {
   const queryClient = useQueryClient()
 
-  const { data: orgs, isLoading: orgsLoading } = useQuery({
+  const { data: orgs, isLoading: orgsLoading, isError: orgsError } = useQuery({
     queryKey: ['organizations'],
     queryFn: async () => {
       const res = await fetch('http://localhost:3000/v1/organizations', {
         credentials: 'include',
       })
-      if (!res.ok) return []
+      if (!res.ok) throw new Error('Erro ao carregar organizações')
       return res.json()
     },
     enabled: !!user,
@@ -46,11 +46,33 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
     enabled: !!tenantId,
   })
 
+  const handleRefresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+    refetchKeys()
+  }, [queryClient, refetchKeys])
+
   if (orgsLoading || orgLoading || membersLoading || keysLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Spinner className="mr-2" />
         <span>Carregando…</span>
+      </div>
+    )
+  }
+
+  if (orgsError) {
+    return (
+      <div className="max-w-md mx-auto">
+        <Card>
+          <CardContent className="text-center p-10">
+            <p className="text-sm text-destructive">
+              {(orgsError as unknown as Error | undefined)?.message ?? 'Erro ao carregar organizações'}
+            </p>
+            <Button onClick={() => window.location.reload()}>
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -69,10 +91,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
     )
   }
 
-  const handleRefresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['api-keys'] })
-    refetchKeys()
-  }, [queryClient, refetchKeys])
+  const m2mKeys = (apiKeysData?.apiKeys ?? []).filter((key) => key.keyType === 'm2m')
 
   return (
     <div className="space-y-6">
@@ -161,7 +180,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Ativas</span>
-              <span className="text-lg font-medium">{apiKeysData?.apiKeys.length ?? 0}</span>
+              <span className="text-lg font-medium">{m2mKeys.length}</span>
             </div>
           </CardContent>
         </Card>
@@ -240,7 +259,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {apiKeysData?.apiKeys.length === 0 ? (
+            {m2mKeys.length === 0 ? (
               <div className="space-y-3 text-center py-6">
                 <p className="text-sm text-muted-foreground">
                   Nenhuma credencial de API criada
@@ -252,7 +271,7 @@ export function DashboardPage({ user, setRoute }: DashboardPageProps) {
               </div>
             ) : (
               <div className="space-y-2">
-                {(apiKeysData?.apiKeys ?? []).map((key) => (
+                {m2mKeys.map((key) => (
                   <div
                     key={key.apiKeyId}
                     className="flex items-center justify-between p-3 rounded-lg border border-border bg-card"

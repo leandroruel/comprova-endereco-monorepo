@@ -1,9 +1,8 @@
-import { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createOrganization, listOrganizations, completeOnboarding, getMe } from '@/api/client'
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Badge, Separator, Spinner } from '@/components/ui'
+import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { createOrganization, completeOnboarding } from '@/api/client'
+import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Separator, Spinner } from '@/components/ui'
 import { Mail, FileText, ShieldCheck, AlertCircle, CheckCircle2, ArrowRight, LayoutDashboard } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 interface OrganizationSummary {
   tenantId: string
@@ -27,12 +26,6 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const queryClient = useQueryClient()
-
-  const { data: me } = useQuery({
-    queryKey: ['me'],
-    queryFn: getMe,
-    enabled: !!user,
-  })
 
   const createOrgMutation = useMutation({
     mutationFn: createOrganization,

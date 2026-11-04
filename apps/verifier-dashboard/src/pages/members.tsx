@@ -1,9 +1,8 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { addMember, listMembers, getOrganization } from '@/api/client'
+import { addMember, listMembers } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Table, TableHeader, TableBody, TableRow, TableHead, TableCell, Badge, Spinner } from '@/components/ui'
 import { Users, Plus, AlertCircle, Mail } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 interface MembersPageProps {
   user: { id: string; email: string; name: string; role: string }

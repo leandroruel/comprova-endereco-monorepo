@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { authClient } from '@/api/auth'
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Spinner } from '@/components/ui'
-import { Mail, Lock, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
+import { AlertCircle, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface PasswordCheck {
