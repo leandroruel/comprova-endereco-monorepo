@@ -26,6 +26,7 @@ const app = await buildApp({
     HOST: '127.0.0.1',
     LOG_LEVEL: 'silent',
     POLICY_VERSION: '2026.11.1',
+    TERMS_VERSION: '1.0.0',
     TEMPORAL_ENABLED: false,
     VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',
@@ -128,14 +129,14 @@ describe('Verifier Onboarding', () => {
   it('deve criar uma organização e associar o usuário como owner', async () => {
     const res = await injectWithSession('POST', '/v1/organizations', {
       name: 'Nova Organização',
-      email: 'owner@exemplo.com',
-      termsVersion: '2.0.0',
+      termsVersion: '1.0.0',
     })
     expect(res.statusCode).toBe(201)
     const org = res.json()
     expect(org.name).toBe('Nova Organização')
     expect(org.onboardingStatus).toBe('pending')
-    expect(org.termsVersion).toBe('2.0.0')
+    // A versão dos termos é definida exclusivamente pelo servidor.
+    expect(org.termsVersion).toBe('1.0.0')
     expect(org.type).toBe('organization')
   })
 

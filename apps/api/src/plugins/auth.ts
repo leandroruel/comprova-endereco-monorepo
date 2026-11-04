@@ -4,7 +4,7 @@ import { and, eq, isNull } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { keyPrefixOf, type ApiKeyHasher } from '@comprova/db'
-import { ALL_API_SCOPES } from './scope.js'
+import { ALL_API_SCOPES, validateScopesForKeyType } from './scope.js'
 import type { Redis } from 'ioredis'
 
 export interface TenantContext {
@@ -55,14 +55,30 @@ export const setRedisClient = (redis: Redis): void => {
 }
 
 const isRevokedInCache = async (apiKeyId: string): Promise<boolean> => {
-  if (!redisClient) return false
-  const result = await redisClient.get(revokedKeyCacheKey(apiKeyId))
-  return result === '1'
+  if (!redisClient) {
+    // Não há como verificar o estado de revogação sem Redis: falha fechada
+    // para evitar que uma chave revogada continue sendo aceita.
+    throw new Error('revocation check unavailable: redis client not configured')
+  }
+  try {
+    const result = await redisClient.get(revokedKeyCacheKey(apiKeyId))
+    return result === '1'
+  } catch (error) {
+    // Falha ao consultar Redis: falha fechada para não aceitar chaves
+    // potencialmente revogadas.
+    throw new Error(`revocation check unavailable: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const markRevokedInCache = async (apiKeyId: string): Promise<void> => {
-  if (!redisClient) return
-  await redisClient.set(revokedKeyCacheKey(apiKeyId), '1', 'EX', Math.ceil(CACHE_TTL_MS / 1000))
+  if (!redisClient) {
+    throw new Error('revocation cache unavailable: redis client not configured')
+  }
+  try {
+    await redisClient.set(revokedKeyCacheKey(apiKeyId), '1', 'EX', Math.ceil(CACHE_TTL_MS / 1000))
+  } catch (error) {
+    throw new Error(`revocation cache unavailable: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const cacheGet = (prefixHash: string, now: number): TenantContext | null => {
@@ -119,8 +135,16 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
     const now = Date.now()
     const cached = cacheGet(prefixHash, now)
     if (cached !== null) {
-      // Verifica se a chave foi revogada no cache distribuído (Redis)
-      if (await isRevokedInCache(cached.apiKeyId)) {
+      // Verifica se a chave foi revogada no cache distribuído (Redis).
+      // Falha fechada: se não for possível verificar, rejeita a autenticação.
+      let revoked = false
+      try {
+        revoked = await isRevokedInCache(cached.apiKeyId)
+      } catch {
+        cacheInvalidate(prefixHash)
+        return unauthorized(reply)
+      }
+      if (revoked) {
         cacheInvalidate(prefixHash)
         return unauthorized(reply)
       }
@@ -157,6 +181,20 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
       }
     }
 
+    // Valida que os scopes persistidos são compatíveis com o tipo da chave.
+    // Isso impede que uma chave persistida com estado inconsistente (ex.: chave
+    // 'user' com scope 'verify:m2m') seja aceita em autenticação.
+    const keyType = match.keyType as 'user' | 'm2m' | string
+    if (keyType !== 'user' && keyType !== 'm2m') {
+      // Tipo de chave desconhecido ou inválido: rejeita.
+      return unauthorized(reply)
+    }
+    try {
+      validateScopesForKeyType(keyType, match.scopes)
+    } catch {
+      return unauthorized(reply)
+    }
+
     // Rejeita chaves expiradas.
     if (match.expiresAt !== null && match.expiresAt !== undefined && new Date(match.expiresAt) < new Date()) {
       return unauthorized(reply)
@@ -169,7 +207,7 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
       rateLimitRps: match.rateLimitRps,
       burst: match.burst,
       expiresAt: match.expiresAt,
-      keyType: match.keyType as 'user' | 'm2m',
+      keyType: keyType,
     }
     cachePut(prefixHash, ctx, now)
     request.tenant = ctx

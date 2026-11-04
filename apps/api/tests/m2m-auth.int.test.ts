@@ -1,4 +1,6 @@
-import { createDbPool, runMigrations } from '@comprova/db'
+import { createDbPool, makeApiKeyHasher, runMigrations, type Db } from '@comprova/db'
+import { createHash, randomUUID } from 'node:crypto'
+import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import Redis from 'ioredis'
@@ -25,6 +27,7 @@ const app = await buildApp({
     HOST: '127.0.0.1',
     LOG_LEVEL: 'silent',
     POLICY_VERSION: '2026.11.1',
+    TERMS_VERSION: '1.0.0',
     TEMPORAL_ENABLED: false,
     VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',
@@ -218,5 +221,118 @@ describe('Verifier M2M autenticação e revogação', () => {
       headers: { 'Content-Type': 'application/json' },
     })
     expect(res.statusCode).toBe(401)
+  })
+})
+
+describe('Verifier Separação user/M2M', () => {
+  // Insere uma chave diretamente no banco, ignorando validações de criação.
+  const insertApiKeyDirectly = async (
+    tenantId: string,
+    plaintext: string,
+    scopes: string[],
+    keyType: string,
+    expired = false,
+  ): Promise<{ apiKeyId: string; secret: string }> => {
+    const apiKeyId = randomUUID()
+    const prefix = createHash('sha256').update(plaintext.slice(0, 8)).digest('hex').slice(0, 12)
+    const hasher = makeApiKeyHasher(PEPPER)
+    const keyHash = hasher.hash(plaintext)
+    await (appPool.db as Db).insert(t.apiKey).values({
+      apiKeyId,
+      tenantId,
+      keyPrefix: prefix,
+      keyHash,
+      scopes,
+      keyType,
+      revokedAt: null,
+      expiresAt: expired ? new Date(Date.now() - 86_400_000) : null,
+    })
+    return { apiKeyId, secret: plaintext }
+  }
+
+  it('chave user via Bearer não acessa operações administrativas de gerenciamento de chaves', async () => {
+    // Cria uma chave user diretamente no banco.
+    const { secret } = await insertApiKeyDirectly(
+      m2mOrgTenantId,
+      'user-key-direct-1234567890',
+      ['validate:read', 'validate:write', 'keys:write'],
+      'user',
+    )
+
+    // Tentativa de listar chaves via Bearer (rota administrativa exige sessão).
+    const res = await injectBearer('GET', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, secret)
+    // Sem sessão de usuário, a rota admin rejeita com 401.
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('chave m2m via Bearer não acessa operações administrativas de gerenciamento de chaves', async () => {
+    const { secret } = await insertApiKeyDirectly(
+      m2mOrgTenantId,
+      'm2m-key-direct-1234567890',
+      ['validate:read', 'verify:m2m'],
+      'm2m',
+    )
+
+    // Tentativa de listar chaves via Bearer (rota administrativa exige sessão).
+    const res = await injectBearer('GET', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, secret)
+    // Sem sessão de usuário, a rota admin rejeita com 401.
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('chave user com scope verify:m2m persistido é rejeitada na autenticação', async () => {
+    const { secret } = await insertApiKeyDirectly(
+      m2mOrgTenantId,
+      'user-with-m2m-scope-1234567890',
+      ['validate:read', 'verify:m2m'],
+      'user',
+    )
+
+    const res = await injectBearer('GET', '/v1/meta', secret)
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('chave m2m com scope keys:write persistido é rejeitada na autenticação', async () => {
+    const { secret } = await insertApiKeyDirectly(
+      m2mOrgTenantId,
+      'm2m-with-keys-write-1234567890',
+      ['validate:read', 'keys:write'],
+      'm2m',
+    )
+
+    const res = await injectBearer('GET', '/v1/meta', secret)
+    expect(res.statusCode).toBe(401)
+  })
+})
+
+describe('Verifier Integridade dos termos', () => {
+  it('rejeita aceite de termos com versão desatualizada', async () => {
+    // Cria organização (usa versão do servidor '1.0.0').
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Termos Desatualizados',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const tenantId = createRes.json().tenantId
+
+    // Tenta completar onboarding com versão diferente da vigente.
+    const res = await injectWithSession('POST', `/v1/organizations/${tenantId}/onboarding/complete`, {
+      termsVersion: '9.9.9',
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('TERMS_VERSION_MISMATCH')
+  })
+
+  it('aceita onboarding com versão vigente do servidor', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Termos Válidos',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const tenantId = createRes.json().tenantId
+
+    const res = await injectWithSession('POST', `/v1/organizations/${tenantId}/onboarding/complete`, {
+      termsVersion: '1.0.0',
+    })
+    expect(res.statusCode).toBe(200)
   })
 })

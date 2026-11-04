@@ -82,6 +82,28 @@ export const requireScope =
     }
   }
 
+/**
+ * Exige que a credencial autenticada seja de um `keyType` específico.
+ *
+ * - `user`: credencial de usuário autenticado (dashboard/sessão).
+ * - `m2m`: credencial máquina-a-máquina (Bearer token, sem sessão de usuário).
+ *
+ * Deve rodar como `preHandler` de rotas montadas DEPOIS do `authenticate`.
+ * Rotas de gerenciamento administrativo de API keys devem exigir `keyType =
+ * 'user'` (via sessão); rotas de consumo M2M devem exigir `keyType = 'm2m'`.
+ */
+export const requireKeyType =
+  (keyType: 'user' | 'm2m') =>
+  async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
+    const tenant = request.tenant
+    if (tenant === undefined) {
+      return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+    }
+    if (tenant.keyType !== keyType) {
+      return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+    }
+  }
+
 export const requireReadScope = requireScope(API_SCOPES.validateRead)
 export const requireWriteScope = requireScope(API_SCOPES.validateWrite)
 export const requireKeysWriteScope = requireScope(API_SCOPES.keysWrite)

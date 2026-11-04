@@ -26,6 +26,8 @@ import { createHmac } from 'node:crypto'
  */
 export interface OrganizationsServiceDeps {
   readonly db: t.Db
+  /** Versão vigente dos termos de onboarding, definida exclusivamente pelo servidor. */
+  readonly termsVersion: string
 }
 
 /**
@@ -79,7 +81,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
           document: create.document ?? null,
           type: 'organization',
           onboardingStatus: 'pending',
-          termsVersion: create.termsVersion,
+          termsVersion: deps.termsVersion,
           dataRegion: create.dataRegion ?? 'sa-east-1',
         })
         .returning()
@@ -134,6 +136,12 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     userId: string,
     termsVersion: string,
   ): Promise<OrganizationDto> => {
+    // A versão dos termos é definida exclusivamente pelo servidor. Rejeita o
+    // aceite quando o cliente envia uma versão diferente da vigente.
+    if (termsVersion !== deps.termsVersion) {
+      throw new Error('terms version does not match the current version')
+    }
+
     // Verifica se o usuário é owner da organização dentro do escopo do tenant
     const member = await withTenant(db, tenantId, async (tx) => {
       return tx
@@ -158,7 +166,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
           onboardingStatus: 'completed',
           termsAcceptedAt: new Date(),
           termsAcceptedBy: userId,
-          termsVersion,
+          termsVersion: deps.termsVersion,
         })
         .where(eq(t.tenant.tenantId, tenantId))
         .returning()

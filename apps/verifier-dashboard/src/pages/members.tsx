@@ -204,13 +204,14 @@ export function MembersPage({ user, activeOrgId }: MembersPageProps) {
                   >
                     <option value="member">Membro</option>
                     <option value="admin">Administrador</option>
-                    <option value="owner">Proprietário</option>
                   </select>
                 </div>
 
                 <p className="text-[10px] text-muted-foreground">
-                  O usuário precisa já ter uma conta no Comprova. O papel{' '}
-                  <span className="font-medium">Proprietário</span> tem controle total sobre a organização.
+                  O usuário precisa já ter uma conta no Comprova. O papel de{' '}
+                  <span className="font-medium">Administrador</span> permite gerenciar membros e credenciais
+                  da organização. O papel de Proprietário é definido apenas na criação da organização e não
+                  pode ser transferido nesta fase.
                 </p>
 
                 <Button

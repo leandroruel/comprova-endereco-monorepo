@@ -40,19 +40,21 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   const [name, setName] = useState('')
   const [legalName, setLegalName] = useState('')
   const [document, setDocument] = useState('')
-  const [email, setEmail] = useState(user.email)
   const [termsVersion, setTermsVersion] = useState<string>('1.0.0')
+  const [termsVersionError, setTermsVersionError] = useState<Error | null>(null)
   const [termsAccepted, setTermsAccepted] = useState(false)
 
-  // A versão vigente dos termos de onboarding é definida pelo servidor. O
-  // cliente apenas a consome e registra a manifestação de aceite, sem escolher
-  // livremente a versão (o conteúdo jurídico depende de aprovação jurídica).
+  // A versão vigente dos termos de onboarding é definida exclusivamente pelo
+  // servidor. Se a consulta falhar, o fluxo de aceite é bloqueado (não há
+  // fallback silencioso nem versão genérica apresentada como termo oficial).
   useEffect(() => {
     getTermsVersion()
-      .then(({ version }) => setTermsVersion(version))
-      .catch(() => {
-        // Falha ao buscar a versão do servidor: mantém o valor default e a UI
-        // segue preparada; o fluxo depende da definição do conteúdo jurídico.
+      .then(({ version }) => {
+        setTermsVersion(version)
+        setTermsVersionError(null)
+      })
+      .catch((err) => {
+        setTermsVersionError(err instanceof Error ? err : new Error(String(err)))
       })
   }, [])
   const [error, setError] = useState<string | null>(null)
@@ -88,6 +90,13 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
     e.preventDefault()
     setError(null)
     setLoading(true)
+    // Não permite criar organização sem a versão vigente dos termos definida
+    // pelo servidor (falha na consulta bloqueia o fluxo).
+    if (termsVersionError) {
+      setError('Não foi possível carregar a versão dos termos do servidor. Tente novamente.')
+      setLoading(false)
+      return
+    }
     try {
       await createOrgMutation.mutateAsync({
         name,
@@ -167,6 +176,35 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
   }
 
   if (step === 'create') {
+    if (termsVersionError) {
+      return (
+        <div className="max-w-2xl mx-auto">
+          <Card className="animate-fade-in">
+            <CardContent className="text-center p-10">
+              <AlertCircle className="h-8 w-8 text-amber-600 mb-3" />
+              <h2 className="text-lg font-semibold">Erro ao carregar termos</h2>
+              <p className="mt-2 text-sm text-muted-foreground">{termsVersionError.message}</p>
+              <Button
+                onClick={() => {
+                  setTermsVersionError(null)
+                  void getTermsVersion()
+                    .then(({ version }) => {
+                      setTermsVersion(version)
+                      setTermsVersionError(null)
+                    })
+                    .catch((err) => {
+                      setTermsVersionError(err instanceof Error ? err : new Error(String(err)))
+                    })
+                }}
+                className="mt-4"
+              >
+                Tentar novamente
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
     return (
       <div className="max-w-xl mx-auto">
         <Card className="animate-fade-in">
@@ -217,19 +255,6 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
                     onChange={(e) => setDocument(e.target.value.replace(/\D/g, ''))}
                     placeholder="Ex: 12345678000199"
                     maxLength={20}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor="email">
-                    E-mail de contato
-                  </label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
                   />
                 </div>
 

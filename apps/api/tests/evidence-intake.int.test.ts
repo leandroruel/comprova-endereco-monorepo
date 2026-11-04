@@ -90,6 +90,7 @@ const app = await buildApp({
     HOST: '127.0.0.1',
     LOG_LEVEL: 'debug',
     POLICY_VERSION: '2026.11.1',
+    TERMS_VERSION: '1.0.0',
     TEMPORAL_ENABLED: false,
     VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',

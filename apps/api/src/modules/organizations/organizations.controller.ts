@@ -20,8 +20,8 @@ const sendProblem = (
     .type(PROBLEM_CONTENT_TYPE)
     .send(problem(status, code, title, detail))
 
-export const makeOrganizationsController = (deps: { readonly db: Db }) => {
-  const service = makeOrganizationsService(deps)
+export const makeOrganizationsController = (deps: { readonly db: Db; readonly termsVersion: string }) => {
+  const service = makeOrganizationsService({ db: deps.db, termsVersion: deps.termsVersion })
 
   type CreateOrgInput = {
     name: string
@@ -123,6 +123,14 @@ export const makeOrganizationsController = (deps: { readonly db: Db }) => {
         }
         if (message === 'organization not found') {
           return sendProblem(reply, 404, 'ORGANIZATION_NOT_FOUND', 'Organização não encontrada')
+        }
+        if (message === 'terms version does not match the current version') {
+          return sendProblem(
+            reply,
+            409,
+            'TERMS_VERSION_MISMATCH',
+            'A versão dos termos não corresponde à versão vigente',
+          )
         }
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao completar onboarding')
       }

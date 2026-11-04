@@ -311,9 +311,16 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         logger: deps.logger,
       })
       registerMeRoute(v1, requireWriteScope)
+      // A versão dos termos deve ser explicitamente configurada. Não há
+      // fallback silencioso: a ausência da configuração impede o fluxo de
+      // onboarding.
+      const termsVersion = deps.config.TERMS_VERSION
+      if (!termsVersion) {
+        throw new Error('TERMS_VERSION must be configured')
+      }
       registerOrganizationsRoutes(v1, {
         db: deps.db,
-        termsVersion: deps.config.TERMS_VERSION ?? '1.0.0',
+        termsVersion,
       })
       registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerCredentialRoutes(v1, { db: deps.db })

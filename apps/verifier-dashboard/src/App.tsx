@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { authClient } from '@/api/auth'
 import { getMe } from '@/api/client'
@@ -41,6 +41,8 @@ export default function App() {
   const [organizationsError, setOrganizationsError] = useState<Error | null>(null)
   /** Organização ativa explicitamente selecionada pelo usuário (não apenas a primeira da lista). */
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null)
+  const activeOrgIdRef = useRef(activeOrgId)
+  activeOrgIdRef.current = activeOrgId
   const [loading, setLoading] = useState(true)
 
   const resolveRoute = useCallback(async () => {
@@ -69,12 +71,15 @@ export default function App() {
 
         // Seleciona explicitamente a primeira organização apenas se nenhuma
         // organização ativa já estiver definida (preserve a seleção do usuário).
-        if (!activeOrgId && list.length > 0) {
+        if (!activeOrgIdRef.current && list.length > 0) {
           setActiveOrgId(list[0]?.tenantId ?? null)
         }
 
+        // O estado de onboarding é determinado pela organização ativa
+        // selecionada, e não pelo primeiro item da lista.
+        const activeOrg = list.find((o) => o.tenantId === activeOrgIdRef.current) ?? list[0]
         const hasOrg = list.length > 0
-        const completed = list[0]?.onboardingStatus === 'completed'
+        const completed = activeOrg?.onboardingStatus === 'completed'
 
         if (!hasOrg) {
           setRoute('onboarding')
@@ -155,7 +160,7 @@ export default function App() {
           ) : route === 'members' ? (
             <MembersPage user={user} activeOrgId={activeOrgId} />
           ) : route === 'integrations' ? (
-            <IntegrationsPage tenantId={activeOrgId ?? organizations[0]?.tenantId ?? ''} />
+            <IntegrationsPage tenantId={activeOrgId ?? ''} />
           ) : (
             <DashboardPage
               user={user}
