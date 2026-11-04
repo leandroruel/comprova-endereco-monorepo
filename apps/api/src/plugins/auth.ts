@@ -56,6 +56,14 @@ const cachePut = (prefixHash: string, ctx: TenantContext, now: number): void => 
 
 export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
+    // Se há uma sessão de usuário válida (definida por makeSessionMiddleware),
+    // permite o acesso por sessão (ex.: dashboard do Verifier). Isso não reusa
+    // o token de sessão como credencial de API: é um contexto de autenticação
+    // distinto, verificado pelo cookie de sessão do Better Auth.
+    if (request.sessionUser !== undefined) {
+      return
+    }
+
     const header = request.headers.authorization
     const bearer = header?.startsWith('Bearer ') ? header.slice(7).trim() : undefined
     if (bearer === undefined || bearer.length === 0) {

@@ -20,12 +20,10 @@ export const makeSessionMiddleware = (auth: Auth) => {
       const cookieHeader = request.headers.cookie
       if (cookieHeader === undefined) return
 
-      const url = `http://localhost/api/auth/get-session`
       const headers = new Headers()
       headers.set('cookie', cookieHeader)
-      const incoming = new Request(url, { method: 'GET', headers })
 
-      const session = await auth.api.getSession({ headers: incoming })
+      const session = await auth.api.getSession({ headers })
       if (session?.user) {
         // O plugin admin do better-auth inclui o campo `role` no objeto do usuário.
         const user = session.user as { readonly role?: string | null }

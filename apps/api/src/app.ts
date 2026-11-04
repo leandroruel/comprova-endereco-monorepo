@@ -49,6 +49,8 @@ import { makeDocumentIntelligenceClient } from '@comprova/providers'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'
+import { registerOrganizationsRoutes } from './modules/organizations/organizations.routes.js'
+import { registerM2MRoutes } from './modules/m2m/m2m.routes.js'
 import { requireWriteScope } from './plugins/scope.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
 import { makeSigningKeyProvider } from './services/signing-key-provider.factory.js'
@@ -259,6 +261,8 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         logger: deps.logger,
       })
       registerMeRoute(v1, requireWriteScope)
+      registerOrganizationsRoutes(v1, { db: deps.db })
+      registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })

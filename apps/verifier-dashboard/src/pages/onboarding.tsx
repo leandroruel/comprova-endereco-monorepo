@@ -1,0 +1,366 @@
+import { useState, useCallback } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { createOrganization, listOrganizations, completeOnboarding, getMe } from '@/api/client'
+import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Badge, Separator, Spinner } from '@/components/ui'
+import { Mail, FileText, ShieldCheck, AlertCircle, CheckCircle2, ArrowRight, LayoutDashboard } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+interface OrganizationSummary {
+  tenantId: string
+  onboardingStatus: string
+}
+
+interface OnboardingPageProps {
+  user: { id: string; email: string; name: string; role: string }
+  organizations: OrganizationSummary[]
+  onComplete: () => void
+}
+
+export function OnboardingPage({ user, organizations, onComplete }: OnboardingPageProps) {
+  const [step, setStep] = useState<'welcome' | 'create' | 'terms' | 'complete'>('welcome')
+  const [name, setName] = useState('')
+  const [legalName, setLegalName] = useState('')
+  const [document, setDocument] = useState('')
+  const [email, setEmail] = useState(user.email)
+  const [termsVersion, setTermsVersion] = useState('1.0.0')
+  const [termsAccepted, setTermsAccepted] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const queryClient = useQueryClient()
+
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: getMe,
+    enabled: !!user,
+  })
+
+  const createOrgMutation = useMutation({
+    mutationFn: createOrganization,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['organizations'] })
+      setStep('terms')
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Erro ao criar organização')
+    },
+  })
+
+  const completeMutation = useMutation({
+    mutationFn: ({ tenantId, tv }: { tenantId: string; tv: string }) =>
+      completeOnboarding(tenantId, tv),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['organizations'] })
+      onComplete()
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Erro ao concluir onboarding')
+    },
+  })
+
+  const hasPendingOrg = organizations.some((o) => o.onboardingStatus === 'pending')
+  const hasCompletedOrg = organizations.some((o) => o.onboardingStatus === 'completed')
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await createOrgMutation.mutateAsync({
+        name,
+        legalName: legalName || undefined,
+        document: document || undefined,
+        email,
+        termsVersion,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleComplete = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    const org = organizations.find((o) => o.onboardingStatus === 'pending')
+    if (!org) {
+      setError('Nenhuma organização pendente encontrada')
+      setLoading(false)
+      return
+    }
+    try {
+      await completeMutation.mutateAsync({ tenantId: org.tenantId, tv: termsVersion })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!hasPendingOrg && !hasCompletedOrg && step === 'welcome') {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <Card className="animate-fade-in">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <LayoutDashboard className="h-5 w-5" /> Bem-vindo ao Comprova Verifier
+            </CardTitle>
+            <CardDescription>
+              Cadastre sua organização para começar a usar a infraestrutura de
+              verificação de evidências do Comprova.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-start gap-3">
+                <Mail className="h-5 w-5 shrink-0 text-primary mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">E-mail responsável</p>
+                  <p className="text-xs text-muted-foreground">{user.email}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <ShieldCheck className="h-5 w-5 shrink-0 text-primary mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">Isolamento de dados</p>
+                  <p className="text-xs text-muted-foreground">
+                    Sua organização terá dados isolados de outras organizações
+                  </p>
+                </div>
+              </div>
+            </div>
+            <Separator />
+            <Button
+              onClick={() => setStep('create')}
+              className="w-full"
+              disabled={loading}
+            >
+              {loading ? <Spinner className="mr-2" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+              Criar organização
+            </Button>
+          </CardContent>
+        </Card>
+
+        {error && (
+          <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" /> {error}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (step === 'create') {
+    return (
+      <div className="max-w-xl mx-auto">
+        <Card className="animate-fade-in">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" /> Dados da organização
+            </CardTitle>
+            <CardDescription>
+              Informe os dados da sua organização Verifier. O CPF/CNPJ é usado
+              apenas como dado organizacional, nunca como identificador interno.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <form onSubmit={handleCreate}>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="name">
+                    Nome da organização
+                  </label>
+                  <Input
+                    id="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Ex: Banco Exemplo S.A."
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="legalName">
+                    Nome legal (opcional)
+                  </label>
+                  <Input
+                    id="legalName"
+                    value={legalName}
+                    onChange={(e) => setLegalName(e.target.value)}
+                    placeholder="Ex: Banco Exemplo S.A."
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="document">
+                    Documento (CPF/CNPJ sem máscara, opcional)
+                  </label>
+                  <Input
+                    id="document"
+                    value={document}
+                    onChange={(e) => setDocument(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Ex: 12345678000199"
+                    maxLength={20}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="email">
+                    E-mail de contato
+                  </label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="termsVersion">
+                    Versão dos termos
+                  </label>
+                  <Input
+                    id="termsVersion"
+                    value={termsVersion}
+                    onChange={(e) => setTermsVersion(e.target.value)}
+                    placeholder="1.0.0"
+                    required
+                  />
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="flex items-center justify-between">
+                <Button type="button" variant="outline" onClick={() => setStep('welcome')}>
+                  Voltar
+                </Button>
+                <Button type="submit" className="w-auto" disabled={loading || !name.trim()}>
+                  {loading ? <Spinner className="mr-2" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+                  Próximo
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {error && (
+          <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" /> {error}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (step === 'terms') {
+    return (
+      <div className="max-w-xl mx-auto">
+        <Card className="animate-fade-in">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" /> Aceite dos termos
+            </CardTitle>
+            <CardDescription>
+              Antes de concluir o onboarding, leia e aceite os termos e políticas
+              aplicáveis à sua organização.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="border border-border rounded-lg p-4 bg-muted/50">
+              <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
+              <p className="text-sm text-foreground">
+                Ao concordar, você autoriza o Comprova a tratar os dados de sua
+                organização para fins de verificação de evidências e emissão de
+                credenciais verificáveis. Os dados pessoais e organizacionais são
+                mantidos separadamente e nunca são compartilhados com outras
+                organizações.
+              </p>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <input
+                id="terms"
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                className="w-4 h-4 rounded border border-input bg-card text-primary focus:ring-0"
+              />
+              <label htmlFor="terms" className="text-sm text-foreground cursor-pointer select-none">
+                Li e concordo com os termos e políticas aplicáveis (versão{' '}
+                <span className="font-medium">{termsVersion}</span>)
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <Button type="button" variant="outline" onClick={() => setStep('create')}>
+                Voltar
+              </Button>
+              <Button
+                onClick={handleComplete}
+                disabled={loading || !termsAccepted}
+                className="w-auto"
+              >
+                {loading ? <Spinner className="mr-2" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                Concluir onboarding
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {error && (
+          <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" /> {error}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (step === 'complete') {
+    return (
+      <div className="max-w-2xl mx-auto text-center">
+        <Card className="animate-fade-in">
+          <CardContent className="p-10 text-center">
+            <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-emerald-100 text-emerald-600 mb-4">
+              <CheckCircle2 className="h-8 w-8" />
+            </div>
+            <h2 className="text-xl font-semibold">Onboarding concluído</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Sua organização está pronta. Você já pode gerenciar membros e
+              integrações.
+            </p>
+            <div className="mt-8">
+              <Button
+                onClick={() => {
+                  setStep('welcome')
+                  onComplete()
+                }}
+              >
+                <LayoutDashboard className="mr-2 h-4 w-4" />
+                Ir para o painel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Se já tem org concluída, redireciona
+  return (
+    <div className="max-w-2xl mx-auto">
+      <Card className="animate-fade-in">
+        <CardContent className="text-center p-10">
+          <ShieldCheck className="h-8 w-8 text-emerald-600 mb-3" />
+          <h2 className="text-lg font-semibold">Organização já configurada</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Sua organização já completou o onboarding.
+          </p>
+          <Button onClick={() => onComplete()} className="mt-4">
+            Ir para o painel
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
