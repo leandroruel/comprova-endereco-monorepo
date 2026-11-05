@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHmac } from 'node:crypto'
 import { createDbPool, runMigrations } from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
@@ -7,16 +7,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
 
 const PEPPER = 'test-pepper-123'
-const DOCUMENT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
 /**
- * Simula o cálculo de HMAC-SHA-256 feito pelo Verifier com segredo derivado por tenant.
+ * Calcula o documentHash como HMAC-SHA-256 com segredo derivado por tenant.
+ *
+ * Fluxo (conforme contrato em packages/contracts/src/holder.ts):
+ * 1. tenantSecret = HMAC-SHA-256(globalSecret, tenantId)
+ * 2. documentHash = HMAC-SHA-256(tenantSecret, documentoNormalizado)
+ * 3. Resultado é string hexadecimal minúscula de 64 caracteres.
+ *
  * Não armazena nem expõe segredos reais; apenas demonstra o comportamento esperado.
  */
 function computeDocumentHash(documento: string, tenantId: string): string {
-  const tenantSecret = `hmac-sha256:${tenantId}:${PEPPER}`
-  const hash = createHash('sha256').update(`${tenantSecret}:${documento}`).digest('hex')
-  return hash
+  const tenantSecret = createHmac('sha256', PEPPER).update(tenantId).digest('hex')
+  return createHmac('sha256', tenantSecret).update(documento).digest('hex')
 }
 
 const db = await startTestDb()
@@ -202,13 +206,16 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const res = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-001',
         name: 'José da Silva',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -219,7 +226,7 @@ describe('Holder Integration', () => {
     expect(body.tenantId).toBe(tenantId)
     expect(body.externalReference).toBe('ext-ref-001')
     expect(body.name).toBe('José da Silva')
-    expect(body.documentHash).toBe(DOCUMENT_HASH)
+    expect(body.documentHash).toBe(documentHash)
     expect(body.documentType).toBe('CPF')
   })
 
@@ -233,13 +240,16 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const res = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-sem-write',
         name: 'Sem Escrita',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -257,6 +267,9 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     // Cria 3 holders
     for (let i = 0; i < 3; i++) {
       await injectWithM2M(
@@ -265,7 +278,7 @@ describe('Holder Integration', () => {
         {
           externalReference: `ext-ref-list-${i}`,
           name: `Holder ${i}`,
-          documentHash: DOCUMENT_HASH,
+          documentHash,
           documentType: 'CPF',
         },
         key.secret,
@@ -291,13 +304,16 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const createRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-search',
         name: 'Holder Busca',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CNPJ',
       },
       key.secret,
@@ -332,13 +348,16 @@ describe('Holder Integration', () => {
     ])
 
     // Cria holder na organização do outro
+    const documento = '12345678901'
+    const documentHashOutro = computeDocumentHash(documento, outroTenantId)
+
     const createRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${outroTenantId}`,
       {
         externalReference: 'ext-ref-outro',
         name: 'Holder Outro Tenant',
-        documentHash: DOCUMENT_HASH,
+        documentHash: documentHashOutro,
         documentType: 'CPF',
       },
       outroKey.secret,
@@ -376,13 +395,16 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const createRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-update',
         name: 'Nome Antigo',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -411,6 +433,9 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     // Primeira criação
     const res1 = await injectWithM2M(
       'POST',
@@ -418,7 +443,7 @@ describe('Holder Integration', () => {
       {
         externalReference: 'ext-ref-duplicado',
         name: 'Primeiro',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -432,7 +457,7 @@ describe('Holder Integration', () => {
       {
         externalReference: 'ext-ref-duplicado',
         name: 'Segundo',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -458,6 +483,12 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
+    // Mesmo documento em tenants diferentes deve produzir documentHash diferente
+    const documento = '12345678901'
+    const documentHashA = computeDocumentHash(documento, tenantA)
+    const documentHashB = computeDocumentHash(documento, tenantB)
+    expect(documentHashA).not.toBe(documentHashB)
+
     // Mesmo externalReference em tenants diferentes deve ser permitido
     const resA = await injectWithM2M(
       'POST',
@@ -465,7 +496,7 @@ describe('Holder Integration', () => {
       {
         externalReference: 'ext-ref-compartilhado',
         name: 'Holder Tenant A',
-        documentHash: DOCUMENT_HASH,
+        documentHash: documentHashA,
         documentType: 'CPF',
       },
       keyA.secret,
@@ -478,7 +509,7 @@ describe('Holder Integration', () => {
       {
         externalReference: 'ext-ref-compartilhado',
         name: 'Holder Tenant B',
-        documentHash: DOCUMENT_HASH,
+        documentHash: documentHashB,
         documentType: 'CPF',
       },
       keyB.secret,
@@ -490,6 +521,8 @@ describe('Holder Integration', () => {
     expect(resB.json().tenantId).toBe(tenantB)
     expect(resA.json().externalReference).toBe('ext-ref-compartilhado')
     expect(resB.json().externalReference).toBe('ext-ref-compartilhado')
+    expect(resA.json().documentHash).toBe(documentHashA)
+    expect(resB.json().documentHash).toBe(documentHashB)
   })
 })
 
@@ -507,13 +540,17 @@ describe('KYC Integration', () => {
     ])
 
     // Cria holder dedicado para este teste
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
+    // Cria holder dedicado para este teste
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-holder-kyc',
         name: 'Holder KYC',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -576,13 +613,16 @@ describe('KYC Integration', () => {
     ])
 
     // Cria holder na org A
+    const documento = '12345678901'
+    const documentHashA = computeDocumentHash(documento, tenantIdA)
+
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantIdA}`,
       {
         externalReference: 'ext-ref-holder-a',
         name: 'Holder Org A',
-        documentHash: DOCUMENT_HASH,
+        documentHash: documentHashA,
         documentType: 'CPF',
       },
       keyA.secret,
@@ -613,13 +653,16 @@ describe('KYC Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-holder-list',
         name: 'Holder Listagem',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -663,13 +706,16 @@ describe('KYC Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-holder-transicao',
         name: 'Holder Transicao',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -723,13 +769,16 @@ describe('KYC Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-holder-concorrencia',
         name: 'Holder Concorrencia',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -803,13 +852,16 @@ describe('KYC Integration', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-holder-eventos',
         name: 'Holder Eventos',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1056,6 +1108,9 @@ describe('Holder/KYC - Autenticação Bearer Restrita', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     // Cria holder via M2M
     const createRes = await injectWithM2M(
       'POST',
@@ -1063,7 +1118,7 @@ describe('Holder/KYC - Autenticação Bearer Restrita', () => {
       {
         externalReference: 'ext-ref-sessao',
         name: 'Holder Sessao',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1094,13 +1149,16 @@ describe('Holder/KYC - Autenticação Bearer Restrita', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const createRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-m2m-ok',
         name: 'Holder M2M OK',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1217,13 +1275,16 @@ describe('Holder/KYC - Autenticação Bearer Restrita', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const createRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-revogada',
         name: 'Holder Revogada',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1278,13 +1339,16 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const res1 = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-hash-1',
         name: 'Hash 1',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1297,7 +1361,7 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
       {
         externalReference: 'ext-ref-hash-2',
         name: 'Hash 2',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1305,7 +1369,7 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
     expect(res2.statusCode).toBe(201)
 
     expect(res1.json().documentHash).toBe(res2.json().documentHash)
-    expect(res1.json().documentHash).toBe(DOCUMENT_HASH)
+    expect(res1.json().documentHash).toBe(documentHash)
   })
 
   it('mesmo documento em tenants diferentes produz identificadores independentes', async () => {
@@ -1378,6 +1442,9 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     // documentHash válido: 64 caracteres hex
     const res = await injectWithM2M(
       'POST',
@@ -1385,7 +1452,7 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
       {
         externalReference: 'ext-ref-formato',
         name: 'Hash Formato',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1418,13 +1485,16 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const res = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-sem-segredo',
         name: 'Holder Sem Segredo',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1455,13 +1525,16 @@ describe('KycEvent - Integridade Referencial Composta', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-evento-ok',
         name: 'Holder Evento OK',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
@@ -1503,13 +1576,16 @@ describe('KycEvent - Integridade Referencial Composta', () => {
       'verify:m2m',
     ])
 
+    const documento = '12345678901'
+    const documentHash = computeDocumentHash(documento, tenantId)
+
     const holderRes = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantId}`,
       {
         externalReference: 'ext-ref-evento-lista',
         name: 'Holder Evento Lista',
-        documentHash: DOCUMENT_HASH,
+        documentHash,
         documentType: 'CPF',
       },
       key.secret,
