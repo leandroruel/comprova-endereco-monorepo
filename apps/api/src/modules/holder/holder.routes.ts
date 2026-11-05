@@ -49,7 +49,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
         body: z.object({
           externalReference: z.string().min(1).max(200),
           name: z.string().min(1).max(200),
-          documentHash: z.string().min(1).max(128),
+          documentHash: z.string().regex(/^[0-9a-f]{64}$/),
           documentType: z.enum(['CPF', 'CNPJ']).default('CPF'),
         }),
         response: { 201: HolderCreatedResponse },
@@ -126,7 +126,10 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
         querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
           name: z.string().min(1).max(200).optional(),
-          documentHash: z.string().min(1).max(128).optional(),
+          documentHash: z
+            .string()
+            .regex(/^[0-9a-f]{64}$/)
+            .optional(),
           documentType: z.enum(['CPF', 'CNPJ']).optional(),
         }),
         response: { 200: HolderResponse, 404: ProblemResponse },
@@ -222,6 +225,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
         getActor(request),
         {
           tenantId: getTenantId(request),
+          holderId: request.params.holderId,
           kycProcessId: request.params.kycProcessId,
         },
         reply,
@@ -251,6 +255,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
         getActor(request),
         {
           tenantId: getTenantId(request),
+          holderId: request.params.holderId,
           kycProcessId: request.params.kycProcessId,
           toState: request.body.toState,
           reason: request.body.reason,
@@ -271,7 +276,8 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
         }),
         querystring: z.object({
           tenantId: z.string().uuid(),
-          ...KycProcessListQuery.shape,
+          limit: z.coerce.number().int().min(1).max(1000).default(50),
+          offset: z.coerce.number().int().min(0).default(0),
         }),
         response: {
           200: z.object({
@@ -288,6 +294,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
         getActor(request),
         {
           tenantId: getTenantId(request),
+          holderId: request.params.holderId,
           kycProcessId: request.params.kycProcessId,
           limit: request.query.limit,
           offset: request.query.offset,

@@ -166,7 +166,7 @@ describe('Holder Integration', () => {
     const res = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
       externalReference: 'ext-ref-001',
       name: 'José da Silva',
-      documentHash: 'sha256:hash123',
+      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       documentType: 'CPF',
     })
     expect(res.statusCode).toBe(201)
@@ -175,7 +175,7 @@ describe('Holder Integration', () => {
     expect(body.tenantId).toBe(orgTenantId)
     expect(body.externalReference).toBe('ext-ref-001')
     expect(body.name).toBe('José da Silva')
-    expect(body.documentHash).toBe('sha256:hash123')
+    expect(body.documentHash).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
     expect(body.documentType).toBe('CPF')
   })
 
@@ -204,7 +204,7 @@ describe('Holder Integration', () => {
       body: JSON.stringify({
         externalReference: 'ext-ref-002',
         name: 'Sem Escrita',
-        documentHash: 'sha256:hash456',
+        documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         documentType: 'CPF',
       }),
     })
@@ -226,7 +226,7 @@ describe('Holder Integration', () => {
     const createRes = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
       externalReference: 'ext-ref-search',
       name: 'Busca Holder',
-      documentHash: 'sha256:hash-search',
+      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       documentType: 'CNPJ',
     })
     expect(createRes.statusCode).toBe(201)
@@ -259,7 +259,7 @@ describe('Holder Integration', () => {
       {
         externalReference: 'ext-ref-other',
         name: 'Holder Outro Tenant',
-        documentHash: 'sha256:hash-other',
+        documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         documentType: 'CPF',
       },
       otherCookie,
@@ -277,7 +277,7 @@ describe('Holder Integration', () => {
     const createRes = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
       externalReference: 'ext-ref-update',
       name: 'Nome Antigo',
-      documentHash: 'sha256:hash-update',
+      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       documentType: 'CPF',
     })
     expect(createRes.statusCode).toBe(201)
@@ -300,7 +300,7 @@ describe('KYC Integration', () => {
     const createRes = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
       externalReference: 'ext-ref-kyc',
       name: 'Holder KYC',
-      documentHash: 'sha256:hash-kyc',
+      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       documentType: 'CPF',
     })
     expect(createRes.statusCode).toBe(201)

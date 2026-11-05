@@ -6,7 +6,9 @@ export type DocumentType = z.infer<typeof DocumentTypeSchema>
 export const CreateHolderRequestSchema = z.object({
   externalReference: z.string().min(1).max(200),
   name: z.string().min(1).max(200),
-  documentHash: z.string().min(1).max(128),
+  documentHash: z.string().regex(/^[0-9a-f]{64}$/, {
+    message: 'documentHash must be a SHA-256 hex digest (64 lowercase hex characters)',
+  }),
   documentType: DocumentTypeSchema.default('CPF'),
 })
 
@@ -14,7 +16,12 @@ export type CreateHolderRequest = z.infer<typeof CreateHolderRequestSchema>
 
 export const UpdateHolderRequestSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  documentHash: z.string().min(1).max(128).optional(),
+  documentHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/, {
+      message: 'documentHash must be a SHA-256 hex digest (64 lowercase hex characters)',
+    })
+    .optional(),
   documentType: DocumentTypeSchema.optional(),
 })
 

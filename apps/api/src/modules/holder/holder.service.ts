@@ -52,17 +52,26 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     const holderId = randomUUID()
 
     const [inserted] = await withTenant(db, tenantId, async (tx) => {
-      return tx
-        .insert(t.holder)
-        .values({
-          holderId,
-          tenantId,
-          externalReference: create.externalReference,
-          name: create.name,
-          documentHash: create.documentHash,
-          documentType: create.documentType,
-        })
-        .returning()
+      try {
+        return tx
+          .insert(t.holder)
+          .values({
+            holderId,
+            tenantId,
+            externalReference: create.externalReference,
+            name: create.name,
+            documentHash: create.documentHash,
+            documentType: create.documentType,
+          })
+          .returning()
+      } catch (error) {
+        // Código 23505 = unique_violation (holder_tenant_external_reference_unique)
+        const pgError = error as { code?: string }
+        if (pgError?.code === '23505') {
+          throw new Error('holder already exists for this external reference')
+        }
+        throw error
+      }
     })
 
     if (!inserted) throw new Error('failed to create holder')
@@ -279,13 +288,20 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   const getKycProcess = async (
     actor: string,
     tenantId: string,
+    holderId: string,
     kycProcessId: string,
   ): Promise<KycProcessDto | null> => {
     const [process] = await withTenant(db, tenantId, async (tx) => {
       return tx
         .select()
         .from(t.kycProcess)
-        .where(and(eq(t.kycProcess.kycProcessId, kycProcessId), eq(t.kycProcess.tenantId, tenantId)))
+        .where(
+          and(
+            eq(t.kycProcess.kycProcessId, kycProcessId),
+            eq(t.kycProcess.tenantId, tenantId),
+            eq(t.kycProcess.holderId, holderId),
+          ),
+        )
         .limit(1)
     })
 
@@ -357,11 +373,12 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   const transitionKycProcess = async (
     actor: string,
     tenantId: string,
+    holderId: string,
     kycProcessId: string,
     transition: { readonly toState: KycProcessState; readonly reason?: string },
   ): Promise<KycProcessDto> => {
-    // Obter estado atual com verificação de tenant.
-    const current = await getKycProcess(actor, tenantId, kycProcessId)
+    // Obter estado atual com verificação de tenant e holder.
+    const current = await getKycProcess(actor, tenantId, holderId, kycProcessId)
     if (!current) throw new Error('KYC process not found')
 
     if (!isValidTransition(current.state as KycProcessState | null, transition.toState)) {
@@ -417,6 +434,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   const listKycEvents = async (
     actor: string,
     tenantId: string,
+    holderId: string,
     kycProcessId: string,
     opts: { readonly limit: number; readonly offset: number },
   ): Promise<{
@@ -425,8 +443,8 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     limit: number
     offset: number
   }> => {
-    // Validar que o processo existe e pertence ao tenant antes de listar eventos.
-    const process = await getKycProcess(actor, tenantId, kycProcessId)
+    // Validar que o processo existe e pertence ao holder e tenant antes de listar eventos.
+    const process = await getKycProcess(actor, tenantId, holderId, kycProcessId)
     if (!process) throw new Error('KYC process not found')
 
     const [countRow] = await withTenant(db, tenantId, async (tx) => {

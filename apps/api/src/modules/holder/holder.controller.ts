@@ -156,10 +156,14 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
 
     getKycProcess: async (
       actor: string,
-      input: { readonly tenantId: string; readonly kycProcessId: string },
+      input: {
+        readonly tenantId: string
+        readonly holderId: string
+        readonly kycProcessId: string
+      },
       reply: FastifyReply,
     ): Promise<KycProcessResponseType | FastifyReply> => {
-      const process = await service.getKycProcess(actor, input.tenantId, input.kycProcessId)
+      const process = await service.getKycProcess(actor, input.tenantId, input.holderId, input.kycProcessId)
       if (!process) {
         return reply
           .code(404)
@@ -192,6 +196,7 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
       actor: string,
       input: {
         readonly tenantId: string
+        readonly holderId: string
         readonly kycProcessId: string
         readonly toState: string
         readonly reason?: string
@@ -199,10 +204,16 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
       reply: FastifyReply,
     ): Promise<KycProcessTransitionResponseType | FastifyReply> => {
       try {
-        const process = await service.transitionKycProcess(actor, input.tenantId, input.kycProcessId, {
-          toState: input.toState as unknown as KycProcessState,
-          reason: input.reason,
-        })
+        const process = await service.transitionKycProcess(
+          actor,
+          input.tenantId,
+          input.holderId,
+          input.kycProcessId,
+          {
+            toState: input.toState as unknown as KycProcessState,
+            reason: input.reason,
+          },
+        )
         return reply.code(200).send(process)
       } catch (error) {
         if (error instanceof Error) {
@@ -230,6 +241,7 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
       actor: string,
       input: {
         readonly tenantId: string
+        readonly holderId: string
         readonly kycProcessId: string
         readonly limit: number
         readonly offset: number
@@ -245,14 +257,14 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
       | FastifyReply
     > => {
       // Validar existência do processo antes de listar eventos.
-      const process = await service.getKycProcess(actor, input.tenantId, input.kycProcessId)
+      const process = await service.getKycProcess(actor, input.tenantId, input.holderId, input.kycProcessId)
       if (!process) {
         return reply
           .code(404)
           .type(PROBLEM_CONTENT_TYPE)
           .send(problem(404, 'KYC_PROCESS_NOT_FOUND', 'Processo KYC não encontrado'))
       }
-      const result = await service.listKycEvents(actor, input.tenantId, input.kycProcessId, {
+      const result = await service.listKycEvents(actor, input.tenantId, input.holderId, input.kycProcessId, {
         limit: input.limit,
         offset: input.offset,
       })

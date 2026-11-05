@@ -1,4 +1,4 @@
-import { and, eq, isNull, withTenant } from '@comprova/db'
+import { and, eq, isNull, or, gt, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@comprova/db'
@@ -111,7 +111,17 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
     }[]
   > => {
     const rows = await withTenant(db, tenantId, async (tx) => {
-      return tx.select().from(t.apiKey).where(eq(t.apiKey.tenantId, tenantId)).orderBy(t.apiKey.createdAt)
+      return tx
+        .select()
+        .from(t.apiKey)
+        .where(
+          and(
+            eq(t.apiKey.tenantId, tenantId),
+            isNull(t.apiKey.revokedAt),
+            or(isNull(t.apiKey.expiresAt), gt(t.apiKey.expiresAt, new Date())),
+          ),
+        )
+        .orderBy(t.apiKey.createdAt)
     })
 
     return rows.map((row) => ({
