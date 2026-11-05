@@ -309,15 +309,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         logger: deps.logger,
       })
       registerMeRoute(v1, requireWriteScope)
-      // A versão dos termos deve ser explicitamente configurada. Não há
-      // fallback silencioso: a ausência da configuração impede o fluxo de
-      // onboarding.
-      const termsVersion = deps.config.TERMS_VERSION
-      if (!termsVersion) {
-        throw new Error('TERMS_VERSION must be configured')
-      }
-      // Os termos só podem ser aceitos quando o conteúdo jurídico foi aprovado.
-      // Até lá, o fluxo de onboarding é bloqueado no frontend.
+      // TERMS_VERSION é opcional no boot: a validação da versão ocorre apenas
+      // quando o fluxo de onboarding é acessado. Sem ela, o endpoint de
+      // onboarding retorna erro, mas o restante da API segue funcional.
+      const termsVersion = deps.config.TERMS_VERSION ?? null
       const termsApproved = deps.config.TERMS_APPROVED === 'true'
       const termsDocumentHash = deps.config.TERMS_DOCUMENT_HASH ?? null
       registerOrganizationsRoutes(v1, {

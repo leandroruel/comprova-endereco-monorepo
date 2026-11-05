@@ -29,8 +29,8 @@ const requireSessionUser = async (
 
 export type OrganizationsRoutesDeps = {
   readonly db: Db
-  /** Versão vigente dos termos, definida pelo servidor (config `TERMS_VERSION`). */
-  readonly termsVersion: string
+  /** Versão vigente dos termos, definida pelo servidor (config `TERMS_VERSION`). Pode ser nula se não configurada. */
+  readonly termsVersion: string | null
   /** Indica se o conteúdo jurídico dos termos foi aprovado e pode ser aceito. */
   readonly termsApproved: boolean
   /** Hash SHA-256 do documento jurídico dos termos, definido pelo servidor. */
@@ -95,7 +95,7 @@ export const registerOrganizationsRoutes = (
       schema: {
         response: {
           200: z.object({
-            version: z.string(),
+            version: z.string().nullable(),
             approved: z.boolean(),
             documentHash: z.string().nullable(),
           }),

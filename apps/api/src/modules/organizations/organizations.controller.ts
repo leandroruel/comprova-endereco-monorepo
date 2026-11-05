@@ -22,7 +22,7 @@ const sendProblem = (
 
 export const makeOrganizationsController = (deps: {
   readonly db: Db
-  readonly termsVersion: string
+  readonly termsVersion: string | null
   readonly termsApproved: boolean
   readonly termsDocumentHash: string | null
 }) => {

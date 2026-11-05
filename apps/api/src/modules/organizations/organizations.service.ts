@@ -26,8 +26,8 @@ import { createHmac } from 'node:crypto'
  */
 export interface OrganizationsServiceDeps {
   readonly db: t.Db
-  /** Versão vigente dos termos de onboarding, definida exclusivamente pelo servidor. */
-  readonly termsVersion: string
+  /** Versão vigente dos termos de onboarding, definida exclusivamente pelo servidor. Pode ser nula se não configurada. */
+  readonly termsVersion: string | null
   /** Indica se o conteúdo jurídico dos termos foi aprovado e pode ser aceito. */
   readonly termsApproved: boolean
   /** Hash SHA-256 do documento jurídico dos termos, definido exclusivamente pelo servidor. */
