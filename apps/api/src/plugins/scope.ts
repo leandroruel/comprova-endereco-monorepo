@@ -1,5 +1,5 @@
-import { PROBLEM_CONTENT_TYPE, problems } from '@comprova/contracts'
-import { eq, sql } from '@comprova/db'
+import { PROBLEM_CONTENT_TYPE, problems, problem } from '@comprova/contracts'
+import { and, eq, sql } from '@comprova/db'
 import type { Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { FastifyReply, FastifyRequest } from 'fastify'
@@ -116,44 +116,63 @@ export const requireScope =
 export const requireSessionOrM2MVerify =
   (db?: Db) =>
   async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
-    // Sessão de usuário autenticada: contexto separado do dashboard.
+    // Sessão de usuário autenticada: exige tenantId explícito via query
+    // parameter. Nunca seleciona uma organização arbitrária por .limit(1).
     if (request.sessionUser !== undefined) {
       // Se já há tenant (definido por algum middleware anterior), mantém.
       if (request.tenant !== undefined) {
         return
       }
-      // Se db foi fornecido, resolve o tenant a partir da associação
-      // usuário-organização.
-      if (db !== undefined) {
-        const sessionUserId = request.sessionUser.id
-        const membership = await db.transaction(async (tx) => {
-          await tx.execute(sql`SELECT set_config('app.user_id', ${sessionUserId}, true)`)
-          return tx
-            .select({
-              tenantId: t.organizationMember.tenantId,
-              role: t.organizationMember.role,
-            })
-            .from(t.organizationMember)
-            .where(eq(t.organizationMember.userId, sessionUserId))
-            .limit(1)
-        })
-        if (membership.length === 0) {
-          return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
-        }
-        const member = membership[0]
-        if (!member) {
-          return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
-        }
-        request.tenant = {
-          tenantId: member.tenantId,
-          apiKeyId: '',
-          scopes: [],
-          rateLimitRps: 0,
-          burst: 0,
-          expiresAt: null,
-          keyType: 'user',
-        }
-        return
+      if (db === undefined) {
+        return reply.code(500).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+      }
+
+      const sessionUser = request.sessionUser
+      if (!sessionUser) {
+        return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+      }
+
+      const query = request.query as Record<string, string | string[] | undefined>
+      const rawTenantId = query.tenantId
+      const tenantId = Array.isArray(rawTenantId) ? rawTenantId[0] : rawTenantId
+
+      if (!tenantId || typeof tenantId !== 'string') {
+        return reply
+          .code(400)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(problem(400, 'MISSING_TENANT_ID', 'tenantId é obrigatório para sessão de usuário'))
+      }
+
+      // Valida que o usuário é membro da organização solicitada.
+      const membership = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.user_id', ${sessionUser.id}, true)`)
+        return tx
+          .select({
+            tenantId: t.organizationMember.tenantId,
+            role: t.organizationMember.role,
+          })
+          .from(t.organizationMember)
+          .where(
+            and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, sessionUser.id)),
+          )
+          .limit(1)
+      })
+
+      if (membership.length === 0) {
+        return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+      }
+      const member = membership[0]
+      if (!member) {
+        return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+      }
+      request.tenant = {
+        tenantId: member.tenantId,
+        apiKeyId: '',
+        scopes: [],
+        rateLimitRps: 0,
+        burst: 0,
+        expiresAt: null,
+        keyType: 'user',
       }
       return
     }

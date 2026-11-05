@@ -389,4 +389,19 @@ describe('Verifier Integridade dos termos', () => {
     })
     expect(res.statusCode).toBe(200)
   })
+
+  it('vincula aceite ao hash do documento dos termos', async () => {
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Org Termos com Hash',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const tenantId = createRes.json().tenantId
+
+    const res = await injectWithSession('POST', `/v1/organizations/${tenantId}/onboarding/complete`, {
+      termsVersion: '1.0.0',
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().termsDocumentHash).toBe('sha256:abc123def456')
+  })
 })

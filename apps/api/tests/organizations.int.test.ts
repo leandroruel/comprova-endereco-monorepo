@@ -172,6 +172,56 @@ describe('Verifier Onboarding', () => {
     expect(res.statusCode).toBe(403)
   })
 
+  it('usuário com duas organizações acessa cada uma com tenantId explícito', async () => {
+    // Cria segunda organização
+    const createRes = await injectWithSession('POST', '/v1/organizations', {
+      name: 'Segunda Organização',
+      termsVersion: '1.0.0',
+    })
+    expect(createRes.statusCode).toBe(201)
+    const orgBId = createRes.json().tenantId
+
+    // Acessa organização A com tenantId explícito
+    const resA = await injectWithSession(
+      'GET',
+      `/v1/organizations/${orgTenantId}`,
+      undefined,
+      ownerSessionCookie,
+    )
+    expect(resA.statusCode).toBe(200)
+    expect(resA.json().tenantId).toBe(orgTenantId)
+
+    // Acessa organização B com tenantId explícito
+    const resB = await injectWithSession('GET', `/v1/organizations/${orgBId}`, undefined, ownerSessionCookie)
+    expect(resB.statusCode).toBe(200)
+    expect(resB.json().tenantId).toBe(orgBId)
+  })
+
+  it('usuário tenta acessar organização da qual não é membro', async () => {
+    // Cria organização com outro usuário
+    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    const createRes = await injectWithSession(
+      'POST',
+      '/v1/organizations',
+      {
+        name: 'Organização de Outro',
+        termsVersion: '1.0.0',
+      },
+      otherCookie,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const otherOrgId = createRes.json().tenantId
+
+    // Tenta acessar organização do outro com cookie do owner
+    const res = await injectWithSession(
+      'GET',
+      `/v1/organizations/${otherOrgId}`,
+      undefined,
+      ownerSessionCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
   it('deve completar o onboarding aceitando termos', async () => {
     const res = await injectWithSession(
       'POST',

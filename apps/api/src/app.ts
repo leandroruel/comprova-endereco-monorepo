@@ -29,7 +29,7 @@ import {
 import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import { DEFAULT_EVIDENCE_MAX_CONCURRENCY, type AppConfig } from './config.js'
-import { makeAuthenticate, setRedisClient } from './plugins/auth.js'
+import { makeAuthenticate } from './plugins/auth.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
 import { createAuth } from './auth.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
@@ -252,8 +252,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   const hasher = makeApiKeyHasher(deps.config.API_KEY_PEPPER)
   const authenticate = makeAuthenticate(deps.db, hasher)
-  // Invalidação compartilhada de chaves revogadas entre instâncias da API.
-  setRedisClient(deps.redis)
   const rateLimit = makeRateLimiter(deps.redis)
 
   // Provider de assinatura por tenant resolvido no boot. `local` (default)
