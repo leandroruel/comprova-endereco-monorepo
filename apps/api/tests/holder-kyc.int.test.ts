@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
 
 const PEPPER = 'test-pepper-123'
+const DOCUMENT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })
@@ -42,10 +43,7 @@ const app = await buildApp({
   metrics: createMetrics(),
 })
 
-let orgTenantId: string
 let ownerSessionCookie: string
-let m2mApiKeySecret: string
-let m2mApiKeyId: string
 
 const signUp = async (email: string, password: string, name: string): Promise<string> => {
   const res = await app.inject({
@@ -97,16 +95,63 @@ const injectWithSession = async (
   })
 }
 
-const injectWithM2M = async (method: string, url: string, body?: unknown) => {
+const injectWithM2M = async (method: string, url: string, body?: unknown, secret?: string) => {
   return app.inject({
     method,
     url,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${m2mApiKeySecret}`,
+      Authorization: `Bearer ${secret ?? ''}`,
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
+}
+
+const createOrganization = async (sessionCookie: string, name: string, email: string): Promise<string> => {
+  const res = await injectWithSession(
+    'POST',
+    '/v1/organizations',
+    {
+      name,
+      email,
+      termsVersion: '1.0.0',
+    },
+    sessionCookie,
+  )
+  expect(res.statusCode).toBe(201)
+  return res.json().tenantId
+}
+
+const addMember = async (
+  sessionCookie: string,
+  tenantId: string,
+  email: string,
+  role: 'member' | 'admin' | 'owner',
+) => {
+  const res = await injectWithSession(
+    'POST',
+    `/v1/organizations/${tenantId}/members`,
+    { email, role },
+    sessionCookie,
+  )
+  return res
+}
+
+const createM2mApiKey = async (
+  sessionCookie: string,
+  tenantId: string,
+  name: string,
+  scopes: string[],
+  keyType: 'user' | 'm2m' = 'm2m',
+) => {
+  const res = await injectWithSession(
+    'POST',
+    `/v1/m2m/api-keys?tenantId=${tenantId}`,
+    { name, scopes, keyType },
+    sessionCookie,
+  )
+  expect(res.statusCode).toBe(201)
+  return { secret: res.json().secret, apiKeyId: res.json().apiKey.apiKeyId }
 }
 
 beforeAll(async () => {
@@ -117,39 +162,6 @@ beforeAll(async () => {
 
   // Faz login para obter cookies de sessão
   ownerSessionCookie = await loginAndGetCookie('owner@exemplo.com', 'SenhaForte123!')
-
-  // Cria uma organização via API
-  const createRes = await injectWithSession('POST', '/v1/organizations', {
-    name: 'Organização Teste',
-    email: 'owner@exemplo.com',
-    termsVersion: '1.0.0',
-  })
-  expect(createRes.statusCode).toBe(201)
-  const org = createRes.json()
-  orgTenantId = org.tenantId
-
-  // Adiciona member como admin para permitir gestão de API keys
-  await injectWithSession(
-    'POST',
-    `/v1/organizations/${orgTenantId}/members`,
-    { email: 'member@exemplo.com', role: 'admin' },
-    ownerSessionCookie,
-  )
-
-  // Cria uma credencial M2M com scopes de holder e kyc
-  const keyRes = await injectWithSession(
-    'POST',
-    `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
-    {
-      name: 'Chave M2M Holder/KYC',
-      scopes: ['holders:read', 'holders:write', 'kyc:read', 'kyc:write', 'verify:m2m'],
-      keyType: 'm2m',
-    },
-    ownerSessionCookie,
-  )
-  expect(keyRes.statusCode).toBe(201)
-  m2mApiKeySecret = keyRes.json().secret
-  m2mApiKeyId = keyRes.json().apiKey.apiKeyId
 })
 
 afterAll(async () => {
@@ -163,254 +175,648 @@ afterAll(async () => {
 
 describe('Holder Integration', () => {
   it('deve criar um holder por M2M', async () => {
-    const res = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
-      externalReference: 'ext-ref-001',
-      name: 'José da Silva',
-      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      documentType: 'CPF',
-    })
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Holder M2M', 'owner@exemplo.com')
+
+    // Adiciona owner como admin para gerenciar chaves (o criador já é owner)
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave M2M Holder', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-001',
+        name: 'José da Silva',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
     expect(res.statusCode).toBe(201)
     const body = res.json()
     expect(body.holderId).toBeDefined()
-    expect(body.tenantId).toBe(orgTenantId)
+    expect(body.tenantId).toBe(tenantId)
     expect(body.externalReference).toBe('ext-ref-001')
     expect(body.name).toBe('José da Silva')
-    expect(body.documentHash).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(body.documentHash).toBe(DOCUMENT_HASH)
     expect(body.documentType).toBe('CPF')
   })
 
   it('não deve permitir criar holder sem scope holders:write', async () => {
-    // Cria uma chave sem scope de escrita
-    const keyRes = await injectWithSession(
-      'POST',
-      `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
-      {
-        name: 'Chave sem scope write',
-        scopes: ['holders:read'],
-        keyType: 'm2m',
-      },
-      ownerSessionCookie,
-    )
-    expect(keyRes.statusCode).toBe(201)
-    const secret = keyRes.json().secret
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Sem Escopo', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
 
-    const res = await app.inject({
-      method: 'POST',
-      url: `/v1/holders?tenantId=${orgTenantId}`,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${secret}`,
-      },
-      body: JSON.stringify({
-        externalReference: 'ext-ref-002',
+    // Chave com verify:m2m e holders:read, MAS SEM holders:write
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave sem holders:write', [
+      'holders:read',
+      'verify:m2m',
+    ])
+
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-sem-write',
         name: 'Sem Escrita',
-        documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        documentHash: DOCUMENT_HASH,
         documentType: 'CPF',
-      }),
-    })
+      },
+      key.secret,
+    )
     expect(res.statusCode).toBe(403)
   })
 
-  it('deve listar holders por M2M', async () => {
-    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${orgTenantId}`)
+  it('deve listar holders por M2M com contagem real', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Listagem', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Listagem', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    // Cria 3 holders
+    for (let i = 0; i < 3; i++) {
+      await injectWithM2M(
+        'POST',
+        `/v1/holders?tenantId=${tenantId}`,
+        {
+          externalReference: `ext-ref-list-${i}`,
+          name: `Holder ${i}`,
+          documentHash: DOCUMENT_HASH,
+          documentType: 'CPF',
+        },
+        key.secret,
+      )
+    }
+
+    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(Array.isArray(body.holders)).toBe(true)
-    expect(body.holders.length).toBeGreaterThanOrEqual(1)
-    expect(body.total).toBeGreaterThanOrEqual(1)
+    expect(body.holders.length).toBe(3)
+    expect(body.total).toBe(3)
     expect(body.total).toBe(body.holders.length)
   })
 
   it('deve buscar um holder específico por ID', async () => {
-    // Primeiro cria um holder
-    const createRes = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
-      externalReference: 'ext-ref-search',
-      name: 'Busca Holder',
-      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      documentType: 'CNPJ',
-    })
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Busca', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Busca', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-search',
+        name: 'Holder Busca',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CNPJ',
+      },
+      key.secret,
+    )
     expect(createRes.statusCode).toBe(201)
     const holderId = createRes.json().holderId
 
-    const res = await injectWithM2M('GET', `/v1/holders/${holderId}?tenantId=${orgTenantId}`)
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(body.holderId).toBe(holderId)
-    expect(body.name).toBe('Busca Holder')
+    expect(body.name).toBe('Holder Busca')
     expect(body.documentType).toBe('CNPJ')
   })
 
-  it('não deve permitir acessar holder de outro tenant', async () => {
-    // Cria outra organização
-    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
-    const otherOrgRes = await injectWithSession(
-      'POST',
-      '/v1/organizations',
-      { name: 'Outra Organização', email: 'outro@exemplo.com', termsVersion: '1.0.0' },
-      otherCookie,
-    )
-    expect(otherOrgRes.statusCode).toBe(201)
-    const otherOrgTenantId = otherOrgRes.json().tenantId
+  it('não deve permitir acessar holder de outro tenant (isolamento)', async () => {
+    const ownerCookie = ownerSessionCookie
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
 
-    // Cria um holder na outra organização
-    const createRes = await injectWithSession(
+    // Organização do outro usuário
+    const outroTenantId = await createOrganization(outroCookie, 'Org Outro Tenant', 'outro@exemplo.com')
+    await addMember(outroCookie, outroTenantId, 'outro@exemplo.com', 'admin')
+    const outroKey = await createM2mApiKey(outroCookie, outroTenantId, 'Chave Outro Tenant', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    // Cria holder na organização do outro
+    const createRes = await injectWithM2M(
       'POST',
-      `/v1/holders?tenantId=${otherOrgTenantId}`,
+      `/v1/holders?tenantId=${outroTenantId}`,
       {
-        externalReference: 'ext-ref-other',
+        externalReference: 'ext-ref-outro',
         name: 'Holder Outro Tenant',
-        documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        documentHash: DOCUMENT_HASH,
         documentType: 'CPF',
       },
-      otherCookie,
+      outroKey.secret,
     )
     expect(createRes.statusCode).toBe(201)
     const otherHolderId = createRes.json().holderId
 
-    // Tenta acessar esse holder usando a chave M2M da orgTenantId
-    const res = await injectWithM2M('GET', `/v1/holders/${otherHolderId}?tenantId=${otherOrgTenantId}`)
-    // Isolamento multi-tenant: não encontra o holder no contexto do próprio tenant
+    // Chave M2M da org principal tenta acessar holder da outra org
+    const ownerTenantId = await createOrganization(ownerCookie, 'Org Principal', 'owner@exemplo.com')
+    await addMember(ownerCookie, ownerTenantId, 'owner@exemplo.com', 'admin')
+    const ownerKey = await createM2mApiKey(ownerCookie, ownerTenantId, 'Chave Principal', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    // Usa tenantId da outra org mas com chave da org principal - não deve encontrar
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders/${otherHolderId}?tenantId=${outroTenantId}`,
+      undefined,
+      ownerKey.secret,
+    )
+    // Isolamento multi-tenant: chave de um tenant não acessa dados de outro
     expect(res.statusCode).toBe(404)
   })
 
   it('deve atualizar um holder por M2M', async () => {
-    const createRes = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
-      externalReference: 'ext-ref-update',
-      name: 'Nome Antigo',
-      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      documentType: 'CPF',
-    })
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Atualiza', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Atualiza', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-update',
+        name: 'Nome Antigo',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
     expect(createRes.statusCode).toBe(201)
     const holderId = createRes.json().holderId
 
-    const res = await injectWithM2M('PATCH', `/v1/holders/${holderId}?tenantId=${orgTenantId}`, {
-      name: 'Nome Atualizado',
-    })
+    const res = await injectWithM2M(
+      'PATCH',
+      `/v1/holders/${holderId}?tenantId=${tenantId}`,
+      { name: 'Nome Atualizado' },
+      key.secret,
+    )
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(body.name).toBe('Nome Atualizado')
   })
+
+  it('deve rejeitar criação de holder com externalReference duplicado no mesmo tenant (409)', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Duplicata', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Duplicata', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    // Primeira criação
+    const res1 = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-duplicado',
+        name: 'Primeiro',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(res1.statusCode).toBe(201)
+
+    // Segunda criação com mesmo externalReference no mesmo tenant
+    const res2 = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-duplicado',
+        name: 'Segundo',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(res2.statusCode).toBe(409)
+    expect(res2.json().code).toBe('HOLDER_ALREADY_EXISTS')
+  })
+
+  it('deve permitir o mesmo externalReference em tenants diferentes', async () => {
+    const tenantA = await createOrganization(ownerSessionCookie, 'Org Tenant A', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantA, 'owner@exemplo.com', 'admin')
+    const keyA = await createM2mApiKey(ownerSessionCookie, tenantA, 'Chave Tenant A', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const tenantB = await createOrganization(ownerSessionCookie, 'Org Tenant B', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantB, 'owner@exemplo.com', 'admin')
+    const keyB = await createM2mApiKey(ownerSessionCookie, tenantB, 'Chave Tenant B', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    // Mesmo externalReference em tenants diferentes deve ser permitido
+    const resA = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantA}`,
+      {
+        externalReference: 'ext-ref-compartilhado',
+        name: 'Holder Tenant A',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      keyA.secret,
+    )
+    expect(resA.statusCode).toBe(201)
+
+    const resB = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantB}`,
+      {
+        externalReference: 'ext-ref-compartilhado',
+        name: 'Holder Tenant B',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      keyB.secret,
+    )
+    expect(resB.statusCode).toBe(201)
+
+    // Ambos existem independentemente
+    expect(resA.json().tenantId).toBe(tenantA)
+    expect(resB.json().tenantId).toBe(tenantB)
+    expect(resA.json().externalReference).toBe('ext-ref-compartilhado')
+    expect(resB.json().externalReference).toBe('ext-ref-compartilhado')
+  })
 })
 
 describe('KYC Integration', () => {
-  let holderId: string
+  it('deve criar um processo KYC com tenant correto e evento de auditoria', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org KYC', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
 
-  beforeAll(async () => {
-    // Cria um holder para os testes de KYC
-    const createRes = await injectWithM2M('POST', `/v1/holders?tenantId=${orgTenantId}`, {
-      externalReference: 'ext-ref-kyc',
-      name: 'Holder KYC',
-      documentHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      documentType: 'CPF',
-    })
-    expect(createRes.statusCode).toBe(201)
-    holderId = createRes.json().holderId
-  })
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave KYC', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
 
-  it('deve criar um processo KYC com tenant correto', async () => {
-    const res = await injectWithM2M('POST', `/v1/holders/${holderId}/kyc?tenantId=${orgTenantId}`, {
-      legalBasis: 'CONSENT',
-      expiresAt: '2027-01-01T00:00:00Z',
-    })
+    // Cria holder dedicado para este teste
+    const holderRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-holder-kyc',
+        name: 'Holder KYC',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
+
+    // Cria processo KYC
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      {
+        legalBasis: 'CONSENT',
+        expiresAt: '2027-01-01T00:00:00Z',
+      },
+      key.secret,
+    )
     expect(res.statusCode).toBe(201)
     const body = res.json()
     expect(body.kycProcessId).toBeDefined()
     expect(body.holderId).toBe(holderId)
-    expect(body.tenantId).toBe(orgTenantId)
+    expect(body.tenantId).toBe(tenantId)
     expect(body.state).toBe('pending')
     expect(body.legalBasis).toBe('CONSENT')
+
+    // Verifica que o evento de auditoria 'created' foi persistido
+    const eventsRes = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}/kyc/${body.kycProcessId}/events?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(eventsRes.statusCode).toBe(200)
+    const events = eventsRes.json()
+    expect(Array.isArray(events.events)).toBe(true)
+    expect(events.events.length).toBeGreaterThanOrEqual(1)
+    expect(events.events[0].eventType).toBe('created')
+    expect(events.events[0].toState).toBe('pending')
   })
 
-  it('não deve criar processo KYC com tenant inconsistente', async () => {
-    // Cria outra organização
-    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
-    const otherOrgRes = await injectWithSession(
-      'POST',
-      '/v1/organizations',
-      { name: 'Org KYC Outro', email: 'outro@exemplo.com', termsVersion: '1.0.0' },
-      otherCookie,
-    )
-    expect(otherOrgRes.statusCode).toBe(201)
-    const otherOrgTenantId = otherOrgRes.json().tenantId
+  it('não deve criar processo KYC quando holder não pertence ao tenant informado', async () => {
+    const tenantIdA = await createOrganization(ownerSessionCookie, 'Org KYC A', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantIdA, 'owner@exemplo.com', 'admin')
+    const keyA = await createM2mApiKey(ownerSessionCookie, tenantIdA, 'Chave KYC A', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
 
-    // Tenta criar KYC para o holder da orgTenantId usando tenant da outra org
-    const res = await injectWithSession(
+    const tenantIdB = await createOrganization(ownerSessionCookie, 'Org KYC B', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantIdB, 'owner@exemplo.com', 'admin')
+    const keyB = await createM2mApiKey(ownerSessionCookie, tenantIdB, 'Chave KYC B', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    // Cria holder na org A
+    const holderRes = await injectWithM2M(
       'POST',
-      `/v1/holders/${holderId}/kyc?tenantId=${otherOrgTenantId}`,
-      { legalBasis: 'CONSENT' },
-      otherCookie,
+      `/v1/holders?tenantId=${tenantIdA}`,
+      {
+        externalReference: 'ext-ref-holder-a',
+        name: 'Holder Org A',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      keyA.secret,
     )
-    // Isolamento multi-tenant: não encontra o holder no contexto do tenant informado
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
+
+    // Tenta criar KYC no tenant B para o holder da org A
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantIdB}`,
+      { legalBasis: 'CONSENT' },
+      keyB.secret,
+    )
+    // Isolamento: holder não pertence ao tenant B
     expect(res.statusCode).toBe(404)
   })
 
-  it('não deve criar processo KYC com tenant de outra organização', async () => {
-    // Cria outra organização
-    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
-    const otherOrgRes = await injectWithSession(
+  it('deve listar processos KYC com contagem real', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org KYC Listagem', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave KYC Listagem', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const holderRes = await injectWithM2M(
       'POST',
-      '/v1/organizations',
-      { name: 'Org KYC Outro 2', email: 'outro@exemplo.com', termsVersion: '1.0.0' },
-      otherCookie,
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-holder-list',
+        name: 'Holder Listagem',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
     )
-    expect(otherOrgRes.statusCode).toBe(201)
-    const otherOrgTenantId = otherOrgRes.json().tenantId
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
 
-    // Tenta criar KYC para o holder desta org usando tenant da outra org.
-    // Isolamento multi-tenant: não encontra o holder no contexto do tenant informado.
-    const res = await injectWithSession(
-      'POST',
-      `/v1/holders/${holderId}/kyc?tenantId=${otherOrgTenantId}`,
-      { legalBasis: 'CONSENT' },
-      otherCookie,
+    // Cria 3 processos KYC
+    for (let i = 0; i < 3; i++) {
+      await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+        { legalBasis: 'CONSENT' },
+        key.secret,
+      )
+    }
+
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
     )
-    expect(res.statusCode).toBe(404)
-  })
-
-  it('deve listar processos KYC com contagem correta', async () => {
-    // Cria um segundo processo
-    await injectWithM2M('POST', `/v1/holders/${holderId}/kyc?tenantId=${orgTenantId}`, {
-      legalBasis: 'CONTRACT_EXECUTION',
-    })
-
-    const res = await injectWithM2M('GET', `/v1/holders/${holderId}/kyc?tenantId=${orgTenantId}`)
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(Array.isArray(body.processes)).toBe(true)
-    expect(body.processes.length).toBeGreaterThanOrEqual(2)
-    expect(body.total).toBeGreaterThanOrEqual(2)
+    expect(body.processes.length).toBe(3)
+    expect(body.total).toBe(3)
     expect(body.total).toBe(body.processes.length)
   })
 
   it('deve transicionar estado do KYC com evento de auditoria', async () => {
-    // Primeiro lista para obter um processo
-    const listRes = await injectWithM2M('GET', `/v1/holders/${holderId}/kyc?tenantId=${orgTenantId}`)
-    expect(listRes.statusCode).toBe(200)
-    const processes = listRes.json().processes
-    const pendingProcess = processes.find((p: { state: string }) => p.state === 'pending')
-    expect(pendingProcess).toBeDefined()
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org KYC Transicao', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave KYC Transicao', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const holderRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-holder-transicao',
+        name: 'Holder Transicao',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      { legalBasis: 'CONSENT' },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const kycProcessId = createRes.json().kycProcessId
 
     const res = await injectWithM2M(
       'POST',
-      `/v1/holders/${holderId}/kyc/${pendingProcess.kycProcessId}/transition?tenantId=${orgTenantId}`,
+      `/v1/holders/${holderId}/kyc/${kycProcessId}/transition?tenantId=${tenantId}`,
       { toState: 'in_progress', reason: 'Iniciando validação' },
+      key.secret,
     )
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(body.state).toBe('in_progress')
+
+    // Verifica evento de transição de auditoria
+    const eventsRes = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(eventsRes.statusCode).toBe(200)
+    const events = eventsRes.json().events
+    const transitionEvent = events.find((e: { eventType: string }) => e.eventType === 'state_transitioned')
+    expect(transitionEvent).toBeDefined()
+    expect(transitionEvent.toState).toBe('in_progress')
+    expect(transitionEvent.fromState).toBe('pending')
+  })
+
+  it('deve retornar 409 em transição KYC concorrente', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org KYC Concorrencia', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave KYC Concorrencia', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const holderRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-holder-concorrencia',
+        name: 'Holder Concorrencia',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      { legalBasis: 'CONSENT' },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const kycProcessId = createRes.json().kycProcessId
+
+    // Duas transições concorrentes para o mesmo estado (in_progress)
+    const results = await Promise.all([
+      injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/kyc/${kycProcessId}/transition?tenantId=${tenantId}`,
+        { toState: 'in_progress', reason: 'Primeira' },
+        key.secret,
+      ),
+      injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/kyc/${kycProcessId}/transition?tenantId=${tenantId}`,
+        { toState: 'in_progress', reason: 'Segunda' },
+        key.secret,
+      ),
+    ])
+
+    // Apenas uma deve ser efetivada (200), a outra deve falhar com 409
+    const statuses = results.map((r) => r.statusCode).sort()
+    expect(statuses).toEqual([200, 409])
+
+    const successResult = results.find((r) => r.statusCode === 200)
+    expect(successResult).toBeDefined()
+    expect(successResult!.json().state).toBe('in_progress')
+
+    // Os eventos de auditoria devem corresponder às transições realmente efetivadas
+    const eventsRes = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(eventsRes.statusCode).toBe(200)
+    const events = eventsRes.json().events
+    const transitionEvents = events.filter((e: { eventType: string }) => e.eventType === 'state_transitioned')
+    // Apenas um evento de transição deve existir (a que foi efetivada)
+    expect(transitionEvents.length).toBe(1)
+    expect(transitionEvents[0].toState).toBe('in_progress')
+    // O reason está dentro de details (pode ser objeto ou string JSON)
+    const details =
+      typeof transitionEvents[0].details === 'string'
+        ? JSON.parse(transitionEvents[0].details as string)
+        : transitionEvents[0].details
+    expect(details.reason).toBe('Primeira')
   })
 
   it('deve listar eventos de auditoria do KYC', async () => {
-    // Cria um processo KYC dedicado para este teste
-    const createRes = await injectWithM2M('POST', `/v1/holders/${holderId}/kyc?tenantId=${orgTenantId}`, {
-      legalBasis: 'CONSENT',
-    })
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org KYC Eventos', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave KYC Eventos', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const holderRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-holder-eventos',
+        name: 'Holder Eventos',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      { legalBasis: 'CONSENT' },
+      key.secret,
+    )
     expect(createRes.statusCode).toBe(201)
     const kycProcessId = createRes.json().kycProcessId
 
     const res = await injectWithM2M(
       'GET',
-      `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${orgTenantId}`,
+      `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
     )
     expect(res.statusCode).toBe(200)
     const body = res.json()
@@ -421,97 +827,204 @@ describe('KYC Integration', () => {
     expect(body.total).toBe(body.events.length)
   })
 
-  it('não deve listar eventos de KYC inexistente', async () => {
+  it('não deve listar eventos de KYC inexistente (404)', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org KYC Sem Processo', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave KYC Sem Processo', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
     const res = await injectWithM2M(
       'GET',
-      `/v1/holders/${holderId}/kyc/00000000-0000-4000-8000-000000000000/events?tenantId=${orgTenantId}`,
+      `/v1/holders/00000000-0000-4000-8000-000000000000/kyc/00000000-0000-4000-8000-000000000000/events?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
     )
     expect(res.statusCode).toBe(404)
   })
 })
 
-describe('M2M API Key Management', () => {
-  beforeAll(async () => {
-    // Cria outra organização para testes de isolamento
-    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
-    const otherOrgRes = await injectWithSession(
-      'POST',
-      '/v1/organizations',
-      { name: 'Org Isolamento', email: 'outro@exemplo.com', termsVersion: '1.0.0' },
-      otherCookie,
-    )
-    expect(otherOrgRes.statusCode).toBe(201)
-  })
+describe('M2M API Key Management - Autorização por Membership', () => {
+  it('usuário sem membership não pode criar API key (403)', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Sem Membership', 'owner@exemplo.com')
 
-  it('usuário sem membership não pode administrar API keys', async () => {
-    // O outro@exemplo.com não é membro de orgTenantId
-    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    // Outro usuário não é membro desta organização
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+
     const res = await injectWithSession(
       'POST',
-      `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
       {
-        name: 'Chave Não Membro',
+        name: 'Chave Sem Membership',
         scopes: ['validate:read'],
         keyType: 'm2m',
       },
-      otherCookie,
+      outroCookie,
     )
     expect(res.statusCode).toBe(403)
   })
 
-  it('usuário de outro tenant não pode listar API keys', async () => {
-    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+  it('membro comum (não admin/owner) não pode criar API key (403)', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Membro Comum', 'owner@exemplo.com')
+
+    // Adiciona outro usuário como membro simples (não admin)
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    await addMember(ownerSessionCookie, tenantId, 'outro@exemplo.com', 'member')
+
     const res = await injectWithSession(
-      'GET',
-      `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
-      undefined,
-      otherCookie,
+      'POST',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      {
+        name: 'Chave Membro Comum',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      outroCookie,
     )
     expect(res.statusCode).toBe(403)
   })
 
-  it('usuário de outro tenant não pode revogar API keys', async () => {
-    const otherCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
-    const res = await injectWithSession(
-      'DELETE',
-      `/v1/m2m/api-keys/${m2mApiKeyId}?tenantId=${orgTenantId}`,
-      undefined,
-      otherCookie,
-    )
-    expect(res.statusCode).toBe(403)
-  })
+  it('admin consegue criar e revogar API key', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Admin', 'owner@exemplo.com')
 
-  it('deve revogar uma API key e invalidar cache', async () => {
-    // Cria uma nova chave para revogar
+    // Adiciona outro usuário como admin
+    const adminCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    await addMember(ownerSessionCookie, tenantId, 'outro@exemplo.com', 'admin')
+
+    // Admin cria API key
     const createRes = await injectWithSession(
       'POST',
-      `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
       {
-        name: 'Chave para Revogar',
+        name: 'Chave do Admin',
         scopes: ['validate:read'],
         keyType: 'm2m',
       },
-      ownerSessionCookie,
+      adminCookie,
     )
     expect(createRes.statusCode).toBe(201)
     const keyId = createRes.json().apiKey.apiKeyId
 
+    // Admin revoga API key
     const revokeRes = await injectWithSession(
       'DELETE',
-      `/v1/m2m/api-keys/${keyId}?tenantId=${orgTenantId}`,
+      `/v1/m2m/api-keys/${keyId}?tenantId=${tenantId}`,
       undefined,
-      ownerSessionCookie,
+      adminCookie,
     )
     expect(revokeRes.statusCode).toBe(200)
     expect(revokeRes.json().revoked).toBe(true)
+  })
 
-    // Tenta revogar novamente (já revogada)
-    const revokeAgain = await injectWithSession(
+  it('membro comum não consegue revogar API key (403)', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Membro Revoga', 'owner@exemplo.com')
+
+    // Owner cria uma API key
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave para Revogar', ['validate:read'])
+
+    // Adiciona outro usuário como membro simples
+    const membroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    await addMember(ownerSessionCookie, tenantId, 'outro@exemplo.com', 'member')
+
+    // Membro simples tenta revogar
+    const res = await injectWithSession(
       'DELETE',
-      `/v1/m2m/api-keys/${keyId}?tenantId=${orgTenantId}`,
+      `/v1/m2m/api-keys/${key.apiKeyId}?tenantId=${tenantId}`,
+      undefined,
+      membroCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('admin e membros autorizados conseguem listar API keys', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Lista Chaves', 'owner@exemplo.com')
+
+    // Owner cria algumas API keys
+    await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave 1', ['validate:read'])
+    await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave 2', ['validate:read'])
+
+    // Owner consegue listar
+    const ownerRes = await injectWithSession(
+      'GET',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
       undefined,
       ownerSessionCookie,
     )
-    expect(revokeAgain.statusCode).toBe(404)
+    expect(ownerRes.statusCode).toBe(200)
+    expect(ownerRes.json().apiKeys.length).toBeGreaterThanOrEqual(2)
+
+    // Adiciona admin e consegue listar
+    const adminCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    await addMember(ownerSessionCookie, tenantId, 'outro@exemplo.com', 'admin')
+
+    const adminRes = await injectWithSession(
+      'GET',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      undefined,
+      adminCookie,
+    )
+    expect(adminRes.statusCode).toBe(200)
+    expect(adminRes.json().apiKeys.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('Bearer token não consegue administrar API keys (401)', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Bearer Sem Sessao',
+      'owner@exemplo.com',
+    )
+
+    // Cria uma chave M2M via sessão
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave M2M', ['validate:read'])
+
+    // Tenta usar a chave M2M via Bearer para criar outra chave (deve falhar - precisa de sessão)
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      {
+        name: 'Chave via Bearer',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      key.secret,
+    )
+    // Sessão de usuário é obrigatória para administrar API keys
+    expect([401, 403]).toContain(res.statusCode)
+  })
+
+  it('usuário de outro tenant não consegue acessar dados ou administrar chaves', async () => {
+    const tenantIdA = await createOrganization(ownerSessionCookie, 'Org Isolada A', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantIdA, 'owner@exemplo.com', 'admin')
+
+    // Cria outra organização com outro usuário (não é membro da org A)
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    const tenantIdB = await createOrganization(outroCookie, 'Org Isolada B', 'outro@exemplo.com')
+    await addMember(outroCookie, tenantIdB, 'outro@exemplo.com', 'admin')
+
+    // Cria chave na org A
+    const keyA = await createM2mApiKey(ownerSessionCookie, tenantIdA, 'Chave Org A', ['validate:read'])
+
+    // Usuário da org B (outroCookie) tenta listar chaves da org A - não é membro da org A
+    const resB = await injectWithSession(
+      'GET',
+      `/v1/m2m/api-keys?tenantId=${tenantIdA}`,
+      undefined,
+      outroCookie,
+    )
+    expect(resB.statusCode).toBe(403)
+
+    // Usuário da org B tenta revogar chave da org A
+    const resRevoke = await injectWithSession(
+      'DELETE',
+      `/v1/m2m/api-keys/${keyA.apiKeyId}?tenantId=${tenantIdA}`,
+      undefined,
+      outroCookie,
+    )
+    expect(resRevoke.statusCode).toBe(403)
   })
 })

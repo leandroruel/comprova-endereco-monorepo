@@ -12,7 +12,7 @@ CREATE TABLE holder (
   tenant_id uuid NOT NULL REFERENCES tenant (tenant_id),
   external_reference text NOT NULL,      -- referência externa do Verifier para o titular
   name text NOT NULL,                    -- nome do titular (não é identificador único)
-  document_hash text NOT NULL,           -- hash SHA-256 do CPF/CNPJ (texto puro nunca é armazenado)
+  document_hash text NOT NULL,           -- HMAC-SHA-256 do CPF/CNPJ com segredo protegido (texto puro nunca é armazenado)
   document_type text NOT NULL DEFAULT 'CPF',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -25,6 +25,17 @@ CREATE INDEX idx_holder_tenant ON holder (tenant_id);
 -- Índice de document_hash isolado por tenant (privacidade e isolamento multi-tenant).
 CREATE INDEX idx_holder_document_hash ON holder (tenant_id, document_hash);
 GRANT SELECT, INSERT, UPDATE, DELETE ON holder TO app_user;
+
+-- AVISO DE SEGURANÇA: document_hash armazena um HMAC-SHA-256 (não SHA-256 simples)
+-- do CPF/CNPJ com um segredo protegido compartilhado entre o Verifier e o
+-- serviço Comprova. SHA-256 simples é insuficiente para documentos com espaço
+-- de valores previsível (CPF/CNPJ), pois permite ataque por enumeração.
+-- O segredo HMAC nunca é armazenado no banco; é provido via variável de
+-- ambiente da aplicação (ex.: HOLDER_DOCUMENT_HMAC_SECRET). O cálculo do HMAC
+-- é responsabilidade da camada de integração do Verifier, que deve compartilhar
+-- o segredo com o serviço Comprova de forma out-of-band.
+-- Não existe correlação global de titulares entre organizações: o isolamento é
+-- feito exclusivamente por tenant_id.
 
 -- Processos de KYC associados a um titular.
 -- O estado do KYC é independente das obrigações documentais.

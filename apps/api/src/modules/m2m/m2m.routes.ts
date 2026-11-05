@@ -1,5 +1,5 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import type { Db } from '@comprova/db'
 import { ProblemSchema } from '@comprova/contracts'
@@ -12,17 +12,39 @@ export type M2MRoutesDeps = {
   readonly apiKeyPepper: string
 }
 
+/**
+ * Exige sessão de usuário autenticada (Better Auth).
+ * Chaves API via Bearer (mesmo do tipo 'user') não podem administrar
+ * outras API keys: essa operação é exclusiva de sessão de dashboard.
+ */
+const requireUserSession = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply | void> => {
+  if (request.sessionUser === undefined) {
+    return reply
+      .code(401)
+      .type('application/problem+json')
+      .send({ type: 'about:blank', title: 'Unauthorized', status: 401, code: 'USER_SESSION_REQUIRED' })
+  }
+}
+
 export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps): void => {
   const app = instance.withTypeProvider<ZodTypeProvider>()
   const controller = makeM2MController(deps)
 
-  // Rotas de gestão de API keys: exigem sessão de usuário (ou M2M verify),
-  // chave do tipo 'user' (não M2M) e scope keys:write. O tenant vem do
-  // contexto autenticado, nunca do body ou query do cliente.
+  // Rotas de gestão de API keys: exigem sessão de usuário autenticada (não
+  // aceita credencial Bearer como substituta), chave do tipo 'user' e scope
+  // keys:write. O tenant vem do contexto autenticado, nunca do cliente.
   app.post(
     '/m2m/api-keys',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireKeyType('user'), requireScope('keys:write')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireUserSession,
+        requireKeyType('user'),
+        requireScope('keys:write'),
+      ],
       schema: {
         querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
@@ -43,7 +65,7 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
           scopes: request.body.scopes,
           keyType: request.body.keyType,
           expiresInDays: request.body.expiresInDays,
-          userId: request.sessionUser?.id ?? '',
+          userId: request.sessionUser!.id,
         },
         reply,
       )
@@ -53,7 +75,12 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
   app.get(
     '/m2m/api-keys',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireKeyType('user'), requireScope('keys:write')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireUserSession,
+        requireKeyType('user'),
+        requireScope('keys:write'),
+      ],
       schema: {
         querystring: z.object({ tenantId: z.string().uuid() }),
         response: { 200: ApiKeyDtoSchema },
@@ -61,14 +88,19 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
     },
     async (request, reply) => {
       const tenantId = request.tenant?.tenantId ?? ''
-      return controller.list(tenantId, request.sessionUser?.id ?? '', reply)
+      return controller.list(tenantId, request.sessionUser!.id, reply)
     },
   )
 
   app.delete(
     '/m2m/api-keys/:apiKeyId',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireKeyType('user'), requireScope('keys:write')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireUserSession,
+        requireKeyType('user'),
+        requireScope('keys:write'),
+      ],
       schema: {
         params: ApiKeyIdParams,
         querystring: z.object({ tenantId: z.string().uuid() }),
@@ -81,7 +113,7 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
     },
     async (request, reply) => {
       const tenantId = request.tenant?.tenantId ?? ''
-      return controller.revoke(tenantId, request.params.apiKeyId, request.sessionUser?.id ?? '', reply)
+      return controller.revoke(tenantId, request.params.apiKeyId, request.sessionUser!.id, reply)
     },
   )
 }

@@ -223,6 +223,18 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
               .type(PROBLEM_CONTENT_TYPE)
               .send(problem(404, 'KYC_PROCESS_NOT_FOUND', 'Processo KYC não encontrado'))
           }
+          if (error.message === 'concurrent state transition detected') {
+            return reply
+              .code(409)
+              .type(PROBLEM_CONTENT_TYPE)
+              .send(
+                problem(
+                  409,
+                  'KYC_CONCURRENT_TRANSITION',
+                  'Conflito de transição simultânea: o estado do processo KYC foi alterado por outra requisição',
+                ),
+              )
+          }
           if (error.message.includes('invalid state transition')) {
             return reply
               .code(409)

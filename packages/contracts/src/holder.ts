@@ -3,11 +3,24 @@ import { z } from 'zod'
 export const DocumentTypeSchema = z.enum(['CPF', 'CNPJ'])
 export type DocumentType = z.infer<typeof DocumentTypeSchema>
 
+/**
+ * documentHash armazena um HMAC-SHA-256 do CPF/CNPJ com um segredo protegido
+ * compartilhado entre o Verifier e o serviço Comprova.
+ *
+ * SHA-256 simples é insuficiente para documentos com espaço de valores
+ * previsível (CPF/CNPJ), pois permite ataque por enumeração. O segredo HMAC
+ * nunca é armazenado no banco; é provido via variável de ambiente da aplicação.
+ * O cálculo do HMAC é responsabilidade da camada de integração do Verifier,
+ * que deve compartilhar o segredo com o serviço Comprova de forma out-of-band.
+ *
+ * Não existe correlação global de titulares entre organizações: o isolamento é
+ * feito exclusivamente por tenant_id.
+ */
 export const CreateHolderRequestSchema = z.object({
   externalReference: z.string().min(1).max(200),
   name: z.string().min(1).max(200),
   documentHash: z.string().regex(/^[0-9a-f]{64}$/, {
-    message: 'documentHash must be a SHA-256 hex digest (64 lowercase hex characters)',
+    message: 'documentHash must be a HMAC-SHA-256 hex digest (64 lowercase hex characters)',
   }),
   documentType: DocumentTypeSchema.default('CPF'),
 })
@@ -19,7 +32,7 @@ export const UpdateHolderRequestSchema = z.object({
   documentHash: z
     .string()
     .regex(/^[0-9a-f]{64}$/, {
-      message: 'documentHash must be a SHA-256 hex digest (64 lowercase hex characters)',
+      message: 'documentHash must be a HMAC-SHA-256 hex digest (64 lowercase hex characters)',
     })
     .optional(),
   documentType: DocumentTypeSchema.optional(),

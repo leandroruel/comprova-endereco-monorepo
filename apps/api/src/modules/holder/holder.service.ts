@@ -53,7 +53,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
 
     const [inserted] = await withTenant(db, tenantId, async (tx) => {
       try {
-        return tx
+        const [row] = await tx
           .insert(t.holder)
           .values({
             holderId,
@@ -64,6 +64,10 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
             documentType: create.documentType,
           })
           .returning()
+
+        if (!row) throw new Error('failed to create holder')
+
+        return [row]
       } catch (error) {
         // Código 23505 = unique_violation (holder_tenant_external_reference_unique)
         const pgError = error as { code?: string }

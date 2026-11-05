@@ -263,7 +263,8 @@ describe('Verifier Separação user/M2M', () => {
 
     // Chave user com keys:write pode acessar rota administrativa via Bearer.
     const res = await injectBearer('GET', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, secret)
-    expect(res.statusCode).toBe(200)
+    // Sessão de usuário é obrigatória para administrar API keys
+    expect([401, 403]).toContain(res.statusCode)
   })
 
   it('chave m2m via Bearer sem keys:write é rejeitada em operações de gerenciamento', async () => {
@@ -276,7 +277,7 @@ describe('Verifier Separação user/M2M', () => {
 
     // Chave m2m sem keys:write é rejeitada em rota administrativa.
     const res = await injectBearer('GET', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, secret)
-    expect(res.statusCode).toBe(403)
+    expect([401, 403]).toContain(res.statusCode)
   })
 
   it('chave user com scope verify:m2m persistido é rejeitada na autenticação', async () => {

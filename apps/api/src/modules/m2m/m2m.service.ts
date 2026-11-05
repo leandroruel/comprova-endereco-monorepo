@@ -13,12 +13,38 @@ export class AuthorizationError extends Error {
   }
 }
 
+const ROLES_ALLOWED_TO_MANAGE_KEYS = ['owner', 'admin']
+
+const ensureMembership = async (
+  db: Db,
+  tenantId: string,
+  userId: string,
+  requireAdmin: boolean,
+): Promise<void> => {
+  const [member] = await withTenant(db, tenantId, async (tx) => {
+    return tx
+      .select({ role: t.organizationMember.role })
+      .from(t.organizationMember)
+      .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
+      .limit(1)
+  })
+
+  if (!member) {
+    throw new AuthorizationError('usuário não é membro da organização')
+  }
+
+  if (requireAdmin && !ROLES_ALLOWED_TO_MANAGE_KEYS.includes(member.role)) {
+    throw new AuthorizationError('usuário não possui papel de admin ou owner na organização')
+  }
+}
+
 export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: string }) => {
   const { db, apiKeyPepper } = deps
   const hasher = makeApiKeyHasher(apiKeyPepper)
 
   const createApiKey = async (
     tenantId: string,
+    userId: string,
     create: {
       readonly name: string
       readonly scopes: string[]
@@ -26,6 +52,9 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
       readonly expiresAt?: string
     },
   ): Promise<{ apiKeyId: string; keyPrefix: string; secret: string }> => {
+    // Somente membros admin/owner podem criar API keys.
+    await ensureMembership(db, tenantId, userId, true)
+
     // Validar escopos conhecidos e permitidos para o tipo de chave.
     validateScopesForKeyType(create.keyType as 'user' | 'm2m', create.scopes)
 
@@ -97,6 +126,7 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
 
   const listApiKeys = async (
     tenantId: string,
+    userId: string,
   ): Promise<
     {
       apiKeyId: string
@@ -110,6 +140,9 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
       createdAt: string
     }[]
   > => {
+    // Somente membros da organização podem listar API keys.
+    await ensureMembership(db, tenantId, userId, false)
+
     const rows = await withTenant(db, tenantId, async (tx) => {
       return tx
         .select()
@@ -137,7 +170,10 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
     }))
   }
 
-  const revokeApiKey = async (apiKeyId: string, tenantId: string): Promise<boolean> => {
+  const revokeApiKey = async (apiKeyId: string, tenantId: string, userId: string): Promise<boolean> => {
+    // Somente membros admin/owner podem revogar API keys.
+    await ensureMembership(db, tenantId, userId, true)
+
     const [updated] = await withTenant(db, tenantId, async (tx) => {
       return tx
         .update(t.apiKey)

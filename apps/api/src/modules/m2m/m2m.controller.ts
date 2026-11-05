@@ -31,7 +31,7 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
           ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
           : undefined
 
-        const result = await service.createApiKey(request.tenantId, {
+        const result = await service.createApiKey(request.tenantId, request.userId, {
           name: request.name,
           scopes: request.scopes,
           keyType: request.keyType,
@@ -74,7 +74,7 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
     ): Promise<{ apiKeys: ApiKeyDto[] } | FastifyReply> => {
       // O tenantId é obtido do contexto autenticado (definido por
       // requireSessionOrM2MVerify), nunca do parâmetro do cliente.
-      const apiKeys = await service.listApiKeys(tenantId)
+      const apiKeys = await service.listApiKeys(tenantId, userId)
       return reply.code(200).send({ apiKeys })
     },
 
@@ -84,13 +84,23 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       userId: string,
       reply: FastifyReply,
     ): Promise<{ revoked: boolean } | FastifyReply> => {
-      const revoked = await service.revokeApiKey(apiKeyId, tenantId)
+      try {
+        const revoked = await service.revokeApiKey(apiKeyId, tenantId, userId)
 
-      if (!revoked) {
-        return sendProblem(reply, 404, 'API_KEY_NOT_FOUND', 'Credencial não encontrada')
+        if (!revoked) {
+          return sendProblem(reply, 404, 'API_KEY_NOT_FOUND', 'Credencial não encontrada')
+        }
+
+        return reply.code(200).send({ revoked: true })
+      } catch (error) {
+        if (error instanceof AuthorizationError) {
+          return reply
+            .code(403)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(403, 'FORBIDDEN', error.message))
+        }
+        return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao revogar credencial')
       }
-
-      return reply.code(200).send({ revoked: true })
     },
   }
 }
