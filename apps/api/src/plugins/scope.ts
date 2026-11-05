@@ -324,7 +324,7 @@ export const requireTenantMatch = async (
     return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
   }
 
-  if (tenant.tenantId !== queryTenantId) {
+  if (tenant.tenantId.toLowerCase() !== queryTenantId.toLowerCase()) {
     return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
   }
 }

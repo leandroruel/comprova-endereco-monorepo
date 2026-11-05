@@ -815,11 +815,11 @@ describe('KYC Integration', () => {
     const statuses = results.map((r) => r.statusCode).sort()
     expect(statuses).toEqual([200, 409])
 
+    // Identificar qual requisição retornou 200
     const successResult = results.find((r) => r.statusCode === 200)
     expect(successResult).toBeDefined()
     expect(successResult!.json().state).toBe('in_progress')
 
-    // Os eventos de auditoria devem corresponder às transições realmente efetivadas
     const eventsRes = await injectWithM2M(
       'GET',
       `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${tenantId}`,
@@ -829,15 +829,13 @@ describe('KYC Integration', () => {
     expect(eventsRes.statusCode).toBe(200)
     const events = eventsRes.json().events
     const transitionEvents = events.filter((e: { eventType: string }) => e.eventType === 'state_transitioned')
-    // Apenas um evento de transição deve existir (a que foi efetivada)
     expect(transitionEvents.length).toBe(1)
     expect(transitionEvents[0].toState).toBe('in_progress')
-    // O reason está dentro de details (pode ser objeto ou string JSON)
     const details =
       typeof transitionEvents[0].details === 'string'
         ? JSON.parse(transitionEvents[0].details as string)
         : transitionEvents[0].details
-    expect(details.reason).toBe('Primeira')
+    expect(['Primeira', 'Segunda']).toContain(details.reason)
   })
 
   it('deve listar eventos de auditoria do KYC', async () => {

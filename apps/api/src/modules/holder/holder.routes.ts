@@ -86,6 +86,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('holders:read'),
       ],
       schema: {
