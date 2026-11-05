@@ -20,8 +20,16 @@ const sendProblem = (
     .type(PROBLEM_CONTENT_TYPE)
     .send(problem(status, code, title, detail))
 
-export const makeOrganizationsController = (deps: { readonly db: Db; readonly termsVersion: string }) => {
-  const service = makeOrganizationsService({ db: deps.db, termsVersion: deps.termsVersion })
+export const makeOrganizationsController = (deps: {
+  readonly db: Db
+  readonly termsVersion: string
+  readonly termsApproved: boolean
+}) => {
+  const service = makeOrganizationsService({
+    db: deps.db,
+    termsVersion: deps.termsVersion,
+    termsApproved: deps.termsApproved,
+  })
 
   type CreateOrgInput = {
     name: string
@@ -130,6 +138,14 @@ export const makeOrganizationsController = (deps: { readonly db: Db; readonly te
             409,
             'TERMS_VERSION_MISMATCH',
             'A versão dos termos não corresponde à versão vigente',
+          )
+        }
+        if (message === 'terms not approved: legal content pending approval') {
+          return sendProblem(
+            reply,
+            403,
+            'TERMS_NOT_APPROVED',
+            'O conteúdo jurídico dos termos ainda não foi aprovado. O onboarding não pode ser concluído.',
           )
         }
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao completar onboarding')

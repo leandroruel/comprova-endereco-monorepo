@@ -110,6 +110,12 @@ const EnvSchema = z.object({
    * conteúdo jurídico depende de aprovação jurídica (Fase 1 prepara o fluxo).
    */
   TERMS_VERSION: z.string().min(1).max(100).optional(),
+  /**
+   * Indica se o conteúdo jurídico dos termos de onboarding foi aprovado.
+   * Quando falso, o aceite de termos é bloqueado e o onboarding não pode ser
+   * concluído. Definir como 'true' apenas após aprovação jurídica formal.
+   */
+  TERMS_APPROVED: z.string().optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

@@ -69,20 +69,20 @@ export default function App() {
         setOrganizations(list)
         setOrganizationsError(null)
 
-        // Seleciona explicitamente a primeira organização apenas se nenhuma
-        // organização ativa já estiver definida (preserve a seleção do usuário).
-        if (!activeOrgIdRef.current && list.length > 0) {
-          setActiveOrgId(list[0]?.tenantId ?? null)
-        }
-
         // O estado de onboarding é determinado pela organização ativa
-        // selecionada, e não pelo primeiro item da lista.
-        const activeOrg = list.find((o) => o.tenantId === activeOrgIdRef.current) ?? list[0]
+        // selecionada, e não pelo primeiro item da lista. Se nenhuma
+        // organização estiver selecionada, o usuário deve escolher uma no
+        // seletor do Layout antes de prosseguir.
+        const activeOrg = list.find((o) => o.tenantId === activeOrgIdRef.current)
         const hasOrg = list.length > 0
         const completed = activeOrg?.onboardingStatus === 'completed'
 
         if (!hasOrg) {
           setRoute('onboarding')
+        } else if (!activeOrgIdRef.current) {
+          // Tem organizações mas nenhuma selecionada: o usuário deve escolher
+          // uma no seletor do Layout.
+          setRoute('dashboard')
         } else if (!completed) {
           setRoute('onboarding')
         } else {
@@ -107,6 +107,25 @@ export default function App() {
   const handleAuthSuccess = useCallback(() => {
     resolveRoute()
   }, [resolveRoute])
+
+  /** Adiciona uma organização recém-criada ao estado local e a define como ativa. */
+  const handleOrganizationCreated = useCallback(
+    (newOrg: {
+      tenantId: string
+      name: string
+      onboardingStatus: string
+      termsVersion: string | null
+      role: string | null
+    }) => {
+      setOrganizations((prev) => {
+        const exists = prev.some((o) => o.tenantId === newOrg.tenantId)
+        if (exists) return prev
+        return [...prev, newOrg]
+      })
+      setActiveOrgId(newOrg.tenantId)
+    },
+    [setActiveOrgId],
+  )
 
   const handleLogout = useCallback(async () => {
     await authClient.signOut()
@@ -160,6 +179,7 @@ export default function App() {
               user={user}
               organizations={organizations}
               activeOrgId={activeOrgId}
+              onOrganizationCreated={handleOrganizationCreated}
               onComplete={resolveRoute}
             />
           ) : route === 'members' ? (

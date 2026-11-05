@@ -33,25 +33,41 @@ interface OnboardingPageProps {
   user: { id: string; email: string; name: string; role: string }
   organizations: OrganizationSummary[]
   activeOrgId: string | null
+  onOrganizationCreated: (newOrg: {
+    tenantId: string
+    name: string
+    onboardingStatus: string
+    termsVersion: string | null
+    role: string | null
+  }) => void
   onComplete: () => void
 }
 
-export function OnboardingPage({ user, organizations, activeOrgId, onComplete }: OnboardingPageProps) {
+export function OnboardingPage({
+  user,
+  organizations,
+  activeOrgId,
+  onOrganizationCreated,
+  onComplete,
+}: OnboardingPageProps) {
   const [step, setStep] = useState<'welcome' | 'create' | 'terms' | 'complete'>('welcome')
   const [name, setName] = useState('')
   const [legalName, setLegalName] = useState('')
   const [document, setDocument] = useState('')
   const [termsVersion, setTermsVersion] = useState<string>('1.0.0')
   const [termsVersionError, setTermsVersionError] = useState<Error | null>(null)
+  const [termsApproved, setTermsApproved] = useState<boolean>(false)
   const [termsAccepted, setTermsAccepted] = useState(false)
 
   // A versão vigente dos termos de onboarding é definida exclusivamente pelo
-  // servidor. Se a consulta falhar, o fluxo de aceite é bloqueado (não há
-  // fallback silencioso nem versão genérica apresentada como termo oficial).
+  // servidor. Se a consulta falhar ou os termos não estiverem aprovados, o
+  // fluxo de aceite é bloqueado (não há fallback silencioso nem versão
+  // genérica apresentada como termo oficial).
   useEffect(() => {
     getTermsVersion()
-      .then(({ version }) => {
+      .then(({ version, approved }) => {
         setTermsVersion(version)
+        setTermsApproved(approved)
         setTermsVersionError(null)
       })
       .catch((err) => {
@@ -64,8 +80,15 @@ export function OnboardingPage({ user, organizations, activeOrgId, onComplete }:
 
   const createOrgMutation = useMutation({
     mutationFn: createOrganization,
-    onSuccess: () => {
+    onSuccess: (newOrg) => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
+      onOrganizationCreated({
+        tenantId: newOrg.tenantId,
+        name: newOrg.name,
+        onboardingStatus: newOrg.onboardingStatus,
+        termsVersion: newOrg.termsVersion,
+        role: newOrg.role,
+      })
       setStep('terms')
     },
     onError: (err) => {
@@ -95,6 +118,14 @@ export function OnboardingPage({ user, organizations, activeOrgId, onComplete }:
     // pelo servidor (falha na consulta bloqueia o fluxo).
     if (termsVersionError) {
       setError('Não foi possível carregar a versão dos termos do servidor. Tente novamente.')
+      setLoading(false)
+      return
+    }
+    // Não permite criar organização sem termos jurídicos aprovados.
+    if (!termsApproved) {
+      setError(
+        'O conteúdo jurídico dos termos ainda não foi aprovado. A criação de organização está bloqueada até que os termos sejam aprovados.',
+      )
       setLoading(false)
       return
     }
@@ -208,6 +239,22 @@ export function OnboardingPage({ user, organizations, activeOrgId, onComplete }:
         </div>
       )
     }
+    if (!termsApproved) {
+      return (
+        <div className="max-w-2xl mx-auto">
+          <Card className="animate-fade-in">
+            <CardContent className="text-center p-10">
+              <AlertCircle className="h-8 w-8 text-amber-600 mb-3" />
+              <h2 className="text-lg font-semibold">Termos não aprovados</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                O conteúdo jurídico dos termos de onboarding ainda não foi aprovado. A criação de organização
+                está bloqueada até que os termos oficiais estejam disponíveis.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
     return (
       <div className="max-w-xl mx-auto">
         <Card className="animate-fade-in">
@@ -313,28 +360,47 @@ export function OnboardingPage({ user, organizations, activeOrgId, onComplete }:
           <CardContent className="space-y-4">
             <div className="border border-border rounded-lg p-4 bg-muted/50">
               <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
-              <p className="text-sm text-foreground">
-                <strong>Conteúdo jurídico pendente de aprovação.</strong>
-                Este é um espaço reservado para os termos oficiais de onboarding da organização. O texto
-                exibido não é um documento jurídico oficial e não deve ser interpretado como tal.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                A versão dos termos é definida exclusivamente pelo servidor. O aceite registrado neste fluxo
-                será associado à versão vigente no momento da conclusão do onboarding.
-              </p>
+              {!termsApproved ? (
+                <>
+                  <p className="text-sm text-foreground">
+                    <strong>Conteúdo jurídico pendente de aprovação.</strong>
+                    Este é um espaço reservado para os termos oficiais de onboarding da organização. O texto
+                    exibido não é um documento jurídico oficial e não deve ser interpretado como tal.
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    A versão dos termos é definida exclusivamente pelo servidor. O aceite não pode ser
+                    registrado enquanto o conteúdo jurídico não estiver aprovado.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-foreground">
+                    Ao concordar, você autoriza o Comprova a tratar os dados de sua organização para fins de
+                    verificação de evidências e emissão de credenciais verificáveis. Os dados pessoais e
+                    organizacionais são mantidos separadamente e nunca são compartilhados com outras
+                    organizações.
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    A versão dos termos é definida exclusivamente pelo servidor. O aceite registrado neste
+                    fluxo será associado à versão vigente no momento da conclusão do onboarding.
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="flex items-start gap-3">
               <input
                 id="terms"
                 type="checkbox"
-                checked={termsAccepted}
-                onChange={(e) => setTermsAccepted(e.target.checked)}
+                checked={termsAccepted && termsApproved}
+                onChange={termsApproved ? (e) => setTermsAccepted(e.target.checked) : undefined}
                 className="w-4 h-4 rounded border border-input bg-card text-primary focus:ring-0"
+                disabled={!termsApproved}
               />
               <label htmlFor="terms" className="text-sm text-foreground cursor-pointer select-none">
                 Li e concordo com os termos e políticas aplicáveis (versão{' '}
                 <span className="font-medium">{termsVersion}</span>)
+                {!termsApproved && ' — pendente de aprovação jurídica'}
               </label>
             </div>
 
@@ -342,7 +408,11 @@ export function OnboardingPage({ user, organizations, activeOrgId, onComplete }:
               <Button type="button" variant="outline" onClick={() => setStep('create')}>
                 Voltar
               </Button>
-              <Button onClick={handleComplete} disabled={loading || !termsAccepted} className="w-auto">
+              <Button
+                onClick={handleComplete}
+                disabled={loading || !termsAccepted || !termsApproved}
+                className="w-auto"
+              >
                 {loading ? <Spinner className="mr-2" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                 Concluir onboarding
               </Button>

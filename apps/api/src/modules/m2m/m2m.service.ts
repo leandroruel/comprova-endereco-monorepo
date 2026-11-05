@@ -3,7 +3,7 @@ import * as t from '@comprova/db'
 import { newApiKey, keyPrefixOf, makeApiKeyHasher, type Db } from '@comprova/db'
 import { type ApiKeyDto, type CreateApiKeyRequest } from '@comprova/contracts'
 import { randomUUID } from 'node:crypto'
-import { markRevokedInCache, cacheInvalidate } from '../../plugins/auth.js'
+import { markRevokedInCache, cacheInvalidate, incrementRevocationVersion } from '../../plugins/auth.js'
 import { validateScopesForKeyType } from '../../plugins/scope.js'
 
 export class AuthorizationError extends Error {
@@ -187,15 +187,21 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
       // que o Redis esteja indisponível.
       cacheInvalidate(apiKeyId)
 
-      // Tenta marcar a chave como revogada no cache distribuído (Redis) para
-      // outras instâncias. Se falhar, a revogação ainda assim é reportada
-      // como concluída: o banco de dados é a fonte confiável e outras
-      // instâncias consultarão o banco quando Redis estiver indisponível.
+      // Tenta marcar a chave como revogada no cache distribuído (Redis) e
+      // incrementar a versão global de revogação. O incremento da versão
+      // força todas as outras instâncias a re-validar suas entradas de cache
+      // contra o banco de dados no próximo cache hit.
       try {
         await markRevokedInCache(apiKeyId)
+        await incrementRevocationVersion()
       } catch {
         // Falha ao gravar marcador no Redis: não falha a revogação. O banco
-        // já foi atualizado e o cache local foi invalidado.
+        // de dados já foi atualizado e o cache local foi invalidado. Outras
+        // instâncias com Redis indisponível verificarão o DB diretamente;
+        // instâncias com Redis disponível verão a versão antiga e, como o
+        // marcador não existe, precisarão de um reconnect do Redis para
+        // forçar o incremento da versão (feito automaticamente no
+        // 'reconnect' handler de setRedisClient).
       }
     }
 

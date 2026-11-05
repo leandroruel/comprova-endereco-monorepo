@@ -28,6 +28,8 @@ export interface OrganizationsServiceDeps {
   readonly db: t.Db
   /** Versão vigente dos termos de onboarding, definida exclusivamente pelo servidor. */
   readonly termsVersion: string
+  /** Indica se o conteúdo jurídico dos termos foi aprovado e pode ser aceito. */
+  readonly termsApproved: boolean
 }
 
 /**
@@ -140,6 +142,13 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     // aceite quando o cliente envia uma versão diferente da vigente.
     if (termsVersion !== deps.termsVersion) {
       throw new Error('terms version does not match the current version')
+    }
+
+    // O conteúdo jurídico dos termos deve estar aprovado antes que o aceite
+    // possa ser registrado. Sem um documento aprovado, o onboarding não pode
+    // ser concluído.
+    if (!deps.termsApproved) {
+      throw new Error('terms not approved: legal content pending approval')
     }
 
     // Verifica se o usuário é owner da organização dentro do escopo do tenant

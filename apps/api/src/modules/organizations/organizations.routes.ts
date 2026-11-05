@@ -31,6 +31,8 @@ export type OrganizationsRoutesDeps = {
   readonly db: Db
   /** Versão vigente dos termos, definida pelo servidor (config `TERMS_VERSION`). */
   readonly termsVersion: string
+  /** Indica se o conteúdo jurídico dos termos foi aprovado e pode ser aceito. */
+  readonly termsApproved: boolean
 }
 
 export const registerOrganizationsRoutes = (
@@ -89,11 +91,11 @@ export const registerOrganizationsRoutes = (
     {
       preHandler: requireSessionUser,
       schema: {
-        response: { 200: z.object({ version: z.string() }) },
+        response: { 200: z.object({ version: z.string(), approved: z.boolean() }) },
       },
     },
     async (_request, reply) => {
-      return reply.code(200).send({ version: deps.termsVersion })
+      return reply.code(200).send({ version: deps.termsVersion, approved: deps.termsApproved })
     },
   )
 

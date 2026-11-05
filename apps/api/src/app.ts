@@ -318,9 +318,13 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       if (!termsVersion) {
         throw new Error('TERMS_VERSION must be configured')
       }
+      // Os termos só podem ser aceitos quando o conteúdo jurídico foi aprovado.
+      // Até lá, o fluxo de onboarding é bloqueado no frontend.
+      const termsApproved = deps.config.TERMS_APPROVED === 'true'
       registerOrganizationsRoutes(v1, {
         db: deps.db,
         termsVersion,
+        termsApproved,
       })
       registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerCredentialRoutes(v1, { db: deps.db })

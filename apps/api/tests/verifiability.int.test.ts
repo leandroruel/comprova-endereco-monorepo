@@ -59,6 +59,7 @@ const config: AppConfig = {
   LOG_LEVEL: 'silent',
   POLICY_VERSION,
   TERMS_VERSION: '1.0.0',
+  TERMS_APPROVED: 'true',
   TEMPORAL_ENABLED: false,
   VLM_ENABLED: false,
   TEMPORAL_ADDRESS: 'localhost:7233',

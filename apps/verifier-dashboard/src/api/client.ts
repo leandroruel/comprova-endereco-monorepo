@@ -53,7 +53,7 @@ export async function getMe(): Promise<{
 }
 
 /** GET /organizations/terms-version — versão vigente dos termos (definida pelo servidor). */
-export async function getTermsVersion(): Promise<{ version: string }> {
+export async function getTermsVersion(): Promise<{ version: string; approved: boolean }> {
   return apiRequest('/organizations/terms-version', { method: 'GET' })
 }
 
@@ -182,6 +182,25 @@ export async function addMember(
   invitedBy: string | null
 }> {
   return apiRequest(`/organizations/${tenantId}/members`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** POST /organizations/:tenantId/invitations — cria um convite. Retorna o token apenas uma vez. */
+export async function createInvitation(
+  tenantId: string,
+  body: { email: string; role: 'owner' | 'admin' | 'member'; expiresInDays?: number },
+): Promise<{
+  organizationInvitationId: string
+  tenantId: string
+  email: string
+  role: string
+  expiresAt: string
+  createdAt: string
+  token: string
+}> {
+  return apiRequest(`/organizations/${tenantId}/invitations`, {
     method: 'POST',
     body: JSON.stringify(body),
   })

@@ -40,7 +40,10 @@ const unauthorized = (reply: FastifyReply): FastifyReply =>
 
 const CACHE_TTL_MS = 60_000
 const CACHE_MAX = 5_000
-const verifiedPrefixes = new Map<string, { readonly expiresAt: number; readonly ctx: TenantContext }>()
+const verifiedPrefixes = new Map<
+  string,
+  { readonly expiresAt: number; readonly revocationVersion: number; readonly ctx: TenantContext }
+>()
 
 /**
  * Chave Redis para rastrear chaves de API revogadas em instâncias distribuídas.
@@ -48,24 +51,37 @@ const verifiedPrefixes = new Map<string, { readonly expiresAt: number; readonly 
  */
 const revokedKeyCacheKey = (apiKeyId: string): string => `comprova:revoked_api_keys:${apiKeyId}`
 
+/**
+ * Versão global de revogação. Incrementada a cada revogação bem-sucedida.
+ * Usada para detectar entradas de cache locais que podem estar desatualizadas
+ * após uma revogação ocorrida enquanto o Redis estava indisponível.
+ */
+const revocationVersionKey = 'comprova:auth_revocation_version'
+
 let redisClient: Redis | null = null
 
 export const setRedisClient = (redis: Redis): void => {
   redisClient = redis
+  // Quando o Redis se reconecta após uma indisponibilidade, incrementa a
+  // versão de revogação para forçar a re-validação de todas as entradas de
+  // cache locais contra o banco de dados (fonte confiável).
+  redis.on('reconnect', async () => {
+    try {
+      await incrementRevocationVersion()
+    } catch {
+      // Best effort: se falhar, as instâncias ainda verificarão o DB no próximo cache hit.
+    }
+  })
 }
 
 const isRevokedInCache = async (apiKeyId: string): Promise<boolean> => {
   if (!redisClient) {
-    // Não há Redis configurado: falha fechada para evitar que uma chave
-    // revogada continue sendo aceita.
     throw new Error('revocation check unavailable: redis client not configured')
   }
   try {
     const result = await redisClient.get(revokedKeyCacheKey(apiKeyId))
     return result === '1'
   } catch (error) {
-    // Falha ao consultar Redis: falha fechada para não aceitar chaves
-    // potencialmente revogadas.
     throw new Error(`revocation check unavailable: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
@@ -85,6 +101,33 @@ const isRevokedInDb = async (db: Db, apiKeyId: string): Promise<boolean> => {
   return rows.length > 0 && rows[0]!.revokedAt !== null
 }
 
+const getRevocationVersion = async (): Promise<number> => {
+  if (!redisClient) {
+    throw new Error('revocation version unavailable: redis client not configured')
+  }
+  try {
+    const v = await redisClient.get(revocationVersionKey)
+    return v ? parseInt(v, 10) : 0
+  } catch (error) {
+    throw new Error(
+      `revocation version unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+const incrementRevocationVersion = async (): Promise<void> => {
+  if (!redisClient) {
+    throw new Error('revocation version unavailable: redis client not configured')
+  }
+  try {
+    await redisClient.incr(revocationVersionKey)
+  } catch (error) {
+    throw new Error(
+      `revocation version increment failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 const markRevokedInCache = async (apiKeyId: string): Promise<void> => {
   if (!redisClient) {
     throw new Error('revocation cache unavailable: redis client not configured')
@@ -96,31 +139,29 @@ const markRevokedInCache = async (apiKeyId: string): Promise<void> => {
   }
 }
 
-const cacheGet = (prefixHash: string, now: number): TenantContext | null => {
+const cacheGet = (
+  prefixHash: string,
+  now: number,
+): { revocationVersion: number; ctx: TenantContext } | null => {
   const hit = verifiedPrefixes.get(prefixHash)
   if (hit === undefined) return null
   if (hit.expiresAt < now) {
     verifiedPrefixes.delete(prefixHash)
     return null
   }
-  // Re-chave expirou: invalida a entrada do cache mesmo antes do TTL.
-  if (
-    hit.ctx.expiresAt !== null &&
-    hit.ctx.expiresAt !== undefined &&
-    new Date(hit.ctx.expiresAt) < new Date()
-  ) {
+  if (hit.ctx.expiresAt !== null && new Date(hit.ctx.expiresAt) < new Date()) {
     verifiedPrefixes.delete(prefixHash)
     return null
   }
-  return hit.ctx
+  return { revocationVersion: hit.revocationVersion, ctx: hit.ctx }
 }
 
-const cachePut = (prefixHash: string, ctx: TenantContext, now: number): void => {
+const cachePut = (prefixHash: string, ctx: TenantContext, now: number, revocationVersion: number): void => {
   if (verifiedPrefixes.size >= CACHE_MAX) {
     const oldest = verifiedPrefixes.keys().next().value
     if (oldest !== undefined) verifiedPrefixes.delete(oldest)
   }
-  verifiedPrefixes.set(prefixHash, { expiresAt: now + CACHE_TTL_MS, ctx })
+  verifiedPrefixes.set(prefixHash, { expiresAt: now + CACHE_TTL_MS, revocationVersion, ctx })
 }
 
 const cacheInvalidate = (prefixHash: string): void => {
@@ -152,26 +193,55 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
     if (cached !== null) {
       // Verifica se a chave foi revogada no cache distribuído (Redis).
       // Falha fechada: se não for possível verificar via Redis, consulta o
-      // banco diretamente para garantir que uma chave revogada nunca seja
-      // aceita pelo cache local (mesmo após recuperação do Redis).
-      let revoked = false
+      // banco diretamente. Se a versão de revogação do cache for menor que a
+      // versão atual no Redis, re-valida contra o banco (a chave pode ter sido
+      // revogada enquanto o Redis estava indisponível).
+      let currentVersion: number
       try {
-        revoked = await isRevokedInCache(cached.apiKeyId)
+        currentVersion = await getRevocationVersion()
       } catch {
         // Redis indisponível: verifica a fonte confiável (banco de dados).
-        try {
-          revoked = await isRevokedInDb(db, cached.apiKeyId)
-        } catch {
-          // Nem Redis nem banco disponíveis: falha fechada.
+        const revoked = await isRevokedInDb(db, cached.ctx.apiKeyId)
+        if (revoked) {
           cacheInvalidate(prefixHash)
           return unauthorized(reply)
         }
+        request.tenant = cached.ctx
+        return
+      }
+
+      if (cached.revocationVersion < currentVersion) {
+        // Versão desatualizada: a chave pode ter sido revogada enquanto este
+        // cache foi armazenado. Re-valida contra o banco de dados.
+        const revoked = await isRevokedInDb(db, cached.ctx.apiKeyId)
+        if (revoked) {
+          cacheInvalidate(prefixHash)
+          return unauthorized(reply)
+        }
+        // Atualiza o cache com a versão atual e prossegue.
+        cachePut(prefixHash, cached.ctx, now, currentVersion)
+        request.tenant = cached.ctx
+        return
+      }
+
+      // Versão corresponde: verifica marcador rápido no Redis.
+      let revoked = false
+      try {
+        revoked = await isRevokedInCache(cached.ctx.apiKeyId)
+      } catch {
+        const dbRevoked = await isRevokedInDb(db, cached.ctx.apiKeyId)
+        if (dbRevoked) {
+          cacheInvalidate(prefixHash)
+          return unauthorized(reply)
+        }
+        request.tenant = cached.ctx
+        return
       }
       if (revoked) {
         cacheInvalidate(prefixHash)
         return unauthorized(reply)
       }
-      request.tenant = cached
+      request.tenant = cached.ctx
       return
     }
 
@@ -205,11 +275,8 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
     }
 
     // Valida que os scopes persistidos são compatíveis com o tipo da chave.
-    // Isso impede que uma chave persistida com estado inconsistente (ex.: chave
-    // 'user' com scope 'verify:m2m') seja aceita em autenticação.
     const keyType = match.keyType as 'user' | 'm2m' | string
     if (keyType !== 'user' && keyType !== 'm2m') {
-      // Tipo de chave desconhecido ou inválido: rejeita.
       return unauthorized(reply)
     }
     try {
@@ -219,10 +286,11 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
     }
 
     // Rejeita chaves expiradas.
-    if (match.expiresAt !== null && match.expiresAt !== undefined && new Date(match.expiresAt) < new Date()) {
+    if (match.expiresAt !== null && new Date(match.expiresAt) < new Date()) {
       return unauthorized(reply)
     }
 
+    const currentVersion = await getRevocationVersion()
     const ctx: TenantContext = {
       tenantId: match.tenantId,
       apiKeyId: match.apiKeyId,
@@ -232,9 +300,9 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
       expiresAt: match.expiresAt,
       keyType: keyType,
     }
-    cachePut(prefixHash, ctx, now)
+    cachePut(prefixHash, ctx, now, currentVersion)
     request.tenant = ctx
   }
 }
 
-export { markRevokedInCache, cacheInvalidate }
+export { markRevokedInCache, cacheInvalidate, incrementRevocationVersion }

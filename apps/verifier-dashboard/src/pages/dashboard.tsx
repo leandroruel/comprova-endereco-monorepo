@@ -45,9 +45,10 @@ export function DashboardPage({ user, setRoute, activeOrgId }: DashboardPageProp
     enabled: !!user,
   })
 
-  // Organização ativa selecionada explicitamente; fallback para a primeira da
-  // lista apenas quando nenhuma seleção estiver definida.
-  const activeOrg = orgs?.find((o: { tenantId: string }) => o.tenantId === activeOrgId) ?? orgs?.[0]
+  // Organização ativa selecionada explicitamente. Sem fallback para a primeira
+  // da lista: se nenhuma organização estiver selecionada, não há contexto
+  // para operar.
+  const activeOrg = orgs?.find((o: { tenantId: string }) => o.tenantId === activeOrgId)
   const tenantId = activeOrg?.tenantId ?? null
 
   const { data: organization, isLoading: orgLoading } = useQuery({
@@ -107,7 +108,7 @@ export function DashboardPage({ user, setRoute, activeOrgId }: DashboardPageProp
         <Card>
           <CardContent className="text-center p-10">
             <p className="text-sm text-muted-foreground">
-              Você não pertence a nenhuma organização. Cadastre-se para começar.
+              Selecione uma organização no menu lateral para visualizar seus dados.
             </p>
           </CardContent>
         </Card>

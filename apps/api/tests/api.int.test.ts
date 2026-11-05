@@ -45,6 +45,7 @@ const app = await buildApp({
     LOG_LEVEL: 'silent',
     POLICY_VERSION: '2026.11.1',
     TERMS_VERSION: '1.0.0',
+    TERMS_APPROVED: 'true',
     TEMPORAL_ENABLED: false,
     VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',
