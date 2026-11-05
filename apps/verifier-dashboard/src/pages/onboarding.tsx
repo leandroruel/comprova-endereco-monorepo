@@ -32,10 +32,11 @@ interface OrganizationSummary {
 interface OnboardingPageProps {
   user: { id: string; email: string; name: string; role: string }
   organizations: OrganizationSummary[]
+  activeOrgId: string | null
   onComplete: () => void
 }
 
-export function OnboardingPage({ user, organizations, onComplete }: OnboardingPageProps) {
+export function OnboardingPage({ user, organizations, activeOrgId, onComplete }: OnboardingPageProps) {
   const [step, setStep] = useState<'welcome' | 'create' | 'terms' | 'complete'>('welcome')
   const [name, setName] = useState('')
   const [legalName, setLegalName] = useState('')
@@ -113,9 +114,11 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
     e.preventDefault()
     setError(null)
     setLoading(true)
-    const org = organizations.find((o) => o.onboardingStatus === 'pending')
+    // Onboarding atua sobre a organização ativa selecionada, sem fallback
+    // automático para a primeira da lista.
+    const org = organizations.find((o) => o.tenantId === activeOrgId && o.onboardingStatus === 'pending')
     if (!org) {
-      setError('Nenhuma organização pendente encontrada')
+      setError('Nenhuma organização pendente selecionada.')
       setLoading(false)
       return
     }
@@ -311,9 +314,13 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
             <div className="border border-border rounded-lg p-4 bg-muted/50">
               <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
               <p className="text-sm text-foreground">
-                Ao concordar, você autoriza o Comprova a tratar os dados de sua organização para fins de
-                verificação de evidências e emissão de credenciais verificáveis. Os dados pessoais e
-                organizacionais são mantidos separadamente e nunca são compartilhados com outras organizações.
+                <strong>Conteúdo jurídico pendente de aprovação.</strong>
+                Este é um espaço reservado para os termos oficiais de onboarding da organização. O texto
+                exibido não é um documento jurídico oficial e não deve ser interpretado como tal.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                A versão dos termos é definida exclusivamente pelo servidor. O aceite registrado neste fluxo
+                será associado à versão vigente no momento da conclusão do onboarding.
               </p>
             </div>
 
@@ -381,8 +388,8 @@ export function OnboardingPage({ user, organizations, onComplete }: OnboardingPa
     )
   }
 
-  // Se já tem org concluída, redireciona
-  const pendingOrg = organizations.find((o) => o.onboardingStatus === 'pending')
+  // Se já tem org concluída, redireciona. Considera apenas a organização ativa.
+  const pendingOrg = organizations.find((o) => o.tenantId === activeOrgId && o.onboardingStatus === 'pending')
   if (pendingOrg) {
     if (pendingOrg.role !== 'owner') {
       return (

@@ -111,6 +111,7 @@ await createIssuerSigningKey(adminPool.db, supersededTenantId, supersededSigning
 const lifecycleTenantId = await createTenant(adminPool.db, { name: 'credential-lifecycle' })
 const lifecycleKey = await createApiKey(adminPool.db, lifecycleTenantId, PEPPER, {
   scopes: ['validate:read', 'validate:write', 'keys:write'],
+  keyType: 'user',
 })
 const lifecycleSigning = createTestCredentialSigningKey('lifecycle-key')
 await createIssuerSigningKey(adminPool.db, lifecycleTenantId, lifecycleSigning)
@@ -120,6 +121,7 @@ await createIssuerSigningKey(adminPool.db, lifecycleTenantId, lifecycleSigning)
 const scheduledTenantId = await createTenant(adminPool.db, { name: 'credential-scheduled-key' })
 const scheduledKey = await createApiKey(adminPool.db, scheduledTenantId, PEPPER, {
   scopes: ['validate:read', 'validate:write', 'keys:write'],
+  keyType: 'user',
 })
 const scheduledSigning = createTestCredentialSigningKey('scheduled-key')
 await createIssuerSigningKey(adminPool.db, scheduledTenantId, scheduledSigning)
@@ -130,6 +132,7 @@ await createIssuerSigningKey(adminPool.db, scheduledTenantId, scheduledSigning)
 const rotationTenantId = await createTenant(adminPool.db, { name: 'credential-rotation' })
 const rotationKey = await createApiKey(adminPool.db, rotationTenantId, PEPPER, {
   scopes: ['validate:read', 'validate:write', 'keys:write'],
+  keyType: 'user',
 })
 const rotationOldSigning = createTestCredentialSigningKey('key-old')
 const rotationNewSigning = createTestCredentialSigningKey('key-new')
@@ -151,6 +154,7 @@ await createIssuerSigningKey(adminPool.db, readOnlyTenantId, readOnlySigning)
 const combinedTenantId = await createTenant(adminPool.db, { name: 'credential-combined-scopes' })
 const combinedKey = await createApiKey(adminPool.db, combinedTenantId, PEPPER, {
   scopes: ['validate:read', 'validate:write', 'keys:write'],
+  keyType: 'user',
 })
 const combinedSigning = createTestCredentialSigningKey('combined-key')
 await createIssuerSigningKey(adminPool.db, combinedTenantId, combinedSigning)

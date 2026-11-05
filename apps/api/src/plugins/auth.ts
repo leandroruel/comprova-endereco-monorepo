@@ -56,8 +56,8 @@ export const setRedisClient = (redis: Redis): void => {
 
 const isRevokedInCache = async (apiKeyId: string): Promise<boolean> => {
   if (!redisClient) {
-    // Não há como verificar o estado de revogação sem Redis: falha fechada
-    // para evitar que uma chave revogada continue sendo aceita.
+    // Não há Redis configurado: falha fechada para evitar que uma chave
+    // revogada continue sendo aceita.
     throw new Error('revocation check unavailable: redis client not configured')
   }
   try {
@@ -68,6 +68,21 @@ const isRevokedInCache = async (apiKeyId: string): Promise<boolean> => {
     // potencialmente revogadas.
     throw new Error(`revocation check unavailable: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+/**
+ * Verifica se a chave foi revogada consultando diretamente o banco de dados.
+ * Usado como fallback quando Redis está indisponível durante a autenticação
+ * por cache local, garantindo que uma chave revogada no banco nunca seja
+ * aceita mesmo após recuperação do Redis.
+ */
+const isRevokedInDb = async (db: Db, apiKeyId: string): Promise<boolean> => {
+  const rows = await db
+    .select({ revokedAt: t.apiKey.revokedAt })
+    .from(t.apiKey)
+    .where(eq(t.apiKey.apiKeyId, apiKeyId))
+    .limit(1)
+  return rows.length > 0 && rows[0]!.revokedAt !== null
 }
 
 const markRevokedInCache = async (apiKeyId: string): Promise<void> => {
@@ -136,13 +151,21 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
     const cached = cacheGet(prefixHash, now)
     if (cached !== null) {
       // Verifica se a chave foi revogada no cache distribuído (Redis).
-      // Falha fechada: se não for possível verificar, rejeita a autenticação.
+      // Falha fechada: se não for possível verificar via Redis, consulta o
+      // banco diretamente para garantir que uma chave revogada nunca seja
+      // aceita pelo cache local (mesmo após recuperação do Redis).
       let revoked = false
       try {
         revoked = await isRevokedInCache(cached.apiKeyId)
       } catch {
-        cacheInvalidate(prefixHash)
-        return unauthorized(reply)
+        // Redis indisponível: verifica a fonte confiável (banco de dados).
+        try {
+          revoked = await isRevokedInDb(db, cached.apiKeyId)
+        } catch {
+          // Nem Redis nem banco disponíveis: falha fechada.
+          cacheInvalidate(prefixHash)
+          return unauthorized(reply)
+        }
       }
       if (revoked) {
         cacheInvalidate(prefixHash)
@@ -214,4 +237,4 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
   }
 }
 
-export { markRevokedInCache }
+export { markRevokedInCache, cacheInvalidate }

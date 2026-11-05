@@ -1,6 +1,6 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
-import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
+import { requireReadScope, requireWriteScope, requireSessionOrM2MVerify } from '../../plugins/scope.js'
 import type { EvidenceIntakeControllerDeps } from './evidence-intake.controller.js'
 import { makeEvidenceIntakeController } from './evidence-intake.controller.js'
 import { EVIDENCE_MULTIPART_OVERHEAD_BYTES } from './evidence-intake.multipart.js'
@@ -33,7 +33,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.get(
     '/validations/:id',
     {
-      preHandler: requireReadScope,
+      preHandler: [requireSessionOrM2MVerify, requireReadScope],
       schema: {
         params: GetValidationParams,
         response: { 200: ValidationDtoSchema, 304: NotModifiedResponse, 404: ProblemSchema },
@@ -46,7 +46,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.post(
     '/validations',
     {
-      preHandler: requireWriteScope,
+      preHandler: [requireSessionOrM2MVerify, requireWriteScope],
       schema: {
         headers: CreateValidationHeaders,
         body: CreateValidationRequestSchema,
@@ -70,7 +70,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.post(
     '/validations/:id/contest',
     {
-      preHandler: requireWriteScope,
+      preHandler: [requireSessionOrM2MVerify, requireWriteScope],
       schema: {
         params: GetValidationParams,
         body: ContestValidationRequest,
@@ -93,7 +93,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.post(
     '/validations/:id/credential',
     {
-      preHandler: requireWriteScope,
+      preHandler: [requireSessionOrM2MVerify, requireWriteScope],
       schema: {
         params: GetValidationParams,
         response: {
@@ -109,7 +109,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   app.post(
     '/validations/:id/evidence',
     {
-      preHandler: requireWriteScope,
+      preHandler: [requireSessionOrM2MVerify, requireWriteScope],
       // O parser de multipart tem seu próprio `fileSize`, mas o bodyLimit da
       // rota evita que o Fastify rejeite o envelope antes do parser. O overhead
       // cobre boundaries/headers, não o arquivo.

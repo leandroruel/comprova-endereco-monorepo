@@ -1,6 +1,6 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
-import { requireReadScope } from '../../plugins/scope.js'
+import { requireReadScope, requireSessionOrM2MVerify } from '../../plugins/scope.js'
 import type { MetaControllerDeps } from './meta.controller.js'
 import { makeMetaController } from './meta.controller.js'
 import { MetaResponse } from './meta.schema.js'
@@ -11,7 +11,12 @@ export const registerMetaRoutes = (instance: FastifyInstance, deps: MetaRoutesDe
   const app = instance.withTypeProvider<ZodTypeProvider>()
   const controller = makeMetaController(deps)
 
-  app.get('/meta', { preHandler: requireReadScope, schema: { response: { 200: MetaResponse } } }, async () =>
-    controller.get(),
+  app.get(
+    '/meta',
+    {
+      preHandler: [requireSessionOrM2MVerify, requireReadScope],
+      schema: { response: { 200: MetaResponse } },
+    },
+    async () => controller.get(),
   )
 }

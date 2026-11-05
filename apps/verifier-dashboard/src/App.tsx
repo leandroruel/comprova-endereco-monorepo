@@ -156,7 +156,12 @@ export default function App() {
           setActiveOrgId={setActiveOrgId}
         >
           {route === 'onboarding' ? (
-            <OnboardingPage user={user} organizations={organizations} onComplete={resolveRoute} />
+            <OnboardingPage
+              user={user}
+              organizations={organizations}
+              activeOrgId={activeOrgId}
+              onComplete={resolveRoute}
+            />
           ) : route === 'members' ? (
             <MembersPage user={user} activeOrgId={activeOrgId} />
           ) : route === 'integrations' ? (

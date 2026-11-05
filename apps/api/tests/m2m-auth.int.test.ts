@@ -1,5 +1,5 @@
 import { createDbPool, makeApiKeyHasher, runMigrations, type Db } from '@comprova/db'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
@@ -122,7 +122,7 @@ describe('Verifier M2M autenticação e revogação', () => {
     const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
       tenantId: m2mOrgTenantId,
       name: 'Chave M2M Válida',
-      scopes: ['validate:read'],
+      scopes: ['validate:read', 'verify:m2m'],
       keyType: 'm2m',
     })
     expect(createRes.statusCode).toBe(201)
@@ -174,7 +174,7 @@ describe('Verifier M2M autenticação e revogação', () => {
     const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
       tenantId: m2mOrgTenantId,
       name: 'Chave para revogar',
-      scopes: ['validate:read'],
+      scopes: ['validate:read', 'verify:m2m'],
       keyType: 'm2m',
     })
     expect(createRes.statusCode).toBe(201)
@@ -199,7 +199,7 @@ describe('Verifier M2M autenticação e revogação', () => {
     const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
       tenantId: m2mOrgTenantId,
       name: 'Chave revogada',
-      scopes: ['validate:read'],
+      scopes: ['validate:read', 'verify:m2m'],
       keyType: 'm2m',
     })
     expect(createRes.statusCode).toBe(201)
@@ -234,7 +234,8 @@ describe('Verifier Separação user/M2M', () => {
     expired = false,
   ): Promise<{ apiKeyId: string; secret: string }> => {
     const apiKeyId = randomUUID()
-    const prefix = createHash('sha256').update(plaintext.slice(0, 8)).digest('hex').slice(0, 12)
+    // Mesmo prefixo que keyPrefixOf(): primeiros 12 caracteres do plaintext.
+    const prefix = plaintext.slice(0, 12)
     const hasher = makeApiKeyHasher(PEPPER)
     const keyHash = hasher.hash(plaintext)
     await (appPool.db as Db).insert(t.apiKey).values({
@@ -301,6 +302,57 @@ describe('Verifier Separação user/M2M', () => {
 
     const res = await injectBearer('GET', '/v1/meta', secret)
     expect(res.statusCode).toBe(401)
+  })
+
+  it('chave user via Bearer acessa /v1/meta com validate:read', async () => {
+    const { secret } = await insertApiKeyDirectly(
+      m2mOrgTenantId,
+      'user-key-meta-1234567890',
+      ['validate:read'],
+      'user',
+    )
+
+    const res = await injectBearer('GET', '/v1/meta', secret)
+    // Chave user com scope funcional pode acessar endpoints de consumo via Bearer.
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('chave m2m com verify:m2m e validate:read acessa /v1/meta', async () => {
+    const { secret } = await insertApiKeyDirectly(
+      m2mOrgTenantId,
+      'm2m-valid-1234567890',
+      ['validate:read', 'verify:m2m'],
+      'm2m',
+    )
+
+    const res = await injectBearer('GET', '/v1/meta', secret)
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('chave m2m com verify:m2m mas sem validate:read é rejeitada em /v1/meta', async () => {
+    const { secret } = await insertApiKeyDirectly(
+      m2mOrgTenantId,
+      'm2m-no-read-1234567890',
+      ['verify:m2m'],
+      'm2m',
+    )
+
+    const res = await injectBearer('GET', '/v1/meta', secret)
+    // Tem verify:m2m mas falta validate:read.
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('sessão de usuário acessa operações administrativas de gerenciamento de chaves', async () => {
+    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
+      tenantId: m2mOrgTenantId,
+      name: 'Chave via sessão',
+      scopes: ['validate:read'],
+      keyType: 'm2m',
+    })
+    expect(createRes.statusCode).toBe(201)
+
+    const listRes = await injectWithSession('GET', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId)
+    expect(listRes.statusCode).toBe(200)
   })
 })
 

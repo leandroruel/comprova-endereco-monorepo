@@ -73,6 +73,12 @@ export const validateScopesForKeyType = (keyType: 'user' | 'm2m', scopes: readon
 export const requireScope =
   (scope: ApiScope) =>
   async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
+    // Sessão de usuário autenticada (Better Auth): já foi autenticada pelo
+    // middleware de sessão. Não exigimos scopes de API key para sessões.
+    if (request.sessionUser !== undefined) {
+      return
+    }
+
     const tenant = request.tenant
     if (tenant === undefined) {
       return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
@@ -81,6 +87,61 @@ export const requireScope =
       return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
     }
   }
+
+/**
+ * Exige autenticação por sessão de usuário (dashboard) OU por credencial de
+ * consumo (M2M com verify:m2m, ou chave user com scopes funcionais).
+ *
+ * Política de autenticação por endpoint:
+ * - Sessão de usuário (cookie Better Auth): aceita em todos os endpoints de
+ *   consumo e administração do dashboard.
+ * - Chave API `m2m` via Bearer: aceita apenas se tiver o escopo `verify:m2m`
+ *   (exclusivo de chaves M2M) e o scope funcional necessário para a operação.
+ * - Chave API `user` via Bearer: aceita para endpoints de consumo se tiver
+ *   `validate:read` ou `validate:write`. Não pode ter `verify:m2m` (esse
+ *   escopo é exclusivo de chaves M2M).
+ *
+ * Isso garante que uma chave `user` não possa ser usada como credencial M2M
+ * (não pode ter verify:m2m), mas ainda possa consumir endpoints de validação
+ * quando possui os scopes funcionais adequados.
+ */
+export const requireSessionOrM2MVerify = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply | void> => {
+  // Sessão de usuário autenticada: contexto separado do dashboard, sempre
+  // válido para endpoints de consumo.
+  if (request.sessionUser !== undefined) {
+    return
+  }
+
+  // Sem sessão: aceita credencial de consumo via Bearer.
+  const tenant = request.tenant
+  if (tenant === undefined) {
+    return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+  }
+
+  // Chave M2M: exige verify:m2m (exclusivo de chaves M2M).
+  if (tenant.keyType === 'm2m') {
+    if (!tenant.scopes.includes(API_SCOPES.verifyM2m)) {
+      return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+    }
+    return
+  }
+
+  // Chave user: exige scope funcional de leitura ou escrita.
+  if (tenant.keyType === 'user') {
+    const hasRead = tenant.scopes.includes(API_SCOPES.validateRead)
+    const hasWrite = tenant.scopes.includes(API_SCOPES.validateWrite)
+    if (!hasRead && !hasWrite) {
+      return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+    }
+    return
+  }
+
+  // Tipo de chave desconhecido.
+  return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+}
 
 /**
  * Exige que a credencial autenticada seja de um `keyType` específico.

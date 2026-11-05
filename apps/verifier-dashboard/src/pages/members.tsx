@@ -44,9 +44,10 @@ export function MembersPage({ user, activeOrgId }: MembersPageProps) {
     enabled: !!user,
   })
 
-  // Organização ativa selecionada explicitamente; fallback para a primeira da
-  // lista apenas quando nenhuma seleção estiver definida.
-  const activeOrg = orgs?.find((o: { tenantId: string }) => o.tenantId === activeOrgId) ?? orgs?.[0]
+  // Organização ativa selecionada explicitamente. Sem fallback para a
+  // primeira da lista: se nenhuma organização estiver selecionada, não há
+  // contexto para operar.
+  const activeOrg = orgs?.find((o: { tenantId: string }) => o.tenantId === activeOrgId)
   const tenantId: string | null = activeOrg?.tenantId ?? null
 
   const { data: members, isLoading: membersLoading } = useQuery({
