@@ -70,7 +70,15 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
         return [row]
       } catch (error) {
         // Código 23505 = unique_violation (holder_tenant_external_reference_unique)
-        const pgError = error as { code?: string }
+        // Com o Drizzle 0.45+, o código pode estar em error.cause.code.
+        // Percorremos a cadeia de cause para encontrar o código original.
+        let pgError: { code?: string; cause?: { code?: string } } | undefined = error as {
+          code?: string
+          cause?: { code?: string } | undefined
+        }
+        while (pgError && pgError.code !== '23505') {
+          pgError = pgError.cause as { code?: string } | undefined
+        }
         if (pgError?.code === '23505') {
           throw new Error('holder already exists for this external reference')
         }
