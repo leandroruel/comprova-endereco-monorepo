@@ -422,18 +422,15 @@ export function OnboardingPage({
               <div className="border border-border rounded-lg p-4 bg-muted/50">
                 <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
                 <p className="text-sm text-foreground">
-                  Ao concordar, você autoriza o Comprova a tratar os dados de sua organização para fins de
-                  verificação de evidências e emissão de credenciais verificáveis. Os dados pessoais e
-                  organizacionais são mantidos separadamente e nunca são compartilhados com outras
-                  organizações.
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  A versão dos termos é definida exclusivamente pelo servidor. O aceite registrado neste fluxo
-                  será associado à versão vigente e ao hash do documento no momento da conclusão do
-                  onboarding.
+                  O documento oficial dos termos está disponível sob o hash abaixo. O conteúdo do documento
+                  não é exibido nesta interface; consulte o documento oficial antes de prosseguir com o
+                  aceite.
                 </p>
                 <p className="text-xs font-mono text-muted-foreground">
                   Hash do documento: {termsDocumentHash}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  O aceite só pode ser registrado após a leitura do documento oficial em outro canal.
                 </p>
               </div>
             )}

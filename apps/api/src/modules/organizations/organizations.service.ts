@@ -313,11 +313,12 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
       }
     }
 
-    // Busca o usuário por email
+    // Busca o usuário por email (normalizado para comparação case-insensitiva)
+    const normalizedEmail = normalizeEmail(create.email)
     const users = await db
       .select({ id: t.authUser.id, email: t.authUser.email, name: t.authUser.name })
       .from(t.authUser)
-      .where(eq(t.authUser.email, create.email))
+      .where(sql`lower(${t.authUser.email}) = ${normalizedEmail}`)
       .limit(1)
 
     const user = users[0]
