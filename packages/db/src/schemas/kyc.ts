@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, index } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, foreignKey, index } from 'drizzle-orm/pg-core'
 import { tenant } from './tenancy.js'
 import { holder } from './holder.js'
 
@@ -14,12 +14,8 @@ export const kycProcess = pgTable(
   'kyc_process',
   {
     kycProcessId: uuid('kyc_process_id').primaryKey(),
-    holderId: uuid('holder_id')
-      .notNull()
-      .references(() => holder.holderId),
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenant.tenantId),
+    holderId: uuid('holder_id').notNull(),
+    tenantId: uuid('tenant_id').notNull(),
     state: text('state').notNull().default('pending'),
     legalBasis: text('legal_basis').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -27,6 +23,11 @@ export const kycProcess = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (t) => [
+    // Integridade referencial composta: holder pertence ao mesmo tenant.
+    foreignKey({
+      columns: [t.holderId, t.tenantId],
+      foreignColumns: [holder.holderId, holder.tenantId],
+    }),
     index('kyc_process_holder_idx').on(t.holderId),
     index('kyc_process_tenant_idx').on(t.tenantId),
     index('kyc_process_state_idx').on(t.state),

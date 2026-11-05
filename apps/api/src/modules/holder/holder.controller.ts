@@ -134,7 +134,7 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
       reply: FastifyReply,
     ): Promise<KycProcessCreatedResponseType | FastifyReply> => {
       try {
-        const process = await service.createKycProcess(actor, {
+        const process = await service.createKycProcess(actor, input.tenantId, {
           holderId: input.holderId,
           legalBasis: input.legalBasis,
           expiresAt: input.expiresAt,
@@ -244,6 +244,14 @@ export const makeHolderController = (deps: HolderControllerDeps) => {
         }
       | FastifyReply
     > => {
+      // Validar existência do processo antes de listar eventos.
+      const process = await service.getKycProcess(actor, input.tenantId, input.kycProcessId)
+      if (!process) {
+        return reply
+          .code(404)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(problem(404, 'KYC_PROCESS_NOT_FOUND', 'Processo KYC não encontrado'))
+      }
       const result = await service.listKycEvents(actor, input.tenantId, input.kycProcessId, {
         limit: input.limit,
         offset: input.offset,

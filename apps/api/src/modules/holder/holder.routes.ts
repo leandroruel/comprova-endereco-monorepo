@@ -1,5 +1,5 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { makeHolderController } from './holder.controller.js'
 import type { HolderRoutesDeps } from './holder.schema.js'
@@ -18,19 +18,7 @@ import {
   ProblemResponse,
   KycProcessNotFoundResponse,
 } from './holder.schema.js'
-import { requireScope } from '../../plugins/scope.js'
-
-const requireSessionUser = async (
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<FastifyReply | void> => {
-  if (request.sessionUser === undefined) {
-    return reply
-      .code(401)
-      .type('application/problem+json')
-      .send({ type: 'about:blank', title: 'Unauthorized', status: 401, code: 'UNAUTHORIZED' })
-  }
-}
+import { requireSessionOrM2MVerify, requireScope } from '../../plugins/scope.js'
 
 export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRoutesDeps): void => {
   const app = instance.withTypeProvider<ZodTypeProvider>()
@@ -46,11 +34,18 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
     return 'system'
   }
 
+  const getTenantId = (request: FastifyRequest): string => {
+    // O tenant vem exclusivamente do contexto autenticado (definido por
+    // requireSessionOrM2MVerify). Nunca de parâmetros ou payload do cliente.
+    return request.tenant?.tenantId ?? ''
+  }
+
   app.post(
     '/holders',
     {
-      preHandler: [requireSessionUser, requireScope('holders:write')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:write')],
       schema: {
+        querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
           externalReference: z.string().min(1).max(200),
           name: z.string().min(1).max(200),
@@ -64,7 +59,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.createHolder(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           externalReference: request.body.externalReference,
           name: request.body.name,
           documentHash: request.body.documentHash,
@@ -78,9 +73,12 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders',
     {
-      preHandler: [requireSessionUser, requireScope('holders:read')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:read')],
       schema: {
-        querystring: HolderListQuery,
+        querystring: z.object({
+          tenantId: z.string().uuid(),
+          ...HolderListQuery.shape,
+        }),
         response: { 200: HoldersListResponse },
       },
     },
@@ -88,7 +86,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.listHolders(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           limit: request.query.limit,
           offset: request.query.offset,
         },
@@ -100,9 +98,10 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId',
     {
-      preHandler: [requireSessionUser, requireScope('holders:read')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:read')],
       schema: {
         params: HolderIdParams,
+        querystring: z.object({ tenantId: z.string().uuid() }),
         response: { 200: HolderResponse, 404: ProblemResponse },
       },
     },
@@ -110,7 +109,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.getHolder(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           holderId: request.params.holderId,
         },
         reply,
@@ -121,9 +120,10 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.patch(
     '/holders/:holderId',
     {
-      preHandler: [requireSessionUser, requireScope('holders:write')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:write')],
       schema: {
         params: HolderIdParams,
+        querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
           name: z.string().min(1).max(200).optional(),
           documentHash: z.string().min(1).max(128).optional(),
@@ -136,7 +136,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.updateHolder(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           holderId: request.params.holderId,
           name: request.body.name,
           documentHash: request.body.documentHash,
@@ -150,11 +150,12 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.post(
     '/holders/:holderId/kyc',
     {
-      preHandler: [requireSessionUser, requireScope('kyc:write')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:write')],
       schema: {
         params: HolderIdParams,
+        querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
-          holderId: z.string().uuid(),
+          // holderId vem do path params, não do body, para evitar duplicidade.
           legalBasis: z.string().min(1).max(200),
           expiresAt: z.string().datetime().optional(),
         }),
@@ -165,8 +166,8 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.createKycProcess(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
-          holderId: request.body.holderId,
+          tenantId: getTenantId(request),
+          holderId: request.params.holderId,
           legalBasis: request.body.legalBasis,
           expiresAt: request.body.expiresAt,
         },
@@ -178,10 +179,13 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId/kyc',
     {
-      preHandler: [requireSessionUser, requireScope('kyc:read')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:read')],
       schema: {
         params: HolderIdParams,
-        querystring: KycProcessListQuery,
+        querystring: z.object({
+          tenantId: z.string().uuid(),
+          ...KycProcessListQuery.shape,
+        }),
         response: { 200: KycProcessListResponse },
       },
     },
@@ -189,7 +193,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.listKycProcesses(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           holderId: request.params.holderId,
           limit: request.query.limit,
           offset: request.query.offset,
@@ -203,12 +207,13 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId/kyc/:kycProcessId',
     {
-      preHandler: [requireSessionUser, requireScope('kyc:read')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:read')],
       schema: {
         params: z.object({
           holderId: z.string().uuid(),
           kycProcessId: z.string().uuid(),
         }),
+        querystring: z.object({ tenantId: z.string().uuid() }),
         response: { 200: KycProcessResponse, 404: KycProcessNotFoundResponse },
       },
     },
@@ -216,7 +221,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.getKycProcess(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           kycProcessId: request.params.kycProcessId,
         },
         reply,
@@ -227,12 +232,13 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.post(
     '/holders/:holderId/kyc/:kycProcessId/transition',
     {
-      preHandler: [requireSessionUser, requireScope('kyc:write')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:write')],
       schema: {
         params: z.object({
           holderId: z.string().uuid(),
           kycProcessId: z.string().uuid(),
         }),
+        querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
           toState: z.enum(['pending', 'in_progress', 'approved', 'rejected', 'expired']),
           reason: z.string().min(1).max(500).optional(),
@@ -244,7 +250,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.transitionKycProcess(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           kycProcessId: request.params.kycProcessId,
           toState: request.body.toState,
           reason: request.body.reason,
@@ -257,13 +263,16 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId/kyc/:kycProcessId/events',
     {
-      preHandler: [requireSessionUser, requireScope('kyc:read')],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:read')],
       schema: {
         params: z.object({
           holderId: z.string().uuid(),
           kycProcessId: z.string().uuid(),
         }),
-        querystring: KycProcessListQuery,
+        querystring: z.object({
+          tenantId: z.string().uuid(),
+          ...KycProcessListQuery.shape,
+        }),
         response: {
           200: z.object({
             events: z.array(KycEventResponse),
@@ -278,7 +287,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       return controller.listKycEvents(
         getActor(request),
         {
-          tenantId: request.tenant?.tenantId ?? '',
+          tenantId: getTenantId(request),
           kycProcessId: request.params.kycProcessId,
           limit: request.query.limit,
           offset: request.query.offset,

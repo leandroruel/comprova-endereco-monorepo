@@ -28,8 +28,11 @@ export const holder = pgTable(
   },
   (t) => [
     unique('holder_tenant_external_reference_unique').on(t.tenantId, t.externalReference),
+    // Chave única composta para integridade referencial com kyc_process.
+    unique('holder_id_tenant_unique').on(t.holderId, t.tenantId),
     index('holder_tenant_idx').on(t.tenantId),
-    index('holder_document_hash_idx').on(t.documentHash),
+    // Índice de document_hash isolado por tenant (privacidade e isolamento multi-tenant).
+    index('holder_document_hash_idx').on(t.tenantId, t.documentHash),
   ],
 )
 

@@ -75,13 +75,16 @@ const loginAndGetCookie = async (email: string, password: string): Promise<strin
 }
 
 const injectWithSession = async (method: string, url: string, body?: unknown) => {
+  const headers: Record<string, string> = {
+    Cookie: `better-auth.session_token=${ownerSessionCookie}`,
+  }
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
   return app.inject({
     method,
     url,
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: `better-auth.session_token=${ownerSessionCookie}`,
-    },
+    headers,
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
 }
@@ -121,8 +124,7 @@ afterAll(async () => {
 
 describe('Verifier M2M autenticação e revogação', () => {
   it('chave M2M válida autentica via Bearer sem sessão de usuário', async () => {
-    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
-      tenantId: m2mOrgTenantId,
+    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, {
       name: 'Chave M2M Válida',
       scopes: ['validate:read', 'verify:m2m'],
       keyType: 'm2m',
@@ -136,8 +138,7 @@ describe('Verifier M2M autenticação e revogação', () => {
   })
 
   it('chave M2M sem scope suficiente é rejeitada com 403', async () => {
-    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
-      tenantId: m2mOrgTenantId,
+    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, {
       name: 'Chave sem leitura',
       scopes: ['verify:m2m'],
       keyType: 'm2m',
@@ -151,8 +152,7 @@ describe('Verifier M2M autenticação e revogação', () => {
   })
 
   it('não é possível criar chave user com escopo exclusivo de M2M (verify:m2m)', async () => {
-    const res = await injectWithSession('POST', '/v1/m2m/api-keys', {
-      tenantId: m2mOrgTenantId,
+    const res = await injectWithSession('POST', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, {
       name: 'Chave user com verify:m2m',
       scopes: ['verify:m2m'],
       keyType: 'user',
@@ -162,8 +162,7 @@ describe('Verifier M2M autenticação e revogação', () => {
   })
 
   it('escopo desconhecido é rejeitado na criação da chave', async () => {
-    const res = await injectWithSession('POST', '/v1/m2m/api-keys', {
-      tenantId: m2mOrgTenantId,
+    const res = await injectWithSession('POST', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, {
       name: 'Chave com escopo desconhecido',
       scopes: ['validate:read', 'scope:inexistente'],
       keyType: 'm2m',
@@ -173,8 +172,7 @@ describe('Verifier M2M autenticação e revogação', () => {
   })
 
   it('após revogação, a mesma chave é rejeitada imediatamente', async () => {
-    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
-      tenantId: m2mOrgTenantId,
+    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, {
       name: 'Chave para revogar',
       scopes: ['validate:read', 'verify:m2m'],
       keyType: 'm2m',
@@ -187,9 +185,11 @@ describe('Verifier M2M autenticação e revogação', () => {
     const before = await injectBearer('GET', '/v1/meta', secret)
     expect(before.statusCode).toBe(200)
 
-    const revokeRes = await injectWithSession('DELETE', `/v1/m2m/api-keys/${keyId}`, {
-      tenantId: m2mOrgTenantId,
-    })
+    const revokeRes = await injectWithSession(
+      'DELETE',
+      `/v1/m2m/api-keys/${keyId}?tenantId=${m2mOrgTenantId}`,
+      undefined,
+    )
     expect(revokeRes.statusCode).toBe(200)
 
     // Imediatamente após a revogação (sem esperar o TTL do cache).
@@ -198,8 +198,7 @@ describe('Verifier M2M autenticação e revogação', () => {
   })
 
   it('chave revogada não acessa endpoint protegido mesmo sem sessão', async () => {
-    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
-      tenantId: m2mOrgTenantId,
+    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, {
       name: 'Chave revogada',
       scopes: ['validate:read', 'verify:m2m'],
       keyType: 'm2m',
@@ -208,7 +207,7 @@ describe('Verifier M2M autenticação e revogação', () => {
     const keyId = createRes.json().apiKey.apiKeyId
     const secret = createRes.json().secret
 
-    await injectWithSession('DELETE', `/v1/m2m/api-keys/${keyId}`, { tenantId: m2mOrgTenantId })
+    await injectWithSession('DELETE', `/v1/m2m/api-keys/${keyId}?tenantId=${m2mOrgTenantId}`, undefined)
 
     const res = await injectBearer('GET', '/v1/meta', secret)
     expect(res.statusCode).toBe(401)
@@ -253,8 +252,8 @@ describe('Verifier Separação user/M2M', () => {
     return { apiKeyId, secret: plaintext }
   }
 
-  it('chave user via Bearer não acessa operações administrativas de gerenciamento de chaves', async () => {
-    // Cria uma chave user diretamente no banco.
+  it('chave user via Bearer com keys:write acessa operações de gerenciamento de chaves', async () => {
+    // Cria uma chave user diretamente no banco com keys:write.
     const { secret } = await insertApiKeyDirectly(
       m2mOrgTenantId,
       'user-key-direct-1234567890',
@@ -262,13 +261,12 @@ describe('Verifier Separação user/M2M', () => {
       'user',
     )
 
-    // Tentativa de listar chaves via Bearer (rota administrativa exige sessão).
+    // Chave user com keys:write pode acessar rota administrativa via Bearer.
     const res = await injectBearer('GET', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, secret)
-    // Sem sessão de usuário, a rota admin rejeita com 401.
-    expect(res.statusCode).toBe(401)
+    expect(res.statusCode).toBe(200)
   })
 
-  it('chave m2m via Bearer não acessa operações administrativas de gerenciamento de chaves', async () => {
+  it('chave m2m via Bearer sem keys:write é rejeitada em operações de gerenciamento', async () => {
     const { secret } = await insertApiKeyDirectly(
       m2mOrgTenantId,
       'm2m-key-direct-1234567890',
@@ -276,10 +274,9 @@ describe('Verifier Separação user/M2M', () => {
       'm2m',
     )
 
-    // Tentativa de listar chaves via Bearer (rota administrativa exige sessão).
+    // Chave m2m sem keys:write é rejeitada em rota administrativa.
     const res = await injectBearer('GET', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, secret)
-    // Sem sessão de usuário, a rota admin rejeita com 401.
-    expect(res.statusCode).toBe(401)
+    expect(res.statusCode).toBe(403)
   })
 
   it('chave user com scope verify:m2m persistido é rejeitada na autenticação', async () => {
@@ -345,8 +342,7 @@ describe('Verifier Separação user/M2M', () => {
   })
 
   it('sessão de usuário acessa operações administrativas de gerenciamento de chaves', async () => {
-    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys', {
-      tenantId: m2mOrgTenantId,
+    const createRes = await injectWithSession('POST', '/v1/m2m/api-keys?tenantId=' + m2mOrgTenantId, {
       name: 'Chave via sessão',
       scopes: ['validate:read'],
       keyType: 'm2m',

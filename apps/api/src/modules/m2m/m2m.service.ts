@@ -1,8 +1,10 @@
-import { and, eq, withTenant } from '@comprova/db'
+import { and, eq, isNull, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@comprova/db'
-import { createHash } from 'node:crypto'
+import { cacheInvalidate } from '../../plugins/auth.js'
+import { makeApiKeyHasher, newApiKey, keyPrefixOf } from '@comprova/db'
+import { validateScopesForKeyType } from '../../plugins/scope.js'
 
 export class AuthorizationError extends Error {
   constructor(message: string) {
@@ -13,12 +15,7 @@ export class AuthorizationError extends Error {
 
 export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: string }) => {
   const { db, apiKeyPepper } = deps
-
-  const hashKey = (secret: string): string => {
-    return createHash('sha256')
-      .update(secret + apiKeyPepper)
-      .digest('hex')
-  }
+  const hasher = makeApiKeyHasher(apiKeyPepper)
 
   const createApiKey = async (
     tenantId: string,
@@ -29,10 +26,13 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
       readonly expiresAt?: string
     },
   ): Promise<{ apiKeyId: string; keyPrefix: string; secret: string }> => {
+    // Validar escopos conhecidos e permitidos para o tipo de chave.
+    validateScopesForKeyType(create.keyType as 'user' | 'm2m', create.scopes)
+
     const apiKeyId = randomUUID()
-    const secret = randomUUID() + randomUUID()
-    const keyPrefix = secret.slice(0, 8)
-    const keyHash = hashKey(secret)
+    const secret = newApiKey()
+    const keyPrefix = keyPrefixOf(secret)
+    const keyHash = hasher.hash(secret)
 
     const [inserted] = await withTenant(db, tenantId, async (tx) => {
       return tx
@@ -41,7 +41,7 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
           apiKeyId,
           tenantId,
           keyPrefix,
-          keyHash: Buffer.from(keyHash, 'hex'),
+          keyHash,
           scopes: create.scopes,
           keyType: create.keyType,
           expiresAt: create.expiresAt ? new Date(create.expiresAt) : null,
@@ -132,9 +132,15 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
       return tx
         .update(t.apiKey)
         .set({ revokedAt: new Date() })
-        .where(and(eq(t.apiKey.apiKeyId, apiKeyId), eq(t.apiKey.tenantId, tenantId)))
+        .where(
+          and(eq(t.apiKey.apiKeyId, apiKeyId), eq(t.apiKey.tenantId, tenantId), isNull(t.apiKey.revokedAt)),
+        )
         .returning()
     })
+
+    if (updated) {
+      cacheInvalidate(apiKeyId)
+    }
 
     return !!updated
   }

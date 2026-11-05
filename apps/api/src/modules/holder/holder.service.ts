@@ -1,4 +1,4 @@
-import { and, eq, withTenant } from '@comprova/db'
+import { and, count, eq, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import {
@@ -9,14 +9,7 @@ import {
   type KycEventType,
   type DocumentType,
 } from '@comprova/contracts'
-import type { Db } from '@comprova/db'
-
-export class AuthorizationError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'AuthorizationError'
-  }
-}
+import type { Db, DbTx } from '@comprova/db'
 
 const KYC_STATE_TRANSITIONS: Record<KycProcessState, readonly KycProcessState[]> = {
   pending: ['in_progress'],
@@ -53,7 +46,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     })
 
     if (existing.length > 0) {
-      throw new AuthorizationError('holder already exists for this external reference')
+      throw new Error('holder already exists for this external reference')
     }
 
     const holderId = randomUUID()
@@ -109,11 +102,45 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     }
   }
 
+  const txInsertKycEvent = async (
+    tx: DbTx,
+    tenantId: string,
+    event: {
+      readonly kycEventId: string
+      readonly kycProcessId: string
+      readonly eventType: KycEventType
+      readonly fromState: KycProcessState | null
+      readonly toState: KycProcessState
+      readonly actor: string
+      readonly details: string
+    },
+  ): Promise<void> => {
+    await tx.insert(t.kycEvent).values({
+      kycEventId: event.kycEventId,
+      kycProcessId: event.kycProcessId,
+      tenantId,
+      eventType: event.eventType,
+      fromState: event.fromState,
+      toState: event.toState,
+      actor: event.actor,
+      details: event.details,
+    })
+  }
+
   const listHolders = async (
     actor: string,
     tenantId: string,
     opts: { readonly limit: number; readonly offset: number },
   ): Promise<{ holders: HolderDto[]; total: number; limit: number; offset: number }> => {
+    const [countRow] = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .select({ count: count(t.holder.holderId).as('count') })
+        .from(t.holder)
+        .where(eq(t.holder.tenantId, tenantId))
+    })
+
+    const total = Number((countRow?.count as unknown as number) ?? 0)
+
     const rows = await withTenant(db, tenantId, async (tx) => {
       return tx
         .select()
@@ -135,7 +162,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
       })),
-      total: rows.length,
+      total,
       limit: opts.limit,
       offset: opts.offset,
     }
@@ -155,7 +182,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
         .limit(1)
     })
 
-    if (!existing.length) throw new AuthorizationError('holder not found')
+    if (!existing.length) throw new Error('holder not found')
 
     const [updated] = await withTenant(db, tenantId, async (tx) => {
       return tx
@@ -186,52 +213,56 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
 
   const createKycProcess = async (
     actor: string,
+    tenantId: string,
     create: {
       readonly holderId: string
       readonly legalBasis: string
       readonly expiresAt?: string
     },
   ): Promise<KycProcessDto> => {
-    const existingHolder = await withTenant(db, create.holderId, async (tx) => {
+    // Validar que o holder pertence ao tenant informado (mesma transação).
+    const existingHolder = await withTenant(db, tenantId, async (tx) => {
       return tx
-        .select({ holderId: t.holder.holderId })
+        .select({ holderId: t.holder.holderId, tenantId: t.holder.tenantId })
         .from(t.holder)
-        .where(eq(t.holder.holderId, create.holderId))
+        .where(and(eq(t.holder.holderId, create.holderId), eq(t.holder.tenantId, tenantId)))
         .limit(1)
     })
 
-    if (existingHolder.length === 0) throw new AuthorizationError('holder not found')
+    if (existingHolder.length === 0) throw new Error('holder not found')
 
     const kycProcessId = randomUUID()
 
-    const [inserted] = await withTenant(db, create.holderId, async (tx) => {
-      return tx
+    // Processo e evento inicial na mesma transação (atomicidade).
+    const [inserted] = await withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
         .insert(t.kycProcess)
         .values({
           kycProcessId,
           holderId: create.holderId,
-          tenantId: create.holderId,
+          tenantId,
           state: 'pending' as KycProcessState,
           legalBasis: create.legalBasis,
           expiresAt: create.expiresAt ? new Date(create.expiresAt) : null,
         })
         .returning()
-    })
 
-    if (!inserted) throw new Error('failed to create KYC process')
+      if (!row) throw new Error('failed to create KYC process')
 
-    await withTenant(db, create.holderId, async (tx) => {
-      await tx.insert(t.kycEvent).values({
+      await txInsertKycEvent(tx, tenantId, {
         kycEventId: randomUUID(),
         kycProcessId,
-        tenantId: create.holderId,
         eventType: 'created' as KycEventType,
         fromState: null,
         toState: 'pending' as KycProcessState,
         actor,
         details: JSON.stringify({ legalBasis: create.legalBasis }),
       })
+
+      return [row]
     })
+
+    if (!inserted) throw new Error('failed to create KYC process')
 
     return {
       kycProcessId: inserted.kycProcessId,
@@ -287,6 +318,15 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
 
     if (opts.state) conditions.push(eq(t.kycProcess.state, opts.state))
 
+    const [countRow] = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .select({ count: count(t.kycProcess.kycProcessId).as('count') })
+        .from(t.kycProcess)
+        .where(and(...conditions))
+    })
+
+    const total = Number((countRow?.count as unknown as number) ?? 0)
+
     const rows = await withTenant(db, tenantId, async (tx) => {
       return tx
         .select()
@@ -308,7 +348,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
         updatedAt: row.updatedAt.toISOString(),
         expiresAt: row.expiresAt?.toISOString() ?? null,
       })),
-      total: rows.length,
+      total,
       limit: opts.limit,
       offset: opts.offset,
     }
@@ -320,38 +360,47 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     kycProcessId: string,
     transition: { readonly toState: KycProcessState; readonly reason?: string },
   ): Promise<KycProcessDto> => {
+    // Obter estado atual com verificação de tenant.
     const current = await getKycProcess(actor, tenantId, kycProcessId)
-    if (!current) throw new AuthorizationError('KYC process not found')
+    if (!current) throw new Error('KYC process not found')
 
     if (!isValidTransition(current.state as KycProcessState | null, transition.toState)) {
-      throw new AuthorizationError(
-        `invalid state transition from '${current.state}' to '${transition.toState}'`,
-      )
+      throw new Error(`invalid state transition from '${current.state}' to '${transition.toState}'`)
     }
 
     const now = new Date()
+
+    // Transição e evento de auditoria na mesma transação, com proteção
+    // contra concorrência: o UPDATE só ocorre se o estado ainda for o esperado.
     const [updated] = await withTenant(db, tenantId, async (tx) => {
-      return tx
+      const [row] = await tx
         .update(t.kycProcess)
         .set({ state: transition.toState as KycProcessState, updatedAt: now })
-        .where(and(eq(t.kycProcess.kycProcessId, kycProcessId), eq(t.kycProcess.tenantId, tenantId)))
+        .where(
+          and(
+            eq(t.kycProcess.kycProcessId, kycProcessId),
+            eq(t.kycProcess.tenantId, tenantId),
+            eq(t.kycProcess.state, current.state as KycProcessState),
+          ),
+        )
         .returning()
-    })
 
-    if (!updated) throw new Error('failed to update KYC process')
+      if (!row) throw new Error('concurrent state transition detected')
 
-    await withTenant(db, tenantId, async (tx) => {
-      await tx.insert(t.kycEvent).values({
+      await txInsertKycEvent(tx, tenantId, {
         kycEventId: randomUUID(),
         kycProcessId,
-        tenantId,
         eventType: 'state_transitioned' as KycEventType,
-        fromState: current.state as KycProcessState,
+        fromState: current.state as KycProcessState | null,
         toState: transition.toState,
         actor,
         details: JSON.stringify({ reason: transition.reason }),
       })
+
+      return [row]
     })
+
+    if (!updated) throw new Error('failed to update KYC process')
 
     return {
       kycProcessId: updated.kycProcessId,
@@ -376,6 +425,19 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     limit: number
     offset: number
   }> => {
+    // Validar que o processo existe e pertence ao tenant antes de listar eventos.
+    const process = await getKycProcess(actor, tenantId, kycProcessId)
+    if (!process) throw new Error('KYC process not found')
+
+    const [countRow] = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .select({ count: count(t.kycEvent.kycEventId).as('count') })
+        .from(t.kycEvent)
+        .where(and(eq(t.kycEvent.kycProcessId, kycProcessId), eq(t.kycEvent.tenantId, tenantId)))
+    })
+
+    const total = Number((countRow?.count as unknown as number) ?? 0)
+
     const rows = await withTenant(db, tenantId, async (tx) => {
       return tx
         .select()
@@ -395,10 +457,10 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
         fromState: row.fromState as unknown as KycProcessState | null,
         toState: row.toState as unknown as KycProcessState,
         actor: row.actor,
-        details: row.details as unknown as Record<string, unknown>,
+        details: JSON.parse(row.details as string),
         createdAt: row.createdAt.toISOString(),
       })),
-      total: rows.length,
+      total,
       limit: opts.limit,
       offset: opts.offset,
     }

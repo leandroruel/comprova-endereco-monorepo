@@ -42,7 +42,6 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
             apiKeyId: result.apiKeyId,
             tenantId: request.tenantId,
             keyPrefix: result.keyPrefix,
-            key: result.secret,
             scopes: request.scopes,
             keyType: request.keyType,
             revokedAt: null,
@@ -58,6 +57,12 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
             .type(PROBLEM_CONTENT_TYPE)
             .send(problem(403, 'FORBIDDEN', error.message))
         }
+        if (error instanceof Error && error.message.includes('scope')) {
+          return reply
+            .code(400)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(400, 'INVALID_SCOPE', error.message))
+        }
         return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao criar credencial')
       }
     },
@@ -67,6 +72,8 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       userId: string,
       reply: FastifyReply,
     ): Promise<{ apiKeys: ApiKeyDto[] } | FastifyReply> => {
+      // O tenantId é obtido do contexto autenticado (definido por
+      // requireSessionOrM2MVerify), nunca do parâmetro do cliente.
       const apiKeys = await service.listApiKeys(tenantId)
       return reply.code(200).send({ apiKeys })
     },

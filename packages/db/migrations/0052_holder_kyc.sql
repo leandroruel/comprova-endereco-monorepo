@@ -17,23 +17,30 @@ CREATE TABLE holder (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT holder_document_type_check CHECK (document_type IN ('CPF', 'CNPJ')),
-  CONSTRAINT holder_tenant_external_reference_unique UNIQUE (tenant_id, external_reference)
+  CONSTRAINT holder_tenant_external_reference_unique UNIQUE (tenant_id, external_reference),
+  -- Chave única composta para integridade referencial com kyc_process.
+  CONSTRAINT holder_id_tenant_unique UNIQUE (holder_id, tenant_id)
 );
 CREATE INDEX idx_holder_tenant ON holder (tenant_id);
-CREATE INDEX idx_holder_document_hash ON holder (document_hash);
+-- Índice de document_hash isolado por tenant (privacidade e isolamento multi-tenant).
+CREATE INDEX idx_holder_document_hash ON holder (tenant_id, document_hash);
 GRANT SELECT, INSERT, UPDATE, DELETE ON holder TO app_user;
 
 -- Processos de KYC associados a um titular.
 -- O estado do KYC é independente das obrigações documentais.
 CREATE TABLE kyc_process (
   kyc_process_id uuid PRIMARY KEY,
-  holder_id uuid NOT NULL REFERENCES holder (holder_id),
-  tenant_id uuid NOT NULL REFERENCES tenant (tenant_id),
+  holder_id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
   state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'in_progress', 'approved', 'rejected', 'expired')),
   legal_basis text NOT NULL,            -- base legal do processamento (ex: 'CONSENT', 'CONTRACT_EXECUTION')
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz                -- expiração opcional do processo
+  expires_at timestamptz,                -- expiração opcional do processo
+  -- Integridade referencial composta: holder pertence ao mesmo tenant.
+  CONSTRAINT kyc_process_holder_tenant_fk
+    FOREIGN KEY (holder_id, tenant_id)
+    REFERENCES holder (holder_id, tenant_id)
 );
 CREATE INDEX idx_kyc_process_holder ON kyc_process (holder_id);
 CREATE INDEX idx_kyc_process_tenant ON kyc_process (tenant_id);
@@ -43,6 +50,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON kyc_process TO app_user;
 -- Eventos de auditoria para transições de estado e operações de KYC.
 -- Cada transição de estado gera um evento imutável, permitindo rastrear quem
 -- alterou o estado, quando e por quê.
+-- Eventos são imutáveis: apenas SELECT e INSERT são permitidos (sem UPDATE/DELETE).
 CREATE TABLE kyc_event (
   kyc_event_id uuid PRIMARY KEY,
   kyc_process_id uuid NOT NULL REFERENCES kyc_process (kyc_process_id),
@@ -57,4 +65,4 @@ CREATE TABLE kyc_event (
 CREATE INDEX idx_kyc_event_process ON kyc_event (kyc_process_id);
 CREATE INDEX idx_kyc_event_tenant ON kyc_event (tenant_id);
 CREATE INDEX idx_kyc_event_created_at ON kyc_event (created_at);
-GRANT SELECT, INSERT, UPDATE, DELETE ON kyc_event TO app_user;
+GRANT SELECT, INSERT ON kyc_event TO app_user;
