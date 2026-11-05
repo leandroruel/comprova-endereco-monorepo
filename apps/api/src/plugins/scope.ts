@@ -46,15 +46,7 @@ export const ALL_API_SCOPES: readonly string[] = Object.values(API_SCOPES)
  *   exige sessão de usuário autenticada).
  */
 export const SCOPES_BY_KEY_TYPE: Record<'user' | 'm2m', readonly string[]> = {
-  user: [
-    API_SCOPES.validateRead,
-    API_SCOPES.validateWrite,
-    API_SCOPES.keysWrite,
-    API_SCOPES.holderRead,
-    API_SCOPES.holderWrite,
-    API_SCOPES.kycRead,
-    API_SCOPES.kycWrite,
-  ],
+  user: [API_SCOPES.validateRead, API_SCOPES.validateWrite, API_SCOPES.keysWrite],
   m2m: [
     API_SCOPES.validateRead,
     API_SCOPES.validateWrite,

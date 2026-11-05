@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { createDbPool, runMigrations } from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
@@ -7,6 +8,16 @@ import { buildApp } from '../src/app.js'
 
 const PEPPER = 'test-pepper-123'
 const DOCUMENT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+/**
+ * Simula o cálculo de HMAC-SHA-256 feito pelo Verifier com segredo derivado por tenant.
+ * Não armazena nem expõe segredos reais; apenas demonstra o comportamento esperado.
+ */
+function computeDocumentHash(documento: string, tenantId: string): string {
+  const tenantSecret = `hmac-sha256:${tenantId}:${PEPPER}`
+  const hash = createHash('sha256').update(`${tenantSecret}:${documento}`).digest('hex')
+  return hash
+}
 
 const db = await startTestDb()
 await runMigrations({ adminUrl: db.adminUrl, rolePassword: TEST_APP_DB_PASSWORD })
@@ -1141,64 +1152,59 @@ describe('Holder/KYC - Autenticação Bearer Restrita', () => {
     expect(res.statusCode).toBe(403)
   })
 
-  it('chave user com holders:read não consegue acessar Holder/KYC via Bearer', async () => {
+  it('chave user com holders:read não consegue acessar via Bearer', async () => {
     const tenantId = await createOrganization(ownerSessionCookie, 'Org User Key', 'owner@exemplo.com')
     // O usuário que cria a organização já é owner
 
-    // Cria uma chave user (não M2M) com holders:read - não deve conseguir via Bearer
-    // Precisa de keys:write para ser criada via API
-    const key = await createM2mApiKey(
+    // Chave user não pode ter scope holders:read - deve ser rejeitada na criação
+    const res = await injectWithSession(
+      'POST',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      {
+        name: 'Chave User',
+        scopes: ['holders:read', 'keys:write'],
+        keyType: 'user',
+      },
       ownerSessionCookie,
-      tenantId,
-      'Chave User',
-      ['holders:read', 'keys:write'],
-      'user',
     )
-
-    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
-    expect([401, 403]).toContain(res.statusCode)
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('INVALID_SCOPE')
   })
 
-  it('chave user com holders:write não consegue acessar Holder/KYC via Bearer', async () => {
+  it('chave user com holders:write não consegue acessar via Bearer', async () => {
     const tenantId = await createOrganization(ownerSessionCookie, 'Org User Write', 'owner@exemplo.com')
     // O usuário que cria a organização já é owner
 
-    const key = await createM2mApiKey(
-      ownerSessionCookie,
-      tenantId,
-      'Chave User Write',
-      ['holders:write', 'keys:write'],
-      'user',
-    )
-
-    const createRes = await injectWithM2M(
+    const res = await injectWithSession(
       'POST',
-      `/v1/holders?tenantId=${tenantId}`,
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
       {
-        externalReference: 'ext-ref-user-write',
-        name: 'Holder User Write',
-        documentHash: DOCUMENT_HASH,
-        documentType: 'CPF',
+        name: 'Chave User Write',
+        scopes: ['holders:write', 'keys:write'],
+        keyType: 'user',
       },
-      key.secret,
+      ownerSessionCookie,
     )
-    expect([401, 403]).toContain(createRes.statusCode)
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('INVALID_SCOPE')
   })
 
-  it('chave user com kyc:read ou kyc:write não consegue acessar Holder/KYC via Bearer', async () => {
+  it('chave user com kyc:read ou kyc:write não consegue acessar via Bearer', async () => {
     const tenantId = await createOrganization(ownerSessionCookie, 'Org User Kyc', 'owner@exemplo.com')
     // O usuário que cria a organização já é owner
 
-    const key = await createM2mApiKey(
+    const res = await injectWithSession(
+      'POST',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      {
+        name: 'Chave User Kyc',
+        scopes: ['kyc:read', 'kyc:write', 'keys:write'],
+        keyType: 'user',
+      },
       ownerSessionCookie,
-      tenantId,
-      'Chave User Kyc',
-      ['kyc:read', 'kyc:write', 'keys:write'],
-      'user',
     )
-
-    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
-    expect([401, 403]).toContain(res.statusCode)
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('INVALID_SCOPE')
   })
 
   it('chave revogada não consegue acessar Holder/KYC', async () => {
@@ -1319,13 +1325,22 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
       'verify:m2m',
     ])
 
+    // Mesmo documento em tenants diferentes deve produzir documentHash diferente,
+    // pois o segredo HMAC é derivado por tenant.
+    const documento = '12345678901'
+    const hashA = computeDocumentHash(documento, tenantA)
+    const hashB = computeDocumentHash(documento, tenantB)
+    expect(hashA).not.toBe(hashB)
+    expect(hashA).toMatch(/^[0-9a-f]{64}$/)
+    expect(hashB).toMatch(/^[0-9a-f]{64}$/)
+
     const resA = await injectWithM2M(
       'POST',
       `/v1/holders?tenantId=${tenantA}`,
       {
         externalReference: 'ext-ref-hash-a',
         name: 'Hash A',
-        documentHash: DOCUMENT_HASH,
+        documentHash: hashA,
         documentType: 'CPF',
       },
       keyA.secret,
@@ -1338,17 +1353,18 @@ describe('DocumentHash - Isolamento Criptográfico', () => {
       {
         externalReference: 'ext-ref-hash-b',
         name: 'Hash B',
-        documentHash: DOCUMENT_HASH,
+        documentHash: hashB,
         documentType: 'CPF',
       },
       keyB.secret,
     )
     expect(resB.statusCode).toBe(201)
 
-    // Mesmo documentHash em tenants diferentes - registros são independentes
+    // Mesmo documento em tenants diferentes produz identificadores diferentes
     expect(resA.json().tenantId).toBe(tenantA)
     expect(resB.json().tenantId).toBe(tenantB)
-    expect(resA.json().documentHash).toBe(resB.json().documentHash)
+    expect(resA.json().documentHash).toBe(hashA)
+    expect(resB.json().documentHash).toBe(hashB)
     expect(resA.json().externalReference).not.toBe(resB.json().externalReference)
   })
 

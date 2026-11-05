@@ -1,5 +1,4 @@
-import { pgTable, text, timestamp, uuid, foreignKey, index } from 'drizzle-orm/pg-core'
-import { tenant } from './tenancy.js'
+import { pgTable, text, timestamp, uuid, foreignKey, index, unique } from 'drizzle-orm/pg-core'
 import { holder } from './holder.js'
 
 /**
@@ -28,6 +27,8 @@ export const kycProcess = pgTable(
       columns: [t.holderId, t.tenantId],
       foreignColumns: [holder.holderId, holder.tenantId],
     }),
+    // Chave única composta para integridade referencial com kyc_event.
+    unique('kyc_process_id_tenant_unique').on(t.kycProcessId, t.tenantId),
     index('kyc_process_holder_idx').on(t.holderId),
     index('kyc_process_tenant_idx').on(t.tenantId),
     index('kyc_process_state_idx').on(t.state),
@@ -47,12 +48,8 @@ export const kycEvent = pgTable(
   'kyc_event',
   {
     kycEventId: uuid('kyc_event_id').primaryKey(),
-    kycProcessId: uuid('kyc_process_id')
-      .notNull()
-      .references(() => kycProcess.kycProcessId),
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenant.tenantId),
+    kycProcessId: uuid('kyc_process_id').notNull(),
+    tenantId: uuid('tenant_id').notNull(),
     eventType: text('event_type').notNull(),
     fromState: text('from_state'),
     toState: text('to_state').notNull(),
@@ -61,6 +58,11 @@ export const kycEvent = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    // Integridade referencial composta: evento pertence ao mesmo tenant do processo.
+    foreignKey({
+      columns: [t.kycProcessId, t.tenantId],
+      foreignColumns: [kycProcess.kycProcessId, kycProcess.tenantId],
+    }),
     index('kyc_event_process_idx').on(t.kycProcessId),
     index('kyc_event_tenant_idx').on(t.tenantId),
     index('kyc_event_created_at_idx').on(t.createdAt),

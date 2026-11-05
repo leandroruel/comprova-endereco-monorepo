@@ -4,25 +4,37 @@ export const DocumentTypeSchema = z.enum(['CPF', 'CNPJ'])
 export type DocumentType = z.infer<typeof DocumentTypeSchema>
 
 /**
- * documentHash armazena um HMAC-SHA-256 do CPF/CNPJ com um segredo protegido
- * compartilhado entre o Verifier e o serviço Comprova.
+ * documentHash armazena um HMAC-SHA-256 do documento (CPF/CNPJ) com um
+ * segredo protegido derivado por tenant, compartilhado entre o Verifier e
+ * o serviço Comprova.
  *
  * SHA-256 simples é insuficiente para documentos com espaço de valores
  * previsível (CPF/CNPJ), pois permite ataque por enumeração. O HMAC-SHA-256
  * é calculado com um segredo derivado por tenant, de modo que o mesmo
- * CPF/CNPJ em tenants diferentes produza identificadores diferentes,
+ * documento em tenants diferentes produza identificadores diferentes,
  * impedindo correlação global de titulares entre organizações.
  *
  * Contrato de integração (Verifier → Comprova):
- * - O Verifier calcula o HMAC-SHA-256 antes de enviar o documentHash à API.
- * - O segredo HMAC NUNCA é armazenado no banco de dados do Comprova.
- * - O segredo HMAC é derivado por tenant: `tenantSpecificSecret =
- *   HMAC(globalSecret, tenantId)`, onde `globalSecret` é provido via
- *   variável de ambiente do Verifier (ex.: HOLDER_DOCUMENT_HMAC_SECRET).
- * - O documentHash enviado à API já é o HMAC final com o segredo do tenant.
- * - O Comprova apenas valida o formato (64 caracteres hexadecimais) e armazena
- *   o valor recebido. Não recalcula, não compara com segredos próprios e não
- *   expõe segredos em logs, respostas ou auditoria.
+ *
+ * 1. O Verifier é o único responsável por calcular o documentHash.
+ *    O Comprova NÃO recebe o documento original (CPF/CNPJ em texto puro)
+ *    e NÃO calcula o HMAC.
+ *
+ * 2. O Verifier normaliza o documento (ex.: remove máscara do CPF/CNPJ,
+ *    converte para maiúsculas, remove espaços) antes de calcular o HMAC.
+ *
+ * 3. O segredo HMAC é derivado por tenant:
+ *    tenantSpecificSecret = HMAC-SHA-256(globalSecret, tenantId)
+ *    onde globalSecret é provido via variável de ambiente do Verifier
+ *    (ex.: HOLDER_DOCUMENT_HMAC_SECRET).
+ *
+ * 4. O documentHash enviado à API já é o HMAC final:
+ *    documentHash = HMAC-SHA-256(tenantSpecificSecret, documentoNormalizado)
+ *    representado como string hexadecimal de 64 caracteres (lowercase).
+ *
+ * 5. O Comprova apenas valida o formato (z.string().regex(/^[0-9a-f]{64}$/))
+ *    e armazena o valor recebido. Não recalcula, não compara com segredos
+ *    próprios, não expõe segredos em logs, respostas ou auditoria.
  *
  * Rotação de segredos:
  * - Ao rotacionar o segredo global, todos os documentHash existentes
@@ -32,7 +44,9 @@ export type DocumentType = z.infer<typeof DocumentTypeSchema>
  *   segredo e atualização via PATCH /holders/:holderId.
  *
  * Não armazene CPF/CNPJ em texto puro. Não utilize um segredo global
- * compartilhado como chave direta para todos os tenants.
+ * compartilhado como chave direta para todos os tenants. O mesmo documento
+ * em tenants diferentes deve produzir documentHash diferentes, pois o
+ * segredo HMAC é específico de cada tenant.
  */
 export const CreateHolderRequestSchema = z.object({
   externalReference: z.string().min(1).max(200),
