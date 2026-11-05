@@ -4,6 +4,7 @@ import { and, eq, isNull } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { keyPrefixOf, type ApiKeyHasher } from '@comprova/db'
+import { ALL_API_SCOPES, validateScopesForKeyType } from './scope.js'
 
 export interface TenantContext {
   readonly tenantId: string
@@ -11,6 +12,8 @@ export interface TenantContext {
   readonly scopes: readonly string[]
   readonly rateLimitRps: number
   readonly burst: number
+  readonly expiresAt: Date | null
+  readonly keyType: 'user' | 'm2m'
 }
 
 declare module 'fastify' {
@@ -27,6 +30,8 @@ interface ApiKeyRow {
   readonly status: string
   readonly rateLimitRps: number
   readonly burst: number
+  readonly expiresAt: Date | null
+  readonly keyType: string
 }
 
 const unauthorized = (reply: FastifyReply): FastifyReply =>
@@ -36,14 +41,18 @@ const CACHE_TTL_MS = 60_000
 const CACHE_MAX = 5_000
 const verifiedPrefixes = new Map<string, { readonly expiresAt: number; readonly ctx: TenantContext }>()
 
-const cacheGet = (prefixHash: string, now: number): TenantContext | null => {
+const cacheGet = (prefixHash: string, now: number): { readonly ctx: TenantContext } | null => {
   const hit = verifiedPrefixes.get(prefixHash)
   if (hit === undefined) return null
   if (hit.expiresAt < now) {
     verifiedPrefixes.delete(prefixHash)
     return null
   }
-  return hit.ctx
+  if (hit.ctx.expiresAt !== null && new Date(hit.ctx.expiresAt) < new Date()) {
+    verifiedPrefixes.delete(prefixHash)
+    return null
+  }
+  return { ctx: hit.ctx }
 }
 
 const cachePut = (prefixHash: string, ctx: TenantContext, now: number): void => {
@@ -54,19 +63,67 @@ const cachePut = (prefixHash: string, ctx: TenantContext, now: number): void => 
   verifiedPrefixes.set(prefixHash, { expiresAt: now + CACHE_TTL_MS, ctx })
 }
 
+/**
+ * Invalida entradas de cache local para uma apiKeyId. Percorre o cache em
+ * busca da entrada cujo contexto corresponda ao apiKeyId informado.
+ * Usado na revogação para garantir que a chave revogada não seja mais
+ * aceita pelo cache local desta instância.
+ */
+export const cacheInvalidate = (apiKeyId: string): void => {
+  for (const [prefixHash, entry] of verifiedPrefixes.entries()) {
+    if (entry.ctx.apiKeyId === apiKeyId) {
+      verifiedPrefixes.delete(prefixHash)
+    }
+  }
+}
+
+/**
+ * Verifica se a chave foi revogada consultando diretamente o banco de dados.
+ * PostgreSQL é sempre a fonte de verdade sobre o estado de revogação.
+ * Nunca confia apenas em cache local ou em marcadores Redis.
+ */
+const isRevokedInDb = async (db: Db, apiKeyId: string): Promise<boolean> => {
+  const rows = await db
+    .select({ revokedAt: t.apiKey.revokedAt })
+    .from(t.apiKey)
+    .where(eq(t.apiKey.apiKeyId, apiKeyId))
+    .limit(1)
+  return rows.length > 0 && rows[0]!.revokedAt !== null
+}
+
 export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
+    // Se há uma sessão de usuário válida (definida por makeSessionMiddleware),
+    // permite o acesso por sessão (ex.: dashboard do Verifier). Isso não reusa
+    // o token de sessão como credencial de API: é um contexto de autenticação
+    // distinto, verificado pelo cookie de sessão do Better Auth.
+    if (request.sessionUser !== undefined) {
+      return
+    }
+
     const header = request.headers.authorization
     const bearer = header?.startsWith('Bearer ') ? header.slice(7).trim() : undefined
     if (bearer === undefined || bearer.length === 0) {
-      return unauthorized(reply)
+      // Sem bearer token e sem sessão: permite o request prosseguir.
+      // Cada rota específica é responsável por seu próprio guard de
+      // autenticação (requireSessionUser para sessão, requireScope para API key).
+      return
     }
     const prefix = keyPrefixOf(bearer)
     const prefixHash = hasher.hash(prefix).toString('hex')
     const now = Date.now()
     const cached = cacheGet(prefixHash, now)
     if (cached !== null) {
-      request.tenant = cached
+      // Sempre verifica o estado de revogação no PostgreSQL (fonte de
+      // verdade). Nunca confia apenas no cache local, mesmo que ele ainda
+      // não tenha expirado. Isso garante que uma chave revogada nunca seja
+      // aceita, independentemente do estado do Redis.
+      const revoked = await isRevokedInDb(db, cached.ctx.apiKeyId)
+      if (revoked) {
+        cacheInvalidate(cached.ctx.apiKeyId)
+        return unauthorized(reply)
+      }
+      request.tenant = cached.ctx
       return
     }
 
@@ -79,6 +136,8 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
         status: t.tenant.status,
         rateLimitRps: t.tenant.rateLimitRps,
         burst: t.tenant.burst,
+        expiresAt: t.apiKey.expiresAt,
+        keyType: t.apiKey.keyType,
       })
       .from(t.apiKey)
       .innerJoin(t.tenant, eq(t.apiKey.tenantId, t.tenant.tenantId))
@@ -89,12 +148,38 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
       return unauthorized(reply)
     }
 
+    // Rejeita chaves com escopos desconhecidos (defesa em profundidade: nunca
+    // confia em valores persistidos direto no banco).
+    for (const scope of match.scopes) {
+      if (!ALL_API_SCOPES.includes(scope)) {
+        return unauthorized(reply)
+      }
+    }
+
+    // Valida que os scopes persistidos são compatíveis com o tipo da chave.
+    const keyType = match.keyType as 'user' | 'm2m' | string
+    if (keyType !== 'user' && keyType !== 'm2m') {
+      return unauthorized(reply)
+    }
+    try {
+      validateScopesForKeyType(keyType, match.scopes)
+    } catch {
+      return unauthorized(reply)
+    }
+
+    // Rejeita chaves expiradas.
+    if (match.expiresAt !== null && new Date(match.expiresAt) < new Date()) {
+      return unauthorized(reply)
+    }
+
     const ctx: TenantContext = {
       tenantId: match.tenantId,
       apiKeyId: match.apiKeyId,
       scopes: match.scopes,
       rateLimitRps: match.rateLimitRps,
       burst: match.burst,
+      expiresAt: match.expiresAt,
+      keyType: keyType,
     }
     cachePut(prefixHash, ctx, now)
     request.tenant = ctx

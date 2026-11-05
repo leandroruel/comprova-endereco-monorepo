@@ -56,9 +56,11 @@ await createIssuerSigningKey(adminPool.db, writeTenant, writeSigning)
 
 // Chave administrativa: só `keys:write`, sem leitura nem escrita de validação.
 // Prova que o novo scope autoriza a revogação da própria signing key e nada mais.
+// Chave do tipo 'user' porque `keys:write` é administrativo e não pode estar em chaves M2M.
 const keysTenant = await createTenant(adminPool.db, { name: 'authz-keys' })
 const keysKey = await createApiKey(adminPool.db, keysTenant, PEPPER, {
   scopes: [API_SCOPES.keysWrite],
+  keyType: 'user',
 })
 const keysSigning = createTestCredentialSigningKey('authz-keys-key')
 await createIssuerSigningKey(adminPool.db, keysTenant, keysSigning)
@@ -104,6 +106,9 @@ const app = await buildApp({
     HOST: '127.0.0.1',
     LOG_LEVEL: 'silent',
     POLICY_VERSION: '2026.11.1',
+    TERMS_VERSION: '1.0.0',
+    TERMS_APPROVED: 'true',
+    TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
     TEMPORAL_ENABLED: false,
     VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',
@@ -459,7 +464,7 @@ describe('scope enforcement', () => {
       .select({ scopes: t.apiKey.scopes })
       .from(t.apiKey)
       .where(eq(t.apiKey.apiKeyId, fullKey.apiKeyId))
-    expect(apiKey?.scopes).toEqual([API_SCOPES.validateRead, API_SCOPES.validateWrite])
+    expect(apiKey?.scopes).toEqual([API_SCOPES.validateRead, API_SCOPES.validateWrite, API_SCOPES.verifyM2m])
     expect(apiKey?.scopes).not.toContain(API_SCOPES.keysWrite)
 
     const res = await app.inject({

@@ -58,6 +58,9 @@ const config: AppConfig = {
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
   POLICY_VERSION,
+  TERMS_VERSION: '1.0.0',
+  TERMS_APPROVED: 'true',
+  TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
   TEMPORAL_ENABLED: false,
   VLM_ENABLED: false,
   TEMPORAL_ADDRESS: 'localhost:7233',
@@ -110,7 +113,7 @@ describe('V-1 — issuer e snapshot de autoridade', () => {
     if (row === undefined) throw new Error('validation row missing')
     expect(row.apiKeyId).toBe(key.apiKeyId)
     expect(row.tenantId).toBe(tenantId)
-    expect(row.issuerScopes).toEqual(['validate:read', 'validate:write'])
+    expect(row.issuerScopes).toEqual(['validate:read', 'validate:write', 'verify:m2m'])
   })
 
   it('a FK composta impede associar api_key de OUTRO tenant', async () => {
@@ -172,7 +175,7 @@ describe('V-1 — issuer e snapshot de autoridade', () => {
     const validationId = res.json().validation_id as string
 
     const before = await validationRow(validationId)
-    expect(before?.issuerScopes).toEqual(['validate:write'])
+    expect(before?.issuerScopes).toEqual(['validate:write', 'verify:m2m'])
 
     await adminPool.db
       .update(t.apiKey)
@@ -180,7 +183,7 @@ describe('V-1 — issuer e snapshot de autoridade', () => {
       .where(eq(t.apiKey.apiKeyId, revocable.apiKeyId))
 
     const after = await validationRow(validationId)
-    expect(after?.issuerScopes).toEqual(['validate:write'])
+    expect(after?.issuerScopes).toEqual(['validate:write', 'verify:m2m'])
     expect(after?.apiKeyId).toBe(revocable.apiKeyId)
   })
 })

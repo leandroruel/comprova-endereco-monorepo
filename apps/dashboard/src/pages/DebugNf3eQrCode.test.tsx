@@ -92,7 +92,9 @@ describe('DebugNf3eQrCodePage', () => {
     await userEvent.click(page.getByRole('button', { name: 'Analisar documento' }))
 
     await expect.element(page.getByText(/A análise completa não está disponível/)).toBeVisible()
-    await expect.element(page.getByText('Trace de execução', { exact: false })).toBeVisible()
+    await expect
+      .element(page.getByTestId('trace-header').getByText('Trace de execução', { exact: false }))
+      .toBeVisible()
     await expect
       .element(page.getByRole('tab').getByText('Nenhum QR legível foi encontrado no PDF.'))
       .toBeVisible()

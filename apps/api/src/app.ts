@@ -14,6 +14,7 @@ import {
   type Db,
 } from '@comprova/db'
 import { makeS3ObjectStore, makeUnavailableObjectStore, type ObjectStore } from '@comprova/providers'
+import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import multipart from '@fastify/multipart'
@@ -49,6 +50,9 @@ import { makeDocumentIntelligenceClient } from '@comprova/providers'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'
+import { registerOrganizationsRoutes } from './modules/organizations/organizations.routes.js'
+import { registerM2MRoutes } from './modules/m2m/m2m.routes.js'
+import { AuthorizationError } from './modules/m2m/m2m.service.js'
 import { requireWriteScope } from './plugins/scope.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
 import { makeSigningKeyProvider } from './services/signing-key-provider.factory.js'
@@ -136,7 +140,46 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const documentIntelligenceMaxBytes = documentIntelligenceMaxFileSizeMb * 1024 * 1024
 
   await app.register(helmet)
-  await app.register(cors, { origin: true, credentials: true })
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://admin.localhost:5173',
+    'http://verifier.localhost:5174',
+    'http://localhost:3000',
+  ]
+
+  await app.register(cors, {
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['content-type', 'authorization', 'cookie'],
+    exposedHeaders: ['set-cookie'],
+    preflight: true,
+    preflightContinue: false,
+  })
+
+  await app.register(cookie, {
+    secret: deps.config.API_KEY_PEPPER,
+  })
+
+  // Fallback de CORS no onResponse: garante que os cabeçalhos CORS estejam
+  // sempre presentes, mesmo quando o plugin @fastify/cors não os aplica (ex.:
+  // respostas de erro, 404, 500, ou qualquer comportamento inesperado do
+  // plugin). Isso evita que o navegador bloqueie a requisição por falta do
+  // cabeçalho Access-Control-Allow-Origin.
+  app.addHook('onResponse', (request, reply) => {
+    const origin = (request.headers as Record<string, string | undefined>)['origin']
+    if (!origin) return
+    if (!allowedOrigins.includes(origin)) return
+    // Se o plugin já definiu o cabeçalho, não sobrescreve.
+    if (reply.getHeader('access-control-allow-origin')) return
+    reply.header('access-control-allow-origin', origin)
+    reply.header('access-control-allow-credentials', 'true')
+    reply.header('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+    reply.header('access-control-allow-headers', 'content-type, authorization, cookie')
+    reply.header('access-control-expose-headers', 'set-cookie')
+    reply.header('vary', 'Origin')
+  })
   await app.register(multipart, {
     limits: { fileSize: evidenceMaxBytes, files: 1, fields: 0, parts: 1 },
     throwFileSizeLimit: true,
@@ -186,6 +229,13 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         )
       return
     }
+    if (err instanceof AuthorizationError) {
+      reply
+        .code(403)
+        .type(PROBLEM_CONTENT_TYPE)
+        .send(problem(403, 'FORBIDDEN', err.message))
+      return
+    }
     deps.logger.error(
       {
         err: err instanceof Error ? err.message : String(err),
@@ -220,8 +270,9 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     credentialTtlSeconds: fastPath.policy.credential_ttl_seconds,
   }
   const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
-  registerAuthRoutes(app, auth)
   app.addHook('preHandler', makeSessionMiddleware(auth))
+  app.addHook('preHandler', authenticate)
+  registerAuthRoutes(app, auth)
   const deepTrigger = {
     config: {
       enabled: deps.config.TEMPORAL_ENABLED,
@@ -234,7 +285,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   await app.register(
     async (v1) => {
-      v1.addHook('preHandler', authenticate)
       v1.addHook('preHandler', rateLimit)
       registerValidationRoutes(v1, {
         db: deps.db,
@@ -259,6 +309,19 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         logger: deps.logger,
       })
       registerMeRoute(v1, requireWriteScope)
+      // TERMS_VERSION é opcional no boot: a validação da versão ocorre apenas
+      // quando o fluxo de onboarding é acessado. Sem ela, o endpoint de
+      // onboarding retorna erro, mas o restante da API segue funcional.
+      const termsVersion = deps.config.TERMS_VERSION ?? null
+      const termsApproved = deps.config.TERMS_APPROVED === 'true'
+      const termsDocumentHash = deps.config.TERMS_DOCUMENT_HASH ?? null
+      registerOrganizationsRoutes(v1, {
+        db: deps.db,
+        termsVersion,
+        termsApproved,
+        termsDocumentHash,
+      })
+      registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })

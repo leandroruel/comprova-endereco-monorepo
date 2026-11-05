@@ -16,6 +16,7 @@
     "@comprova/db": "workspace:*",
     "@comprova/observability": "workspace:*",
     "@comprova/providers": "workspace:*",
+    "@fastify/cookie": "^11.1.5",
     "@fastify/cors": "^11.3.1",
     "@fastify/helmet": "^13.1.2",
     "@fastify/multipart": "10.1.2",

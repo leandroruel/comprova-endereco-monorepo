@@ -104,6 +104,25 @@ const EnvSchema = z.object({
   DOCUMENT_INTELLIGENCE_URL: z.url().optional(),
   DOCUMENT_INTELLIGENCE_TIMEOUT_MS: z.coerce.number().int().positive().max(3_600_000).optional(),
   DOCUMENT_INTELLIGENCE_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().max(1024).optional(),
+  /**
+   * Versão vigente dos termos de onboarding, definida pelo servidor. O
+   * frontend deve expô-la como não editável e registrá-la no aceite; o
+   * conteúdo jurídico depende de aprovação jurídica (Fase 1 prepara o fluxo).
+   */
+  TERMS_VERSION: z.string().min(1).max(100).optional(),
+  /**
+   * Indica se o conteúdo jurídico dos termos de onboarding foi aprovado.
+   * Quando falso, o aceite de termos é bloqueado e o onboarding não pode ser
+   * concluído. Definir como 'true' apenas após aprovação jurídica formal.
+   */
+  TERMS_APPROVED: z.string().optional(),
+  /**
+   * Hash SHA-256 do conteúdo do documento jurídico dos termos de onboarding,
+   * definido exclusivamente pelo servidor. Quando presente, é o identificador
+   * verificável do documento efetivamente apresentado ao usuário no momento do
+   * aceite. Ausente indica que não há documento oficial disponível.
+   */
+  TERMS_DOCUMENT_HASH: z.string().optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

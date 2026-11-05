@@ -21,11 +21,13 @@ import {
 import { refCep, refCnefeAddress, refKnownSharedAddress } from './reference-address.js'
 import { subject } from './subjects.js'
 import { apiKey, tenant } from './tenancy.js'
+import { organizationInvitation, organizationMember } from './organizations.js'
 import { auditLog, usageEvent } from './usage.js'
 import { validation, validationIdempotency } from './validations.js'
 
 export * from './enums.js'
 export * from './tenancy.js'
+export * from './organizations.js'
 export * from './issuers.js'
 export * from './reference-receita.js'
 export * from './reference-address.js'
@@ -51,6 +53,8 @@ export * from './batches.js'
 export const schema = {
   tenant,
   apiKey,
+  organizationMember,
+  organizationInvitation,
   issuerSigningKey,
   credentialStatus,
   credentialIssuance,
