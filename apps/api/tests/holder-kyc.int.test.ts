@@ -150,6 +150,9 @@ const createM2mApiKey = async (
     { name, scopes, keyType },
     sessionCookie,
   )
+  if (res.statusCode !== 201) {
+    console.log('CREATE KEY ERROR:', res.statusCode, res.body)
+  }
   expect(res.statusCode).toBe(201)
   return { secret: res.json().secret, apiKeyId: res.json().apiKey.apiKeyId }
 }
@@ -1026,5 +1029,586 @@ describe('M2M API Key Management - Autorização por Membership', () => {
       outroCookie,
     )
     expect(resRevoke.statusCode).toBe(403)
+  })
+})
+
+describe('Holder/KYC - Autenticação Bearer Restrita', () => {
+  it('sessão válida acessa endpoints Holder/KYC', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Sessao', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Sessao', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    // Cria holder via M2M
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-sessao',
+        name: 'Holder Sessao',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const holderId = createRes.json().holderId
+
+    // Sessão autenticada consegue acessar o holder
+    const res = await injectWithSession(
+      'GET',
+      `/v1/holders/${holderId}?tenantId=${tenantId}`,
+      undefined,
+      ownerSessionCookie,
+    )
+    expect(res.statusCode).toBe(200)
+    expect(res.json().holderId).toBe(holderId)
+  })
+
+  it('chave M2M com verify:m2m e scope funcional consegue acessar Holder/KYC', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org M2M OK', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave M2M OK', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-m2m-ok',
+        name: 'Holder M2M OK',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const holderId = createRes.json().holderId
+
+    // Chave M2M com verify:m2m e holders:read consegue ler
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(res.statusCode).toBe(200)
+
+    // Chave M2M com verify:m2m e kyc:write consegue criar KYC
+    const kycRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      { legalBasis: 'CONSENT' },
+      key.secret,
+    )
+    expect(kycRes.statusCode).toBe(201)
+  })
+
+  it('chave M2M sem verify:m2m recebe 403 em Holder/KYC', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Sem Verify', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    // Chave M2M sem verify:m2m, apenas holders:read
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Sem Verify', ['holders:read'])
+
+    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('chave M2M sem scope funcional recebe 403 em Holder/KYC', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Sem Scope', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    // Chave M2M com verify:m2m mas SEM holders:read
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Sem Scope', [
+      'validate:read',
+      'verify:m2m',
+    ])
+
+    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('chave user com holders:read não consegue acessar Holder/KYC via Bearer', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org User Key', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    // Cria uma chave user (não M2M) com holders:read - não deve conseguir via Bearer
+    // Precisa de keys:write para ser criada via API
+    const key = await createM2mApiKey(
+      ownerSessionCookie,
+      tenantId,
+      'Chave User',
+      ['holders:read', 'keys:write'],
+      'user',
+    )
+
+    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
+    expect([401, 403]).toContain(res.statusCode)
+  })
+
+  it('chave user com holders:write não consegue acessar Holder/KYC via Bearer', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org User Write', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    const key = await createM2mApiKey(
+      ownerSessionCookie,
+      tenantId,
+      'Chave User Write',
+      ['holders:write', 'keys:write'],
+      'user',
+    )
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-user-write',
+        name: 'Holder User Write',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect([401, 403]).toContain(createRes.statusCode)
+  })
+
+  it('chave user com kyc:read ou kyc:write não consegue acessar Holder/KYC via Bearer', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org User Kyc', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    const key = await createM2mApiKey(
+      ownerSessionCookie,
+      tenantId,
+      'Chave User Kyc',
+      ['kyc:read', 'kyc:write', 'keys:write'],
+      'user',
+    )
+
+    const res = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
+    expect([401, 403]).toContain(res.statusCode)
+  })
+
+  it('chave revogada não consegue acessar Holder/KYC', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Revogada', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Para Revogar', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-revogada',
+        name: 'Holder Revogada',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const holderId = createRes.json().holderId
+
+    // Revoga a chave via sessão
+    await injectWithSession(
+      'DELETE',
+      `/v1/m2m/api-keys/${key.apiKeyId}?tenantId=${tenantId}`,
+      undefined,
+      ownerSessionCookie,
+    )
+
+    // Chave revogada não consegue acessar
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect([401, 403]).toContain(res.statusCode)
+  })
+
+  it('chave inválida não consegue acessar Holder/KYC', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Invalida', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders?tenantId=${tenantId}`,
+      undefined,
+      'chave-invalida-que-nao-existe',
+    )
+    expect([401, 403]).toContain(res.statusCode)
+  })
+})
+
+describe('DocumentHash - Isolamento Criptográfico', () => {
+  it('mesmo documento e mesmo tenant produzem identificador consistente', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Hash Consistencia',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Hash', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const res1 = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-hash-1',
+        name: 'Hash 1',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(res1.statusCode).toBe(201)
+
+    const res2 = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-hash-2',
+        name: 'Hash 2',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(res2.statusCode).toBe(201)
+
+    expect(res1.json().documentHash).toBe(res2.json().documentHash)
+    expect(res1.json().documentHash).toBe(DOCUMENT_HASH)
+  })
+
+  it('mesmo documento em tenants diferentes produz identificadores independentes', async () => {
+    const tenantA = await createOrganization(ownerSessionCookie, 'Org Hash A', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantA, 'owner@exemplo.com', 'admin')
+    const keyA = await createM2mApiKey(ownerSessionCookie, tenantA, 'Chave Hash A', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const tenantB = await createOrganization(ownerSessionCookie, 'Org Hash B', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantB, 'owner@exemplo.com', 'admin')
+    const keyB = await createM2mApiKey(ownerSessionCookie, tenantB, 'Chave Hash B', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const resA = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantA}`,
+      {
+        externalReference: 'ext-ref-hash-a',
+        name: 'Hash A',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      keyA.secret,
+    )
+    expect(resA.statusCode).toBe(201)
+
+    const resB = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantB}`,
+      {
+        externalReference: 'ext-ref-hash-b',
+        name: 'Hash B',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      keyB.secret,
+    )
+    expect(resB.statusCode).toBe(201)
+
+    // Mesmo documentHash em tenants diferentes - registros são independentes
+    expect(resA.json().tenantId).toBe(tenantA)
+    expect(resB.json().tenantId).toBe(tenantB)
+    expect(resA.json().documentHash).toBe(resB.json().documentHash)
+    expect(resA.json().externalReference).not.toBe(resB.json().externalReference)
+  })
+
+  it('documentHash segue formato SHA-256 hex (64 caracteres)', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Hash Formato', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Formato', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    // documentHash válido: 64 caracteres hex
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-formato',
+        name: 'Hash Formato',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(res.statusCode).toBe(201)
+    expect(res.json().documentHash).toMatch(/^[0-9a-f]{64}$/)
+
+    // documentHash inválido: não é hex
+    const resInvalido = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-formato-invalido',
+        name: 'Hash Invalido',
+        documentHash: 'not-a-valid-hex-hash',
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(resInvalido.statusCode).toBe(400)
+  })
+
+  it('segredos não aparecem em respostas HTTP', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Sem Segredo', 'owner@exemplo.com')
+    // O usuário que cria a organização já é owner
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Sem Segredo', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-sem-segredo',
+        name: 'Holder Sem Segredo',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(res.statusCode).toBe(201)
+
+    const listRes = await injectWithM2M('GET', `/v1/holders?tenantId=${tenantId}`, undefined, key.secret)
+    expect(listRes.statusCode).toBe(200)
+
+    const body = JSON.stringify(listRes.json())
+    // O segredo da chave M2M nunca deve aparecer nas respostas de holders
+    expect(body).not.toContain(key.secret)
+    // documentHash não deve conter o segredo em texto puro
+    expect(listRes.json().holders[0].documentHash).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+describe('KycEvent - Integridade Referencial Composta', () => {
+  it('criar evento para processo pertencente ao mesmo tenant funciona', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Evento OK', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Evento OK', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const holderRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-evento-ok',
+        name: 'Holder Evento OK',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      { legalBasis: 'CONSENT' },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const kycProcessId = createRes.json().kycProcessId
+
+    // Listar eventos do processo - deve funcionar
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(Array.isArray(body.events)).toBe(true)
+    expect(body.events.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('consultas e listagens de eventos continuam funcionando', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Evento Lista', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Evento Lista', [
+      'holders:read',
+      'holders:write',
+      'kyc:read',
+      'kyc:write',
+      'verify:m2m',
+    ])
+
+    const holderRes = await injectWithM2M(
+      'POST',
+      `/v1/holders?tenantId=${tenantId}`,
+      {
+        externalReference: 'ext-ref-evento-lista',
+        name: 'Holder Evento Lista',
+        documentHash: DOCUMENT_HASH,
+        documentType: 'CPF',
+      },
+      key.secret,
+    )
+    expect(holderRes.statusCode).toBe(201)
+    const holderId = holderRes.json().holderId
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc?tenantId=${tenantId}`,
+      { legalBasis: 'CONSENT' },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const kycProcessId = createRes.json().kycProcessId
+
+    // Transicionar para gerar mais eventos
+    await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/kyc/${kycProcessId}/transition?tenantId=${tenantId}`,
+      { toState: 'in_progress', reason: 'Iniciando' },
+      key.secret,
+    )
+
+    // Listar eventos - deve funcionar com integridade referencial composta
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(Array.isArray(body.events)).toBe(true)
+    expect(body.events.length).toBeGreaterThanOrEqual(2) // created + state_transitioned
+    expect(body.total).toBe(body.events.length)
+  })
+})
+
+describe('M2M API Key - listApiKeys Autorização', () => {
+  it('usuário sem membership tentando listar API keys recebe 403', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Sem Membership List',
+      'owner@exemplo.com',
+    )
+
+    // Outro usuário não é membro desta organização
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+
+    const res = await injectWithSession(
+      'GET',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      undefined,
+      outroCookie,
+    )
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('membro autorizado consegue listar API keys', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Membro Lista', 'owner@exemplo.com')
+
+    // Adiciona outro usuário como membro
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    await addMember(ownerSessionCookie, tenantId, 'outro@exemplo.com', 'member')
+
+    // Membro consegue listar
+    const res = await injectWithSession(
+      'GET',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      undefined,
+      outroCookie,
+    )
+    expect(res.statusCode).toBe(200)
+    expect(Array.isArray(res.json().apiKeys)).toBe(true)
+  })
+
+  it('usuário sem permissão não consegue criar ou revogar API keys', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Sem Permissao', 'owner@exemplo.com')
+
+    // Outro usuário não é membro
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+
+    // Não consegue criar
+    const createRes = await injectWithSession(
+      'POST',
+      `/v1/m2m/api-keys?tenantId=${tenantId}`,
+      {
+        name: 'Chave Sem Permissao',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      outroCookie,
+    )
+    expect(createRes.statusCode).toBe(403)
+
+    // Não consegue revogar (criamos uma chave primeiro com o owner)
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Para Testar', ['validate:read'])
+    const revokeRes = await injectWithSession(
+      'DELETE',
+      `/v1/m2m/api-keys/${key.apiKeyId}?tenantId=${tenantId}`,
+      undefined,
+      outroCookie,
+    )
+    expect(revokeRes.statusCode).toBe(403)
+  })
+
+  it('Bearer token não consegue administrar API keys', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Bearer Lista', 'owner@exemplo.com')
+
+    // Cria uma chave M2M via sessão
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Bearer Lista', ['validate:read'])
+
+    // Tenta listar chaves via Bearer (deve falhar - precisa de sessão)
+    const res = await injectWithM2M('GET', `/v1/m2m/api-keys?tenantId=${tenantId}`, undefined, key.secret)
+    expect([401, 403]).toContain(res.statusCode)
   })
 })

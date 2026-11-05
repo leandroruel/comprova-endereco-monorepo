@@ -8,13 +8,31 @@ export type DocumentType = z.infer<typeof DocumentTypeSchema>
  * compartilhado entre o Verifier e o serviço Comprova.
  *
  * SHA-256 simples é insuficiente para documentos com espaço de valores
- * previsível (CPF/CNPJ), pois permite ataque por enumeração. O segredo HMAC
- * nunca é armazenado no banco; é provido via variável de ambiente da aplicação.
- * O cálculo do HMAC é responsabilidade da camada de integração do Verifier,
- * que deve compartilhar o segredo com o serviço Comprova de forma out-of-band.
+ * previsível (CPF/CNPJ), pois permite ataque por enumeração. O HMAC-SHA-256
+ * é calculado com um segredo derivado por tenant, de modo que o mesmo
+ * CPF/CNPJ em tenants diferentes produza identificadores diferentes,
+ * impedindo correlação global de titulares entre organizações.
  *
- * Não existe correlação global de titulares entre organizações: o isolamento é
- * feito exclusivamente por tenant_id.
+ * Contrato de integração (Verifier → Comprova):
+ * - O Verifier calcula o HMAC-SHA-256 antes de enviar o documentHash à API.
+ * - O segredo HMAC NUNCA é armazenado no banco de dados do Comprova.
+ * - O segredo HMAC é derivado por tenant: `tenantSpecificSecret =
+ *   HMAC(globalSecret, tenantId)`, onde `globalSecret` é provido via
+ *   variável de ambiente do Verifier (ex.: HOLDER_DOCUMENT_HMAC_SECRET).
+ * - O documentHash enviado à API já é o HMAC final com o segredo do tenant.
+ * - O Comprova apenas valida o formato (64 caracteres hexadecimais) e armazena
+ *   o valor recebido. Não recalcula, não compara com segredos próprios e não
+ *   expõe segredos em logs, respostas ou auditoria.
+ *
+ * Rotação de segredos:
+ * - Ao rotacionar o segredo global, todos os documentHash existentes
+ *   deixam de ser reconhecíveis pelo novo segredo.
+ * - Não há re-hash automático de registros existentes; a migração de
+ *   registros antigos requer re-calculo do HMAC pelo Verifier com o novo
+ *   segredo e atualização via PATCH /holders/:holderId.
+ *
+ * Não armazene CPF/CNPJ em texto puro. Não utilize um segredo global
+ * compartilhado como chave direta para todos os tenants.
  */
 export const CreateHolderRequestSchema = z.object({
   externalReference: z.string().min(1).max(200),

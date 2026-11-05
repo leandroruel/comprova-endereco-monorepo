@@ -18,7 +18,7 @@ import {
   ProblemResponse,
   KycProcessNotFoundResponse,
 } from './holder.schema.js'
-import { requireSessionOrM2MVerify, requireScope } from '../../plugins/scope.js'
+import { requireSessionOrM2M, requireSessionOrM2MVerify, requireScope } from '../../plugins/scope.js'
 
 export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRoutesDeps): void => {
   const app = instance.withTypeProvider<ZodTypeProvider>()
@@ -43,7 +43,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.post(
     '/holders',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:write')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('holders:write'),
+      ],
       schema: {
         querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
@@ -73,7 +77,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:read')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('holders:read'),
+      ],
       schema: {
         querystring: z.object({
           tenantId: z.string().uuid(),
@@ -98,7 +106,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:read')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('holders:read'),
+      ],
       schema: {
         params: HolderIdParams,
         querystring: z.object({ tenantId: z.string().uuid() }),
@@ -120,7 +132,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.patch(
     '/holders/:holderId',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('holders:write')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('holders:write'),
+      ],
       schema: {
         params: HolderIdParams,
         querystring: z.object({ tenantId: z.string().uuid() }),
@@ -153,7 +169,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.post(
     '/holders/:holderId/kyc',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:write')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('kyc:write'),
+      ],
       schema: {
         params: HolderIdParams,
         querystring: z.object({ tenantId: z.string().uuid() }),
@@ -182,7 +202,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId/kyc',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:read')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('kyc:read'),
+      ],
       schema: {
         params: HolderIdParams,
         querystring: z.object({
@@ -210,7 +234,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId/kyc/:kycProcessId',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:read')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('kyc:read'),
+      ],
       schema: {
         params: z.object({
           holderId: z.string().uuid(),
@@ -236,7 +264,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.post(
     '/holders/:holderId/kyc/:kycProcessId/transition',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:write')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('kyc:write'),
+      ],
       schema: {
         params: z.object({
           holderId: z.string().uuid(),
@@ -268,7 +300,11 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
   app.get(
     '/holders/:holderId/kyc/:kycProcessId/events',
     {
-      preHandler: [requireSessionOrM2MVerify(deps.db), requireScope('kyc:read')],
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireScope('kyc:read'),
+      ],
       schema: {
         params: z.object({
           holderId: z.string().uuid(),

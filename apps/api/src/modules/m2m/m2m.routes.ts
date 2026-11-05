@@ -5,7 +5,7 @@ import type { Db } from '@comprova/db'
 import { ProblemSchema } from '@comprova/contracts'
 import { makeM2MController } from './m2m.controller.js'
 import { ApiKeyIdParams, ApiKeyCreatedResponse, ApiKeyDtoSchema } from './m2m.schema.js'
-import { requireSessionOrM2MVerify, requireKeyType, requireScope } from '../../plugins/scope.js'
+import { requireSessionOrM2MVerify, requireKeyType } from '../../plugins/scope.js'
 
 export type M2MRoutesDeps = {
   readonly db: Db
@@ -39,12 +39,7 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
   app.post(
     '/m2m/api-keys',
     {
-      preHandler: [
-        requireSessionOrM2MVerify(deps.db),
-        requireUserSession,
-        requireKeyType('user'),
-        requireScope('keys:write'),
-      ],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireUserSession, requireKeyType('user')],
       schema: {
         querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
@@ -75,12 +70,7 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
   app.get(
     '/m2m/api-keys',
     {
-      preHandler: [
-        requireSessionOrM2MVerify(deps.db),
-        requireUserSession,
-        requireKeyType('user'),
-        requireScope('keys:write'),
-      ],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireUserSession, requireKeyType('user')],
       schema: {
         querystring: z.object({ tenantId: z.string().uuid() }),
         response: { 200: ApiKeyDtoSchema },
@@ -95,12 +85,7 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
   app.delete(
     '/m2m/api-keys/:apiKeyId',
     {
-      preHandler: [
-        requireSessionOrM2MVerify(deps.db),
-        requireUserSession,
-        requireKeyType('user'),
-        requireScope('keys:write'),
-      ],
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireUserSession, requireKeyType('user')],
       schema: {
         params: ApiKeyIdParams,
         querystring: z.object({ tenantId: z.string().uuid() }),

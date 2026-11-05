@@ -72,10 +72,20 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       userId: string,
       reply: FastifyReply,
     ): Promise<{ apiKeys: ApiKeyDto[] } | FastifyReply> => {
-      // O tenantId é obtido do contexto autenticado (definido por
-      // requireSessionOrM2MVerify), nunca do parâmetro do cliente.
-      const apiKeys = await service.listApiKeys(tenantId, userId)
-      return reply.code(200).send({ apiKeys })
+      try {
+        // O tenantId é obtido do contexto autenticado (definido por
+        // requireSessionOrM2MVerify), nunca do parâmetro do cliente.
+        const apiKeys = await service.listApiKeys(tenantId, userId)
+        return reply.code(200).send({ apiKeys })
+      } catch (error) {
+        if (error instanceof AuthorizationError) {
+          return reply
+            .code(403)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(403, 'FORBIDDEN', error.message))
+        }
+        return sendProblem(reply, 500, 'INTERNAL_ERROR', 'Erro ao listar credenciais')
+      }
     },
 
     revoke: async (
