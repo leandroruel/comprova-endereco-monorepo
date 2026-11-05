@@ -18,7 +18,12 @@ import {
   ProblemResponse,
   KycProcessNotFoundResponse,
 } from './holder.schema.js'
-import { requireSessionOrM2M, requireSessionOrM2MVerify, requireScope } from '../../plugins/scope.js'
+import {
+  requireSessionOrM2M,
+  requireSessionOrM2MVerify,
+  requireScope,
+  requireTenantMatch,
+} from '../../plugins/scope.js'
 
 export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRoutesDeps): void => {
   const app = instance.withTypeProvider<ZodTypeProvider>()
@@ -46,6 +51,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('holders:write'),
       ],
       schema: {
@@ -109,6 +115,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('holders:read'),
       ],
       schema: {
@@ -135,6 +142,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('holders:write'),
       ],
       schema: {
@@ -172,6 +180,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('kyc:write'),
       ],
       schema: {
@@ -205,6 +214,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('kyc:read'),
       ],
       schema: {
@@ -237,6 +247,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('kyc:read'),
       ],
       schema: {
@@ -267,6 +278,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('kyc:write'),
       ],
       schema: {
@@ -303,6 +315,7 @@ export const registerHolderRoutes = (instance: FastifyInstance, deps: HolderRout
       preHandler: [
         requireSessionOrM2MVerify(deps.db),
         requireSessionOrM2M(deps.db),
+        requireTenantMatch,
         requireScope('kyc:read'),
       ],
       schema: {

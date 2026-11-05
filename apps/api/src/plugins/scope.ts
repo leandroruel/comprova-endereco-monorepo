@@ -294,3 +294,37 @@ export const requireSessionOrM2M =
     // Tipo de chave desconhecido.
     return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
   }
+
+/**
+ * Exige que o tenantId informado via query string corresponda ao tenant
+ * resolvido pelo contexto de autenticação.
+ *
+ * Isso impede que uma requisição envie um tenantId diferente daquele
+ * pertencente à credencial autenticada, evitando confusão ou tentativas de
+ * acesso a recursos de outro tenant por meio de parâmetros inconsistentes.
+ *
+ * Aplica-se apenas quando há tenantId na query string E um tenant autenticado.
+ * Caso contrário, não há o que validar e a requisição prossegue.
+ */
+export const requireTenantMatch = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply | void> => {
+  const query = request.query as Record<string, string | string[] | undefined>
+  const rawTenantId = query.tenantId
+  const queryTenantId = Array.isArray(rawTenantId) ? rawTenantId[0] : rawTenantId
+
+  // Não há tenantId na query string: nada a validar.
+  if (!queryTenantId || typeof queryTenantId !== 'string') {
+    return
+  }
+
+  const tenant = request.tenant
+  if (tenant === undefined) {
+    return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+  }
+
+  if (tenant.tenantId !== queryTenantId) {
+    return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+  }
+}

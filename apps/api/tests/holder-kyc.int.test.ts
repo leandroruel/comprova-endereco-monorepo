@@ -374,7 +374,7 @@ describe('Holder Integration', () => {
       'verify:m2m',
     ])
 
-    // Usa tenantId da outra org mas com chave da org principal - não deve encontrar
+    // Usa tenantId da outra org mas com chave da org principal - deve ser rejeitado
     const res = await injectWithM2M(
       'GET',
       `/v1/holders/${otherHolderId}?tenantId=${outroTenantId}`,
@@ -382,7 +382,7 @@ describe('Holder Integration', () => {
       ownerKey.secret,
     )
     // Isolamento multi-tenant: chave de um tenant não acessa dados de outro
-    expect(res.statusCode).toBe(404)
+    expect(res.statusCode).toBe(403)
   })
 
   it('deve atualizar um holder por M2M', async () => {
