@@ -1,10 +1,8 @@
-import { and, eq, gte, isNull, or, withTenant } from '@comprova/db'
+import { and, eq, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
-import { newApiKey, keyPrefixOf, makeApiKeyHasher, type Db } from '@comprova/db'
-import { type ApiKeyDto, type CreateApiKeyRequest } from '@comprova/contracts'
 import { randomUUID } from 'node:crypto'
-import { cacheInvalidate } from '../../plugins/auth.js'
-import { validateScopesForKeyType } from '../../plugins/scope.js'
+import type { Db } from '@comprova/db'
+import { createHash } from 'node:crypto'
 
 export class AuthorizationError extends Error {
   constructor(message: string) {
@@ -13,151 +11,113 @@ export class AuthorizationError extends Error {
   }
 }
 
-/** Escopo desconhecido ou não permitido para o tipo de chave. */
-export class InvalidScopeError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'InvalidScopeError'
-  }
-}
-
-export interface M2MServiceDeps {
-  readonly db: Db
-  readonly apiKeyPepper: string
-}
-
-export const makeM2MService = (deps: M2MServiceDeps) => {
+export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: string }) => {
   const { db, apiKeyPepper } = deps
-  const hasher = makeApiKeyHasher(apiKeyPepper)
 
-  /**
-   * Verifica se o usuário é membro da organização e, opcionalmente, tem o
-   * papel mínimo exigido. Lança erro caso contrário.
-   */
-  const ensureMembership = async (
+  const hashKey = (secret: string): string => {
+    return createHash('sha256')
+      .update(secret + apiKeyPepper)
+      .digest('hex')
+  }
+
+  const createApiKey = async (
     tenantId: string,
-    userId: string,
-    requiredRole?: 'owner' | 'admin' | 'member',
-  ): Promise<void> => {
-    const member = await withTenant(db, tenantId, async (tx) => {
+    create: {
+      readonly name: string
+      readonly scopes: string[]
+      readonly keyType: string
+      readonly expiresAt?: string
+    },
+  ): Promise<{ apiKeyId: string; keyPrefix: string; secret: string }> => {
+    const apiKeyId = randomUUID()
+    const secret = randomUUID() + randomUUID()
+    const keyPrefix = secret.slice(0, 8)
+    const keyHash = hashKey(secret)
+
+    const [inserted] = await withTenant(db, tenantId, async (tx) => {
       return tx
-        .select({ userId: t.organizationMember.userId, role: t.organizationMember.role })
-        .from(t.organizationMember)
-        .where(and(eq(t.organizationMember.tenantId, tenantId), eq(t.organizationMember.userId, userId)))
+        .insert(t.apiKey)
+        .values({
+          apiKeyId,
+          tenantId,
+          keyPrefix,
+          keyHash: Buffer.from(keyHash, 'hex'),
+          scopes: create.scopes,
+          keyType: create.keyType,
+          expiresAt: create.expiresAt ? new Date(create.expiresAt) : null,
+        })
+        .returning()
+    })
+
+    if (!inserted) throw new Error('failed to create API key')
+
+    return {
+      apiKeyId: inserted.apiKeyId,
+      keyPrefix: inserted.keyPrefix,
+      secret,
+    }
+  }
+
+  const getApiKey = async (
+    apiKeyId: string,
+    tenantId: string,
+  ): Promise<{
+    apiKeyId: string
+    tenantId: string
+    keyPrefix: string
+    scopes: string[]
+    keyType: string
+    revokedAt: string | null
+    expiresAt: string | null
+    lastUsedAt: string | null
+    createdAt: string
+  } | null> => {
+    const [key] = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .select()
+        .from(t.apiKey)
+        .where(and(eq(t.apiKey.apiKeyId, apiKeyId), eq(t.apiKey.tenantId, tenantId)))
         .limit(1)
     })
 
-    if (member.length === 0) {
-      throw new AuthorizationError('user is not a member of this organization')
-    }
-
-    if (requiredRole) {
-      const hierarchy = ['member', 'admin', 'owner']
-      const userLevel = hierarchy.indexOf(member[0]!.role)
-      const minLevel = hierarchy.indexOf(requiredRole)
-      if (userLevel < minLevel) {
-        throw new AuthorizationError('insufficient role for this operation')
-      }
-    }
-  }
-
-  /**
-   * Cria uma credencial de API M2M associada à organização.
-   * Retorna o segredo em claro apenas uma vez (na criação).
-   */
-  const createApiKey = async (
-    tenantId: string,
-    create: CreateApiKeyRequest,
-    userId: string,
-  ): Promise<{ apiKey: ApiKeyDto; secret: string }> => {
-    // Rejeita escopos desconhecidos e escopos não permitidos para o tipo de
-    // chave antes de qualquer outra operação (defesa no backend, nunca confie
-    // na interface).
-    try {
-      validateScopesForKeyType(create.keyType, create.scopes)
-    } catch (error) {
-      throw new InvalidScopeError(error instanceof Error ? error.message : String(error))
-    }
-
-    await ensureMembership(tenantId, userId, 'admin')
-
-    const plaintext = newApiKey()
-    const prefix = keyPrefixOf(plaintext)
-    const keyHash = hasher.hash(plaintext)
-
-    const expiresAt = create.expiresInDays
-      ? new Date(Date.now() + create.expiresInDays * 24 * 60 * 60 * 1000)
-      : null
-
-    const insertedKeys = await db
-      .insert(t.apiKey)
-      .values({
-        apiKeyId: randomUUID(),
-        tenantId,
-        keyPrefix: prefix,
-        keyHash,
-        scopes: create.scopes,
-        keyType: create.keyType,
-        expiresAt,
-      })
-      .returning()
-
-    const apiKey = insertedKeys[0]
-    if (!apiKey) {
-      throw new Error('failed to create API key')
-    }
+    if (!key) return null
 
     return {
-      apiKey: {
-        apiKeyId: apiKey.apiKeyId,
-        tenantId: apiKey.tenantId,
-        keyPrefix: apiKey.keyPrefix,
-        key: undefined, // nunca expõe o segredo no objeto da chave
-        scopes: apiKey.scopes,
-        keyType: apiKey.keyType,
-        revokedAt: apiKey.revokedAt?.toISOString() ?? null,
-        expiresAt: apiKey.expiresAt?.toISOString() ?? null,
-        lastUsedAt: apiKey.lastUsedAt?.toISOString() ?? null,
-        createdAt: apiKey.createdAt.toISOString(),
-      },
-      secret: plaintext,
+      apiKeyId: key.apiKeyId,
+      tenantId: key.tenantId,
+      keyPrefix: key.keyPrefix,
+      scopes: key.scopes,
+      keyType: key.keyType,
+      revokedAt: key.revokedAt?.toISOString() ?? null,
+      expiresAt: key.expiresAt?.toISOString() ?? null,
+      lastUsedAt: key.lastUsedAt?.toISOString() ?? null,
+      createdAt: key.createdAt.toISOString(),
     }
   }
 
-  /**
-   * Lista API keys da organização (sem expor o segredo).
-   */
-  const listApiKeys = async (tenantId: string, userId: string): Promise<ApiKeyDto[]> => {
-    await ensureMembership(tenantId, userId)
-
-    const rows = await db
-      .select({
-        apiKeyId: t.apiKey.apiKeyId,
-        tenantId: t.apiKey.tenantId,
-        keyPrefix: t.apiKey.keyPrefix,
-        scopes: t.apiKey.scopes,
-        keyType: t.apiKey.keyType,
-        revokedAt: t.apiKey.revokedAt,
-        expiresAt: t.apiKey.expiresAt,
-        lastUsedAt: t.apiKey.lastUsedAt,
-        createdAt: t.apiKey.createdAt,
-      })
-      .from(t.apiKey)
-      .where(
-        and(
-          eq(t.apiKey.tenantId, tenantId),
-          isNull(t.apiKey.revokedAt),
-          // Exclui chaves expiradas (mas não revogadas): não as apresenta como
-          // ativas. Chaves sem expiração (expiresAt IS NULL) seguem listadas.
-          or(isNull(t.apiKey.expiresAt), gte(t.apiKey.expiresAt, new Date())),
-        ),
-      )
+  const listApiKeys = async (
+    tenantId: string,
+  ): Promise<
+    {
+      apiKeyId: string
+      tenantId: string
+      keyPrefix: string
+      scopes: string[]
+      keyType: string
+      revokedAt: string | null
+      expiresAt: string | null
+      lastUsedAt: string | null
+      createdAt: string
+    }[]
+  > => {
+    const rows = await withTenant(db, tenantId, async (tx) => {
+      return tx.select().from(t.apiKey).where(eq(t.apiKey.tenantId, tenantId)).orderBy(t.apiKey.createdAt)
+    })
 
     return rows.map((row) => ({
       apiKeyId: row.apiKeyId,
       tenantId: row.tenantId,
       keyPrefix: row.keyPrefix,
-      key: undefined, // nunca expõe o segredo
       scopes: row.scopes,
       keyType: row.keyType,
       revokedAt: row.revokedAt?.toISOString() ?? null,
@@ -167,33 +127,21 @@ export const makeM2MService = (deps: M2MServiceDeps) => {
     }))
   }
 
-  /**
-   * Revoga uma API key da organização.
-   */
-  const revokeApiKey = async (tenantId: string, apiKeyId: string, userId: string): Promise<boolean> => {
-    await ensureMembership(tenantId, userId, 'admin')
+  const revokeApiKey = async (apiKeyId: string, tenantId: string): Promise<boolean> => {
+    const [updated] = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .update(t.apiKey)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(t.apiKey.apiKeyId, apiKeyId), eq(t.apiKey.tenantId, tenantId)))
+        .returning()
+    })
 
-    const [updated] = await db
-      .update(t.apiKey)
-      .set({ revokedAt: new Date() })
-      .where(
-        and(eq(t.apiKey.apiKeyId, apiKeyId), eq(t.apiKey.tenantId, tenantId), isNull(t.apiKey.revokedAt)),
-      )
-      .returning({ apiKeyId: t.apiKey.apiKeyId })
-
-    if (updated) {
-      // Invalida imediatamente o cache LOCAL desta instância. Isso garante
-      // que a chave revogada não seja mais aceita pelo cache local.
-      // O banco de dados (PostgreSQL) é a fonte de verdade sobre revogação;
-      // outras instâncias consultarão o banco em cada autenticação.
-      cacheInvalidate(apiKeyId)
-    }
-
-    return updated !== undefined
+    return !!updated
   }
 
   return {
     createApiKey,
+    getApiKey,
     listApiKeys,
     revokeApiKey,
   }

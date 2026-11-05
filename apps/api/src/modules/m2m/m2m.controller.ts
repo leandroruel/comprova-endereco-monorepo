@@ -4,8 +4,7 @@ import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import type { z } from 'zod'
 import type { ApiKeyCreatedResponse, M2MControllerDeps } from './m2m.schema.js'
 import { sendProblem } from './m2m.schema.js'
-import { makeM2MService } from './m2m.service.js'
-import { AuthorizationError, InvalidScopeError } from './m2m.service.js'
+import { makeM2MService, AuthorizationError } from './m2m.service.js'
 
 export type ApiKeyCreatedResponseType = z.infer<typeof ApiKeyCreatedResponse>
 
@@ -27,24 +26,32 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       reply: FastifyReply,
     ): Promise<ApiKeyCreatedResponseType | FastifyReply> => {
       try {
-        const result = await service.createApiKey(
-          request.tenantId,
-          {
-            name: request.name,
+        const expiresInDays = request.expiresInDays
+        const expiresAt = expiresInDays
+          ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
+          : undefined
+
+        const result = await service.createApiKey(request.tenantId, {
+          name: request.name,
+          scopes: request.scopes,
+          keyType: request.keyType,
+          expiresAt,
+        })
+        return reply.code(201).send({
+          apiKey: {
+            apiKeyId: result.apiKeyId,
+            tenantId: request.tenantId,
+            keyPrefix: result.keyPrefix,
+            key: result.secret,
             scopes: request.scopes,
             keyType: request.keyType,
-            expiresInDays: request.expiresInDays,
+            revokedAt: null,
+            lastUsedAt: null,
+            createdAt: new Date().toISOString(),
           },
-          request.userId,
-        )
-        return reply.code(201).send(result)
+          secret: result.secret,
+        })
       } catch (error) {
-        if (error instanceof InvalidScopeError) {
-          return reply
-            .code(400)
-            .type(PROBLEM_CONTENT_TYPE)
-            .send(problem(400, 'INVALID_SCOPE', error.message))
-        }
         if (error instanceof AuthorizationError) {
           return reply
             .code(403)
@@ -60,7 +67,7 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       userId: string,
       reply: FastifyReply,
     ): Promise<{ apiKeys: ApiKeyDto[] } | FastifyReply> => {
-      const apiKeys = await service.listApiKeys(tenantId, userId)
+      const apiKeys = await service.listApiKeys(tenantId)
       return reply.code(200).send({ apiKeys })
     },
 
@@ -70,7 +77,7 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       userId: string,
       reply: FastifyReply,
     ): Promise<{ revoked: boolean } | FastifyReply> => {
-      const revoked = await service.revokeApiKey(tenantId, apiKeyId, userId)
+      const revoked = await service.revokeApiKey(apiKeyId, tenantId)
 
       if (!revoked) {
         return sendProblem(reply, 404, 'API_KEY_NOT_FOUND', 'Credencial não encontrada')
