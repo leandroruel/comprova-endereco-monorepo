@@ -116,6 +116,13 @@ const EnvSchema = z.object({
    * concluído. Definir como 'true' apenas após aprovação jurídica formal.
    */
   TERMS_APPROVED: z.string().optional(),
+  /**
+   * Hash SHA-256 do conteúdo do documento jurídico dos termos de onboarding,
+   * definido exclusivamente pelo servidor. Quando presente, é o identificador
+   * verificável do documento efetivamente apresentado ao usuário no momento do
+   * aceite. Ausente indica que não há documento oficial disponível.
+   */
+  TERMS_DOCUMENT_HASH: z.string().optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

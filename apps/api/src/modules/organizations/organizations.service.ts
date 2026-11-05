@@ -30,6 +30,8 @@ export interface OrganizationsServiceDeps {
   readonly termsVersion: string
   /** Indica se o conteúdo jurídico dos termos foi aprovado e pode ser aceito. */
   readonly termsApproved: boolean
+  /** Hash SHA-256 do documento jurídico dos termos, definido exclusivamente pelo servidor. */
+  readonly termsDocumentHash: string | null
 }
 
 /**
@@ -84,6 +86,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
           type: 'organization',
           onboardingStatus: 'pending',
           termsVersion: deps.termsVersion,
+          termsDocumentHash: deps.termsDocumentHash,
           dataRegion: create.dataRegion ?? 'sa-east-1',
         })
         .returning()
@@ -120,6 +123,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
       termsAcceptedAt: null,
       termsAcceptedBy: null,
       termsVersion: newTenant.termsVersion,
+      termsDocumentHash: newTenant.termsDocumentHash,
       dataRegion: newTenant.dataRegion,
       rateLimitRps: newTenant.rateLimitRps,
       burst: newTenant.burst,
@@ -151,6 +155,13 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
       throw new Error('terms not approved: legal content pending approval')
     }
 
+    // O hash do documento deve estar presente quando os termos forem aprovados.
+    // Sem um documento oficial, não há conteúdo verificável para vincular ao
+    // aceite.
+    if (!deps.termsDocumentHash) {
+      throw new Error('terms document hash missing: no official document available')
+    }
+
     // Verifica se o usuário é owner da organização dentro do escopo do tenant
     const member = await withTenant(db, tenantId, async (tx) => {
       return tx
@@ -176,6 +187,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
           termsAcceptedAt: new Date(),
           termsAcceptedBy: userId,
           termsVersion: deps.termsVersion,
+          termsDocumentHash: deps.termsDocumentHash,
         })
         .where(eq(t.tenant.tenantId, tenantId))
         .returning()
@@ -210,6 +222,7 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
           termsAcceptedAt: t.tenant.termsAcceptedAt,
           termsAcceptedBy: t.tenant.termsAcceptedBy,
           termsVersion: t.tenant.termsVersion,
+          termsDocumentHash: t.tenant.termsDocumentHash,
           dataRegion: t.tenant.dataRegion,
           rateLimitRps: t.tenant.rateLimitRps,
           burst: t.tenant.burst,
@@ -453,13 +466,18 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     const tokenHash = hashInviteToken(token)
     const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
 
+    // Normaliza o e-mail antes de persistir: remove espaços externos e
+    // converte para minúsculas. Isso garante consistência com a comparação
+    // feita na aceitação, que também normaliza ambos os lados.
+    const normalizedEmail = normalizeEmail(email)
+
     const [invitation] = await withTenant(db, tenantId, async (tx) => {
       return tx
         .insert(t.organizationInvitation)
         .values({
           organizationInvitationId: randomUUID(),
           tenantId,
-          email,
+          email: normalizedEmail,
           tokenHash,
           role,
           expiresAt,
@@ -636,6 +654,7 @@ function mapTenantToDto(tenant: {
   termsAcceptedAt: Date | null
   termsAcceptedBy: string | null
   termsVersion: string | null
+  termsDocumentHash: string | null
   dataRegion: string
   rateLimitRps: number
   burst: number
@@ -659,6 +678,7 @@ function mapTenantToDto(tenant: {
         : null,
     termsAcceptedBy: tenant.termsAcceptedBy ?? null,
     termsVersion: tenant.termsVersion,
+    termsDocumentHash: tenant.termsDocumentHash,
     dataRegion: tenant.dataRegion,
     rateLimitRps: tenant.rateLimitRps,
     burst: tenant.burst,
@@ -677,6 +697,7 @@ function mapTenantRowToDto(row: {
   termsAcceptedAt: Date | null
   termsAcceptedBy: string | null
   termsVersion: string | null
+  termsDocumentHash: string | null
   dataRegion: string
   rateLimitRps: number
   burst: number

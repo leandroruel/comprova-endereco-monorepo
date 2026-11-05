@@ -43,6 +43,7 @@ export const OrganizationResponse = z.object({
   termsAcceptedAt: z.string().nullable(),
   termsAcceptedBy: z.string().nullable(),
   termsVersion: z.string().nullable(),
+  termsDocumentHash: z.string().nullable(),
   dataRegion: z.string(),
   rateLimitRps: z.number(),
   burst: z.number(),

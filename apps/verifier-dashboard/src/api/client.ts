@@ -53,7 +53,11 @@ export async function getMe(): Promise<{
 }
 
 /** GET /organizations/terms-version — versão vigente dos termos (definida pelo servidor). */
-export async function getTermsVersion(): Promise<{ version: string; approved: boolean }> {
+export async function getTermsVersion(): Promise<{
+  version: string
+  approved: boolean
+  documentHash: string | null
+}> {
   return apiRequest('/organizations/terms-version', { method: 'GET' })
 }
 
@@ -138,16 +142,18 @@ export async function getOrganization(tenantId: string): Promise<{
 export async function completeOnboarding(
   tenantId: string,
   termsVersion: string,
+  termsDocumentHash: string | null,
 ): Promise<{
   tenantId: string
   onboardingStatus: string
   termsAcceptedAt: string | null
   termsAcceptedBy: string | null
   termsVersion: string | null
+  termsDocumentHash: string | null
 }> {
   return apiRequest(`/organizations/${tenantId}/onboarding/complete`, {
     method: 'POST',
-    body: JSON.stringify({ termsVersion }),
+    body: JSON.stringify({ termsVersion, termsDocumentHash }),
   })
 }
 

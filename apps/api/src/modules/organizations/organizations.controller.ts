@@ -24,11 +24,13 @@ export const makeOrganizationsController = (deps: {
   readonly db: Db
   readonly termsVersion: string
   readonly termsApproved: boolean
+  readonly termsDocumentHash: string | null
 }) => {
   const service = makeOrganizationsService({
     db: deps.db,
     termsVersion: deps.termsVersion,
     termsApproved: deps.termsApproved,
+    termsDocumentHash: deps.termsDocumentHash,
   })
 
   type CreateOrgInput = {

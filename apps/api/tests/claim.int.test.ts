@@ -41,6 +41,7 @@ const app = await buildApp({
     POLICY_VERSION: '2026.13.1',
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
+    TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
     TEMPORAL_ENABLED: false,
     VLM_ENABLED: false,
     TEMPORAL_ADDRESS: 'localhost:7233',

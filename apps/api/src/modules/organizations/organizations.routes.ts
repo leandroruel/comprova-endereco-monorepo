@@ -33,6 +33,8 @@ export type OrganizationsRoutesDeps = {
   readonly termsVersion: string
   /** Indica se o conteúdo jurídico dos termos foi aprovado e pode ser aceito. */
   readonly termsApproved: boolean
+  /** Hash SHA-256 do documento jurídico dos termos, definido pelo servidor. */
+  readonly termsDocumentHash: string | null
 }
 
 export const registerOrganizationsRoutes = (
@@ -91,11 +93,21 @@ export const registerOrganizationsRoutes = (
     {
       preHandler: requireSessionUser,
       schema: {
-        response: { 200: z.object({ version: z.string(), approved: z.boolean() }) },
+        response: {
+          200: z.object({
+            version: z.string(),
+            approved: z.boolean(),
+            documentHash: z.string().nullable(),
+          }),
+        },
       },
     },
     async (_request, reply) => {
-      return reply.code(200).send({ version: deps.termsVersion, approved: deps.termsApproved })
+      return reply.code(200).send({
+        version: deps.termsVersion,
+        approved: deps.termsApproved,
+        documentHash: deps.termsDocumentHash,
+      })
     },
   )
 

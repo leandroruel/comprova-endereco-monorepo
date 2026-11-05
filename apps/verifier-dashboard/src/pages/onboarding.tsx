@@ -57,17 +57,19 @@ export function OnboardingPage({
   const [termsVersion, setTermsVersion] = useState<string>('1.0.0')
   const [termsVersionError, setTermsVersionError] = useState<Error | null>(null)
   const [termsApproved, setTermsApproved] = useState<boolean>(false)
+  const [termsDocumentHash, setTermsDocumentHash] = useState<string | null>(null)
   const [termsAccepted, setTermsAccepted] = useState(false)
 
   // A versão vigente dos termos de onboarding é definida exclusivamente pelo
-  // servidor. Se a consulta falhar ou os termos não estiverem aprovados, o
-  // fluxo de aceite é bloqueado (não há fallback silencioso nem versão
-  // genérica apresentada como termo oficial).
+  // servidor. Se a consulta falhar, os termos não estiverem aprovados ou não
+  // houver documento oficial (hash ausente), o fluxo de aceite é bloqueado.
+  // Não há fallback silencioso nem texto genérico apresentado como termo oficial.
   useEffect(() => {
     getTermsVersion()
-      .then(({ version, approved }) => {
+      .then(({ version, approved, documentHash }) => {
         setTermsVersion(version)
         setTermsApproved(approved)
+        setTermsDocumentHash(documentHash)
         setTermsVersionError(null)
       })
       .catch((err) => {
@@ -97,7 +99,15 @@ export function OnboardingPage({
   })
 
   const completeMutation = useMutation({
-    mutationFn: ({ tenantId, tv }: { tenantId: string; tv: string }) => completeOnboarding(tenantId, tv),
+    mutationFn: ({
+      tenantId,
+      tv,
+      termsDocumentHash,
+    }: {
+      tenantId: string
+      tv: string
+      termsDocumentHash: string | null
+    }) => completeOnboarding(tenantId, tv, termsDocumentHash),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] })
       onComplete()
@@ -121,10 +131,18 @@ export function OnboardingPage({
       setLoading(false)
       return
     }
-    // Não permite criar organização sem termos jurídicos aprovados.
+    // Não permite criar organização sem termos jurídicos aprovados nem sem
+    // documento oficial disponível.
     if (!termsApproved) {
       setError(
         'O conteúdo jurídico dos termos ainda não foi aprovado. A criação de organização está bloqueada até que os termos sejam aprovados.',
+      )
+      setLoading(false)
+      return
+    }
+    if (!termsDocumentHash) {
+      setError(
+        'Não há documento oficial de termos disponível. A criação de organização está bloqueada até que o documento seja publicado.',
       )
       setLoading(false)
       return
@@ -154,7 +172,11 @@ export function OnboardingPage({
       return
     }
     try {
-      await completeMutation.mutateAsync({ tenantId: org.tenantId, tv: termsVersion })
+      await completeMutation.mutateAsync({
+        tenantId: org.tenantId,
+        tv: termsVersion,
+        termsDocumentHash,
+      })
     } finally {
       setLoading(false)
     }
@@ -249,6 +271,22 @@ export function OnboardingPage({
               <p className="mt-2 text-sm text-muted-foreground">
                 O conteúdo jurídico dos termos de onboarding ainda não foi aprovado. A criação de organização
                 está bloqueada até que os termos oficiais estejam disponíveis.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
+    if (!termsDocumentHash) {
+      return (
+        <div className="max-w-2xl mx-auto">
+          <Card className="animate-fade-in">
+            <CardContent className="text-center p-10">
+              <AlertCircle className="h-8 w-8 text-amber-600 mb-3" />
+              <h2 className="text-lg font-semibold">Documento oficial não disponível</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Não há um documento oficial de termos publicado. A criação de organização está bloqueada até
+                que o documento jurídico esteja disponível.
               </p>
             </CardContent>
           </Card>
@@ -358,49 +396,64 @@ export function OnboardingPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="border border-border rounded-lg p-4 bg-muted/50">
-              <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
-              {!termsApproved ? (
-                <>
-                  <p className="text-sm text-foreground">
-                    <strong>Conteúdo jurídico pendente de aprovação.</strong>
-                    Este é um espaço reservado para os termos oficiais de onboarding da organização. O texto
-                    exibido não é um documento jurídico oficial e não deve ser interpretado como tal.
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    A versão dos termos é definida exclusivamente pelo servidor. O aceite não pode ser
-                    registrado enquanto o conteúdo jurídico não estiver aprovado.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-foreground">
-                    Ao concordar, você autoriza o Comprova a tratar os dados de sua organização para fins de
-                    verificação de evidências e emissão de credenciais verificáveis. Os dados pessoais e
-                    organizacionais são mantidos separadamente e nunca são compartilhados com outras
-                    organizações.
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    A versão dos termos é definida exclusivamente pelo servidor. O aceite registrado neste
-                    fluxo será associado à versão vigente no momento da conclusão do onboarding.
-                  </p>
-                </>
-              )}
-            </div>
+            {!termsApproved ? (
+              <div className="border border-border rounded-lg p-4 bg-muted/50">
+                <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
+                <p className="text-sm text-foreground">
+                  <strong>Conteúdo jurídico pendente de aprovação.</strong>
+                  Este é um espaço reservado para os termos oficiais de onboarding da organização. O texto
+                  exibido não é um documento jurídico oficial e não deve ser interpretado como tal.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  A versão dos termos é definida exclusivamente pelo servidor. O aceite não pode ser
+                  registrado enquanto o conteúdo jurídico não estiver aprovado.
+                </p>
+              </div>
+            ) : !termsDocumentHash ? (
+              <div className="border border-border rounded-lg p-4 bg-muted/50">
+                <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
+                <p className="text-sm text-foreground">
+                  <strong>Documento oficial não disponível.</strong>
+                  Os termos foram aprovados, mas o documento jurídico ainda não foi publicado. O aceite não
+                  pode ser registrado sem um documento verificável.
+                </p>
+              </div>
+            ) : (
+              <div className="border border-border rounded-lg p-4 bg-muted/50">
+                <p className="text-xs text-muted-foreground mb-2">Termos de Uso — Versão {termsVersion}</p>
+                <p className="text-sm text-foreground">
+                  Ao concordar, você autoriza o Comprova a tratar os dados de sua organização para fins de
+                  verificação de evidências e emissão de credenciais verificáveis. Os dados pessoais e
+                  organizacionais são mantidos separadamente e nunca são compartilhados com outras
+                  organizações.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  A versão dos termos é definida exclusivamente pelo servidor. O aceite registrado neste fluxo
+                  será associado à versão vigente e ao hash do documento no momento da conclusão do
+                  onboarding.
+                </p>
+                <p className="text-xs font-mono text-muted-foreground">
+                  Hash do documento: {termsDocumentHash}
+                </p>
+              </div>
+            )}
 
             <div className="flex items-start gap-3">
               <input
                 id="terms"
                 type="checkbox"
-                checked={termsAccepted && termsApproved}
-                onChange={termsApproved ? (e) => setTermsAccepted(e.target.checked) : undefined}
+                checked={termsAccepted && termsApproved && termsDocumentHash !== null}
+                onChange={
+                  termsApproved && termsDocumentHash ? (e) => setTermsAccepted(e.target.checked) : undefined
+                }
                 className="w-4 h-4 rounded border border-input bg-card text-primary focus:ring-0"
-                disabled={!termsApproved}
+                disabled={!termsApproved || !termsDocumentHash}
               />
               <label htmlFor="terms" className="text-sm text-foreground cursor-pointer select-none">
                 Li e concordo com os termos e políticas aplicáveis (versão{' '}
                 <span className="font-medium">{termsVersion}</span>)
                 {!termsApproved && ' — pendente de aprovação jurídica'}
+                {!termsDocumentHash && ' — sem documento oficial'}
               </label>
             </div>
 
@@ -410,7 +463,7 @@ export function OnboardingPage({
               </Button>
               <Button
                 onClick={handleComplete}
-                disabled={loading || !termsAccepted || !termsApproved}
+                disabled={loading || !termsAccepted || !termsApproved || !termsDocumentHash}
                 className="w-auto"
               >
                 {loading ? <Spinner className="mr-2" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}

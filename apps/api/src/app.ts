@@ -321,10 +321,12 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       // Os termos só podem ser aceitos quando o conteúdo jurídico foi aprovado.
       // Até lá, o fluxo de onboarding é bloqueado no frontend.
       const termsApproved = deps.config.TERMS_APPROVED === 'true'
+      const termsDocumentHash = deps.config.TERMS_DOCUMENT_HASH ?? null
       registerOrganizationsRoutes(v1, {
         db: deps.db,
         termsVersion,
         termsApproved,
+        termsDocumentHash,
       })
       registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerCredentialRoutes(v1, { db: deps.db })

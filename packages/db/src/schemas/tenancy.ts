@@ -14,6 +14,7 @@ export const tenant = pgTable('tenant', {
   termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
   termsAcceptedBy: text('terms_accepted_by'),
   termsVersion: text('terms_version'),
+  termsDocumentHash: text('terms_document_hash'),
   rateLimitRps: integer('rate_limit_rps').notNull().default(50),
   burst: integer('burst').notNull().default(100),
   monthlyQuota: bigint('monthly_quota', { mode: 'number' }),
