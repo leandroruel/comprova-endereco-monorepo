@@ -1,4 +1,10 @@
 @import 'tailwindcss';
+/* Board UI theme tokens + typography utilities (React Aria based components).
+ * Imported *before* the dashboard @theme so the dashboard's own tokens
+ * (--color-background, --font-sans, …) win on any name clash, while Board UI
+ * tokens that the dashboard doesn't define (--color-accent-*, --color-neutral-*, …)
+ * stay available to the Board UI components. */
+@import './styles/boardui.css';
 
 @theme {
   --color-background: #fafafa;

@@ -462,3 +462,38 @@ export async function getMe(): Promise<MeDto | null> {
   }
   return (await res.json()) as MeDto
 }
+
+/**
+ * Organizações
+ */
+export interface OrganizationDto {
+  readonly tenantId: string
+  readonly name: string
+  readonly legalName: string | null
+  readonly document: string | null
+  readonly type: string
+  readonly status: string
+  readonly onboardingStatus: string
+  readonly termsAcceptedAt: string | null
+  readonly termsAcceptedBy: string | null
+  readonly termsVersion: string | null
+  readonly termsDocumentHash: string | null
+  readonly dataRegion: string
+  readonly rateLimitRps: number
+  readonly burst: number
+  readonly monthlyQuota: number | null
+  readonly createdAt: string
+}
+
+/**
+ * GET /v1/organizations — lista as organizações do usuário logado.
+ * Requer sessão válida (cookie). Usa a mesma API key dos demais endpoints v1.
+ */
+export async function getOrganizations(): Promise<OrganizationDto[]> {
+  const res = await fetch(`${API_BASE}/v1/organizations`, {
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${API_KEY}` },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return (await res.json()) as OrganizationDto[]
+}

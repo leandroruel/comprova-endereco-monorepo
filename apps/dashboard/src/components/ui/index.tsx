@@ -133,3 +133,52 @@ export function Spinner() {
     <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
   )
 }
+
+/* ---------------------------------------------------------------- Board UI
+ * Re-exports of Board UI components so both the admin and verifier
+ * dashboards consume a single shared UI layer from `@/components/ui`.
+ * Prefixed with `BUI` so they never clash with the shadcn primitives above. */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+export {
+  Button as BUIButton,
+  ButtonLink as BUIButtonLink,
+  type ButtonProps as BUIButtonProps,
+  type ButtonLinkProps as BUIButtonLinkProps,
+} from "./boardui-button";
+export {
+  Badge as BUIBadge,
+  type BadgeProps as BUIBadgeProps,
+} from "./boardui-badge";
+export {
+  Input as BUIInput,
+  type InputProps as BUIInputProps,
+} from "./boardui-input";
+export {
+  Table as BUITable,
+  TableHeader as BUITableHeader,
+  TableBody as BUITableBody,
+  TableRow as BUITableRow,
+  TableCell as BUITableCell,
+  TableColumn as BUITableColumn,
+  type TableSize as BUITableSize,
+} from "@/components/base/table/table";
+export {
+  Modal as BUIModal,
+  ModalTrigger as BUIModalTrigger,
+  ModalHeader as BUIModalHeader,
+  ModalBody as BUIModalBody,
+  ModalFooter as BUIModalFooter,
+  AlertDialog as BUIAlertDialog,
+  type ModalProps as BUIModalProps,
+  type ModalSize as BUIModalSize,
+  type AlertDialogProps as BUIAlertDialogProps,
+} from "./boardui-dialog";
+export {
+  Pagination as BUIPagination,
+  type PaginationProps as BUIPaginationProps,
+} from "./boardui-pagination";
+export {
+  BoardUIThemeProvider,
+  useBoardUITheme,
+} from "./boardui-theme-provider";
+/* eslint-enable @typescript-eslint/no-unused-vars */
