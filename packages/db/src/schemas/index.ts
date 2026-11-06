@@ -22,7 +22,7 @@ import { refCep, refCnefeAddress, refKnownSharedAddress } from './reference-addr
 import { subject } from './subjects.js'
 import { apiKey, tenant } from './tenancy.js'
 import { organizationInvitation, organizationMember } from './organizations.js'
-import { auditLog, usageEvent } from './usage.js'
+import { auditLog, tenantQuotaAudit, usageEvent, usageEventIdempotency } from './usage.js'
 import { validation, validationIdempotency } from './validations.js'
 import { holder } from './holder.js'
 import { kycProcess, kycEvent } from './kyc.js'
@@ -94,6 +94,8 @@ export const schema = {
   webhookEndpoint,
   webhookDelivery,
   usageEvent,
+  usageEventIdempotency,
+  tenantQuotaAudit,
   auditLog,
   holder,
   kycProcess,

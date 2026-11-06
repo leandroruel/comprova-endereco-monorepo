@@ -401,10 +401,33 @@ export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Pr
     },
   })
 
-  await tx.insert(t.usageEvent).values({
-    tenantId: write.tenantId,
-    kind: 'deep',
-    units: 1,
-    validationId: write.validationId,
-  })
+  // Evento de uso (F3.3): idempotente, com rastreamento de faturabilidade.
+  // A tabela `usage_event` é particionada; a unicidade da chave de
+  // idempotência é garantida pela tabela dedicada `usage_event_idempotency`
+  // (não particionada, ADR-0004), dentro da mesma transação.
+  const idempotencyKey = `deep:${write.validationId}`
+  const idemRows = await tx
+    .insert(t.usageEventIdempotency)
+    .values({
+      tenantId: write.tenantId,
+      idempotencyKey,
+      eventId: null,
+    })
+    .onConflictDoNothing()
+    .returning({ idempotencyKey: t.usageEventIdempotency.idempotencyKey })
+
+  if (idemRows.length > 0) {
+    await tx.insert(t.usageEvent).values({
+      tenantId: write.tenantId,
+      eventId: randomUUID(),
+      eventType: 'usage_event',
+      kind: 'deep',
+      units: 1,
+      costMicros: null,
+      validationId: write.validationId,
+      idempotencyKey,
+      billable: !write.stillPartial,
+      source: 'deep',
+    })
+  }
 }

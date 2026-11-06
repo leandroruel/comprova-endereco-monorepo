@@ -44,6 +44,7 @@ import { registerSigningKeyRoutes } from './modules/signing-keys/signing-keys.ro
 import { registerMetaRoutes } from './modules/meta/meta.routes.js'
 import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
+import { registerUsageRoutes } from './modules/usage/usage.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerDocumentRoutes } from './modules/documents/documents.routes.js'
 import { makeDocumentIntelligenceClient } from '@comprova/providers'
@@ -329,6 +330,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
       registerBatchRoutes(v1, { db: deps.db })
       registerStatsRoutes(v1, { db: deps.db })
+      registerUsageRoutes(v1, { db: deps.db })
       registerMetaRoutes(v1, { db: deps.db, cache })
       registerSubjectRoutes(v1, { db: deps.db })
     },

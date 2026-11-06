@@ -29,6 +29,7 @@ import {
 } from '@comprova/core'
 import { withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
+import { makeUsageService } from '../modules/usage/usage.service.js'
 
 export interface FastPathTenantContext {
   readonly tenantId: string
@@ -731,11 +732,17 @@ export const runFastPath = async (
       },
     })
 
-    await tx.insert(t.usageEvent).values({
+    // Evento de uso (F3.3): idempotente, com rastreamento de faturabilidade
+    // e proteção de cota hard. Grava dentro da mesma transação da validation.
+    const usage = makeUsageService({ db: deps.db })
+    await usage.recordUsageEventInTx(tx, {
       tenantId: tenant.tenantId,
+      eventType: 'usage_event',
       kind: 'fast',
       units: 1,
       validationId,
+      billable: status === 'completed',
+      source: 'fast',
     })
 
     await tx.insert(t.auditLog).values({
