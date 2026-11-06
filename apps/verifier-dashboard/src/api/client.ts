@@ -9,13 +9,18 @@ function authHeaders(): HeadersInit {
 
 /** Faz uma requisição à API e lança em caso de erro HTTP. */
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers: HeadersInit = {
+    ...authHeaders(),
+    ...init.headers,
+  }
+  // Somente envia Content-Type quando há corpo na requisição.
+  if (init.body === undefined) {
+    delete headers['Content-Type']
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include',
-    headers: {
-      ...authHeaders(),
-      ...init.headers,
-    },
+    headers,
   })
   if (!res.ok) {
     const problem = (await res.json().catch(() => ({}))) as {

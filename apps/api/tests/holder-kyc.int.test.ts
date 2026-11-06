@@ -820,6 +820,9 @@ describe('KYC Integration', () => {
     expect(successResult).toBeDefined()
     expect(successResult!.json().state).toBe('in_progress')
 
+    const winnerIndex = results.findIndex((r) => r.statusCode === 200)
+    const winnerReason = winnerIndex === 0 ? 'Primeira' : 'Segunda'
+
     const eventsRes = await injectWithM2M(
       'GET',
       `/v1/holders/${holderId}/kyc/${kycProcessId}/events?tenantId=${tenantId}`,
@@ -835,7 +838,7 @@ describe('KYC Integration', () => {
       typeof transitionEvents[0].details === 'string'
         ? JSON.parse(transitionEvents[0].details as string)
         : transitionEvents[0].details
-    expect(['Primeira', 'Segunda']).toContain(details.reason)
+    expect(details.reason).toBe(winnerReason)
   })
 
   it('deve listar eventos de auditoria do KYC', async () => {
