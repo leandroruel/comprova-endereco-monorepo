@@ -112,6 +112,59 @@ export default function OrganizationsPage({
 
   const columns = useMemo(() => COLUMNS, [])
 
+  // Erro de rede/API: exibe bem visível no topo, não no rodapé da página.
+  if (error) {
+    const isServerError = error instanceof Error && error.message.includes('HTTP 500')
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Organizações</h1>
+            <p className="text-sm text-muted-foreground">Gerencie as organizações do sistema</p>
+          </div>
+
+          <div className="flex items-center gap-2 w-full lg:w-auto">
+            <BUIButton
+              onClick={() => alert('Cadastro de organização em breve')}
+            >
+              <Building2 className="h-4 w-4 mr-2" />
+              Nova organização
+            </BUIButton>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border-error-default bg-red-50 p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="size-6 shrink-0 text-red-600" />
+            <div>
+              <p className="text-sm font-medium text-red-800">
+                Não foi possível carregar as organizações
+              </p>
+              {isServerError && (
+                <p className="text-xs text-red-600 mt-1">
+                  O servidor retornou um erro inesperado. Verifique se a API está rodando e tente novamente.
+                </p>
+              )}
+              {!isServerError && (
+                <p className="text-xs text-red-600 mt-1">
+                  {error instanceof Error ? error.message : 'Erro inesperado'}
+                </p>
+              )}
+              <button
+                onClick={() => {
+                  void organizationsQuery.refetch()
+                }}
+                className="mt-3 inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800"
+              >
+                <RefreshCw className="size-3.5" /> Tentar novamente
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -158,38 +211,31 @@ export default function OrganizationsPage({
       </div>
 
       <div className="rounded-2xl border border-border-button-default bg-background-primary-default shadow-sm">
-        <DataGrid
-          aria-label="Organizações"
-          data={organizations}
-          columns={columns}
-          getRowId={(row) => row.tenantId}
-          height={520}
-        />
-      </div>
-
-      {error && (
-        <div className="rounded-xl border border-border-error-default bg-red-50 p-4 shadow-sm">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="size-5 shrink-0 text-red-600" />
-            <div>
-              <p className="text-sm font-medium text-red-800">
-                Não foi possível carregar as organizações
-              </p>
-              {error instanceof Error && error.message.includes('HTTP 500') && (
-                <p className="text-xs text-red-600 mt-1">
-                  O servidor retornou um erro inesperado. Tente novamente em alguns instantes.
-                </p>
-              )}
-              <button
-                onClick={() => {
-                  void organizationsQuery.refetch()
-                }}
-                className="mt-2 inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800"
-              >
-                <RefreshCw className="size-3.5" /> Tentar novamente
-              </button>
+        {isLoading ? (
+          <div className="flex h-[520px] items-center justify-center">
+            <div className="flex flex-col items-center gap-2">
+              <div className="h-8 w-8 rounded-full border-2 border-border border-t-transparent animate-spin" />
+              <p className="text-xs text-muted-foreground">Carregando organizações…</p>
             </div>
           </div>
+        ) : (
+          <DataGrid
+            aria-label="Organizações"
+            data={organizations}
+            columns={columns}
+            getRowId={(row) => row.tenantId}
+            height={520}
+          />
+        )}
+      </div>
+
+      {!isLoading && organizations.length === 0 && (
+        <div className="flex h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-background-secondary p-8 text-center">
+          <Building2 className="mb-2 size-6 text-muted-foreground/40" />
+          <p className="text-sm font-medium text-muted-foreground">Nenhuma organização cadastrada</p>
+          <p className="mt-1 text-xs text-muted-foreground/70">
+            Ainda não há organizações no sistema.
+          </p>
         </div>
       )}
     </div>
