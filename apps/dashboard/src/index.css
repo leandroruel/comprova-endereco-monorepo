@@ -60,6 +60,63 @@
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
+/* Dark theme values for the app-level tokens.
+ *
+ * The Board UI tokens in `styles/theme.css` already flip under `.dark`; these
+ * are the shadcn-style tokens declared above, which the dashboard shell and
+ * the older pages use (`bg-background`, `bg-card`, `text-muted-foreground`, …).
+ * Keeping both in sync means the theme toggle restyles every screen, not just
+ * the Board UI components. */
+.dark {
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-card: #121212;
+  --color-card-foreground: #fafafa;
+  --color-popover: #171717;
+  --color-popover-foreground: #fafafa;
+  --color-primary: #fafafa;
+  --color-primary-foreground: #18181b;
+  --color-secondary: #1f1f1f;
+  --color-secondary-foreground: #fafafa;
+  --color-muted: #1f1f1f;
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #262626;
+  --color-accent-foreground: #fafafa;
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #18181b;
+  --color-border: #27272a;
+  --color-input: #3f3f46;
+  --color-ring: #d4d4d8;
+  --color-sidebar: #0f0f0f;
+  --color-sidebar-foreground: #fafafa;
+  --color-sidebar-accent: #1c1c20;
+  --color-sidebar-border: #27272a;
+  --color-sidebar-muted: #71717a;
+
+  /* Status ramps: the 50/100 steps are used as badge/chart surfaces and the
+   * 600–800 steps as their text, so both ends need a dark counterpart. */
+  --color-emerald-50: #052e22;
+  --color-emerald-100: #064e3b;
+  --color-emerald-600: #34d399;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+  --color-amber-50: #2a1d05;
+  --color-amber-100: #3f2d0a;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-red-50: #2a0b0b;
+  --color-red-100: #3f1010;
+  --color-red-600: #f87171;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+  --color-blue-50: #0a1a2e;
+  --color-blue-100: #10263f;
+  --color-blue-600: #60a5fa;
+  --color-blue-700: #93c5fd;
+  --color-blue-800: #bfdbfe;
+}
+
 * {
   border-color: var(--color-border);
 }

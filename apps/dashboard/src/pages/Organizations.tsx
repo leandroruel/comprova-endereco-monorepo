@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   useTable,
@@ -15,7 +15,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { getOrganizations, type OrganizationDto } from '@/api/client'
-import { DashboardLayout } from '@/components/layout'
+import type { SessionUser } from '@/api/auth'
 import {
   BUIBadge,
   BUIButton,
@@ -59,81 +59,76 @@ const features = tableFeatures({
   paginatedRowModel: createPaginatedRowModel(),
 })
 
-const columnDefs = useMemo<ColumnDef<typeof features, OrganizationDto>[]>(
-  () => [
-    {
-      accessorKey: 'tenantId',
-      header: 'ID',
-      cell: ({ row }) => {
-        const value = row.getValue<string>('tenantId')
-        return (
-          <span className="font-mono text-xs text-muted-foreground">{String(value ?? '').slice(0, 8)}…</span>
-        )
-      },
+const columnDefs: ColumnDef<typeof features, OrganizationDto>[] = [
+  {
+    accessorKey: 'tenantId',
+    header: 'ID',
+    cell: ({ row }) => {
+      const value = row.getValue<string>('tenantId')
+      return (
+        <span className="font-mono text-xs text-muted-foreground">{String(value ?? '').slice(0, 8)}…</span>
+      )
     },
-    {
-      accessorKey: 'name',
-      header: 'Nome',
-      cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground">{row.getValue<string>('name')}</span>
-      ),
+  },
+  {
+    accessorKey: 'name',
+    header: 'Nome',
+    cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.getValue<string>('name')}</span>,
+  },
+  {
+    accessorKey: 'document',
+    header: 'Documento',
+    cell: ({ row }) => {
+      const value = row.getValue<string | null>('document')
+      return value ? (
+        <span className="font-mono text-xs text-muted-foreground">{value}</span>
+      ) : (
+        <span className="text-xs text-muted-foreground/50">—</span>
+      )
     },
-    {
-      accessorKey: 'document',
-      header: 'Documento',
-      cell: ({ row }) => {
-        const value = row.getValue<string | null>('document')
-        return value ? (
-          <span className="font-mono text-xs text-muted-foreground">{value}</span>
-        ) : (
-          <span className="text-xs text-muted-foreground/50">—</span>
-        )
-      },
+  },
+  {
+    accessorKey: 'createdAt',
+    header: 'Criado em',
+    cell: ({ row }) => (
+      <span className="text-xs text-muted-foreground">
+        {new Date(String(row.getValue<string>('createdAt'))).toLocaleDateString('pt-BR')}
+      </span>
+    ),
+  },
+  {
+    accessorKey: 'status',
+    header: 'Status',
+    cell: ({ row }) => {
+      const status = String(row.getValue<string>('status') ?? '')
+      return (
+        <BUIBadge color="neutral" className={STATUS_CLASS[status] ?? ''}>
+          {STATUS_LABELS[status] ?? status}
+        </BUIBadge>
+      )
     },
-    {
-      accessorKey: 'createdAt',
-      header: 'Criado em',
-      cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground">
-          {new Date(String(row.getValue<string>('createdAt'))).toLocaleDateString('pt-BR')}
-        </span>
-      ),
+  },
+  {
+    id: 'actions',
+    header: 'Ações',
+    cell: ({ row }) => {
+      const org = row.original
+      return (
+        <div className="flex items-center gap-2">
+          <BUIButton
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              alert(`Organização: ${org.name}\nID: ${org.tenantId}\nStatus: ${org.status}`)
+            }}
+          >
+            Ver
+          </BUIButton>
+        </div>
+      )
     },
-    {
-      accessorKey: 'status',
-      header: 'Status',
-      cell: ({ row }) => {
-        const status = String(row.getValue<string>('status') ?? '')
-        return (
-          <BUIBadge color="neutral" className={STATUS_CLASS[status] ?? ''}>
-            {STATUS_LABELS[status] ?? status}
-          </BUIBadge>
-        )
-      },
-    },
-    {
-      id: 'actions',
-      header: 'Ações',
-      cell: ({ row }) => {
-        const org = row.original
-        return (
-          <div className="flex items-center gap-2">
-            <BUIButton
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                alert(`Organização: ${org.name}\nID: ${org.tenantId}\nStatus: ${org.status}`)
-              }}
-            >
-              Ver
-            </BUIButton>
-          </div>
-        )
-      },
-    },
-  ],
-  [],
-)
+  },
+]
 
 function StatCard({
   icon,
@@ -168,10 +163,21 @@ function StatCard({
   )
 }
 
-export default function OrganizationsPage() {
+export default function OrganizationsPage({
+  user,
+  onNavigate,
+}: {
+  user?: SessionUser
+  onNavigate?: (page: string) => void
+}) {
   const [search, setSearch] = useState('')
   const [pageIndex, setPageIndex] = useState(0)
   const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }])
+  const [userRole, setUserRole] = useState<string>('user')
+
+  useEffect(() => {
+    setUserRole(user?.role ?? 'user')
+  }, [user?.role])
 
   const {
     data: organizations = [],
@@ -229,12 +235,11 @@ export default function OrganizationsPage() {
   }, [])
 
   return (
-    <DashboardLayout activePage="organizations">
-      <div className="space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Organizações</h1>
-            <p className="text-sm text-muted-foreground">Gerencie as organizações do sistema</p>
+    <div className="space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Organizações</h1>
+          <p className="text-sm text-muted-foreground">Gerencie as organizações do sistema</p>
           </div>
 
           <div className="flex items-center gap-2 w-full lg:w-auto">
@@ -283,39 +288,35 @@ export default function OrganizationsPage() {
 
         <div className="rounded-xl border border-border bg-card shadow-sm">
           <div className="overflow-auto">
-            <BUITable size="md">
+            <BUITable aria-label="Organizações" size="md">
               <BUITableHeader>
-                <BUITableRow>
-                  {table.getHeaderGroups().flatMap((group) =>
-                    group.headers.map((header) => (
-                      <BUITableColumn
-                        key={header.id}
-                        onClick={() => {
-                          if (header.column.getCanSort()) {
-                            header.column.toggleSorting()
-                          }
-                        }}
-                        className={cn(
-                          'cursor-pointer font-medium select-none',
-                          header.column.getCanSort() ? 'hover:bg-accent/50' : undefined,
-                        )}
-                        data-sorted={
-                          header.column.getIsSorted()
-                            ? header.column.getIsSorted() === 'desc'
-                              ? 'desc'
-                              : 'asc'
-                            : undefined
+                {table.getHeaderGroups().flatMap((group) =>
+                  group.headers.map((header) => (
+                    <BUITableColumn
+                      key={header.id}
+                      isRowHeader={header.index === 0}
+                      onClick={() => {
+                        if (header.column.getCanSort()) {
+                          header.column.toggleSorting()
                         }
-                      >
-                        <BUITableCell className="font-medium">
-                          {flexRender(header.column.columnDef.header, header.getContext())}
-                          {header.column.getIsSorted() &&
-                            (header.column.getIsSorted() === 'desc' ? ' ▼' : ' ▲')}
-                        </BUITableCell>
-                      </BUITableColumn>
-                    )),
-                  )}
-                </BUITableRow>
+                      }}
+                      className={cn(
+                        'cursor-pointer font-medium select-none',
+                        header.column.getCanSort() ? 'hover:bg-accent/50' : undefined,
+                      )}
+                      data-sorted={
+                        header.column.getIsSorted()
+                          ? header.column.getIsSorted() === 'desc'
+                            ? 'desc'
+                            : 'asc'
+                          : undefined
+                      }
+                    >
+                      {flexRender(header.column.columnDef.header, header.getContext())}
+                      {header.column.getIsSorted() && (header.column.getIsSorted() === 'desc' ? ' ▼' : ' ▲')}
+                    </BUITableColumn>
+                  )),
+                )}
               </BUITableHeader>
               <BUITableBody>
                 {pageData.map((row) => (
@@ -361,6 +362,5 @@ export default function OrganizationsPage() {
           </p>
         )}
       </div>
-    </DashboardLayout>
   )
 }

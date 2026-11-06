@@ -6,7 +6,7 @@ import { BoardUIThemeProvider } from '@/components/ui/boardui-theme-provider'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BoardUIThemeProvider defaultDark={false}>
+    <BoardUIThemeProvider defaultDark>
       <App />
     </BoardUIThemeProvider>
   </StrictMode>,
