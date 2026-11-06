@@ -9,13 +9,18 @@ function authHeaders(): HeadersInit {
 
 /** Faz uma requisição à API e lança em caso de erro HTTP. */
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers: HeadersInit = {
+    ...authHeaders(),
+    ...init.headers,
+  }
+  // Somente envia Content-Type quando há corpo na requisição.
+  if (init.body === undefined) {
+    delete headers['Content-Type']
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include',
-    headers: {
-      ...authHeaders(),
-      ...init.headers,
-    },
+    headers,
   })
   if (!res.ok) {
     const problem = (await res.json().catch(() => ({}))) as {
@@ -233,9 +238,15 @@ export async function createApiKey(body: {
   }
   secret: string
 }> {
-  return apiRequest('/m2m/api-keys', {
+  const query = new URLSearchParams({ tenantId: body.tenantId })
+  return apiRequest(`/m2m/api-keys?${query.toString()}`, {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      name: body.name,
+      scopes: body.scopes,
+      keyType: body.keyType,
+      expiresInDays: body.expiresInDays,
+    }),
   })
 }
 
@@ -259,8 +270,8 @@ export async function listApiKeys(tenantId: string): Promise<{
 
 /** DELETE /m2m/api-keys/:apiKeyId — revoga uma credencial M2M. */
 export async function revokeApiKey(tenantId: string, apiKeyId: string): Promise<{ revoked: boolean }> {
-  return apiRequest(`/m2m/api-keys/${apiKeyId}`, {
+  const query = new URLSearchParams({ tenantId })
+  return apiRequest(`/m2m/api-keys/${apiKeyId}?${query.toString()}`, {
     method: 'DELETE',
-    body: JSON.stringify({ tenantId }),
   })
 }

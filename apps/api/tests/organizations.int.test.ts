@@ -85,13 +85,16 @@ const injectWithSession = async (
   body?: unknown,
   sessionCookie: string = ownerSessionCookie,
 ) => {
+  const headers: Record<string, string> = {
+    Cookie: `better-auth.session_token=${sessionCookie}`,
+  }
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
   return app.inject({
     method,
     url,
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: `better-auth.session_token=${sessionCookie}`,
-    },
+    headers,
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
 }
@@ -326,9 +329,8 @@ describe('Verifier M2M Integration', () => {
   it('deve criar uma credencial M2M e retornar o segredo apenas na criação', async () => {
     const res = await injectWithSession(
       'POST',
-      `/v1/m2m/api-keys`,
+      `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
       {
-        tenantId: orgTenantId,
         name: 'Chave M2M Teste',
         scopes: ['validate:read', 'validate:write', 'verify:m2m'],
         keyType: 'm2m',
@@ -366,8 +368,8 @@ describe('Verifier M2M Integration', () => {
   it('deve revogar uma credencial M2M', async () => {
     const createRes = await injectWithSession(
       'POST',
-      `/v1/m2m/api-keys`,
-      { tenantId: orgTenantId, name: 'Chave para Revogar', keyType: 'm2m' },
+      `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
+      { name: 'Chave para Revogar', keyType: 'm2m' },
       ownerSessionCookie,
     )
     expect(createRes.statusCode).toBe(201)
@@ -375,8 +377,8 @@ describe('Verifier M2M Integration', () => {
 
     const revokeRes = await injectWithSession(
       'DELETE',
-      `/v1/m2m/api-keys/${keyId}`,
-      { tenantId: orgTenantId },
+      `/v1/m2m/api-keys/${keyId}?tenantId=${orgTenantId}`,
+      undefined,
       ownerSessionCookie,
     )
     expect(revokeRes.statusCode).toBe(200)
@@ -385,8 +387,8 @@ describe('Verifier M2M Integration', () => {
     // Tenta revogar novamente (já revogada)
     const revokeAgain = await injectWithSession(
       'DELETE',
-      `/v1/m2m/api-keys/${keyId}`,
-      { tenantId: orgTenantId },
+      `/v1/m2m/api-keys/${keyId}?tenantId=${orgTenantId}`,
+      undefined,
       ownerSessionCookie,
     )
     expect(revokeAgain.statusCode).toBe(404)
@@ -395,8 +397,8 @@ describe('Verifier M2M Integration', () => {
   it('não deve permitir acesso a credenciais inexistentes', async () => {
     const res = await injectWithSession(
       'DELETE',
-      '/v1/m2m/api-keys/00000000-0000-4000-8000-000000000000',
-      { tenantId: orgTenantId },
+      '/v1/m2m/api-keys/00000000-0000-4000-8000-000000000000?tenantId=' + orgTenantId,
+      undefined,
       ownerSessionCookie,
     )
     expect(res.statusCode).toBe(404)

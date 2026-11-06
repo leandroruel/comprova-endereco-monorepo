@@ -25,6 +25,10 @@ export const API_SCOPES = {
   validateWrite: 'validate:write',
   keysWrite: 'keys:write',
   verifyM2m: 'verify:m2m',
+  holderRead: 'holders:read',
+  holderWrite: 'holders:write',
+  kycRead: 'kyc:read',
+  kycWrite: 'kyc:write',
 } as const
 
 export type ApiScope = (typeof API_SCOPES)[keyof typeof API_SCOPES]
@@ -43,7 +47,15 @@ export const ALL_API_SCOPES: readonly string[] = Object.values(API_SCOPES)
  */
 export const SCOPES_BY_KEY_TYPE: Record<'user' | 'm2m', readonly string[]> = {
   user: [API_SCOPES.validateRead, API_SCOPES.validateWrite, API_SCOPES.keysWrite],
-  m2m: [API_SCOPES.validateRead, API_SCOPES.validateWrite, API_SCOPES.verifyM2m],
+  m2m: [
+    API_SCOPES.validateRead,
+    API_SCOPES.validateWrite,
+    API_SCOPES.verifyM2m,
+    API_SCOPES.holderRead,
+    API_SCOPES.holderWrite,
+    API_SCOPES.kycRead,
+    API_SCOPES.kycWrite,
+  ],
 } as const
 
 /**
@@ -231,3 +243,88 @@ export const requireReadScope = requireScope(API_SCOPES.validateRead)
 export const requireWriteScope = requireScope(API_SCOPES.validateWrite)
 export const requireKeysWriteScope = requireScope(API_SCOPES.keysWrite)
 export const requireVerifyM2mScope = requireScope(API_SCOPES.verifyM2m)
+
+/**
+ * Exige autenticação por sessão de usuário (dashboard) OU por credencial de
+ * consumo M2M (Bearer token).
+ *
+ * Ao contrário de `requireSessionOrM2MVerify`, este middleware NÃO aceita
+ * chaves do tipo `user` via Bearer. Chaves `user` só podem ser usadas com
+ * sessão de usuário autenticada (dashboad), jamais como credencial Bearer
+ * para acessar endpoints Holder/KYC.
+ *
+ * Política:
+ * - Sessão de usuário autenticada: aceita (o contexto de tenant já foi
+ *   resolvido por `requireSessionOrM2MVerify`).
+ * - Chave M2M via Bearer: aceita apenas se tiver `keyType = 'm2m'` e o
+ *   escopo `verify:m2m` (exclusivo de chaves M2M).
+ * - Chave user via Bearer: rejeitada com 403, mesmo que possua scopes
+ *   funcionais de Holder/KYC.
+ */
+export const requireSessionOrM2M =
+  (_db?: Db) =>
+  async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
+    // Sessão de usuário autenticada: já foi autenticada pelo middleware de
+    // sessão e o contexto de tenant já foi resolvido por
+    // requireSessionOrM2MVerify (ou similar).
+    if (request.sessionUser !== undefined) {
+      return
+    }
+
+    // Sem sessão: aceita apenas credencial M2M via Bearer.
+    const tenant = request.tenant
+    if (tenant === undefined) {
+      return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+    }
+
+    // Chave M2M: exige verify:m2m (exclusivo de chaves M2M).
+    if (tenant.keyType === 'm2m') {
+      if (!tenant.scopes.includes(API_SCOPES.verifyM2m)) {
+        return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+      }
+      return
+    }
+
+    // Chave user via Bearer NÃO é aceita para Holder/KYC, mesmo com scopes
+    // funcionais.
+    if (tenant.keyType === 'user') {
+      return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+    }
+
+    // Tipo de chave desconhecido.
+    return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+  }
+
+/**
+ * Exige que o tenantId informado via query string corresponda ao tenant
+ * resolvido pelo contexto de autenticação.
+ *
+ * Isso impede que uma requisição envie um tenantId diferente daquele
+ * pertencente à credencial autenticada, evitando confusão ou tentativas de
+ * acesso a recursos de outro tenant por meio de parâmetros inconsistentes.
+ *
+ * Aplica-se apenas quando há tenantId na query string E um tenant autenticado.
+ * Caso contrário, não há o que validar e a requisição prossegue.
+ */
+export const requireTenantMatch = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply | void> => {
+  const query = request.query as Record<string, string | string[] | undefined>
+  const rawTenantId = query.tenantId
+  const queryTenantId = Array.isArray(rawTenantId) ? rawTenantId[0] : rawTenantId
+
+  // Não há tenantId na query string: nada a validar.
+  if (!queryTenantId || typeof queryTenantId !== 'string') {
+    return
+  }
+
+  const tenant = request.tenant
+  if (tenant === undefined) {
+    return reply.code(401).type(PROBLEM_CONTENT_TYPE).send(problems.unauthorized())
+  }
+
+  if (tenant.tenantId.toLowerCase() !== queryTenantId.toLowerCase()) {
+    return reply.code(403).type(PROBLEM_CONTENT_TYPE).send(problems.forbidden())
+  }
+}

@@ -24,6 +24,8 @@ import { apiKey, tenant } from './tenancy.js'
 import { organizationInvitation, organizationMember } from './organizations.js'
 import { auditLog, usageEvent } from './usage.js'
 import { validation, validationIdempotency } from './validations.js'
+import { holder } from './holder.js'
+import { kycProcess, kycEvent } from './kyc.js'
 
 export * from './enums.js'
 export * from './tenancy.js'
@@ -43,6 +45,8 @@ export * from './evidence-verification.js'
 export * from './events.js'
 export * from './usage.js'
 export * from './batches.js'
+export * from './holder.js'
+export * from './kyc.js'
 
 /**
  * Mapa canônico de tabelas para o Drizzle (`drizzle(client, { schema })`) e
@@ -91,6 +95,9 @@ export const schema = {
   webhookDelivery,
   usageEvent,
   auditLog,
+  holder,
+  kycProcess,
+  kycEvent,
   batch,
   batchItem,
 } as const
