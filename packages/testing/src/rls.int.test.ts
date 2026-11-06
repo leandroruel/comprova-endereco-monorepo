@@ -141,3 +141,218 @@ describe('RLS multi-tenant isolation', () => {
     ).rejects.toThrow()
   })
 })
+
+describe('RLS Holder/KYC isolation (app_user)', () => {
+  const newHolder = (tenantId: string) => ({
+    holderId: randomUUID(),
+    tenantId,
+    externalReference: `ext-${randomUUID()}`,
+    name: 'Titular Teste',
+    documentHash: 'a'.repeat(64),
+    documentType: 'CPF' as const,
+  })
+
+  it('consulta sem contexto de tenant não retorna holders', async () => {
+    await withTenant(appPool.db, tenantA, (tx) => tx.insert(t.holder).values(newHolder(tenantA)))
+    const noTenant = await appPool.db.select({ holderId: t.holder.holderId }).from(t.holder)
+    expect(noTenant).toHaveLength(0)
+  })
+
+  it('bloqueia insert de holder sem contexto de tenant', async () => {
+    await expect(appPool.db.insert(t.holder).values(newHolder(tenantA))).rejects.toThrow()
+  })
+
+  it('bloqueia insert de holder de tenant diferente do contexto', async () => {
+    await expect(
+      withTenant(appPool.db, tenantA, (tx) => tx.insert(t.holder).values(newHolder(tenantB))),
+    ).rejects.toThrow()
+  })
+
+  it('tenant A acessa seus holders e não enxerga os do tenant B', async () => {
+    const holderA = await withTenant(appPool.db, tenantA, async (tx) => {
+      const v = newHolder(tenantA)
+      await tx.insert(t.holder).values(v)
+      return v.holderId
+    })
+    const holderB = await withTenant(appPool.db, tenantB, async (tx) => {
+      const v = newHolder(tenantB)
+      await tx.insert(t.holder).values(v)
+      return v.holderId
+    })
+    expect(holderA).not.toBe(holderB)
+
+    const asA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.select({ holderId: t.holder.holderId }).from(t.holder),
+    )
+    const asB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ holderId: t.holder.holderId }).from(t.holder),
+    )
+
+    expect(asA.map((r) => r.holderId)).toContain(holderA)
+    expect(asA.map((r) => r.holderId)).not.toContain(holderB)
+    expect(asB.map((r) => r.holderId)).toContain(holderB)
+    expect(asB.map((r) => r.holderId)).not.toContain(holderA)
+  })
+
+  it('tenant A não atualiza nem exclui holder do tenant B', async () => {
+    const holderB = await withTenant(appPool.db, tenantB, async (tx) => {
+      const v = newHolder(tenantB)
+      await tx.insert(t.holder).values(v)
+      return v.holderId
+    })
+
+    const updated = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.update(t.holder).set({ name: 'alterado' }).where(eq(t.holder.holderId, holderB)),
+    )
+    expect(updated).toHaveLength(0)
+
+    const deleted = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.delete(t.holder).where(eq(t.holder.holderId, holderB)),
+    )
+    expect(deleted).toHaveLength(0)
+  })
+
+  it('processo KYC: tenant B não acessa processo do tenant A', async () => {
+    const holderA = await withTenant(appPool.db, tenantA, async (tx) => {
+      const v = newHolder(tenantA)
+      await tx.insert(t.holder).values(v)
+      return v.holderId
+    })
+    const kycId = await withTenant(appPool.db, tenantA, async (tx) => {
+      const id = randomUUID()
+      await tx.insert(t.kycProcess).values({
+        kycProcessId: id,
+        holderId: holderA,
+        tenantId: tenantA,
+        state: 'pending',
+        legalBasis: 'CONSENT',
+      })
+      return id
+    })
+
+    const fromB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx
+        .select({ kycProcessId: t.kycProcess.kycProcessId })
+        .from(t.kycProcess)
+        .where(eq(t.kycProcess.kycProcessId, kycId)),
+    )
+    expect(fromB).toHaveLength(0)
+
+    const fromA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx
+        .select({ kycProcessId: t.kycProcess.kycProcessId })
+        .from(t.kycProcess)
+        .where(eq(t.kycProcess.kycProcessId, kycId)),
+    )
+    expect(fromA).toHaveLength(1)
+  })
+
+  it('evento KYC: insert de tenant diferente do contexto é rejeitado', async () => {
+    const holderA = await withTenant(appPool.db, tenantA, async (tx) => {
+      const v = newHolder(tenantA)
+      await tx.insert(t.holder).values(v)
+      return v.holderId
+    })
+    const kycId = await withTenant(appPool.db, tenantA, async (tx) => {
+      const id = randomUUID()
+      await tx.insert(t.kycProcess).values({
+        kycProcessId: id,
+        holderId: holderA,
+        tenantId: tenantA,
+        state: 'pending',
+        legalBasis: 'CONSENT',
+      })
+      return id
+    })
+
+    await expect(
+      withTenant(appPool.db, tenantA, (tx) =>
+        tx.insert(t.kycEvent).values({
+          kycEventId: randomUUID(),
+          kycProcessId: kycId,
+          tenantId: tenantB,
+          eventType: 'created',
+          toState: 'pending',
+          actor: 'test',
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('evento KYC: imutabilidade (sem update/delete) preservada', async () => {
+    const holderA = await withTenant(appPool.db, tenantA, async (tx) => {
+      const v = newHolder(tenantA)
+      await tx.insert(t.holder).values(v)
+      return v.holderId
+    })
+    const kycId = await withTenant(appPool.db, tenantA, async (tx) => {
+      const id = randomUUID()
+      await tx.insert(t.kycProcess).values({
+        kycProcessId: id,
+        holderId: holderA,
+        tenantId: tenantA,
+        state: 'pending',
+        legalBasis: 'CONSENT',
+      })
+      return id
+    })
+    const eventId = await withTenant(appPool.db, tenantA, async (tx) => {
+      const id = randomUUID()
+      await tx.insert(t.kycEvent).values({
+        kycEventId: id,
+        kycProcessId: kycId,
+        tenantId: tenantA,
+        eventType: 'created',
+        toState: 'pending',
+        actor: 'test',
+      })
+      return id
+    })
+
+    await expect(
+      withTenant(appPool.db, tenantA, (tx) =>
+        tx.update(t.kycEvent).set({ actor: 'hacker' }).where(eq(t.kycEvent.kycEventId, eventId)),
+      ),
+    ).rejects.toThrow()
+
+    await expect(
+      withTenant(appPool.db, tenantA, (tx) =>
+        tx.delete(t.kycEvent).where(eq(t.kycEvent.kycEventId, eventId)),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('evento KYC: tenant B não acessa eventos do tenant A', async () => {
+    const holderA = await withTenant(appPool.db, tenantA, async (tx) => {
+      const v = newHolder(tenantA)
+      await tx.insert(t.holder).values(v)
+      return v.holderId
+    })
+    const kycId = await withTenant(appPool.db, tenantA, async (tx) => {
+      const id = randomUUID()
+      await tx.insert(t.kycProcess).values({
+        kycProcessId: id,
+        holderId: holderA,
+        tenantId: tenantA,
+        state: 'pending',
+        legalBasis: 'CONSENT',
+      })
+      return id
+    })
+    await withTenant(appPool.db, tenantA, (tx) =>
+      tx.insert(t.kycEvent).values({
+        kycEventId: randomUUID(),
+        kycProcessId: kycId,
+        tenantId: tenantA,
+        eventType: 'created',
+        toState: 'pending',
+        actor: 'test',
+      }),
+    )
+
+    const fromB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ kycEventId: t.kycEvent.kycEventId }).from(t.kycEvent),
+    )
+    expect(fromB).toHaveLength(0)
+  })
+})

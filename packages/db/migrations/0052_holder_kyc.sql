@@ -26,6 +26,13 @@ CREATE INDEX idx_holder_tenant ON holder (tenant_id);
 CREATE INDEX idx_holder_document_hash ON holder (tenant_id, document_hash);
 GRANT SELECT, INSERT, UPDATE, DELETE ON holder TO app_user;
 
+-- RLS para isolamento por tenant na tabela holder
+ALTER TABLE holder ENABLE ROW LEVEL SECURITY;
+ALTER TABLE holder FORCE ROW LEVEL SECURITY;
+CREATE POLICY holder_tenant_isolation ON holder
+  USING (tenant_id = app_tenant_id())
+  WITH CHECK (tenant_id = app_tenant_id());
+
 -- AVISO DE SEGURANÇA: document_hash armazena um HMAC-SHA-256 (não SHA-256
 -- simples) do CPF/CNPJ com um segredo protegido derivado POR TENANT.
 --
@@ -76,6 +83,13 @@ CREATE INDEX idx_kyc_process_tenant ON kyc_process (tenant_id);
 CREATE INDEX idx_kyc_process_state ON kyc_process (state);
 GRANT SELECT, INSERT, UPDATE, DELETE ON kyc_process TO app_user;
 
+-- RLS para isolamento por tenant na tabela kyc_process
+ALTER TABLE kyc_process ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kyc_process FORCE ROW LEVEL SECURITY;
+CREATE POLICY kyc_process_tenant_isolation ON kyc_process
+  USING (tenant_id = app_tenant_id())
+  WITH CHECK (tenant_id = app_tenant_id());
+
 -- Eventos de auditoria para transições de estado e operações de KYC.
 -- Cada transição de estado gera um evento imutável, permitindo rastrear quem
 -- alterou o estado, quando e por quê.
@@ -99,3 +113,10 @@ CREATE INDEX idx_kyc_event_process ON kyc_event (kyc_process_id);
 CREATE INDEX idx_kyc_event_tenant ON kyc_event (tenant_id);
 CREATE INDEX idx_kyc_event_created_at ON kyc_event (created_at);
 GRANT SELECT, INSERT ON kyc_event TO app_user;
+
+-- RLS para isolamento por tenant na tabela kyc_event
+ALTER TABLE kyc_event ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kyc_event FORCE ROW LEVEL SECURITY;
+CREATE POLICY kyc_event_tenant_isolation ON kyc_event
+  USING (tenant_id = app_tenant_id())
+  WITH CHECK (tenant_id = app_tenant_id());

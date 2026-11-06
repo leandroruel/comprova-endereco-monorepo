@@ -1705,3 +1705,236 @@ describe('M2M API Key - listApiKeys Autorização', () => {
     expect([401, 403]).toContain(res.statusCode)
   })
 })
+
+describe('M2M API Keys - compatibilidade tenantId body vs query', () => {
+  const setupOrg = async (email: string) => {
+    await signUp(email, 'SenhaForte123!', 'Usuario BodyQuery')
+    const cookie = await loginAndGetCookie(email, 'SenhaForte123!')
+    const tenantId = await createOrganization(cookie, 'Org BodyQuery', email)
+    return { cookie, tenantId }
+  }
+
+  const createKeyViaSession = async (
+    cookie: string,
+    tenantId: string,
+    body: unknown,
+    queryTenantId?: string,
+  ) => {
+    const url =
+      queryTenantId === undefined ? `/v1/m2m/api-keys` : `/v1/m2m/api-keys?tenantId=${queryTenantId}`
+    return injectWithSession('POST', url, body, cookie)
+  }
+
+  const revokeKeyViaSession = async (
+    cookie: string,
+    tenantId: string,
+    apiKeyId: string,
+    body: unknown,
+    queryTenantId?: string,
+  ) => {
+    const url =
+      queryTenantId === undefined
+        ? `/v1/m2m/api-keys/${apiKeyId}`
+        : `/v1/m2m/api-keys/${apiKeyId}?tenantId=${queryTenantId}`
+    return injectWithSession('DELETE', url, body, cookie)
+  }
+
+  it('POST com tenantId somente no body é aceito (201)', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery@exemplo.com')
+
+    const res = await createKeyViaSession(cookie, tenantId, {
+      tenantId,
+      name: 'Chave Body',
+      scopes: ['validate:read'],
+      keyType: 'm2m',
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().apiKey.tenantId).toBe(tenantId)
+  })
+
+  it('POST com tenantId somente na query é aceito (201)', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery2@exemplo.com')
+
+    const res = await createKeyViaSession(
+      cookie,
+      tenantId,
+      {
+        name: 'Chave Query',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      tenantId,
+    )
+    expect(res.statusCode).toBe(201)
+    expect(res.json().apiKey.tenantId).toBe(tenantId)
+  })
+
+  it('POST com tenantId equivalente no body e na query é aceito (201)', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery3@exemplo.com')
+
+    const res = await createKeyViaSession(
+      cookie,
+      tenantId,
+      {
+        tenantId,
+        name: 'Chave Ambos',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      tenantId,
+    )
+    expect(res.statusCode).toBe(201)
+  })
+
+  it('POST com tenantId divergente no body e na query responde 400', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery4@exemplo.com')
+
+    const outroTenantId = await createOrganization(cookie, 'Org Outro', 'bodyquery4@exemplo.com')
+    const res = await createKeyViaSession(
+      cookie,
+      tenantId,
+      {
+        tenantId: outroTenantId,
+        name: 'Chave Divergente',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      tenantId,
+    )
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('POST sem tenantId nem no body nem na query responde 400', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery5@exemplo.com')
+
+    const res = await createKeyViaSession(cookie, tenantId, {
+      name: 'Chave Sem Tenant',
+      scopes: ['validate:read'],
+      keyType: 'm2m',
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('POST com tenantId inválido responde 400', async () => {
+    const { cookie } = await setupOrg('bodyquery6@exemplo.com')
+
+    const res = await createKeyViaSession(cookie, '', {
+      tenantId: 'nao-e-um-uuid',
+      name: 'Chave Invalida',
+      scopes: ['validate:read'],
+      keyType: 'm2m',
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('DELETE com tenantId somente no body é aceito (200)', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery7@exemplo.com')
+
+    const createRes = await createKeyViaSession(
+      cookie,
+      tenantId,
+      {
+        name: 'Chave Para Revogar Body',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      tenantId,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const apiKeyId = createRes.json().apiKey.apiKeyId
+
+    const res = await revokeKeyViaSession(cookie, tenantId, apiKeyId, { tenantId })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().revoked).toBe(true)
+  })
+
+  it('DELETE com tenantId somente na query é aceito (200)', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery8@exemplo.com')
+
+    const createRes = await createKeyViaSession(
+      cookie,
+      tenantId,
+      {
+        name: 'Chave Para Revogar Query',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      tenantId,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const apiKeyId = createRes.json().apiKey.apiKeyId
+
+    const res = await revokeKeyViaSession(cookie, tenantId, apiKeyId, undefined, tenantId)
+    expect(res.statusCode).toBe(200)
+    expect(res.json().revoked).toBe(true)
+  })
+
+  it('DELETE com tenantId divergente no body e na query responde 400', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery9@exemplo.com')
+
+    const createRes = await createKeyViaSession(
+      cookie,
+      tenantId,
+      {
+        name: 'Chave Divergente Del',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      tenantId,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const apiKeyId = createRes.json().apiKey.apiKeyId
+
+    const outroTenantId = await createOrganization(cookie, 'Org Outro Del', 'bodyquery9@exemplo.com')
+    const res = await revokeKeyViaSession(cookie, tenantId, apiKeyId, { tenantId: outroTenantId }, tenantId)
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('DELETE sem tenantId nem no body nem na query responde 400', async () => {
+    const { cookie, tenantId } = await setupOrg('bodyquery10@exemplo.com')
+
+    const createRes = await createKeyViaSession(
+      cookie,
+      tenantId,
+      {
+        name: 'Chave Sem Tenant Del',
+        scopes: ['validate:read'],
+        keyType: 'm2m',
+      },
+      tenantId,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const apiKeyId = createRes.json().apiKey.apiKeyId
+
+    const res = await revokeKeyViaSession(cookie, tenantId, apiKeyId, undefined)
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('usuário sem membership não pode criar API key (403)', async () => {
+    const { tenantId } = await setupOrg('bodyquery11@exemplo.com')
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+
+    const res = await createKeyViaSession(outroCookie, tenantId, {
+      tenantId,
+      name: 'Chave Sem Membership',
+      scopes: ['validate:read'],
+      keyType: 'm2m',
+    })
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('usuário tentando acessar tenant ao qual não pertence recebe 403', async () => {
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+
+    const tenantIdA = await createOrganization(ownerSessionCookie, 'Org Alvo BodyQuery', 'owner@exemplo.com')
+
+    // outro@exemplo.com não é membro da org A
+    const res = await createKeyViaSession(outroCookie, tenantIdA, {
+      tenantId: tenantIdA,
+      name: 'Chave Invasora',
+      scopes: ['validate:read'],
+      keyType: 'm2m',
+    })
+    expect(res.statusCode).toBe(403)
+  })
+})
