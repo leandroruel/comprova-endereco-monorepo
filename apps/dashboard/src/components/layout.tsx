@@ -3,6 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { cn } from '@/lib/utils'
 import {
   Activity,
+  Building2,
   ChevronRight,
   ChevronsUpDown,
   FileSearch,
@@ -25,6 +26,7 @@ const baseNavItems: readonly NavItem[] = [
 
 const adminNavItems: readonly NavItem[] = [
   { id: 'debug-nf3e-qrcode', label: 'QRCode NF3e debugger', icon: <Activity className="h-4 w-4" /> },
+  { id: 'organizations', label: 'Organizações', icon: <Building2 className="h-4 w-4" /> },
 ]
 
 /** Rótulo do segundo nível do breadcrumb; o Fast path é o default de validações. */
@@ -32,6 +34,7 @@ const PAGE_LABELS: Readonly<Record<string, string>> = {
   validations: 'Fast path',
   bulk: 'Busca em lote',
   'debug-nf3e-qrcode': 'QRCode NF3e debugger',
+  organizations: 'Organizações',
   profile: 'Perfil',
   settings: 'Configurações',
 }

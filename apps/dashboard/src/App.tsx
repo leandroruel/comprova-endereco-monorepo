@@ -4,6 +4,7 @@ import { authClient, type SessionUser } from '@/api/auth'
 import Dashboard from '@/pages/Dashboard'
 import { BulkSearchPage } from '@/pages/BulkSearch'
 import { DebugNf3eQrCodePage } from '@/pages/DebugNf3eQrCode'
+import OrganizationsPage from '@/pages/Organizations'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,8 @@ export default function App() {
         <BulkSearchPage onNavigate={setPage} user={user} />
       ) : page === 'debug-nf3e-qrcode' ? (
         <DebugNf3eQrCodePage onNavigate={setPage} user={user} />
+      ) : page === 'organizations' ? (
+        <OrganizationsPage />
       ) : (
         <Dashboard onNavigate={setPage} />
       )}
