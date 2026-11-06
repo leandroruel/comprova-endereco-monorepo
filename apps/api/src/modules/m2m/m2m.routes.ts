@@ -43,6 +43,7 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
       schema: {
         querystring: z.object({ tenantId: z.string().uuid() }),
         body: z.object({
+          tenantId: z.string().uuid(),
           name: z.string().min(1).max(100),
           scopes: z.array(z.string()).default(['validate:read', 'validate:write']),
           keyType: z.enum(['user', 'm2m']).default('m2m'),
@@ -89,6 +90,7 @@ export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps
       schema: {
         params: ApiKeyIdParams,
         querystring: z.object({ tenantId: z.string().uuid() }),
+        body: z.object({ tenantId: z.string().uuid() }),
         response: {
           200: z.object({ revoked: z.boolean() }),
           403: ProblemSchema,
