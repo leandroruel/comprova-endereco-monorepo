@@ -1,5 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from '@comprova/db'
-import type { DbTx } from '@comprova/db'
+import { and, desc, eq, inArray, isNull, sql, recordUsageEventInTx, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
 import { randomUUID } from 'node:crypto'
@@ -401,33 +400,23 @@ export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Pr
     },
   })
 
-  // Evento de uso (F3.3): idempotente, com rastreamento de faturabilidade.
-  // A tabela `usage_event` é particionada; a unicidade da chave de
-  // idempotência é garantida pela tabela dedicada `usage_event_idempotency`
-  // (não particionada, ADR-0004), dentro da mesma transação.
-  const idempotencyKey = `deep:${write.validationId}`
-  const idemRows = await tx
-    .insert(t.usageEventIdempotency)
-    .values({
-      tenantId: write.tenantId,
-      idempotencyKey,
-      eventId: null,
-    })
-    .onConflictDoNothing()
-    .returning({ idempotencyKey: t.usageEventIdempotency.idempotencyKey })
+  // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
+  // geram uma unidade faturável. Resultados parciais (queued/partial) não
+  // claimam a chave de idempotência de conclusão nem consomem cota — a
+  // conclusão será registrada por esta mesma função quando o deep path de fato
+  // terminar (CodeRabbit k). A cota hard é aplicada a todo evento faturável
+  // dentro da mesma transação (CodeRabbit l).
+  if (write.stillPartial) return
 
-  if (idemRows.length > 0) {
-    await tx.insert(t.usageEvent).values({
-      tenantId: write.tenantId,
-      eventId: randomUUID(),
-      eventType: 'usage_event',
-      kind: 'deep',
-      units: 1,
-      costMicros: null,
-      validationId: write.validationId,
-      idempotencyKey,
-      billable: !write.stillPartial,
-      source: 'deep',
-    })
-  }
+  await recordUsageEventInTx(tx, {
+    tenantId: write.tenantId,
+    eventType: 'usage_event',
+    kind: 'deep',
+    units: 1,
+    costMicros: null,
+    validationId: write.validationId,
+    idempotencyKey: `deep:${write.validationId}`,
+    billable: true,
+    source: 'deep',
+  })
 }

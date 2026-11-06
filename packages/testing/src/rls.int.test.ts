@@ -140,6 +140,78 @@ describe('RLS multi-tenant isolation', () => {
       appPool.db.delete(t.auditLog).where(eq(t.auditLog.auditId, auditId as number)),
     ).rejects.toThrow()
   })
+
+  it('RLS usage_event: isola leitura e escrita entre tenants (app_user)', async () => {
+    await withTenant(appPool.db, tenantA, (tx) =>
+      tx.insert(t.usageEvent).values({
+        eventId: randomUUID(),
+        tenantId: tenantA,
+        eventType: 'usage_event',
+        kind: 'fast',
+        units: 1,
+        billable: true,
+        source: 'fast',
+        occurredAt: new Date(),
+      }),
+    )
+    await withTenant(appPool.db, tenantB, (tx) =>
+      tx.insert(t.usageEvent).values({
+        eventId: randomUUID(),
+        tenantId: tenantB,
+        eventType: 'usage_event',
+        kind: 'deep',
+        units: 1,
+        billable: false,
+        source: 'deep',
+        occurredAt: new Date(),
+      }),
+    )
+
+    const asA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.select({ eventId: t.usageEvent.eventId }).from(t.usageEvent),
+    )
+    const asB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ eventId: t.usageEvent.eventId }).from(t.usageEvent),
+    )
+    expect(asA.map((r) => r.eventId)).toHaveLength(1)
+    expect(asB.map((r) => r.eventId)).toHaveLength(1)
+  })
+
+  it('RLS usage_event: bloqueia insert com tenant incompatível ao contexto', async () => {
+    await expect(
+      withTenant(appPool.db, tenantA, (tx) =>
+        tx.insert(t.usageEvent).values({
+          eventId: randomUUID(),
+          tenantId: tenantB, // tenant diferente do contexto (tenantA)
+          eventType: 'usage_event',
+          kind: 'fast',
+          units: 1,
+          billable: true,
+          source: 'fast',
+          occurredAt: new Date(),
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('RLS usage_event_idempotency: isola leitura e escrita entre tenants', async () => {
+    const key = 'idem-rls-' + randomUUID()
+    await withTenant(appPool.db, tenantA, (tx) =>
+      tx.insert(t.usageEventIdempotency).values({
+        tenantId: tenantA,
+        idempotencyKey: key,
+        eventId: null,
+      }),
+    )
+    const asA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.select({ idempotencyKey: t.usageEventIdempotency.idempotencyKey }).from(t.usageEventIdempotency),
+    )
+    const asB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ idempotencyKey: t.usageEventIdempotency.idempotencyKey }).from(t.usageEventIdempotency),
+    )
+    expect(asA.map((r) => r.idempotencyKey)).toContain(key)
+    expect(asB.map((r) => r.idempotencyKey)).not.toContain(key)
+  })
 })
 
 describe('RLS Holder/KYC isolation (app_user)', () => {

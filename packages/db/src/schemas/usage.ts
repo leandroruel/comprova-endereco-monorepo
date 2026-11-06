@@ -6,10 +6,10 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  index,
   text,
   timestamp,
   uuid,
-  uniqueIndex,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import { inet } from './custom-types.js'
@@ -32,7 +32,12 @@ export const usageEvent = pgTable(
     source: text('source'),
   },
   (t) => [
-    uniqueIndex('usage_event_idempotency_key_uq')
+    // Índice de lookup por idempotência (não único: a unicidade global é
+    // garantida pela tabela dedicada `usage_event_idempotency`, não
+    // particionada — veja ADR-0044 item 2). A tabela `usage_event` é
+    // particionada por `occurred_at`, portanto um índice único não pode
+    // abranger colunas que não incluam a chave de partição.
+    index('idx_usage_event_idempotency_key')
       .on(t.tenantId, t.idempotencyKey)
       .where(sql`idempotency_key IS NOT NULL`),
   ],

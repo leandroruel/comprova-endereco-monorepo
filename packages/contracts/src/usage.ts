@@ -24,8 +24,8 @@ export type UsageEventDto = z.infer<typeof UsageEventDtoSchema>
 /** Agregado de consumo por tenant e período. */
 export const UsageConsumptionDtoSchema = z.object({
   tenantId: z.uuid(),
-  periodStart: z.string(),
-  periodEnd: z.string(),
+  periodStart: z.string().datetime(),
+  periodEnd: z.string().datetime(),
   totalEvents: z.number().int(),
   totalUnits: z.number().int(),
   totalBillableUnits: z.number().int(),
@@ -45,8 +45,8 @@ export const UsageQuotaDtoSchema = z.object({
   softThresholdPercent: z.number().nullable(),
   isSoftLimitReached: z.boolean(),
   isHardLimitReached: z.boolean(),
-  periodStart: z.string(),
-  periodEnd: z.string(),
+  periodStart: z.string().datetime(),
+  periodEnd: z.string().datetime(),
 })
 
 export type UsageQuotaDto = z.infer<typeof UsageQuotaDtoSchema>
@@ -54,8 +54,8 @@ export type UsageQuotaDto = z.infer<typeof UsageQuotaDtoSchema>
 /** Resultado de reconciliação de uso. */
 export const UsageReconciliationDtoSchema = z.object({
   tenantId: z.uuid(),
-  periodStart: z.string(),
-  periodEnd: z.string(),
+  periodStart: z.string().datetime(),
+  periodEnd: z.string().datetime(),
   completedValidations: z.number().int(),
   usageEvents: z.number().int(),
   billableEvents: z.number().int(),
@@ -78,8 +78,8 @@ export type UsageReconciliationDto = z.infer<typeof UsageReconciliationDtoSchema
 
 /** Parâmetros de consulta de consumo. */
 export const UsageConsumptionQuerySchema = z.object({
-  periodStart: z.string().optional(),
-  periodEnd: z.string().optional(),
+  periodStart: z.string().datetime().optional(),
+  periodEnd: z.string().datetime().optional(),
 })
 
 export type UsageConsumptionQuery = z.infer<typeof UsageConsumptionQuerySchema>

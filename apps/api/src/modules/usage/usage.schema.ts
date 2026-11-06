@@ -8,14 +8,39 @@ export const UsageConsumptionQuerySchema = z.object({
 
 export type UsageConsumptionQuery = z.infer<typeof UsageConsumptionQuerySchema>
 
+/** Converte uma string de query parameter em número inteiro de forma segura.
+ *
+ * Retorna `NaN` quando inválido, de modo que o `.pipe(z.number()...)` rejeite
+ * com erro de validação (400) em vez de lançar exceção (500).
+ */
+const parseIntParam = (val: string | undefined, fallback: number): number => {
+  if (val === undefined) return fallback
+  const n = Number(val)
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return NaN
+  return n
+}
+
 /** Filtros para listagem de eventos de uso. */
 export const UsageEventsQuerySchema = z.object({
   periodStart: z.string().datetime().optional(),
   periodEnd: z.string().datetime().optional(),
-  billable: z.boolean().optional(),
+  // `z.enum(['true','false'])` aceita apenas essas strings e as converte para
+  // boolean. `z.coerce.boolean()` é EVITADO porque `Boolean("false")` é `true`.
+  billable: z
+    .enum(['true', 'false'] as const)
+    .optional()
+    .transform((val) => val === 'true'),
   eventType: z.string().optional(),
-  limit: z.number().int().min(1).max(100).default(50),
-  offset: z.number().int().min(0).default(0),
+  limit: z
+    .string()
+    .optional()
+    .transform((val) => parseIntParam(val, 50))
+    .pipe(z.number().int().min(1).max(100)),
+  offset: z
+    .string()
+    .optional()
+    .transform((val) => parseIntParam(val, 0))
+    .pipe(z.number().int().min(0)),
 })
 
 export type UsageEventsQuery = z.infer<typeof UsageEventsQuerySchema>

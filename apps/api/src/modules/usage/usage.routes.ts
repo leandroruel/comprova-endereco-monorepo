@@ -1,6 +1,7 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
-import { requireReadScope } from '../../plugins/scope.js'
+import { requireReadScope, requireSessionOrM2MVerify, requireTenantMatch } from '../../plugins/scope.js'
+import type { Db } from '@comprova/db'
 import type { UsageControllerDeps } from './usage.controller.js'
 import { makeUsageController } from './usage.controller.js'
 import {
@@ -12,16 +13,17 @@ import {
   UsageReconciliationResponseSchema,
 } from './usage.schema.js'
 
-export type UsageRoutesDeps = UsageControllerDeps
+export type UsageRoutesDeps = UsageControllerDeps & { readonly db: Db }
 
 export const registerUsageRoutes = (instance: FastifyInstance, deps: UsageRoutesDeps): void => {
   const app = instance.withTypeProvider<ZodTypeProvider>()
   const controller = makeUsageController(deps)
+  const authSessionOrM2M = requireSessionOrM2MVerify(deps.db)
 
   app.get(
     '/usage/consumption',
     {
-      preHandler: requireReadScope,
+      preHandler: [authSessionOrM2M, requireReadScope, requireTenantMatch],
       schema: {
         querystring: UsageConsumptionQuerySchema,
         response: { 200: UsageConsumptionResponseSchema },
@@ -36,7 +38,7 @@ export const registerUsageRoutes = (instance: FastifyInstance, deps: UsageRoutes
   app.get(
     '/usage/quota',
     {
-      preHandler: requireReadScope,
+      preHandler: [authSessionOrM2M, requireReadScope],
       schema: {
         response: { 200: UsageQuotaResponseSchema },
       },
@@ -50,7 +52,7 @@ export const registerUsageRoutes = (instance: FastifyInstance, deps: UsageRoutes
   app.get(
     '/usage/events',
     {
-      preHandler: requireReadScope,
+      preHandler: [authSessionOrM2M, requireReadScope, requireTenantMatch],
       schema: {
         querystring: UsageEventsQuerySchema,
         response: { 200: UsageEventsResponseSchema },
@@ -65,7 +67,7 @@ export const registerUsageRoutes = (instance: FastifyInstance, deps: UsageRoutes
   app.get(
     '/usage/reconcile',
     {
-      preHandler: requireReadScope,
+      preHandler: [authSessionOrM2M, requireReadScope, requireTenantMatch],
       schema: {
         querystring: UsageConsumptionQuerySchema,
         response: { 200: UsageReconciliationResponseSchema },
