@@ -8,7 +8,7 @@ import { DataGrid, type DataGridColumn } from '@/components/application/data-gri
 import { BUIBadge, BUIButton } from '@/components/ui'
 import { Card, CardContent } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import { Building2, Users, Clock, CircleAlert, FileText } from 'lucide-react'
+import { Building2, Users, Clock, CircleAlert, FileText, AlertTriangle, RefreshCw } from 'lucide-react'
 
 const STATUS_LABELS: Record<string, string> = {
   active: 'Ativo',
@@ -92,15 +92,18 @@ export default function OrganizationsPage({
     setUserRole(user?.role ?? 'user')
   }, [user?.role])
 
+  const organizationsQuery = useQuery({
+    queryKey: ['organizations'],
+    queryFn: getOrganizations,
+    staleTime: 30_000,
+    enabled: !!user,
+  })
+
   const {
     data: organizations = [],
     isLoading,
     error,
-  } = useQuery({
-    queryKey: ['organizations'],
-    queryFn: getOrganizations,
-    staleTime: 30_000,
-  })
+  } = organizationsQuery
 
   const total = organizations.length
   const activeCount = organizations.filter((o) => o.status === 'active').length
@@ -165,9 +168,29 @@ export default function OrganizationsPage({
       </div>
 
       {error && (
-        <p className="text-sm text-destructive">
-          {error instanceof Error ? error.message : 'Erro ao carregar organizações'}
-        </p>
+        <div className="rounded-xl border border-border-error-default bg-red-50 p-4 shadow-sm">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="size-5 shrink-0 text-red-600" />
+            <div>
+              <p className="text-sm font-medium text-red-800">
+                Não foi possível carregar as organizações
+              </p>
+              {error instanceof Error && error.message.includes('HTTP 500') && (
+                <p className="text-xs text-red-600 mt-1">
+                  O servidor retornou um erro inesperado. Tente novamente em alguns instantes.
+                </p>
+              )}
+              <button
+                onClick={() => {
+                  void organizationsQuery.refetch()
+                }}
+                className="mt-2 inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800"
+              >
+                <RefreshCw className="size-3.5" /> Tentar novamente
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
