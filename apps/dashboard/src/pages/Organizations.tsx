@@ -1,9 +1,21 @@
-"use client";
+'use client'
 
-import { useCallback, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getOrganizations, type OrganizationDto } from "@/api/client";
-import { DashboardLayout } from "@/components/layout";
+import { useCallback, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import {
+  useTable,
+  flexRender,
+  tableFeatures,
+  coreFeatures,
+  rowSortingFeature,
+  rowPaginationFeature,
+  createSortedRowModel,
+  createPaginatedRowModel,
+  type ColumnDef,
+  type SortingState,
+} from '@tanstack/react-table'
+import { getOrganizations, type OrganizationDto } from '@/api/client'
+import { DashboardLayout } from '@/components/layout'
 import {
   BUIBadge,
   BUIButton,
@@ -15,96 +27,206 @@ import {
   BUITableColumn,
   BUITableHeader,
   BUITableRow,
-} from "@/components/ui";
-import { Search, Building2 } from "lucide-react";
+  Card,
+  CardContent,
+} from '@/components/ui'
+import { cn } from '@/lib/utils'
+import { Search, Building2, Users, Clock, CircleAlert, FileText } from 'lucide-react'
 
 const STATUS_LABELS: Record<string, string> = {
-  active: "Ativo",
-  pending: "Pendente",
-  inactive: "Inativo",
-  suspended: "Suspenso",
-  onboarding: "Onboarding",
-};
+  active: 'Ativo',
+  pending: 'Pendente',
+  inactive: 'Inativo',
+  suspended: 'Suspenso',
+  onboarding: 'Onboarding',
+}
 
 const STATUS_CLASS: Record<string, string> = {
-  active: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  pending: "bg-amber-100 text-amber-800 border-amber-200",
-  inactive: "bg-muted text-muted-foreground border-muted",
-  suspended: "bg-red-100 text-red-800 border-red-200",
-  onboarding: "bg-blue-100 text-blue-800 border-blue-200",
-};
+  active: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  pending: 'bg-amber-100 text-amber-800 border-amber-200',
+  inactive: 'bg-muted text-muted-foreground border-muted',
+  suspended: 'bg-red-100 text-red-800 border-red-200',
+  onboarding: 'bg-blue-100 text-blue-800 border-blue-200',
+}
 
-type OrgColumn = keyof OrganizationDto | "actions";
+const PAGE_SIZE = 10
 
-const columns: OrgColumn[] = [
-  "tenantId",
-  "name",
-  "document",
-  "createdAt",
-  "status",
-  "actions",
-];
+const features = tableFeatures({
+  ...coreFeatures,
+  rowSortingFeature,
+  rowPaginationFeature,
+  sortedRowModel: createSortedRowModel(),
+  paginatedRowModel: createPaginatedRowModel(),
+})
+
+const columnDefs = useMemo<ColumnDef<typeof features, OrganizationDto>[]>(
+  () => [
+    {
+      accessorKey: 'tenantId',
+      header: 'ID',
+      cell: ({ row }) => {
+        const value = row.getValue<string>('tenantId')
+        return (
+          <span className="font-mono text-xs text-muted-foreground">{String(value ?? '').slice(0, 8)}…</span>
+        )
+      },
+    },
+    {
+      accessorKey: 'name',
+      header: 'Nome',
+      cell: ({ row }) => (
+        <span className="text-xs text-muted-foreground">{row.getValue<string>('name')}</span>
+      ),
+    },
+    {
+      accessorKey: 'document',
+      header: 'Documento',
+      cell: ({ row }) => {
+        const value = row.getValue<string | null>('document')
+        return value ? (
+          <span className="font-mono text-xs text-muted-foreground">{value}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground/50">—</span>
+        )
+      },
+    },
+    {
+      accessorKey: 'createdAt',
+      header: 'Criado em',
+      cell: ({ row }) => (
+        <span className="text-xs text-muted-foreground">
+          {new Date(String(row.getValue<string>('createdAt'))).toLocaleDateString('pt-BR')}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: 'Status',
+      cell: ({ row }) => {
+        const status = String(row.getValue<string>('status') ?? '')
+        return (
+          <BUIBadge color="neutral" className={STATUS_CLASS[status] ?? ''}>
+            {STATUS_LABELS[status] ?? status}
+          </BUIBadge>
+        )
+      },
+    },
+    {
+      id: 'actions',
+      header: 'Ações',
+      cell: ({ row }) => {
+        const org = row.original
+        return (
+          <div className="flex items-center gap-2">
+            <BUIButton
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                alert(`Organização: ${org.name}\nID: ${org.tenantId}\nStatus: ${org.status}`)
+              }}
+            >
+              Ver
+            </BUIButton>
+          </div>
+        )
+      },
+    },
+  ],
+  [],
+)
+
+function StatCard({
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  readonly icon: React.ReactNode
+  readonly label: string
+  readonly value: string
+  readonly accent?: string
+}) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+              accent ?? 'bg-muted',
+            )}
+          >
+            {icon}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+            <p className="font-mono text-2xl font-bold tabular-nums leading-tight text-foreground">{value}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function OrganizationsPage() {
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(10);
-  const [sort, setSort] = useState<{ id: OrgColumn; desc: boolean }>({
-    id: "createdAt",
-    desc: true,
-  });
+  const [search, setSearch] = useState('')
+  const [pageIndex, setPageIndex] = useState(0)
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }])
 
-  const { data: organizations = [], isLoading, error } = useQuery({
-    queryKey: ["organizations"],
+  const {
+    data: organizations = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ['organizations'],
     queryFn: getOrganizations,
     staleTime: 30_000,
-  });
+  })
 
-  // Aplica filtro manualmente (pesquisa por nome, documento ou ID)
   const filtered = useMemo(
     () =>
       organizations.filter(
         (o) =>
           o.name.toLowerCase().includes(search.toLowerCase()) ||
-          (o.document ?? "").toLowerCase().includes(search.toLowerCase()) ||
-          o.tenantId.includes(search),
-    ),
+          (o.document ?? '').toLowerCase().includes(search.toLowerCase()) ||
+          o.tenantId.toLowerCase().includes(search.toLowerCase()),
+      ),
     [organizations, search],
-  );
+  )
 
-  // Ordena
-  const sorted = useMemo(() => {
-    const dir = sort.desc ? -1 : 1;
-    return [...filtered].sort((a, b) => {
-      const id = sort.id as keyof OrganizationDto;
-      const av = (a as unknown as Record<string, unknown>)[id];
-      const bv = (b as unknown as Record<string, unknown>)[id];
-      if (av === bv) return 0;
-      if (av === undefined || av === null) return 1;
-      if (bv === undefined || bv === null) return -1;
-      if (typeof av === "string" && typeof bv === "string") {
-        return av.localeCompare(bv) * dir;
-      }
-      return (Number(av) - Number(bv)) * dir;
-    });
-  }, [filtered, sort]);
+  const table = useTable({
+    features,
+    columns: columnDefs,
+    data: filtered,
+    initialState: {
+      sorting,
+      pagination: { pageIndex, pageSize: PAGE_SIZE },
+    },
+    onSortingChange: setSorting,
+    onPaginationChange: (updater) =>
+      setPageIndex((prev) => {
+        const next =
+          typeof updater === 'function' ? updater({ pageIndex: prev, pageSize: PAGE_SIZE }) : updater
+        return next.pageIndex
+      }),
+  })
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const safePage = Math.min(page, totalPages);
-  if (safePage !== page) {
-    setPage(safePage);
-  }
+  const total = organizations.length
+  const activeCount = organizations.filter((o) => o.status === 'active').length
+  const pendingCount = organizations.filter((o) => o.status === 'pending').length
+  const suspendedCount = organizations.filter((o) => o.status === 'suspended').length
 
-  const pageData = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pageData = table.getRowModel().rows
+  const totalPages = Math.max(1, table.getPageCount())
 
   const handleCreate = useCallback(() => {
-    // eslint-disable-next-line no-alert
-    alert("Cadastro de organização em breve");
-  }, []);
+    alert('Cadastro de organização em breve')
+  }, [])
 
-  const handleSort = useCallback((id: OrgColumn) => {
-    setSort((s) => (s.id === id ? { id, desc: !s.desc } : { id, desc: false }));
-  }, []);
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value)
+    setPageIndex(0)
+  }, [])
 
   return (
     <DashboardLayout activePage="organizations">
@@ -112,9 +234,7 @@ export default function OrganizationsPage() {
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Organizações</h1>
-            <p className="text-sm text-muted-foreground">
-              Gerencie as organizações do sistema
-            </p>
+            <p className="text-sm text-muted-foreground">Gerencie as organizações do sistema</p>
           </div>
 
           <div className="flex items-center gap-2 w-full lg:w-auto">
@@ -123,10 +243,7 @@ export default function OrganizationsPage() {
               <BUIInput
                 placeholder="Buscar organização…"
                 value={search}
-                onChange={(value: string) => {
-                  setSearch(value);
-                  setPage(1);
-                }}
+                onChange={handleSearchChange}
                 className="pl-9"
               />
             </div>
@@ -137,109 +254,77 @@ export default function OrganizationsPage() {
           </div>
         </div>
 
+        <div className="grid gap-4 lg:grid-cols-4">
+          <StatCard
+            icon={<Users className="h-4 w-4 text-foreground/60" />}
+            label="Total"
+            value={String(total)}
+            accent="bg-muted"
+          />
+          <StatCard
+            icon={<Clock className="h-4 w-4 text-emerald-600" />}
+            label="Ativas"
+            value={String(activeCount)}
+            accent="bg-emerald-50"
+          />
+          <StatCard
+            icon={<CircleAlert className="h-4 w-4 text-amber-600" />}
+            label="Pendentes"
+            value={String(pendingCount)}
+            accent="bg-amber-50"
+          />
+          <StatCard
+            icon={<FileText className="h-4 w-4 text-red-600" />}
+            label="Suspensas"
+            value={String(suspendedCount)}
+            accent="bg-red-50"
+          />
+        </div>
+
         <div className="rounded-xl border border-border bg-card shadow-sm">
           <div className="overflow-auto">
             <BUITable size="md">
               <BUITableHeader>
                 <BUITableRow>
-                  {columns.map((id) => {
-                    if (id === "actions") {
-                      return (
-                        <BUITableColumn key={id}>
-                          <BUITableCell className="font-medium">Ações</BUITableCell>
-                        </BUITableColumn>
-                      );
-                    }
-                    return (
+                  {table.getHeaderGroups().flatMap((group) =>
+                    group.headers.map((header) => (
                       <BUITableColumn
-                        key={id}
-                        onClick={() => handleSort(id)}
-                        className="cursor-pointer font-medium select-none"
-                        data-sorted={sort.id === id ? (sort.desc ? "desc" : "asc") : undefined}
+                        key={header.id}
+                        onClick={() => {
+                          if (header.column.getCanSort()) {
+                            header.column.toggleSorting()
+                          }
+                        }}
+                        className={cn(
+                          'cursor-pointer font-medium select-none',
+                          header.column.getCanSort() ? 'hover:bg-accent/50' : undefined,
+                        )}
+                        data-sorted={
+                          header.column.getIsSorted()
+                            ? header.column.getIsSorted() === 'desc'
+                              ? 'desc'
+                              : 'asc'
+                            : undefined
+                        }
                       >
-                        <BUITableCell>
-                          {id === "tenantId" ? "ID" : id === "name" ? "Nome" : id === "document" ? "Documento" : id === "createdAt" ? "Criado em" : "Status"}
-                          {sort.id === id && (sort.desc ? " ▼" : " ▲")}
+                        <BUITableCell className="font-medium">
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {header.column.getIsSorted() &&
+                            (header.column.getIsSorted() === 'desc' ? ' ▼' : ' ▲')}
                         </BUITableCell>
                       </BUITableColumn>
-                    );
-                  })}
+                    )),
+                  )}
                 </BUITableRow>
               </BUITableHeader>
               <BUITableBody>
                 {pageData.map((row) => (
-                  <BUITableRow key={row.tenantId}>
-                    {columns.map((id) => {
-                      if (id === "actions") {
-                        return (
-                          <BUITableCell key={id}>
-                            <div className="flex items-center gap-2">
-                              <BUIButton
-                                variant="ghost"
-                                size="xs"
-                                onClick={() => {
-                                  // eslint-disable-next-line no-alert
-                                  alert(
-                                    `Organização: ${row.name}\nID: ${row.tenantId}\nStatus: ${row.status}`,
-                                  );
-                                }}
-                              >
-                                Ver
-                              </BUIButton>
-                            </div>
-                          </BUITableCell>
-                        );
-                      }
-                      const value = row[id];
-                      if (id === "status") {
-                        const status = String(value ?? "");
-                        return (
-                          <BUITableCell key={id}>
-                            <BUIBadge color="neutral" className={STATUS_CLASS[status]}>
-                              {STATUS_LABELS[status] ?? status}
-                            </BUIBadge>
-                          </BUITableCell>
-                        );
-                      }
-                      if (id === "createdAt") {
-                        return (
-                          <BUITableCell key={id}>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(String(value)).toLocaleDateString("pt-BR")}
-                            </span>
-                          </BUITableCell>
-                        );
-                      }
-                      if (id === "tenantId") {
-                        return (
-                          <BUITableCell key={id}>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {String(value ?? "").slice(0, 8)}…
-                            </span>
-                          </BUITableCell>
-                        );
-                      }
-                      if (id === "document") {
-                        return (
-                          <BUITableCell key={id}>
-                            {value ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {value}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground/50">—</span>
-                            )}
-                          </BUITableCell>
-                        );
-                      }
-                      return (
-                        <BUITableCell key={id}>
-                          <span className="text-xs text-muted-foreground">
-                            {String(value)}
-                          </span>
-                        </BUITableCell>
-                      );
-                    })}
+                  <BUITableRow key={row.id}>
+                    {row.getAllCells().map((cell) => (
+                      <BUITableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </BUITableCell>
+                    ))}
                   </BUITableRow>
                 ))}
               </BUITableBody>
@@ -247,29 +332,23 @@ export default function OrganizationsPage() {
           </div>
         </div>
 
-        {sorted.length === 0 && !isLoading && (
+        {filtered.length === 0 && !isLoading && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <p className="text-sm font-medium text-muted-foreground">
-              Nenhuma organização encontrada
-            </p>
+            <p className="text-sm font-medium text-muted-foreground">Nenhuma organização encontrada</p>
           </div>
         )}
 
         {totalPages > 1 && (
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
-              Exibindo{" "}
-              {Math.min((safePage - 1) * pageSize + 1, sorted.length)}{"-"}{Math.min(
-                safePage * pageSize,
-                sorted.length,
-              )} de {sorted.length} resultados
+              Exibindo {Math.min(pageIndex * PAGE_SIZE + 1, filtered.length)}
+              {'-'}
+              {Math.min((pageIndex + 1) * PAGE_SIZE, filtered.length)} de {filtered.length} resultados
             </p>
             <BUIPagination
-              page={safePage}
+              page={pageIndex + 1}
               totalPages={totalPages}
-              onChange={(p: number) => {
-                setPage(p);
-              }}
+              onChange={(p: number) => setPageIndex(p - 1)}
               previousLabel="Anterior"
               nextLabel="Próximo"
             />
@@ -278,10 +357,10 @@ export default function OrganizationsPage() {
 
         {error && (
           <p className="text-sm text-destructive">
-            {error instanceof Error ? error.message : "Erro ao carregar organizações"}
+            {error instanceof Error ? error.message : 'Erro ao carregar organizações'}
           </p>
         )}
       </div>
     </DashboardLayout>
-  );
+  )
 }

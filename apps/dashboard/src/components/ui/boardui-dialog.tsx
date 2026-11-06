@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 import {
   Modal as BoardUIModal,
@@ -10,7 +10,7 @@ import {
   type ModalProps,
   type ModalSize,
   type AlertDialogProps,
-} from "@/components/base/modal/modal";
+} from '@/components/base/modal/modal'
 
 /**
  * Board UI Modal / Dialog re-exported from the shared UI barrel.
@@ -27,5 +27,5 @@ export {
   ModalBody,
   ModalFooter,
   AlertDialog,
-};
-export type { ModalProps, ModalSize, AlertDialogProps };
+}
+export type { ModalProps, ModalSize, AlertDialogProps }

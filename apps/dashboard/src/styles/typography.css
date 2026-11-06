@@ -149,11 +149,11 @@
 
   /* ===== Title 3 — 18 / 24-26 ============================================== */
   --text-title-3-regular: 1.125rem;
-  --text-title-3-regular--line-height: 1.5rem;     /* 24 per Figma */
+  --text-title-3-regular--line-height: 1.5rem; /* 24 per Figma */
   --text-title-3-regular--letter-spacing: 0;
   --text-title-3-regular--font-weight: 400;
   --text-title-3-medium: 1.125rem;
-  --text-title-3-medium--line-height: 1.625rem;    /* 26 per Figma */
+  --text-title-3-medium--line-height: 1.625rem; /* 26 per Figma */
   --text-title-3-medium--letter-spacing: 0;
   --text-title-3-medium--font-weight: 500;
   --text-title-3-semibold: 1.125rem;

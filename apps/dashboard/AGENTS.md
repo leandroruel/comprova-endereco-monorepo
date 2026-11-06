@@ -1,4 +1,5 @@
 <!-- boardui:rules:start -->
+
 # BoardUI design rules
 
 This project uses BoardUI (React + Tailwind CSS v4, source-owned components under `components/`). These rules always apply when writing UI code. MCP tools are on demand; these rules are not optional context.

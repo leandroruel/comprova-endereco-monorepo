@@ -144,15 +144,9 @@ export {
   ButtonLink as BUIButtonLink,
   type ButtonProps as BUIButtonProps,
   type ButtonLinkProps as BUIButtonLinkProps,
-} from "./boardui-button";
-export {
-  Badge as BUIBadge,
-  type BadgeProps as BUIBadgeProps,
-} from "./boardui-badge";
-export {
-  Input as BUIInput,
-  type InputProps as BUIInputProps,
-} from "./boardui-input";
+} from './boardui-button'
+export { Badge as BUIBadge, type BadgeProps as BUIBadgeProps } from './boardui-badge'
+export { Input as BUIInput, type InputProps as BUIInputProps } from './boardui-input'
 export {
   Table as BUITable,
   TableHeader as BUITableHeader,
@@ -161,7 +155,7 @@ export {
   TableCell as BUITableCell,
   TableColumn as BUITableColumn,
   type TableSize as BUITableSize,
-} from "@/components/base/table/table";
+} from '@/components/base/table/table'
 export {
   Modal as BUIModal,
   ModalTrigger as BUIModalTrigger,
@@ -172,13 +166,7 @@ export {
   type ModalProps as BUIModalProps,
   type ModalSize as BUIModalSize,
   type AlertDialogProps as BUIAlertDialogProps,
-} from "./boardui-dialog";
-export {
-  Pagination as BUIPagination,
-  type PaginationProps as BUIPaginationProps,
-} from "./boardui-pagination";
-export {
-  BoardUIThemeProvider,
-  useBoardUITheme,
-} from "./boardui-theme-provider";
+} from './boardui-dialog'
+export { Pagination as BUIPagination, type PaginationProps as BUIPaginationProps } from './boardui-pagination'
+export { BoardUIThemeProvider, useBoardUITheme } from './boardui-theme-provider'
 /* eslint-enable @typescript-eslint/no-unused-vars */

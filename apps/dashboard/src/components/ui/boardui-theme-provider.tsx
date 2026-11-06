@@ -1,6 +1,6 @@
-"use client";
+'use client'
 
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useState } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useState } from 'react'
 
 /**
  * BoardUI theme provider.
@@ -16,39 +16,32 @@ import { type ReactNode, createContext, useCallback, useContext, useEffect, useS
  * dashboard and the verifier dashboard can wrap their entry point with it.
  */
 export interface BoardUIThemeProviderProps {
-  children: ReactNode;
+  children: ReactNode
   /** Start in dark mode? Defaults to false (light). */
-  defaultDark?: boolean;
+  defaultDark?: boolean
 }
 
-export function BoardUIThemeProvider({
-  children,
-  defaultDark = false,
-}: BoardUIThemeProviderProps) {
-  const [dark, setDark] = useState(defaultDark);
+export function BoardUIThemeProvider({ children, defaultDark = false }: BoardUIThemeProviderProps) {
+  const [dark, setDark] = useState(defaultDark)
 
   useEffect(() => {
     if (dark) {
-      document.documentElement.classList.add("dark");
+      document.documentElement.classList.add('dark')
     } else {
-      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.remove('dark')
     }
-  }, [dark]);
+  }, [dark])
 
-  const toggle = useCallback(() => setDark((d) => !d), []);
+  const toggle = useCallback(() => setDark((d) => !d), [])
 
-  return (
-    <BoardUIThemeContext.Provider value={{ dark, toggle }}>
-      {children}
-    </BoardUIThemeContext.Provider>
-  );
+  return <BoardUIThemeContext.Provider value={{ dark, toggle }}>{children}</BoardUIThemeContext.Provider>
 }
 
 const BoardUIThemeContext = createContext<{
-  readonly dark: boolean;
-  readonly toggle: () => void;
-}>({ dark: false, toggle: () => {} });
+  readonly dark: boolean
+  readonly toggle: () => void
+}>({ dark: false, toggle: () => {} })
 
 export function useBoardUITheme() {
-  return useContext(BoardUIThemeContext);
+  return useContext(BoardUIThemeContext)
 }

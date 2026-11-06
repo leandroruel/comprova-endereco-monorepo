@@ -1,8 +1,8 @@
-"use client";
+'use client'
 
-import type { CSSProperties } from "react";
-import { ProgressBar as AriaProgressBar } from "react-aria-components";
-import { cx } from "@/utils/cx";
+import type { CSSProperties } from 'react'
+import { ProgressBar as AriaProgressBar } from 'react-aria-components'
+import { cx } from '@/utils/cx'
 
 /**
  * Spinner — an orbiting light for work of unknown length.
@@ -23,7 +23,7 @@ import { cx } from "@/utils/cx";
  * orbit rather than stopping it: the motion is the message.
  */
 
-export type SpinnerSize = "xs" | "sm" | "md" | "lg" | "xl";
+export type SpinnerSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 
 /** Box size and line width in px. */
 const SIZES: Record<SpinnerSize, { box: number; line: number }> = {
@@ -32,7 +32,7 @@ const SIZES: Record<SpinnerSize, { box: number; line: number }> = {
   md: { box: 20, line: 2 },
   lg: { box: 24, line: 2.5 },
   xl: { box: 32, line: 3 },
-};
+}
 
 /** One scale of the light: a conic arc masked to a ring, blurred by its wrapper. */
 function Arc({
@@ -44,29 +44,29 @@ function Arc({
   arc,
   lag,
 }: {
-  box: number;
-  line: number;
+  box: number
+  line: number
   /** Ring thickness, px. */
-  width: number;
-  blur: number;
-  opacity: number;
+  width: number
+  blur: number
+  opacity: number
   /** Arc length in degrees; the head sits at 12 o'clock before the turn. */
-  arc: number;
+  arc: number
   /** Degrees this layer trails the crisp head. */
-  lag: number;
+  lag: number
 }) {
-  const center = box / 2 - line / 2;
-  const inner = center - width / 2;
-  const outer = center + width / 2;
+  const center = box / 2 - line / 2
+  const inner = center - width / 2
+  const outer = center + width / 2
   // The wrapper is grown to hold the ring plus its blur, so nothing clips.
-  const bleed = Math.max(0, outer + blur * 2 - box / 2);
-  const ring = `radial-gradient(circle, transparent ${inner}px, #000 ${inner + 0.5}px, #000 ${outer - 0.5}px, transparent ${outer}px)`;
+  const bleed = Math.max(0, outer + blur * 2 - box / 2)
+  const ring = `radial-gradient(circle, transparent ${inner}px, #000 ${inner + 0.5}px, #000 ${outer - 0.5}px, transparent ${outer}px)`
   const style: CSSProperties = {
     inset: -bleed,
     filter: blur > 0 ? `blur(${blur}px)` : undefined,
     opacity,
     rotate: `${-lag}deg`,
-  };
+  }
   return (
     <span aria-hidden className="absolute" style={style}>
       <span
@@ -78,32 +78,39 @@ function Arc({
         }}
       />
     </span>
-  );
+  )
 }
 
 export interface SpinnerProps {
   /** 12, 16, 20 (default), 24, or 32px. */
-  size?: SpinnerSize;
+  size?: SpinnerSize
   /** Draw the faint full circle under the light. Default true. */
-  track?: boolean;
+  track?: boolean
   /** Accessible name. Default "Loading". */
-  "aria-label"?: string;
+  'aria-label'?: string
   /** Hide it from assistive technology when a parent already announces the wait. */
-  "aria-hidden"?: boolean;
+  'aria-hidden'?: boolean
   /** Colour comes from the text colour, e.g. `text-white`. Default accent. */
-  className?: string;
+  className?: string
 }
 
-export function SpinnerGlyph({ size = "md", track = true, className }: Omit<SpinnerProps, "aria-label" | "aria-hidden">) {
-  const { box, line } = SIZES[size];
+export function SpinnerGlyph({
+  size = 'md',
+  track = true,
+  className,
+}: Omit<SpinnerProps, 'aria-label' | 'aria-hidden'>) {
+  const { box, line } = SIZES[size]
   return (
     <span
       aria-hidden
-      className={cx("relative inline-flex shrink-0 text-accent-500", className)}
+      className={cx('relative inline-flex shrink-0 text-accent-500', className)}
       style={{ width: box, height: box }}
     >
       {track ? (
-        <span className="absolute inset-0 rounded-full border-current opacity-15" style={{ borderWidth: line }} />
+        <span
+          className="absolute inset-0 rounded-full border-current opacity-15"
+          style={{ borderWidth: line }}
+        />
       ) : null}
       <span className="absolute inset-0 animate-spin [animation-duration:900ms] motion-reduce:[animation-duration:2400ms]">
         <Arc box={box} line={line} width={line * 4} blur={line * 1.6} opacity={0.32} arc={110} lag={22} />
@@ -112,18 +119,24 @@ export function SpinnerGlyph({ size = "md", track = true, className }: Omit<Spin
         {/* The crisp line's rounded head, at the arc's leading end. */}
         <span
           className="absolute left-1/2 top-0 rounded-full bg-current"
-          style={{ width: line, height: line, translate: "-50% 0" }}
+          style={{ width: line, height: line, translate: '-50% 0' }}
         />
       </span>
     </span>
-  );
+  )
 }
 
-export function Spinner({ size = "md", track = true, "aria-label": ariaLabel = "Loading", "aria-hidden": ariaHidden, className }: SpinnerProps) {
-  if (ariaHidden) return <SpinnerGlyph size={size} track={track} className={className} />;
+export function Spinner({
+  size = 'md',
+  track = true,
+  'aria-label': ariaLabel = 'Loading',
+  'aria-hidden': ariaHidden,
+  className,
+}: SpinnerProps) {
+  if (ariaHidden) return <SpinnerGlyph size={size} track={track} className={className} />
   return (
     <AriaProgressBar isIndeterminate aria-label={ariaLabel} className="inline-flex shrink-0">
       <SpinnerGlyph size={size} track={track} className={className} />
     </AriaProgressBar>
-  );
+  )
 }

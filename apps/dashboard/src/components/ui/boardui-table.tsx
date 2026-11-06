@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 /**
  * Board UI table primitives re-exported from the shared UI barrel.
@@ -17,5 +17,5 @@ export {
   TableRow as BUITableRow,
   TableCell as BUITableCell,
   TableColumn as BUITableColumn,
-} from "@/components/base/table/table";
-export type { TableSize as BUITableSize } from "@/components/base/table/table";
+} from '@/components/base/table/table'
+export type { TableSize as BUITableSize } from '@/components/base/table/table'
