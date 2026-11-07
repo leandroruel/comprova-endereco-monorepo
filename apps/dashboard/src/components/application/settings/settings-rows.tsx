@@ -1,9 +1,9 @@
-"use client";
+'use client'
 
-import { useTemplateCopy } from "@/components/foundations/template-copy/template-copy";
+import { useTemplateCopy } from '@/components/foundations/template-copy/template-copy'
 
-import type { ComponentType, ReactNode } from "react";
-import { cx } from "@/utils/cx";
+import type { ComponentType, ReactNode } from 'react'
+import { cx } from '@/utils/cx'
 
 /**
  * Shared row chrome for the settings modal pages (Figma "Settings/Profile"
@@ -20,31 +20,26 @@ import { cx } from "@/utils/cx";
  */
 
 type IconComponent = ComponentType<{
-  className?: string;
-  "aria-hidden"?: boolean | "true" | "false";
-}>;
+  className?: string
+  'aria-hidden'?: boolean | 'true' | 'false'
+}>
 
 /** Grouped card — rows divide themselves with borders that respect pl-12. */
 export function SettingsCard({ className, children }: { className?: string; children: ReactNode }) {
-  const localize = useTemplateCopy();
-  return localize((
-    <div
-      className={cx(
-        "flex w-full flex-col rounded-2xl bg-background-secondary-default ps-3",
-        className,
-      )}
-    >
+  const localize = useTemplateCopy()
+  return localize(
+    <div className={cx('flex w-full flex-col rounded-2xl bg-background-secondary-default ps-3', className)}>
       {children}
-    </div>
-  ));
+    </div>,
+  )
 }
 
 /** Muted 13px section heading above a card ("Pull Requests", "Notifications"). */
 export function SettingsSectionLabel({ className, children }: { className?: string; children: ReactNode }) {
-  const localize = useTemplateCopy();
-  return localize((
-    <p className={cx("w-full px-3 text-body-2-medium text-text-secondary", className)}>{children}</p>
-  ));
+  const localize = useTemplateCopy()
+  return localize(
+    <p className={cx('w-full px-3 text-body-2-medium text-text-secondary', className)}>{children}</p>,
+  )
 }
 
 /** One label + control row. Rows separate themselves; the last has no border. */
@@ -53,27 +48,25 @@ export function SettingsRow({
   description,
   children,
 }: {
-  label: string;
-  description?: string;
-  children?: ReactNode;
+  label: string
+  description?: string
+  children?: ReactNode
 }) {
-  const localize = useTemplateCopy();
-  return localize((
+  const localize = useTemplateCopy()
+  return localize(
     <div
       className={cx(
-        "flex min-h-[52px] w-full items-center justify-between gap-4 py-2.5 pe-2.5",
-        "border-b border-separator-border last:border-b-0",
+        'flex min-h-[52px] w-full items-center justify-between gap-4 py-2.5 pe-2.5',
+        'border-b border-separator-border last:border-b-0',
       )}
     >
       <div className="flex min-w-0 flex-col">
         <p className="text-body-regular text-text-primary">{label}</p>
-        {description && (
-          <p className="text-body-2-regular text-text-secondary">{description}</p>
-        )}
+        {description && <p className="text-body-2-regular text-text-secondary">{description}</p>}
       </div>
       {children}
-    </div>
-  ));
+    </div>,
+  )
 }
 
 /**
@@ -87,29 +80,26 @@ export function SettingsValueField({
   muted = false,
   className,
 }: {
-  icon?: IconComponent;
-  children: ReactNode;
+  icon?: IconComponent
+  children: ReactNode
   /** Secondary text color (e.g. the truncated Device ID). */
-  muted?: boolean;
-  className?: string;
+  muted?: boolean
+  className?: string
 }) {
-  const localize = useTemplateCopy();
-  return localize((
+  const localize = useTemplateCopy()
+  return localize(
     <div
       className={cx(
-        "flex h-8 w-[202px] shrink-0 items-center gap-0.5 rounded-2lg bg-background-tertiary-default px-1.5",
+        'flex h-8 w-[202px] shrink-0 items-center gap-0.5 rounded-2lg bg-background-tertiary-default px-1.5',
         className,
       )}
     >
       {Icon && <Icon className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />}
       <span
-        className={cx(
-          "truncate ps-1 text-body-regular",
-          muted ? "text-text-secondary" : "text-text-primary",
-        )}
+        className={cx('truncate ps-1 text-body-regular', muted ? 'text-text-secondary' : 'text-text-primary')}
       >
         {children}
       </span>
-    </div>
-  ));
+    </div>,
+  )
 }

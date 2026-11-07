@@ -1,20 +1,16 @@
-"use client";
+'use client'
 
-import { useTemplateCopy } from "@/components/foundations/template-copy/template-copy";
+import { useTemplateCopy } from '@/components/foundations/template-copy/template-copy'
 
-import { useRef, useState, type ComponentProps } from "react";
-import { CalendarDate } from "@internationalized/date";
-import { RiCalendarLine, RiExternalLinkLine, RiLogoutCircleLine, RiMailLine } from "@remixicon/react";
-import { Button } from "@/components/base/buttons/button";
-import { DatePicker } from "@/components/base/date-picker/date-picker";
-import { Input } from "@/components/base/input/input";
-import { Switch } from "@/components/base/switch/switch";
-import { cx } from "@/utils/cx";
-import {
-  SettingsCard,
-  SettingsRow,
-  SettingsValueField,
-} from "./settings-rows";
+import { useRef, useState, type ComponentProps } from 'react'
+import { CalendarDate } from '@internationalized/date'
+import { RiCalendarLine, RiExternalLinkLine, RiLogoutCircleLine, RiMailLine } from '@remixicon/react'
+import { Button } from '@/components/base/buttons/button'
+import { DatePicker } from '@/components/base/date-picker/date-picker'
+import { Input } from '@/components/base/input/input'
+import { Switch } from '@/components/base/switch/switch'
+import { cx } from '@/utils/cx'
+import { SettingsCard, SettingsRow, SettingsValueField } from './settings-rows'
 
 /**
  * Figma source: Board UI → "Settings/Profile" (node 4081:13943), the right
@@ -29,12 +25,22 @@ import {
  */
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
 
 function formatBirthDate(date: CalendarDate) {
-  return `${date.day} ${MONTHS[date.month - 1]} ${date.year}`;
+  return `${date.day} ${MONTHS[date.month - 1]} ${date.year}`
 }
 
 /**
@@ -48,40 +54,40 @@ function SavableInput({
   ...inputProps
 }: { initialValue: string; onSaved?: () => void } & Omit<
   ComponentProps<typeof Input>,
-  "value" | "onChange" | "defaultValue"
+  'value' | 'onChange' | 'defaultValue'
 >) {
-  const localize = useTemplateCopy();
-  const [value, setValue] = useState(initialValue);
-  const committed = useRef(initialValue);
+  const localize = useTemplateCopy()
+  const [value, setValue] = useState(initialValue)
+  const committed = useRef(initialValue)
 
-  return localize((
+  return localize(
     <Input
       size="small"
       {...inputProps}
       value={value}
       onChange={setValue}
       onKeyDown={(event) => {
-        if (event.key === "Enter") (event.target as HTMLElement).blur();
+        if (event.key === 'Enter') (event.target as HTMLElement).blur()
       }}
       onBlur={() => {
         if (value !== committed.current) {
-          committed.current = value;
-          onSaved?.();
+          committed.current = value
+          onSaved?.()
         }
       }}
-      className={cx("w-[202px] shrink-0", inputProps.className)}
-    />
-  ));
+      className={cx('w-[202px] shrink-0', inputProps.className)}
+    />,
+  )
 }
 
 export function SettingsProfile({ onSaved }: { onSaved?: () => void } = {}) {
-  const localize = useTemplateCopy();
-  const [birthDate, setBirthDate] = useState<CalendarDate>(new CalendarDate(1997, 7, 28));
-  const [birthOpen, setBirthOpen] = useState(false);
-  const birthTriggerRef = useRef<HTMLButtonElement>(null);
-  const [publicProfile, setPublicProfile] = useState(true);
+  const localize = useTemplateCopy()
+  const [birthDate, setBirthDate] = useState<CalendarDate>(new CalendarDate(1997, 7, 28))
+  const [birthOpen, setBirthOpen] = useState(false)
+  const birthTriggerRef = useRef<HTMLButtonElement>(null)
+  const [publicProfile, setPublicProfile] = useState(true)
 
-  return localize((
+  return localize(
     <div className="flex w-full flex-col gap-6">
       <SettingsCard>
         <SettingsRow label="Email">
@@ -105,11 +111,11 @@ export function SettingsProfile({ onSaved }: { onSaved?: () => void } = {}) {
             type="button"
             onClick={() => setBirthOpen((o) => !o)}
             className={[
-              "flex h-8 w-[202px] shrink-0 cursor-pointer items-center gap-0.5 rounded-lg px-2",
-              "border border-border-button-default bg-background-primary-default shadow-xs",
-              "transition-colors duration-150 ease hover:bg-background-primary-hover",
-              "outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring",
-            ].join(" ")}
+              'flex h-8 w-[202px] shrink-0 cursor-pointer items-center gap-0.5 rounded-lg px-2',
+              'border border-border-button-default bg-background-primary-default shadow-xs',
+              'transition-colors duration-150 ease hover:bg-background-primary-hover',
+              'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+            ].join(' ')}
           >
             <RiCalendarLine className="size-[18px] shrink-0 text-foreground-icon-primary" aria-hidden />
             <span className="px-0.5 text-body-regular whitespace-nowrap text-text-primary">
@@ -137,11 +143,7 @@ export function SettingsProfile({ onSaved }: { onSaved?: () => void } = {}) {
           label="Public profile"
           description="When enabled your profile page will be visible to anyone"
         >
-          <Switch
-            aria-label="Public profile"
-            isSelected={publicProfile}
-            onChange={setPublicProfile}
-          />
+          <Switch aria-label="Public profile" isSelected={publicProfile} onChange={setPublicProfile} />
         </SettingsRow>
         <SettingsRow label="Device ID">
           <SettingsValueField muted>593e2611-b9e3-44e2-1289-ab3f9d21</SettingsValueField>
@@ -152,6 +154,6 @@ export function SettingsProfile({ onSaved }: { onSaved?: () => void } = {}) {
           </Button>
         </SettingsRow>
       </SettingsCard>
-    </div>
-  ));
+    </div>,
+  )
 }

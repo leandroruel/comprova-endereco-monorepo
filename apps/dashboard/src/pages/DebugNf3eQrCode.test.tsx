@@ -172,11 +172,7 @@ describe('DebugNf3eQrCodePage', () => {
     respondWith({ events: [], reference })
 
     await render(
-      <DashboardLayout
-        onNavigate={() => {}}
-        userName="Leandro Rocha"
-        userEmail="leandro@empresa.com"
-      >
+      <DashboardLayout onNavigate={() => {}} userName="Leandro Rocha" userEmail="leandro@empresa.com">
         <DebugNf3eQrCodePage user={{ name: 'Leandro Rocha', email: 'leandro@empresa.com' }} />
       </DashboardLayout>,
     )

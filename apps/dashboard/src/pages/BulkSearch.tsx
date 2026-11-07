@@ -71,8 +71,8 @@ function exportBatch(id: string, format: 'csv' | 'json') {
 }
 
 export function BulkSearchPage({
-  onNavigate,
-  user,
+  onNavigate: _onNavigate,
+  user: _user,
 }: {
   onNavigate?: (page: string) => void
   user?: SessionUser
@@ -124,10 +124,6 @@ export function BulkSearchPage({
     if (docs.length > 0) mutation.mutate(docs)
   }
 
-  const handleNavigate = (page: string) => {
-    onNavigate?.(page)
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -137,91 +133,91 @@ export function BulkSearchPage({
         </p>
       </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card>
-            <CardContent className="p-5">
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  const file = e.dataTransfer.files[0]
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardContent className="p-5">
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault()
+                const file = e.dataTransfer.files[0]
+                if (file) void handleFile(file)
+              }}
+              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-12 text-center transition-colors hover:border-foreground/30 hover:bg-muted/30"
+              onClick={() => fileRef.current?.click()}
+            >
+              {uploading ? <Spinner /> : <Upload className="mb-3 h-8 w-8 text-muted-foreground/40" />}
+              <p className="text-sm font-medium text-foreground">Arraste um arquivo CSV aqui</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                ou clique para selecionar (.csv, .txt — um CNPJ/CPF por linha)
+              </p>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,.txt"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
                   if (file) void handleFile(file)
                 }}
-                className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-12 text-center transition-colors hover:border-foreground/30 hover:bg-muted/30"
-                onClick={() => fileRef.current?.click()}
-              >
-                {uploading ? <Spinner /> : <Upload className="mb-3 h-8 w-8 text-muted-foreground/40" />}
-                <p className="text-sm font-medium text-foreground">Arraste um arquivo CSV aqui</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  ou clique para selecionar (.csv, .txt — um CNPJ/CPF por linha)
-                </p>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".csv,.txt"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) void handleFile(file)
-                  }}
-                />
-              </div>
-              {uploadError && <p className="mt-2 text-sm text-red-500">{uploadError}</p>}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-5">
-              <label className="mb-2 block text-xs font-medium text-muted-foreground">
-                Ou cole os documentos (um por linha)
-              </label>
-              <textarea
-                className="h-36 w-full rounded-lg border border-input bg-card p-3 font-mono text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                placeholder={'33986733000104\n52998224725\n11222333000181'}
-                value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
               />
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  {parseDocuments(rawText).length} documento(s) válido(s)
-                </span>
-                <Button
-                  size="sm"
-                  disabled={mutation.isPending || parseDocuments(rawText).length === 0}
-                  onClick={handleTextareaSubmit}
-                >
-                  {mutation.isPending ? <Spinner /> : 'Processar'}
-                </Button>
-              </div>
-              {mutation.isError && (
-                <p className="mt-2 text-sm text-red-500">
-                  {mutation.error instanceof Error ? mutation.error.message : 'Erro'}
-                </p>
-              )}
+            </div>
+            {uploadError && <p className="mt-2 text-sm text-red-500">{uploadError}</p>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-5">
+            <label className="mb-2 block text-xs font-medium text-muted-foreground">
+              Ou cole os documentos (um por linha)
+            </label>
+            <textarea
+              className="h-36 w-full rounded-lg border border-input bg-card p-3 font-mono text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder={'33986733000104\n52998224725\n11222333000181'}
+              value={rawText}
+              onChange={(e) => setRawText(e.target.value)}
+            />
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {parseDocuments(rawText).length} documento(s) válido(s)
+              </span>
+              <Button
+                size="sm"
+                disabled={mutation.isPending || parseDocuments(rawText).length === 0}
+                onClick={handleTextareaSubmit}
+              >
+                {mutation.isPending ? <Spinner /> : 'Processar'}
+              </Button>
+            </div>
+            {mutation.isError && (
+              <p className="mt-2 text-sm text-red-500">
+                {mutation.error instanceof Error ? mutation.error.message : 'Erro'}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Lotes recentes</h2>
+        {batches.isPending ? (
+          <Card>
+            <CardContent className="flex justify-center p-8">
+              <Spinner />
             </CardContent>
           </Card>
-        </div>
-
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-foreground">Lotes recentes</h2>
-          {batches.isPending ? (
-            <Card>
-              <CardContent className="flex justify-center p-8">
-                <Spinner />
-              </CardContent>
-            </Card>
-          ) : batches.data?.batches.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center py-8 text-center">
-                <FileText className="mb-2 h-6 w-6 text-muted-foreground/30" />
-                <p className="text-xs text-muted-foreground">Nenhum lote ainda</p>
-              </CardContent>
-            </Card>
-          ) : (
-            batches.data?.batches.map((batch) => <BatchRow key={batch.batch_id} batch={batch} />)
-          )}
-        </div>
+        ) : batches.data?.batches.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center py-8 text-center">
+              <FileText className="mb-2 h-6 w-6 text-muted-foreground/30" />
+              <p className="text-xs text-muted-foreground">Nenhum lote ainda</p>
+            </CardContent>
+          </Card>
+        ) : (
+          batches.data?.batches.map((batch) => <BatchRow key={batch.batch_id} batch={batch} />)
+        )}
       </div>
+    </div>
   )
 }
 

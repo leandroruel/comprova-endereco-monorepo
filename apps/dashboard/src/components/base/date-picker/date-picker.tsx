@@ -1,23 +1,23 @@
-"use client";
+'use client'
 
-import { useTemplateCopy } from "@/components/foundations/template-copy/template-copy";
+import { useTemplateCopy } from '@/components/foundations/template-copy/template-copy'
 
-import { useEffect, useRef, useState } from "react";
-import type { RefObject } from "react";
-import { Calendar, Dialog, Popover, useLocale } from "react-aria-components";
-import type { CalendarDate } from "@internationalized/date";
-import { RiCalendarLine } from "@remixicon/react";
-import { AnimatePresence, motion } from "motion/react";
-import { Button } from "@/components/base/buttons/button";
+import { useEffect, useRef, useState } from 'react'
+import type { RefObject } from 'react'
+import { Calendar, Dialog, Popover, useLocale } from 'react-aria-components'
+import type { CalendarDate } from '@internationalized/date'
+import { RiCalendarLine } from '@remixicon/react'
+import { AnimatePresence, motion } from 'motion/react'
+import { Button } from '@/components/base/buttons/button'
 import {
   DateChipInput,
   MonthPanel,
   formatTriggerDate,
   popoverClassName,
   triggerButtonClassName,
-} from "@/components/base/date-picker/shared";
-import { cx } from "@/utils/cx";
-import { useDismissOnOutsidePress } from "@/utils/use-dismiss-on-outside-press";
+} from '@/components/base/date-picker/shared'
+import { cx } from '@/utils/cx'
+import { useDismissOnOutsidePress } from '@/utils/use-dismiss-on-outside-press'
 
 /**
  * Figma source: Board UI → "Calendar_single" (node 3879:6708).
@@ -44,18 +44,18 @@ import { useDismissOnOutsidePress } from "@/utils/use-dismiss-on-outside-press";
  */
 
 export interface DatePickerProps {
-  value?: CalendarDate | null;
-  defaultValue?: CalendarDate | null;
-  onChange?: (value: CalendarDate | null) => void;
-  isDisabled?: boolean;
-  className?: string;
-  "aria-label"?: string;
+  value?: CalendarDate | null
+  defaultValue?: CalendarDate | null
+  onChange?: (value: CalendarDate | null) => void
+  isDisabled?: boolean
+  className?: string
+  'aria-label'?: string
   /** Anchor the popover to an external element instead of DatePicker's own
    *  trigger button (which is hidden when this is provided). Pair with
    *  `isOpen`/`onOpenChange` for full external control. */
-  triggerRef?: RefObject<HTMLElement | null>;
-  isOpen?: boolean;
-  onOpenChange?: (isOpen: boolean) => void;
+  triggerRef?: RefObject<HTMLElement | null>
+  isOpen?: boolean
+  onOpenChange?: (isOpen: boolean) => void
 }
 
 export function DatePicker({
@@ -64,27 +64,27 @@ export function DatePicker({
   onChange,
   isDisabled,
   className,
-  "aria-label": ariaLabel = "Date",
+  'aria-label': ariaLabel = 'Date',
   triggerRef: externalTriggerRef,
   isOpen: controlledIsOpen,
   onOpenChange: controlledOnOpenChange,
 }: DatePickerProps) {
-  const localize = useTemplateCopy();
-  const { locale } = useLocale();
-  const ownTriggerRef = useRef<HTMLButtonElement>(null);
-  const triggerRef = externalTriggerRef ?? ownTriggerRef;
-  const isExternal = externalTriggerRef !== undefined;
-  const popoverRef = useRef<HTMLElement>(null);
+  const localize = useTemplateCopy()
+  const { locale } = useLocale()
+  const ownTriggerRef = useRef<HTMLButtonElement>(null)
+  const triggerRef = externalTriggerRef ?? ownTriggerRef
+  const isExternal = externalTriggerRef !== undefined
+  const popoverRef = useRef<HTMLElement>(null)
 
-  const [internalOpen, setInternalOpen] = useState(false);
-  const isOpen = isExternal ? (controlledIsOpen ?? false) : internalOpen;
-  const setIsOpen = isExternal ? (controlledOnOpenChange ?? (() => {})) : setInternalOpen;
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isOpen = isExternal ? (controlledIsOpen ?? false) : internalOpen
+  const setIsOpen = isExternal ? (controlledOnOpenChange ?? (() => {})) : setInternalOpen
 
-  const isControlled = value !== undefined;
-  const [internalValue, setInternalValue] = useState<CalendarDate | null>(defaultValue);
-  const committedValue = isControlled ? (value ?? null) : internalValue;
+  const isControlled = value !== undefined
+  const [internalValue, setInternalValue] = useState<CalendarDate | null>(defaultValue)
+  const committedValue = isControlled ? (value ?? null) : internalValue
 
-  const [pendingValue, setPendingValue] = useState<CalendarDate | null>(committedValue);
+  const [pendingValue, setPendingValue] = useState<CalendarDate | null>(committedValue)
   // React Aria's `Calendar` keeps its own internal `visibleRange` state for
   // as long as it stays mounted (Popover keeps its content mounted between
   // opens for the exit animation), so it never re-derives the visible month
@@ -92,7 +92,7 @@ export function DatePicker({
   // keying `Calendar` on it forces a fresh mount showing the right month —
   // needed for the external-trigger case, where `value` can jump (e.g. the
   // calendar template's month switcher) between one open and the next.
-  const [openKey, setOpenKey] = useState(0);
+  const [openKey, setOpenKey] = useState(0)
 
   // Re-sync the calendar's displayed month/selection to the current
   // committed value every time the popover opens — not just when DatePicker's
@@ -100,25 +100,25 @@ export function DatePicker({
   // external trigger (`triggerRef`), which never runs `openChange` below.
   useEffect(() => {
     if (isOpen) {
-      setPendingValue(committedValue);
-      setOpenKey((k) => k + 1);
+      setPendingValue(committedValue)
+      setOpenKey((k) => k + 1)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync on the open transition only, not every committedValue change
-  }, [isOpen]);
+    // resync on the open transition only, not every committedValue change
+  }, [isOpen])
 
   const commit = (next: CalendarDate | null) => {
-    if (!isControlled) setInternalValue(next);
-    onChange?.(next);
-    setIsOpen(false);
-  };
+    if (!isControlled) setInternalValue(next)
+    onChange?.(next)
+    setIsOpen(false)
+  }
 
   const openChange = (open: boolean) => {
-    setIsOpen(open);
-  };
+    setIsOpen(open)
+  }
 
-  useDismissOnOutsidePress(isOpen, () => setIsOpen(false), [triggerRef, popoverRef]);
+  useDismissOnOutsidePress(isOpen, () => setIsOpen(false), [triggerRef, popoverRef])
 
-  return localize((
+  return localize(
     <>
       {!isExternal && (
         <button
@@ -130,7 +130,7 @@ export function DatePicker({
         >
           <RiCalendarLine className="size-5 shrink-0 text-foreground-icon-primary" aria-hidden />
           <span className="flex items-center justify-center whitespace-nowrap px-1 text-body-medium text-text-primary">
-            {committedValue ? formatTriggerDate(committedValue, locale) : "Select date"}
+            {committedValue ? formatTriggerDate(committedValue, locale) : 'Select date'}
           </span>
         </button>
       )}
@@ -168,8 +168,8 @@ export function DatePicker({
                   <Button
                     variant="secondary"
                     onClick={() => {
-                      setPendingValue(committedValue);
-                      setIsOpen(false);
+                      setPendingValue(committedValue)
+                      setIsOpen(false)
                     }}
                   >
                     Cancel
@@ -183,6 +183,6 @@ export function DatePicker({
           </Calendar>
         </Dialog>
       </Popover>
-    </>
-  ));
+    </>,
+  )
 }
