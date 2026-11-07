@@ -87,150 +87,186 @@ export const recordUsageEventInTx = async (
   // Concorrência segura: bloqueia a linha do tenant apenas para eventos
   // faturáveis, impedindo que duas requisições simultâneas ultrapassem
   // silenciosamente um limite hard. Eventos não-faturáveis não consomem cota
-  // e podem pular o lock.
+  // e podem pular o lock. O lock é obtido FORA do savepoint para que persista
+  // mesmo após rollback de savepoint, evitando que duas requisições
+  // concorrentes ambas decidam que há cota disponível.
   if (billable) {
     await tx.execute(sql`SELECT 1 FROM tenant WHERE tenant_id = ${tenantId} FOR UPDATE`)
   }
 
-  // 1. Reservar/inserir a chave de idempotência (única por tenant+chave).
-  const idemRows = await tx
-    .insert(t.usageEventIdempotency)
-    .values({
-      tenantId,
-      idempotencyKey: key,
-      eventId: null,
-    })
-    .onConflictDoNothing()
-    .returning({ idempotencyKey: t.usageEventIdempotency.idempotencyKey })
+  // Cria um savepoint para que, em caso de excedimento de cota hard, possamos
+  // desfazer todas as alterações de idempotência e unidade comercial sem
+  // desfazer o lock do tenant nem a transação externa.
+  await tx.execute(sql`SAVEPOINT usage_event_metering`)
 
-  // 2. Replay: outra transação (ou execução prévia) já registrou esta chave.
-  if (idemRows.length === 0) {
-    const existing = await tx
-      .select({ eventId: t.usageEventIdempotency.eventId })
-      .from(t.usageEventIdempotency)
-      .where(
-        and(eq(t.usageEventIdempotency.tenantId, tenantId), eq(t.usageEventIdempotency.idempotencyKey, key)),
-      )
-      .limit(1)
-    return {
-      eventId: existing[0]?.eventId ?? null,
-      replayed: true,
-    }
-  }
-
-  // 3. Evento faturável com validação: reservar a identidade comercial
-  //    (garantia no BANCO de uma única unidade faturável por
-  //    tenant + validation, independente da chave de idempotência usada).
-  let billingUnitClaimed = false
-  if (billable && validationId !== null) {
-    const claimed = await tx
-      .insert(t.usageBillingUnit)
-      .values({ tenantId, validationId, eventId: null })
+  try {
+    // 1. Reservar/inserir a chave de idempotência (única por tenant+chave).
+    const idemRows = await tx
+      .insert(t.usageEventIdempotency)
+      .values({
+        tenantId,
+        idempotencyKey: key,
+        eventId: null,
+      })
       .onConflictDoNothing()
-      .returning({ validationId: t.usageBillingUnit.validationId })
+      .returning({ idempotencyKey: t.usageEventIdempotency.idempotencyKey })
 
-    if (claimed.length === 0) {
-      // Outra execução (fast ou deep, com qualquer chave) já faturou esta
-      // validação. Retornar o evento dela SEM consumir cota nem duplicar
-      // evento. O lock do tenant (FOR UPDATE acima) serializa as duas
-      // transações, então o `event_id` já foi preenchido pela vencedora.
-      const existingUnit = await tx
-        .select({ eventId: t.usageBillingUnit.eventId })
-        .from(t.usageBillingUnit)
+    // 2. Replay: outra transação (ou execução prévia) já registrou esta chave.
+    if (idemRows.length === 0) {
+      const existing = await tx
+        .select({ eventId: t.usageEventIdempotency.eventId })
+        .from(t.usageEventIdempotency)
         .where(
-          and(eq(t.usageBillingUnit.tenantId, tenantId), eq(t.usageBillingUnit.validationId, validationId)),
+          and(
+            eq(t.usageEventIdempotency.tenantId, tenantId),
+            eq(t.usageEventIdempotency.idempotencyKey, key),
+          ),
         )
         .limit(1)
-      // Mapeia também a chave reservada neste fluxo para o evento vencedor,
-      // para que retries com esta chave sejam reconhecidos como replay.
-      const winnerEventId = existingUnit[0]?.eventId ?? null
-      if (winnerEventId !== null) {
-        await tx
-          .update(t.usageEventIdempotency)
-          .set({ eventId: winnerEventId })
+      // Se já existe um evento gravado, retorna replay imediatamente.
+      if (existing[0]?.eventId !== null) {
+        await tx.execute(sql`RELEASE SAVEPOINT usage_event_metering`)
+        return {
+          eventId: existing[0]!.eventId,
+          replayed: true,
+        }
+      }
+      // Se eventId é null (chave reservada mas evento não gravado), prossegue
+      // para verificar cota e gravar o evento.
+    }
+
+    // 3. Evento faturável com validação: reservar a identidade comercial
+    //    (garantia no BANCO de uma única unidade faturável por
+    //    tenant + validation, independente da chave de idempotência usada).
+    let billingUnitClaimed = false
+    if (billable && validationId !== null) {
+      const claimed = await tx
+        .insert(t.usageBillingUnit)
+        .values({ tenantId, validationId, eventId: null })
+        .onConflictDoNothing()
+        .returning({ validationId: t.usageBillingUnit.validationId })
+
+      if (claimed.length === 0) {
+        // Outra execução (fast ou deep, com qualquer chave) já faturou esta
+        // validação. Retornar o evento dela SEM consumir cota nem duplicar
+        // evento. O lock do tenant (FOR UPDATE acima) serializa as duas
+        // transações, então o `event_id` já foi preenchido pela vencedora.
+        const existingUnit = await tx
+          .select({ eventId: t.usageBillingUnit.eventId })
+          .from(t.usageBillingUnit)
+          .where(
+            and(eq(t.usageBillingUnit.tenantId, tenantId), eq(t.usageBillingUnit.validationId, validationId)),
+          )
+          .limit(1)
+        // Mapeia também a chave reservada neste fluxo para o evento vencedor,
+        // para que retries com esta chave sejam reconhecidos como replay.
+        const winnerEventId = existingUnit[0]?.eventId ?? null
+        if (winnerEventId !== null) {
+          await tx
+            .update(t.usageEventIdempotency)
+            .set({ eventId: winnerEventId })
+            .where(
+              and(
+                eq(t.usageEventIdempotency.tenantId, tenantId),
+                eq(t.usageEventIdempotency.idempotencyKey, key),
+              ),
+            )
+        }
+        await tx.execute(sql`RELEASE SAVEPOINT usage_event_metering`)
+        return { eventId: winnerEventId, replayed: true }
+      }
+      billingUnitClaimed = true
+    }
+
+    // 4. Operação nova: verificar cota hard ANTES de gravar evento faturável.
+    if (billable) {
+      const tenantRow = await tx
+        .select({ monthlyQuota: t.tenant.monthlyQuota })
+        .from(t.tenant)
+        .where(eq(t.tenant.tenantId, tenantId))
+        .limit(1)
+
+      if (tenantRow[0]?.monthlyQuota !== null && tenantRow[0]?.monthlyQuota !== undefined) {
+        const quota = Number(tenantRow[0].monthlyQuota)
+        const { start, end } = defaultPeriod()
+        // Bind como string ISO para evitar erro de serialização do driver com Date.
+        const startStr = start.toISOString()
+        const endStr = end.toISOString()
+        const consumed = await tx
+          .select({
+            total: sql<number>`COALESCE(sum(units), 0)::int`,
+          })
+          .from(t.usageEvent)
           .where(
             and(
-              eq(t.usageEventIdempotency.tenantId, tenantId),
-              eq(t.usageEventIdempotency.idempotencyKey, key),
+              eq(t.usageEvent.tenantId, tenantId),
+              eq(t.usageEvent.billable, true),
+              sql`usage_event.occurred_at >= ${startStr}`,
+              sql`usage_event.occurred_at < ${endStr}`,
+            ),
+          )
+        const consumedUnits = Number(consumed[0]?.total ?? 0)
+        if (consumedUnits + units > quota) {
+          // Desfaz todas as alterações dentro do savepoint (idempotência e
+          // unidade comercial) sem desfazer o lock do tenant nem a transação
+          // externa. A transação externa pode continuar e persistir o estado
+          // blocked_quota.
+          await tx.execute(sql`ROLLBACK TO SAVEPOINT usage_event_metering`)
+          throw new QuotaExceededError(
+            `Cota hard atingida: consumido ${consumedUnits}/${quota} unidades no período.`,
+          )
+        }
+      }
+    }
+
+    // 5. Registrar o evento de uso e atualizar as referências (idempotência e
+    //    identidade comercial).
+    const inserted = await tx
+      .insert(t.usageEvent)
+      .values({
+        eventId,
+        tenantId,
+        eventType,
+        kind,
+        units,
+        costMicros: costMicros ?? null,
+        validationId: validationId ?? null,
+        idempotencyKey: key,
+        billable,
+        source: source ?? null,
+      })
+      .returning({ eventId: t.usageEvent.eventId })
+
+    const persistedEventId = inserted[0]?.eventId ?? null
+    if (persistedEventId !== null) {
+      await tx
+        .update(t.usageEventIdempotency)
+        .set({ eventId: persistedEventId })
+        .where(
+          and(
+            eq(t.usageEventIdempotency.tenantId, tenantId),
+            eq(t.usageEventIdempotency.idempotencyKey, key),
+          ),
+        )
+      if (billingUnitClaimed) {
+        await tx
+          .update(t.usageBillingUnit)
+          .set({ eventId: persistedEventId })
+          .where(
+            and(
+              eq(t.usageBillingUnit.tenantId, tenantId),
+              eq(t.usageBillingUnit.validationId, validationId!),
             ),
           )
       }
-      return { eventId: winnerEventId, replayed: true }
     }
-    billingUnitClaimed = true
+
+    await tx.execute(sql`RELEASE SAVEPOINT usage_event_metering`)
+    return { eventId: persistedEventId, replayed: false }
+  } catch (err) {
+    // Garante rollback do savepoint mesmo que o erro não seja QuotaExceededError,
+    // evitando reservas incompletas de idempotência ou unidade comercial.
+    await tx.execute(sql`ROLLBACK TO SAVEPOINT usage_event_metering`)
+    throw err
   }
-
-  // 4. Operação nova: verificar cota hard ANTES de gravar evento faturável.
-  if (billable) {
-    const tenantRow = await tx
-      .select({ monthlyQuota: t.tenant.monthlyQuota })
-      .from(t.tenant)
-      .where(eq(t.tenant.tenantId, tenantId))
-      .limit(1)
-
-    if (tenantRow[0]?.monthlyQuota !== null && tenantRow[0]?.monthlyQuota !== undefined) {
-      const quota = Number(tenantRow[0].monthlyQuota)
-      const { start, end } = defaultPeriod()
-      // Bind como string ISO para evitar erro de serialização do driver com Date.
-      const startStr = start.toISOString()
-      const endStr = end.toISOString()
-      const consumed = await tx
-        .select({
-          total: sql<number>`COALESCE(sum(units), 0)::int`,
-        })
-        .from(t.usageEvent)
-        .where(
-          and(
-            eq(t.usageEvent.tenantId, tenantId),
-            eq(t.usageEvent.billable, true),
-            sql`usage_event.occurred_at >= ${startStr}`,
-            sql`usage_event.occurred_at < ${endStr}`,
-          ),
-        )
-      const consumedUnits = Number(consumed[0]?.total ?? 0)
-      if (consumedUnits + units > quota) {
-        throw new QuotaExceededError(
-          `Cota hard atingida: consumido ${consumedUnits}/${quota} unidades no período.`,
-        )
-      }
-    }
-  }
-
-  // 5. Registrar o evento de uso e atualizar as referências (idempotência e
-  //    identidade comercial).
-  const inserted = await tx
-    .insert(t.usageEvent)
-    .values({
-      eventId,
-      tenantId,
-      eventType,
-      kind,
-      units,
-      costMicros: costMicros ?? null,
-      validationId: validationId ?? null,
-      idempotencyKey: key,
-      billable,
-      source: source ?? null,
-    })
-    .returning({ eventId: t.usageEvent.eventId })
-
-  const persistedEventId = inserted[0]?.eventId ?? null
-  if (persistedEventId !== null) {
-    await tx
-      .update(t.usageEventIdempotency)
-      .set({ eventId: persistedEventId })
-      .where(
-        and(eq(t.usageEventIdempotency.tenantId, tenantId), eq(t.usageEventIdempotency.idempotencyKey, key)),
-      )
-    if (billingUnitClaimed) {
-      await tx
-        .update(t.usageBillingUnit)
-        .set({ eventId: persistedEventId })
-        .where(
-          and(eq(t.usageBillingUnit.tenantId, tenantId), eq(t.usageBillingUnit.validationId, validationId!)),
-        )
-    }
-  }
-
-  return { eventId: persistedEventId, replayed: false }
 }

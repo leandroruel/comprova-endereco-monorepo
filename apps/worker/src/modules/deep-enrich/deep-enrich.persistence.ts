@@ -423,18 +423,7 @@ export const emitOutcomeEvents = async (
   tx: DbTx,
   write: OutcomeEventsWrite,
 ): Promise<{ readonly blockedByQuota: boolean }> => {
-  await tx.insert(t.outbox).values({
-    aggregate: 'validation',
-    aggregateId: write.validationId,
-    eventType: write.stillPartial ? 'validation.updated' : 'validation.completed',
-    payload: {
-      tenant_id: write.tenantId,
-      validation_id: write.validationId,
-      claim_id: write.claimId,
-      claim_type: write.claimType,
-      verdict: write.verdict,
-    },
-  })
+  // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
 
   // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
   // geram a unidade comercial. Resultados parciais (queued/partial) não claimam
@@ -484,5 +473,31 @@ export const emitOutcomeEvents = async (
     }
     throw err
   }
+
+  // O evento de uso foi gravado com sucesso. Agora publica o evento de
+  // conclusão na outbox. Publicar ANTES de recordUsageEventInTx arriscaria
+  // emitir validation.completed para uma validação que acabou sendo bloqueada
+  // por cota. Publicar DEPOIS garante consistência entre o estado persistido e
+  // o evento publicado.
+  await tx.insert(t.outbox).values({
+    aggregate: 'validation',
+    aggregateId: write.validationId,
+    eventType: 'validation.completed',
+    payload: {
+      tenant_id: write.tenantId,
+      validation_id: write.validationId,
+      claim_id: write.claimId,
+      claim_type: write.claimType,
+      verdict: write.verdict,
+    },
+  })
+
+  // Quando o evento é gravado com sucesso, limpa o motivo de bloqueio por
+  // quota (se houver de uma tentativa anterior falhada).
+  await tx
+    .update(t.validation)
+    .set({ quotaBlockedReason: null })
+    .where(eq(t.validation.validationId, write.validationId))
+
   return { blockedByQuota: false }
 }

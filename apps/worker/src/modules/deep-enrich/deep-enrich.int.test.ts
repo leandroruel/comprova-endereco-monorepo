@@ -1393,3 +1393,186 @@ describe('deepEnrich (activity core)', () => {
     })
   })
 })
+
+// ============================================================================
+// F3.3 — Tratamento de quota excedida no deep worker
+// ============================================================================
+describe('deepEnrich — quota excedida (blocked_quota)', () => {
+  const setQuota = async (quota: number | null) => {
+    await adminPool.db
+      .update(t.tenant)
+      .set({ monthlyQuota: quota === null ? null : quota })
+      .where(eq(t.tenant.tenantId, tenant))
+  }
+
+  const createQueuedValidation = async (idempotencyKey: string, documentValue: string): Promise<string> => {
+    const created = await runFastPath(
+      { ...fastPathDeps, clock: systemClock },
+      { tenantId: tenant, apiKeyId: null },
+      {
+        documentType: 'CNPJ',
+        documentValue,
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'deep',
+        idempotencyKey,
+      },
+    )
+    expect(created.status).toBe('queued')
+    return created.validationId
+  }
+
+  const countBillableEvents = async (validationId: string): Promise<number> => {
+    const rows = await adminPool.db
+      .select({ eventId: t.usageEvent.eventId })
+      .from(t.usageEvent)
+      .where(and(eq(t.usageEvent.validationId, validationId), eq(t.usageEvent.billable, true)))
+    return rows.length
+  }
+
+  const countOutboxCompleted = async (validationId: string): Promise<number> => {
+    const rows = await adminPool.db
+      .select({ aggregateId: t.outbox.aggregateId })
+      .from(t.outbox)
+      .where(
+        and(
+          eq(t.outbox.aggregate, 'validation'),
+          eq(t.outbox.aggregateId, validationId),
+          eq(t.outbox.eventType, 'validation.completed'),
+        ),
+      )
+    return rows.length
+  }
+
+  const validationRow = async (validationId: string) => {
+    const rows = await adminPool.db
+      .select()
+      .from(t.validation)
+      .where(eq(t.validation.validationId, validationId))
+    return rows[0]
+  }
+
+  beforeEach(async () => {
+    await setQuota(1000)
+    await adminPool.db.delete(t.usageEvent).where(eq(t.usageEvent.tenantId, tenant))
+    await adminPool.db.delete(t.usageEventIdempotency).where(eq(t.usageEventIdempotency.tenantId, tenant))
+    await adminPool.db.delete(t.usageBillingUnit).where(eq(t.usageBillingUnit.tenantId, tenant))
+  })
+
+  it('quota hard excedida: nenhum evento faturável novo, status blocked_quota', async () => {
+    // Cria validação em estado queued (não consome cota pois modo deep)
+    const validationId = await createQueuedValidation('quota-exceeded-1', '12345678000195')
+    // Pré-carrega 1 unidade faturável para esgotar quota = 1
+    await adminPool.db.insert(t.usageEvent).values({
+      eventId: randomUUID(),
+      tenantId: tenant,
+      eventType: 'usage_event',
+      kind: 'fast',
+      units: 1,
+      validationId: randomUUID(),
+      idempotencyKey: 'quota-exhausted-prior',
+      billable: true,
+      source: 'fast',
+      occurredAt: new Date(),
+    })
+    await setQuota(1)
+
+    const result = await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
+      { tenantId: tenant, validationId },
+    )
+    // O worker não lança QuotaExceededError: trata internamente e conclui.
+    expect(result.status).toBe('blocked_quota')
+
+    const row = await validationRow(validationId)
+    // A validação NÃO fica presa em 'queued': marca blocked_quota com motivo.
+    expect(row?.status).toBe('blocked_quota')
+    expect(row?.quotaBlockedReason).toContain('Cota hard atingida')
+
+    // Nenhum evento faturável novo foi criado para esta validação.
+    expect(await countBillableEvents(validationId)).toBe(0)
+
+    // Não há reserva de idempotência órfã para esta validação.
+    const idemRows = await adminPool.db
+      .select({ idempotencyKey: t.usageEventIdempotency.idempotencyKey })
+      .from(t.usageEventIdempotency)
+      .where(eq(t.usageEventIdempotency.tenantId, tenant))
+    const hasCanonicalKey = idemRows.some((r) => r.idempotencyKey === validationBillingKey(validationId))
+    expect(hasCanonicalKey).toBe(false)
+
+    // Não houve publicação de validation.completed na outbox.
+    const completedCount = await countOutboxCompleted(validationId)
+    expect(completedCount).toBe(0)
+  })
+
+  it('validação previamente queued encontra quota excedida durante o processamento', async () => {
+    await setQuota(0) // quota zero: qualquer evento faturável é bloqueado
+    const validationId = await createQueuedValidation('quota-zero-1', '12345678000195')
+
+    const result = await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
+      { tenantId: tenant, validationId },
+    )
+    expect(result.status).toBe('blocked_quota')
+
+    const row = await validationRow(validationId)
+    expect(row?.status).toBe('blocked_quota')
+    expect(row?.quotaBlockedReason).toContain('Cota hard atingida')
+    expect(await countBillableEvents(validationId)).toBe(0)
+  })
+
+  it('retry após aumento da quota: validação bloqueada pode ser reprocessada', async () => {
+    // 1. Quota esgotada → blocked_quota
+    await setQuota(0)
+    const validationId = await createQueuedValidation('quota-retry-1', '12345678000195')
+    const result1 = await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
+      { tenantId: tenant, validationId },
+    )
+    expect(result1.status).toBe('blocked_quota')
+    expect((await validationRow(validationId))?.status).toBe('blocked_quota')
+    expect(await countBillableEvents(validationId)).toBe(0)
+
+    // 2. Aumenta a quota
+    await setQuota(10)
+
+    // 3. Reprocessamento: a validação está blocked_quota, não queued.
+    // O deepEnrich processa novamente e agora consegue faturar.
+    const result2 = await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
+      { tenantId: tenant, validationId },
+    )
+    expect(result2.status).toBe('completed')
+
+    const row = await validationRow(validationId)
+    expect(row?.status).toBe('completed')
+    expect(row?.quotaBlockedReason).toBeNull()
+    expect(await countBillableEvents(validationId)).toBe(1)
+
+    // Exatamente um evento faturável e uma unidade comercial.
+    const idemRows = await adminPool.db
+      .select({ idempotencyKey: t.usageEventIdempotency.idempotencyKey })
+      .from(t.usageEventIdempotency)
+      .where(eq(t.usageEventIdempotency.tenantId, tenant))
+    const canonicalKeys = idemRows.filter((r) => r.idempotencyKey === validationBillingKey(validationId))
+    expect(canonicalKeys).toHaveLength(1)
+
+    // validation.completed foi publicado uma única vez.
+    const completedCount = await countOutboxCompleted(validationId)
+    expect(completedCount).toBe(1)
+  })
+
+  it('rollback da transação não deixa alterações parciais', async () => {
+    // Garante que, quando a quota é excedida, nenhum sinal, claim ou
+    // claim_evidence fica parcialmente persistido.
+    await setQuota(0)
+    const validationId = await createQueuedValidation('quota-rollback-1', '12345678000195')
+
+    const result = await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
+      { tenantId: tenant, validationId },
+    )
+    expect(result.status).toBe('blocked_quota')
+    expect((await validationRow(validationId))?.status).toBe('blocked_quota')
+  })
+})

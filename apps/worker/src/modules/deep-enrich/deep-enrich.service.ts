@@ -228,7 +228,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
   const claimType = claimTypeOf(state.subject.docType)
   const subjectType = subjectTypeOf(state.subject.docType)
 
-  let isCompleted = false
+  let isCompleted: 'completed' | 'partial' | 'blocked_quota' = 'partial'
   const outcome = await withTenant(deps.db, input.tenantId, async (tx) => {
     const existingCheckerIds = new Set(signals.map((s) => `${s.checkerId}@${s.checkerVersion}`))
     const freshSignals = [...newSignals, ...t2Signals].filter(
@@ -377,13 +377,14 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
 
     // Se a cota hard bloqueou o faturamento, a validação foi marcada como
     // blocked_quota dentro de emitOutcomeEvents. O processamento foi concluído
-    // (mesmo que sem cobrança), então o status é 'completed' e não 'partial'.
-    isCompleted = blockedByQuota || !stillPartial
+    // (mesmo que sem cobrança), então o status é 'blocked_quota' e não
+    // 'completed' nem 'partial'.
+    isCompleted = blockedByQuota ? 'blocked_quota' : !stillPartial ? 'completed' : 'partial'
     return { score, decision, stillPartial: blockedByQuota ? false : stillPartial }
   })
 
   return {
-    status: isCompleted ? 'completed' : 'partial',
+    status: isCompleted,
     verdict: outcome.decision.verdict,
     confidence: outcome.decision.confidence,
     score: Math.tanh(outcome.score),

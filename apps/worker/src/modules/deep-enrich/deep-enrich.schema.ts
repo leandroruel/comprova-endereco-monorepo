@@ -10,7 +10,7 @@ export const deepEnrichInputSchema = z.object({
 export type DeepEnrichInput = z.infer<typeof deepEnrichInputSchema>
 
 export interface DeepEnrichResult {
-  readonly status: 'completed' | 'partial'
+  readonly status: 'completed' | 'partial' | 'blocked_quota'
   readonly verdict: Verdict
   readonly confidence: number
   readonly score: number
