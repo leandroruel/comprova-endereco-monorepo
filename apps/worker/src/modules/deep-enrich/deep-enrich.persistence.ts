@@ -424,13 +424,11 @@ export const emitOutcomeEvents = async (
   write: OutcomeEventsWrite,
 ): Promise<{ readonly blockedByQuota: boolean }> => {
   // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
-
-  // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
-  // geram a unidade comercial. Resultados parciais (queued/partial) não claimam
-  // a identidade comercial nem consomem cota — a conclusão será registrada por
-  // esta mesma função quando o deep path de fato terminar (CodeRabbit k). A
-  // cota hard é aplicada a todo evento faturável dentro da mesma transação
-  // (CodeRabbit l).
+  // geram a unidade comercial. Resultados parciais (queued/partial) não
+  // claimam a identidade comercial nem consomem cota — a conclusão será
+  // registrada por esta mesma função quando o deep path de fato terminar
+  // (CodeRabbit k). A cota hard é aplicada a todo evento faturável dentro da
+  // mesma transação (CodeRabbit l).
   //
   // Identidade comercial compartilhada com o fast path (ADR-0044 §3): eventos
   // FATURÁVEIS usam a chave canônica `validation:<id>` e a garantia estrutural
@@ -438,7 +436,21 @@ export const emitOutcomeEvents = async (
   // esta validação, aqui é replay (não há segunda cobrança). Eventos NÃO
   // faturáveis (indisponibilidade de fonte externa) usam chave própria, para
   // nunca bloquearem um faturamento legítimo de uma reexecução posterior.
-  if (write.stillPartial) return { blockedByQuota: false }
+  if (write.stillPartial) {
+    await tx.insert(t.outbox).values({
+      aggregate: 'validation',
+      aggregateId: write.validationId,
+      eventType: 'validation.updated',
+      payload: {
+        tenant_id: write.tenantId,
+        validation_id: write.validationId,
+        claim_id: write.claimId,
+        claim_type: write.claimType,
+        verdict: write.verdict,
+      },
+    })
+    return { blockedByQuota: false }
+  }
 
   const billable = !write.externalUnavailability
   try {
@@ -469,6 +481,22 @@ export const emitOutcomeEvents = async (
           completedAt: null,
         })
         .where(eq(t.validation.validationId, write.validationId))
+
+      // Publicar evento de conclusão bloqueada por quota
+      await tx.insert(t.outbox).values({
+        aggregate: 'validation',
+        aggregateId: write.validationId,
+        eventType: 'validation.blocked_quota',
+        payload: {
+          tenant_id: write.tenantId,
+          validation_id: write.validationId,
+          claim_id: write.claimId,
+          claim_type: write.claimType,
+          verdict: write.verdict,
+          quota_blocked_reason: err.message,
+        },
+      })
+
       return { blockedByQuota: true }
     }
     throw err
