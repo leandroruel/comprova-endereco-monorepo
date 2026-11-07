@@ -84,9 +84,13 @@ export const recordUsageEventInTx = async (
   const key = idempotencyKey ?? randomUUID()
   const eventId = randomUUID()
 
-  // Concorrência segura: bloqueia a linha do tenant para impedir que duas
-  // requisições simultâneas ultrapassem silenciosamente um limite hard.
-  await tx.execute(sql`SELECT 1 FROM tenant WHERE tenant_id = ${tenantId} FOR UPDATE`)
+  // Concorrência segura: bloqueia a linha do tenant apenas para eventos
+  // faturáveis, impedindo que duas requisições simultâneas ultrapassem
+  // silenciosamente um limite hard. Eventos não-faturáveis não consomem cota
+  // e podem pular o lock.
+  if (billable) {
+    await tx.execute(sql`SELECT 1 FROM tenant WHERE tenant_id = ${tenantId} FOR UPDATE`)
+  }
 
   // 1. Reservar/inserir a chave de idempotência (única por tenant+chave).
   const idemRows = await tx

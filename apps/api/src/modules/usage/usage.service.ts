@@ -31,6 +31,9 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
   /**
    * Registra um evento de uso de forma idempotente (nova transação via
    * `withTenant`). Use `recordUsageEventInTx` quando já houver transação aberta.
+   *
+   * @param input dados do evento (tenant, tipo, tipo de evento, unidades, custo, validação, chave de idempotência, faturável, fonte)
+   * @returns evento registrado e se foi replay (`replayed: true`)
    */
   const recordUsageEvent = async (input: {
     readonly tenantId: string
@@ -50,6 +53,15 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
 
   /**
    * Consulta o consumo agregado de um tenant em um período.
+   *
+   * Agrupa eventos de uso por `event_type` dentro do intervalo
+   * `[periodStart, periodEnd)` (ou período corrente quando omitido) e devolve
+   * totais de eventos, unidades, unidades faturáveis, custo e distribuição
+   * por tipo de evento.
+   *
+   * @param tenantId tenant proprietário
+   * @param query bounds do período (periodStart/periodEnd opcionais)
+   * @returns consumo agregado do tenant no período
    */
   const getConsumption = async (
     tenantId: string,
@@ -117,6 +129,12 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
 
   /**
    * Consulta a situação da cota de um tenant no período corrente.
+   *
+   * Devolve o limite mensal, unidades consumidas, remanescente, se há limite
+   * hard e se os limites soft/hard foram atingidos (soft = 80% do quota).
+   *
+   * @param tenantId tenant proprietário
+   * @returns situação da cota do tenant no período corrente
    */
   const getQuota = async (
     tenantId: string,
@@ -191,6 +209,15 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
 
   /**
    * Lista eventos de uso de um tenant com filtros opcionais.
+   *
+   * Retorna eventos no intervalo `[periodStart, periodEnd)` (ou período
+   * corrente quando omitido), filtrados por `billable` e `event_type` quando
+   * informados, com paginação (`limit`/`offset`). O `total` reflete o
+   * conjunto completo filtrado (independente da página).
+   *
+   * @param tenantId tenant proprietário
+   * @param query filtros e paginação (periodStart, periodEnd, billable, eventType, limit, offset)
+   * @returns lista de eventos da página, total de linhas filtradas, limit e offset
    */
   const getEvents = async (
     tenantId: string,
@@ -283,7 +310,18 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
   /**
    * Reconcilia validações concluídas com eventos de uso registrados.
    *
-   * Identifica divergências sem corrigi-las silenciosamente.
+   * Compara validações concluídas (selecionadas por `completed_at` dentro do
+   * período) com eventos de uso no mesmo período, de forma somente leitura
+   * (não corrige dados silenciosamente). Reporta divergências:
+   * `validation_without_event`, `billability_mismatch`, `duplicate_event`,
+   * `unit_mismatch` e `event_without_validation`. Validações concluídas com
+   * sinais de indisponibilidade de fonte externa são isentas das
+   * divergências de faturamento (política ADR-0044 §3b).
+   *
+   * @param tenantId tenant proprietário
+   * @param periodStart início do período (opcional, default = período corrente)
+   * @param periodEnd fim do período (opcional, default = período corrente)
+   * @returns contagem de concluídos, eventos, faturáveis e lista de divergências
    */
   const reconcile = async (
     tenantId: string,

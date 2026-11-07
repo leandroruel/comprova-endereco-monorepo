@@ -18,6 +18,7 @@ import {
   makeProfileReader,
   makeRegistryReader,
   runMigrations,
+  validationBillingKey,
 } from '@comprova/db'
 import * as t from '@comprova/db'
 import {
@@ -26,6 +27,7 @@ import {
   policyHashOf,
   systemClock,
   type Clock,
+  type Checker,
   type FiscalLookupInput,
   type PartnerGraphReader,
 } from '@comprova/core'
@@ -197,6 +199,64 @@ describe('deepEnrich (activity core)', () => {
       .from(t.signal)
       .where(eq(t.signal.validationId, created.validationId))
     expect(t1Signals.filter((s) => s.stance === 'contradicts').length).toBe(0)
+  })
+
+  it('timeout de checker no fast-path não torna a conclusão do deep não-faturável', async () => {
+    // Checker T0 que demora mais que o próprio timeoutMs → sinal de checker_timeout.
+    const slowChecker: Checker = {
+      id: 'slow_checker',
+      version: '1.0.0',
+      tier: 0,
+      appliesTo: ['CNPJ'],
+      timeoutMs: 50,
+      run: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5000)) // expira bem antes de resolver
+        return []
+      },
+    }
+
+    // Fast path com os checkers reais T0 mais um checker que expira → conclui
+    // (modo 'fast' → sempre 'completed') com veredito conclusivo, mas com
+    // indisponibilidade (timeout) → conclusão NÃO faturável.
+    const created = await runFastPath(
+      { ...fastPathDeps, checkers: [...fastPathDeps.checkers, slowChecker] },
+      { tenantId: tenant, apiKeyId: null },
+      {
+        documentType: 'CNPJ',
+        documentValue: '12345678000195',
+        addressInput: null,
+        legalBasis: 'FRAUD_PREVENTION',
+        mode: 'fast',
+        idempotencyKey: 'deep-billability-timeout',
+      },
+    )
+    expect(created.status).toBe('completed')
+
+    const eventoRapido = await adminPool.db
+      .select({ billable: t.usageEvent.billable, idempotencyKey: t.usageEvent.idempotencyKey })
+      .from(t.usageEvent)
+      .where(eq(t.usageEvent.validationId, created.validationId))
+    expect(eventoRapido.some((e) => e.billable === false)).toBe(true)
+    // O evento não-faturável do fast path usa chave própria, não a canônica.
+    expect(eventoRapido.some((e) => e.idempotencyKey === validationBillingKey(created.validationId))).toBe(
+      false,
+    )
+
+    // Deep com checkers que funcionam: conclui sem indisponibilidade NESTA execução.
+    // O timeout antigo do fast path (sinal herdado) não contamina a faturabilidade.
+    const result = await deepEnrich(
+      { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
+      { tenantId: tenant, validationId: created.validationId },
+    )
+    expect(result.status).toBe('completed')
+
+    // A conclusão do deep é faturável: evento usage_event com a chave canônica.
+    const eventoDeep = await adminPool.db
+      .select({ billable: t.usageEvent.billable, idempotencyKey: t.usageEvent.idempotencyKey })
+      .from(t.usageEvent)
+      .where(eq(t.usageEvent.validationId, created.validationId))
+    expect(eventoDeep.some((e) => e.billable === true)).toBe(true)
+    expect(eventoDeep.some((e) => e.idempotencyKey === validationBillingKey(created.validationId))).toBe(true)
   })
 
   // Fase 14 — evidências históricas jamais são sobrescritas: nova observação → nova

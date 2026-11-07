@@ -1,6 +1,6 @@
 import { and, createDbPool, eq, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
-import { validationBillingKey } from '@comprova/db'
+import { validationBillingKey, QuotaExceededError } from '@comprova/db'
 import { z } from 'zod'
 import { UsageConsumptionDtoSchema, UsageEventDtoSchema, UsageQuotaDtoSchema } from '@comprova/contracts'
 import { runMigrations } from '@comprova/db'
@@ -236,11 +236,30 @@ describe('usage metering — idempotência', () => {
     const succeeded = results.filter(
       (r) => r.status === 'fulfilled' && r.value.replayed === false && r.value.eventId !== null,
     ).length
-    const rejected = results.filter((r) => r.status === 'rejected').length
+    const rejected = results.filter((r) => r.status === 'rejected')
     // Apenas uma das duas concorrentes deve conseguir (resta 1 unidade); a outra
     // é rejeitada por cota hard.
     expect(succeeded).toBe(1)
-    expect(rejected).toBe(1)
+    expect(rejected).toHaveLength(1)
+
+    // A rejeição deve ser um QuotaExceededError (erro de negócio, não transitório).
+    const rejection = rejected[0]!
+    expect(rejection.status).toBe('rejected')
+    expect(rejection.reason).toBeInstanceOf(QuotaExceededError)
+
+    // Após a rejeição, não deve haver linha extra de usage_event além da
+    // inicial (conc-1) e da que venceu a concorrência (conc-2 ou conc-3).
+    const rows = await withTenant(appPool.db, tenantId, (tx) =>
+      tx
+        .select({ eventId: t.usageEvent.eventId, idempotencyKey: t.usageEvent.idempotencyKey })
+        .from(t.usageEvent)
+        .where(eq(t.usageEvent.tenantId, tenantId))
+        .orderBy(t.usageEvent.occurredAt),
+    )
+    expect(rows).toHaveLength(2)
+    const keys = new Set(rows.map((r) => r.idempotencyKey))
+    expect(keys.has('conc-1')).toBe(true)
+    expect([...keys].filter((k) => k !== 'conc-1')).toHaveLength(1)
   })
 
   it('deep não consome quando cota já atingida', async () => {
@@ -486,6 +505,136 @@ describe('usage metering — reconciliação', () => {
 
     expect(body.divergences).toEqual([])
   })
+
+  it('validação partial/queued sem evento → sem divergência', async () => {
+    const partialSubject = randomUUID()
+    const queuedSubject = randomUUID()
+    const partialId = randomUUID()
+    const queuedId = randomUUID()
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx.insert(t.subject).values([
+        { subjectId: partialSubject, tenantId, docType: 'CNPJ', docHmac: Buffer.from('partial') },
+        { subjectId: queuedSubject, tenantId, docType: 'CNPJ', docHmac: Buffer.from('queued') },
+      ])
+      await tx.insert(t.validation).values([
+        {
+          validationId: partialId,
+          tenantId,
+          subjectId: partialSubject,
+          mode: 'fast',
+          status: 'partial',
+          verdict: 'INSUFFICIENT_EVIDENCE',
+          score: 0.5,
+          confidence: 0.9,
+          policyVersion: '2026.11.1',
+          legalBasis: 'CONSENT',
+          createdAt: now,
+          completedAt: now,
+          expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+        },
+        {
+          validationId: queuedId,
+          tenantId,
+          subjectId: queuedSubject,
+          mode: 'auto',
+          status: 'queued',
+          verdict: 'INSUFFICIENT_EVIDENCE',
+          score: 0.5,
+          confidence: 0.9,
+          policyVersion: '2026.11.1',
+          legalBasis: 'CONSENT',
+          createdAt: now,
+          completedAt: null,
+          expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+        },
+      ])
+    })
+    const body = await reconcile()
+
+    expect(body.completedValidations).toBe(0)
+    expect(body.divergences).toEqual([])
+  })
+
+  it('validação concluída fora do período (antes de periodStart e em periodEnd) → excluída', async () => {
+    const periodEndDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+
+    // concluída antes do período (dia 10 do mês anterior)
+    const beforeId = randomUUID()
+    const beforeSubject = randomUUID()
+    // concluída exatamente em periodEnd (o bound superior é exclusivo → excluída)
+    const atEndId = randomUUID()
+    const atEndSubject = randomUUID()
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx.insert(t.subject).values([
+        { subjectId: beforeSubject, tenantId, docType: 'CNPJ', docHmac: Buffer.from('before') },
+        { subjectId: atEndSubject, tenantId, docType: 'CNPJ', docHmac: Buffer.from('atend') },
+      ])
+      await tx.insert(t.validation).values([
+        {
+          validationId: beforeId,
+          tenantId,
+          subjectId: beforeSubject,
+          mode: 'fast',
+          status: 'completed',
+          verdict: 'INSUFFICIENT_EVIDENCE',
+          score: 0.5,
+          confidence: 0.9,
+          policyVersion: '2026.11.1',
+          legalBasis: 'CONSENT',
+          createdAt: now,
+          completedAt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 10)),
+          expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+        },
+        {
+          validationId: atEndId,
+          tenantId,
+          subjectId: atEndSubject,
+          mode: 'fast',
+          status: 'completed',
+          verdict: 'INSUFFICIENT_EVIDENCE',
+          score: 0.5,
+          confidence: 0.9,
+          policyVersion: '2026.11.1',
+          legalBasis: 'CONSENT',
+          createdAt: now,
+          completedAt: new Date(periodEndDate),
+          expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+        },
+      ])
+    })
+
+    const body = await reconcile()
+    // Ambas concluídas fora do período não entram na base de comparação.
+    expect(body.completedValidations).toBe(0)
+    expect(body.divergences).toEqual([])
+  })
+
+  it('evento de uso com occurred_at fora do período → excluído de usageEvents e divergências', async () => {
+    const validationId = await insertValidation('completed', now)
+    // evento dentro do período
+    await insertEvent('evt-in', validationId, true, 1)
+    // evento fora do período (mês anterior)
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx.insert(t.usageEvent).values({
+        eventId: randomUUID(),
+        tenantId,
+        eventType: 'usage_event',
+        kind: 'fast',
+        units: 1,
+        validationId,
+        idempotencyKey: 'evt-out',
+        billable: true,
+        source: 'fast',
+        occurredAt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 10)),
+      })
+    })
+
+    const body = await reconcile()
+    expect(body.completedValidations).toBe(1)
+    // usageEvents conta apenas os no período; o evento fora do período não gera divergência.
+    expect(body.usageEvents).toBe(1)
+    expect(body.divergences).toEqual([])
+  })
 })
 
 describe('usage metering — paginação e parsing', () => {
@@ -537,6 +686,45 @@ describe('usage metering — paginação e parsing', () => {
     expect(body.events).toHaveLength(4)
   })
 
+  it('paginação com limit menor que o total e offset que pula a primeira página', async () => {
+    // 7 eventos faturáveis, todos no período (occurredAt = now)
+    for (let i = 1; i <= 7; i++) {
+      await insertEvent(`pagmulti-${i}`, randomUUID(), true, 1, 'fast')
+    }
+
+    // Página 1: limit=3, offset=0 → 3 eventos, total continua 7
+    const res1 = await injectM2M('GET', '/v1/usage/events?limit=3&offset=0', apiKeySecret)
+    expect(res1.statusCode).toBe(200)
+    const body1 = res1.json()
+    expect(body1.total).toBe(7)
+    expect(body1.limit).toBe(3)
+    expect(body1.offset).toBe(0)
+    expect(body1.events).toHaveLength(3)
+    const ids1 = new Set(body1.events.map((e: { eventId: string }) => e.eventId))
+
+    // Página 2: limit=3, offset=3 → 3 eventos, total continua 7, sem repetir da página 1
+    const res2 = await injectM2M('GET', '/v1/usage/events?limit=3&offset=3', apiKeySecret)
+    expect(res2.statusCode).toBe(200)
+    const body2 = res2.json()
+    expect(body2.total).toBe(7)
+    expect(body2.limit).toBe(3)
+    expect(body2.offset).toBe(3)
+    expect(body2.events).toHaveLength(3)
+    const ids2 = new Set(body2.events.map((e: { eventId: string }) => e.eventId))
+    expect([...ids2].some((id) => ids1.has(id))).toBe(false)
+
+    // Página 3: limit=3, offset=6 → 1 evento (o último), total continua 7
+    const res3 = await injectM2M('GET', '/v1/usage/events?limit=3&offset=6', apiKeySecret)
+    expect(res3.statusCode).toBe(200)
+    const body3 = res3.json()
+    expect(body3.total).toBe(7)
+    expect(body3.events).toHaveLength(1)
+
+    // As três páginas juntas cobrem todos os 7 eventos sem sobreposição.
+    const allIds = new Set([...ids1, ...ids2, ...body3.events.map((e: { eventId: string }) => e.eventId)])
+    expect(allIds.size).toBe(7)
+  })
+
   it('parsing billable=true/false, limit, offset válidos', async () => {
     await insertEvent('parse-1', randomUUID(), true, 1, 'fast')
 
@@ -562,6 +750,82 @@ describe('usage metering — paginação e parsing', () => {
       apiKeySecret,
     )
     expect(res.statusCode).toBe(200)
+  })
+})
+
+describe('usage metering — consumo com fixtures abrangendo o período', () => {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+
+  beforeEach(async () => {
+    await setQuota(1000)
+    await clearUsage()
+  })
+
+  const insertEventAt = async (
+    idempotencyKey: string,
+    validationId: string | null,
+    billable: boolean,
+    units: number,
+    eventType: 'usage_event' | 'processing_attempt' | 'technical_execution',
+    occurredAt: Date,
+  ) => {
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx.insert(t.usageEvent).values({
+        eventId: randomUUID(),
+        tenantId,
+        eventType,
+        kind: 'fast',
+        units,
+        validationId: validationId ?? null,
+        idempotencyKey,
+        billable,
+        source: 'fast',
+        occurredAt,
+      })
+    })
+  }
+
+  it('soma apenas eventos dentro do período, por event_type e billable', async () => {
+    const inside = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15))
+    const atStart = new Date(monthStart) // boundary inclusivo
+    const before = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 20)) // antes do período
+    const atEnd = new Date(monthEnd) // boundary exclusivo (periodEnd é exclusivo)
+    const after = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 5)) // depois do período
+
+    // dentro do período, faturáveis
+    const v1 = randomUUID()
+    const v2 = randomUUID()
+    const v3 = randomUUID()
+    await insertEventAt('c-in-1', v1, true, 2, 'usage_event', inside)
+    await insertEventAt('c-in-2', v2, true, 3, 'usage_event', atStart)
+    // dentro do período, não faturável
+    await insertEventAt('c-in-3', null, false, 1, 'processing_attempt', inside)
+    // dentro do período, outro tipo faturável
+    await insertEventAt('c-in-4', v3, true, 1, 'technical_execution', inside)
+    // fora do período (antes) — deve ser excluído
+    await insertEventAt('c-before', randomUUID(), true, 99, 'usage_event', before)
+    // fora do período (em periodEnd, exclusivo) — deve ser excluído
+    await insertEventAt('c-at-end', randomUUID(), true, 99, 'usage_event', atEnd)
+    // fora do período (depois) — deve ser excluído
+    await insertEventAt('c-after', randomUUID(), true, 99, 'usage_event', after)
+
+    const res = await injectM2M('GET', '/v1/usage/consumption', apiKeySecret)
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+
+    // 4 eventos dentro do período (inside, atStart x2 tipos, processing_attempt)
+    expect(body.totalEvents).toBe(4)
+    // unidades faturáveis: 2 + 3 + 1 (o processing_attempt não é billable)
+    expect(body.totalBillableUnits).toBe(6)
+    // custo: nenhum tem costMicros → null
+    expect(body.totalCostMicros).toBeNull()
+    // distribuição por tipo dentro do período
+    expect(body.byEventType).toEqual({
+      usage_event: 2, // inside + atStart (usage_event)
+      processing_attempt: 1,
+      technical_execution: 1,
+    })
   })
 })
 

@@ -26,6 +26,23 @@ const insertSubject = (tenantId: string) => ({
   docHmac: randomBytes(32),
 })
 
+/** Aguarda uma rejeição por RLS e afirma que o texto do erro é de RLS (não genérico). */
+const expectRlsReject = async (promise: Promise<unknown>): Promise<void> => {
+  let err: unknown
+  try {
+    await promise
+  } catch (e) {
+    err = e
+  }
+  expect(err).toBeDefined()
+  const msg = String(
+    (err as { cause?: { message?: string } } | undefined)?.cause?.message ??
+      (err as Error | undefined)?.message ??
+      '',
+  )
+  expect(msg).toMatch(/row-level security|policy/i)
+}
+
 describe('RLS multi-tenant isolation', () => {
   it('bloqueia insert sem contexto de tenant', async () => {
     await expect(appPool.db.insert(t.subject).values(insertSubject(tenantA))).rejects.toThrow()
@@ -142,9 +159,11 @@ describe('RLS multi-tenant isolation', () => {
   })
 
   it('RLS usage_event: isola leitura e escrita entre tenants (app_user)', async () => {
+    const idA = randomUUID()
+    const idB = randomUUID()
     await withTenant(appPool.db, tenantA, (tx) =>
       tx.insert(t.usageEvent).values({
-        eventId: randomUUID(),
+        eventId: idA,
         tenantId: tenantA,
         eventType: 'usage_event',
         kind: 'fast',
@@ -156,7 +175,7 @@ describe('RLS multi-tenant isolation', () => {
     )
     await withTenant(appPool.db, tenantB, (tx) =>
       tx.insert(t.usageEvent).values({
-        eventId: randomUUID(),
+        eventId: idB,
         tenantId: tenantB,
         eventType: 'usage_event',
         kind: 'deep',
@@ -173,12 +192,13 @@ describe('RLS multi-tenant isolation', () => {
     const asB = await withTenant(appPool.db, tenantB, (tx) =>
       tx.select({ eventId: t.usageEvent.eventId }).from(t.usageEvent),
     )
-    expect(asA.map((r) => r.eventId)).toHaveLength(1)
-    expect(asB.map((r) => r.eventId)).toHaveLength(1)
+    // Cada tenant vê o próprio ID e não o do outro.
+    expect(asA.map((r) => r.eventId)).toEqual([idA])
+    expect(asB.map((r) => r.eventId)).toEqual([idB])
   })
 
   it('RLS usage_event: bloqueia insert com tenant incompatível ao contexto', async () => {
-    await expect(
+    await expectRlsReject(
       withTenant(appPool.db, tenantA, (tx) =>
         tx.insert(t.usageEvent).values({
           eventId: randomUUID(),
@@ -191,7 +211,7 @@ describe('RLS multi-tenant isolation', () => {
           occurredAt: new Date(),
         }),
       ),
-    ).rejects.toThrow()
+    )
   })
 
   it('RLS usage_event_idempotency: isola leitura e escrita entre tenants', async () => {
@@ -231,7 +251,7 @@ describe('RLS multi-tenant isolation', () => {
     expect(asA.map((r) => r.validationId)).toEqual([validationId])
     expect(asB).toHaveLength(0)
 
-    await expect(
+    await expectRlsReject(
       withTenant(appPool.db, tenantA, (tx) =>
         tx.insert(t.usageBillingUnit).values({
           tenantId: tenantB, // tenant diferente do contexto (tenantA)
@@ -239,7 +259,7 @@ describe('RLS multi-tenant isolation', () => {
           eventId: null,
         }),
       ),
-    ).rejects.toThrow()
+    )
   })
 })
 

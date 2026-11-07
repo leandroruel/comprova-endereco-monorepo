@@ -402,6 +402,22 @@ export interface OutcomeEventsWrite {
   readonly externalUnavailability: boolean
 }
 
+/**
+ * Emite os eventos de resultado de uma validação (outbox + evento de uso).
+ *
+ * Publica `validation.completed` (ou `validation.updated` quando ainda parcial)
+ * na tabela `outbox`. Somente validações concluídas (`stillPartial === false`)
+ * geram a unidade comercial faturável e consomem cota; resultados parciais
+ * retornam cedo sem reclamar identidade comercial.
+ *
+ * O evento de uso é idempotente e compartilha a identidade comercial com o
+ * fast path (ADR-0044 §3): faturáveis usam a chave canônica
+ * `validation:<validationId>` (garantia de `usage_billing_unit`), não
+ * faturáveis usam chave própria para não bloquear faturamento futuro.
+ *
+ * @param tx transação aberta (mesma da conclusão da validação)
+ * @param write dados do evento de resultado (tenant, validação, claim, parcial, veredito, indisponibilidade externa)
+ */
 export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Promise<void> => {
   await tx.insert(t.outbox).values({
     aggregate: 'validation',

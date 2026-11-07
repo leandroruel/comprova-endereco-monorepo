@@ -205,10 +205,27 @@ WHERE u.billable = true
   );
 
 -- 4.2. Promover EXATAMENTE UM evento canônico por validação concluída.
+--
+-- Validações cuja conclusão decorre de indisponibilidade de fonte externa
+-- (checker_timeout, source_unavailable, internal_error — mesmo predicado de
+-- `hasExternalUnavailability` em @comprova/core, ADR-0044 §3b) são
+-- conclusões técnicas, não faturáveis, e NÃO são promovidas a unidade
+-- faturável pelo backfill. Expressível em SQL via NOT EXISTS sobre `signal`
+-- (validacao_id é único, então o join pela validation_id basta para isolar o
+-- tenant).
 WITH completed AS (
   SELECT v.tenant_id, v.validation_id
   FROM validation v
   WHERE v.status = 'completed'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM signal s
+      WHERE s.validation_id = v.validation_id
+        AND (
+          s.source LIKE '%:timeout'
+          OR s.detail->>'reason' IN ('checker_timeout', 'source_unavailable', 'internal_error')
+        )
+    )
 ),
 ranked AS (
   SELECT u.event_id,

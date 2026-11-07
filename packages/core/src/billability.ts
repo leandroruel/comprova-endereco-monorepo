@@ -31,6 +31,14 @@ const UNAVAILABLE_REASONS: ReadonlySet<string> = new Set([
  * Causa de indisponibilidade de um sinal, ou `null` quando o sinal representa
  * um resultado legítimo do checker (inclusive `unknown` sem motivo de
  * indisponibilidade).
+ *
+ * Motivos que caracterizam indisponibilidade (não faturável):
+ * `checker_timeout`, `source_unavailable`, `internal_error`. Qualquer outro
+ * motivo (ex.: `not_in_registry`, `cep_missing`) é resultado legítimo do
+ * checker e não impede o faturamento.
+ *
+ * @param signal sinal de checker a avaliar
+ * @returns causa de indisponibilidade ou `null` quando o sinal é um resultado legítimo
  */
 export const unavailabilityCauseOfSignal = (signal: Signal): ExternalUnavailabilityCause | null => {
   // Timeout do fast path chega como `stance: 'unknown'` com `source` sufixado.
@@ -51,6 +59,9 @@ export const unavailabilityCauseOfSignal = (signal: Signal): ExternalUnavailabil
 /**
  * Há alguma indisponibilidade de fonte externa no conjunto de sinais?
  * Usado para decidir `billable` de forma consistente entre fast e deep.
+ *
+ * @param signals sinais de checker a avaliar
+ * @returns `true` quando algum sinal indica indisponibilidade de fonte externa
  */
 export const hasExternalUnavailability = (signals: readonly Signal[]): boolean =>
   signals.some((signal) => unavailabilityCauseOfSignal(signal) !== null)

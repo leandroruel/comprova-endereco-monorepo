@@ -367,9 +367,11 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       verdict: decision.verdict,
       // Mesma política de faturabilidade do fast path (ADR-0044 §3): timeout
       // de checker, fonte externa indisponível ou falha interna tornam a
-      // conclusão não faturável (aplica-se ao conjunto de sinais desta
-      // execução — T1 + T2).
-      externalUnavailability: hasExternalUnavailability([...signalsAfterT1, ...t2Signals]),
+      // conclusão não faturável. Considera APENAS os sinais desta execução
+      // (T1 = newSignals, T2 = t2Signals): um timeout antigo do checker do
+      // fast path (sinal herdado em `signalsAfterT1`) não torna não-faturável
+      // uma conclusão bem-sucedida do deep.
+      externalUnavailability: hasExternalUnavailability([...newSignals, ...t2Signals]),
     })
 
     return { score, decision, stillPartial }

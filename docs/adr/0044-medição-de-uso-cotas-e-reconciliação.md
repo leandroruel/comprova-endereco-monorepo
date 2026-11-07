@@ -95,7 +95,9 @@ O campo `billable` + `source` tornam a decisão auditável.
 
 A coluna `tenant.monthly_quota` (bigint) já existe no schema (`packages/db/src/schemas/tenancy.ts`) mas não é utilizada comercialmente.
 
-- **Cota hard**: quando o consumo acumulado no período >= `monthly_quota`, novas operações faturáveis são impedidas (403/429).
+- **Cota hard**: quando o consumo acumulado no período mais as unidades da
+  operação excede `monthly_quota` (`consumido + unidades > monthly_quota`),
+  novas operações faturáveis são impedidas (`QuotaExceededError`, HTTP 429).
 - **Cota soft**: quando o consumo >= percentual configurável (ex.: 80% do quota), permite continuar mas registra alerta.
 - **Período de referência**: mensal, alinhado com `occurred_at` de `usage_event`.
 - **Ausência de cota**: `monthly_quota IS NULL` → sem limite comercial (rate limiting técnico continua ativo independente).

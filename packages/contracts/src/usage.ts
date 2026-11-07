@@ -95,9 +95,22 @@ export const UsageReconciliationDtoSchema = z.object({
 export type UsageReconciliationDto = z.infer<typeof UsageReconciliationDtoSchema>
 
 /** Parâmetros de consulta de consumo. */
-export const UsageConsumptionQuerySchema = z.object({
-  periodStart: z.string().datetime().optional(),
-  periodEnd: z.string().datetime().optional(),
-})
+export const UsageConsumptionQuerySchema = z
+  .object({
+    periodStart: z.string().datetime().optional(),
+    periodEnd: z.string().datetime().optional(),
+  })
+  .refine(
+    (data) => {
+      // Quando um dos bounds está ausente, usa o padrão (período corrente) e
+      // não há janela inválida para rejeitar.
+      if (!data.periodStart || !data.periodEnd) return true
+      return new Date(data.periodEnd) >= new Date(data.periodStart)
+    },
+    {
+      message: 'periodEnd não pode ser anterior a periodStart',
+      path: ['periodEnd'],
+    },
+  )
 
 export type UsageConsumptionQuery = z.infer<typeof UsageConsumptionQuerySchema>
