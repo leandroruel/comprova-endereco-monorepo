@@ -4,6 +4,7 @@ import {
   eq,
   inArray,
   isNull,
+  QuotaExceededError,
   sql,
   recordUsageEventInTx,
   validationBillingKey,
@@ -418,7 +419,10 @@ export interface OutcomeEventsWrite {
  * @param tx transação aberta (mesma da conclusão da validação)
  * @param write dados do evento de resultado (tenant, validação, claim, parcial, veredito, indisponibilidade externa)
  */
-export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Promise<void> => {
+export const emitOutcomeEvents = async (
+  tx: DbTx,
+  write: OutcomeEventsWrite,
+): Promise<{ readonly blockedByQuota: boolean }> => {
   await tx.insert(t.outbox).values({
     aggregate: 'validation',
     aggregateId: write.validationId,
@@ -445,18 +449,40 @@ export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Pr
   // esta validação, aqui é replay (não há segunda cobrança). Eventos NÃO
   // faturáveis (indisponibilidade de fonte externa) usam chave própria, para
   // nunca bloquearem um faturamento legítimo de uma reexecução posterior.
-  if (write.stillPartial) return
+  if (write.stillPartial) return { blockedByQuota: false }
 
   const billable = !write.externalUnavailability
-  await recordUsageEventInTx(tx, {
-    tenantId: write.tenantId,
-    eventType: 'usage_event',
-    kind: 'deep',
-    units: 1,
-    costMicros: null,
-    validationId: write.validationId,
-    idempotencyKey: billable ? validationBillingKey(write.validationId) : null,
-    billable,
-    source: 'deep',
-  })
+  try {
+    await recordUsageEventInTx(tx, {
+      tenantId: write.tenantId,
+      eventType: 'usage_event',
+      kind: 'deep',
+      units: 1,
+      costMicros: null,
+      validationId: write.validationId,
+      idempotencyKey: billable ? validationBillingKey(write.validationId) : null,
+      billable,
+      source: 'deep',
+    })
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      // A cota hard impediu o faturamento. Marcar a validação com um estado de
+      // negócio explícito (blocked_quota) em vez de deixá-la em queued/partial
+      // sem indicação do motivo. O erro NÃO é relançado: o caller decide o
+      // fluxo de retry baseado no retorno.
+      await tx
+        .update(t.validation)
+        .set({
+          status: 'blocked_quota',
+          quotaBlockedReason: err.message,
+          // A validação não foi concluída com sucesso; completed_at permanece
+          // nulo até que o processamento possa ser retomado (quota aumentada).
+          completedAt: null,
+        })
+        .where(eq(t.validation.validationId, write.validationId))
+      return { blockedByQuota: true }
+    }
+    throw err
+  }
+  return { blockedByQuota: false }
 }

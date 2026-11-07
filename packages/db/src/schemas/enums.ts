@@ -19,6 +19,7 @@ export const valStatusEnum = pgEnum('val_status', [
   'completed',
   'failed',
   'expired',
+  'blocked_quota',
 ])
 
 export const verdictEnum = pgEnum('verdict_t', [

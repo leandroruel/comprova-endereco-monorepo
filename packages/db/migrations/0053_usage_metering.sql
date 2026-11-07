@@ -210,9 +210,17 @@ WHERE u.billable = true
 -- (checker_timeout, source_unavailable, internal_error — mesmo predicado de
 -- `hasExternalUnavailability` em @comprova/core, ADR-0044 §3b) são
 -- conclusões técnicas, não faturáveis, e NÃO são promovidas a unidade
--- faturável pelo backfill. Expressível em SQL via NOT EXISTS sobre `signal`
--- (validacao_id é único, então o join pela validation_id basta para isolar o
--- tenant).
+-- faturável pelo backfill.
+--
+-- O predicado SQL deve ser semanticamente equivalente à função runtime
+-- `unavailabilityCauseOfSignal()` em @comprova/core: um sinal `unknown` apenas
+-- é indisponibilidade quando tem motivo de indisponibilidade
+-- (`source LIKE '%:timeout'` ou `detail->>'reason' IN (...)`). Um sinal com
+-- outro stance (ex.: `supports`, `contradicts`) e o mesmo motivo NÃO é
+-- indisponibilidade no runtime, então não pode ser tratado como tal no SQL.
+-- Por isso exigimos `s.stance = 'unknown'` junto com o motivo.
+-- Expressível em SQL via NOT EXISTS sobre `signal` (validation_id é único,
+-- então o join pela validation_id basta para isolar o tenant).
 WITH completed AS (
   SELECT v.tenant_id, v.validation_id
   FROM validation v
@@ -221,6 +229,7 @@ WITH completed AS (
       SELECT 1
       FROM signal s
       WHERE s.validation_id = v.validation_id
+        AND s.stance = 'unknown'
         AND (
           s.source LIKE '%:timeout'
           OR s.detail->>'reason' IN ('checker_timeout', 'source_unavailable', 'internal_error')

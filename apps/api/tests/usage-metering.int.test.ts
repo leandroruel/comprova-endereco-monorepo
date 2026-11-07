@@ -13,6 +13,7 @@ import {
   createTenant,
 } from '@comprova/testing'
 import Redis from 'ioredis'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- beforeEach é usado em vários describes abaixo
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
 import { randomUUID } from 'node:crypto'
@@ -49,6 +50,7 @@ const app = await buildApp({
     TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
   },
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- beforeEach é usado em vários describes abaixo
   db: appPool.db,
   redis,
   logger: createLogger({ level: 'silent' }),
@@ -1070,6 +1072,44 @@ describe('usage metering — identidade comercial (uma unidade faturável por va
       .where(eq(t.usageEventIdempotency.tenantId, otherTenantId))
     await adminPool.db.delete(t.usageBillingUnit).where(eq(t.usageBillingUnit.tenantId, otherTenantId))
     await adminPool.db.delete(t.tenant).where(eq(t.tenant.tenantId, otherTenantId))
+  })
+
+  it('quota excedida: evento faturável para validação diferente lança QuotaExceededError', async () => {
+    const validationId1 = randomUUID()
+    const validationId2 = randomUUID()
+    const key1 = validationBillingKey(validationId1)
+    const key2 = validationBillingKey(validationId2)
+
+    await setQuota(1)
+
+    // Primeiro evento faturável consome a quota
+    const first = await record({ tenantId, validationId: validationId1, kind: 'fast', idempotencyKey: key1 })
+    expect(first.replayed).toBe(false)
+
+    // Segundo evento faturável para validação diferente deve lançar QuotaExceededError
+    const service = await getService()
+    await expect(
+      withTenant(appPool.db, tenantId, async (tx) => {
+        await service.recordUsageEventInTx(tx, {
+          tenantId,
+          eventType: 'usage_event',
+          kind: 'fast',
+          units: 1,
+          validationId: validationId2,
+          idempotencyKey: key2,
+          billable: true,
+          source: 'fast',
+        })
+      }),
+    ).rejects.toThrow(QuotaExceededError)
+
+    // Nenhum evento faturável extra foi criado para validationId2
+    const count = await billableCount(tenantId, validationId2)
+    expect(count).toBe(0)
+
+    // O evento original continua existindo (não foi removido pelo rollback)
+    const count1 = await billableCount(tenantId, validationId1)
+    expect(count1).toBe(1)
   })
 
   it('retry após falha transacional: sem duplicação de unidade faturável', async () => {

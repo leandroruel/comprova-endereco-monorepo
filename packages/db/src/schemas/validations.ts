@@ -74,6 +74,9 @@ export const validation = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    // F3.3: motivo do bloqueio por quota hard, preenchido quando status =
+    // 'blocked_quota'. Nulo quando a validação não está bloqueada por quota.
+    quotaBlockedReason: text('quota_blocked_reason'),
   },
   (t) => [
     primaryKey({ columns: [t.validationId, t.createdAt] }),
