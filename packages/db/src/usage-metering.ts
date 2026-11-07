@@ -29,6 +29,14 @@ export interface UsageEventRecorded {
 }
 
 /**
+ * Chave comercial canônica da unidade faturável de uma validação
+ * (ADR-0044 §3): compartilhada por TODOS os caminhos técnicos (fast, deep).
+ * Usada apenas para eventos FATURÁVEIS — eventos técnicos/tentativas usam
+ * chaves próprias para nunca bloquearem um faturamento legítimo posterior.
+ */
+export const validationBillingKey = (validationId: string): string => `validation:${validationId}`
+
+/**
  * Insere um evento de uso dentro de uma transação existente (tx já tem
  * contexto de tenant via `withTenant`).
  *
@@ -36,9 +44,16 @@ export interface UsageEventRecorded {
  * 1. Reservar/inserir a chave de idempotência em `usage_event_idempotency`.
  * 2. Se for replay (chave já existente), retornar o evento previamente
  *    registrado SEM consumir cota novamente (`replayed: true`).
- * 3. Se for uma operação nova, verificar a cota hard.
- * 4. Registrar o evento e atualizar a referência do evento na idempotência.
- * 5. Tudo permanece na mesma transação da operação de negócio.
+ * 3. Se o evento é FATURÁVEL e tem `validationId`, reservar a identidade
+ *    comercial em `usage_billing_unit` (PK `tenant_id + validation_id`,
+ *    `ON CONFLICT DO NOTHING`). Se outra execução (fast ou deep, qualquer
+ *    chave) já faturou esta validação, retornar o evento dela como replay —
+ *    garantia estrutural do banco: no máximo uma unidade faturável por
+ *    `tenantId + validationId` (ADR-0044 §3).
+ * 4. Se for uma operação nova, verificar a cota hard.
+ * 5. Registrar o evento e atualizar as referências (idempotência e identidade
+ *    comercial).
+ * 6. Tudo permanece na mesma transação da operação de negócio.
  */
 export const recordUsageEventInTx = async (
   tx: DbTx,
@@ -99,7 +114,49 @@ export const recordUsageEventInTx = async (
     }
   }
 
-  // 3. Operação nova: verificar cota hard ANTES de gravar evento faturável.
+  // 3. Evento faturável com validação: reservar a identidade comercial
+  //    (garantia no BANCO de uma única unidade faturável por
+  //    tenant + validation, independente da chave de idempotência usada).
+  let billingUnitClaimed = false
+  if (billable && validationId !== null) {
+    const claimed = await tx
+      .insert(t.usageBillingUnit)
+      .values({ tenantId, validationId, eventId: null })
+      .onConflictDoNothing()
+      .returning({ validationId: t.usageBillingUnit.validationId })
+
+    if (claimed.length === 0) {
+      // Outra execução (fast ou deep, com qualquer chave) já faturou esta
+      // validação. Retornar o evento dela SEM consumir cota nem duplicar
+      // evento. O lock do tenant (FOR UPDATE acima) serializa as duas
+      // transações, então o `event_id` já foi preenchido pela vencedora.
+      const existingUnit = await tx
+        .select({ eventId: t.usageBillingUnit.eventId })
+        .from(t.usageBillingUnit)
+        .where(
+          and(eq(t.usageBillingUnit.tenantId, tenantId), eq(t.usageBillingUnit.validationId, validationId)),
+        )
+        .limit(1)
+      // Mapeia também a chave reservada neste fluxo para o evento vencedor,
+      // para que retries com esta chave sejam reconhecidos como replay.
+      const winnerEventId = existingUnit[0]?.eventId ?? null
+      if (winnerEventId !== null) {
+        await tx
+          .update(t.usageEventIdempotency)
+          .set({ eventId: winnerEventId })
+          .where(
+            and(
+              eq(t.usageEventIdempotency.tenantId, tenantId),
+              eq(t.usageEventIdempotency.idempotencyKey, key),
+            ),
+          )
+      }
+      return { eventId: winnerEventId, replayed: true }
+    }
+    billingUnitClaimed = true
+  }
+
+  // 4. Operação nova: verificar cota hard ANTES de gravar evento faturável.
   if (billable) {
     const tenantRow = await tx
       .select({ monthlyQuota: t.tenant.monthlyQuota })
@@ -135,7 +192,8 @@ export const recordUsageEventInTx = async (
     }
   }
 
-  // 4. Registrar o evento de uso e atualizar a referência do evento.
+  // 5. Registrar o evento de uso e atualizar as referências (idempotência e
+  //    identidade comercial).
   const inserted = await tx
     .insert(t.usageEvent)
     .values({
@@ -160,6 +218,14 @@ export const recordUsageEventInTx = async (
       .where(
         and(eq(t.usageEventIdempotency.tenantId, tenantId), eq(t.usageEventIdempotency.idempotencyKey, key)),
       )
+    if (billingUnitClaimed) {
+      await tx
+        .update(t.usageBillingUnit)
+        .set({ eventId: persistedEventId })
+        .where(
+          and(eq(t.usageBillingUnit.tenantId, tenantId), eq(t.usageBillingUnit.validationId, validationId!)),
+        )
+    }
   }
 
   return { eventId: persistedEventId, replayed: false }

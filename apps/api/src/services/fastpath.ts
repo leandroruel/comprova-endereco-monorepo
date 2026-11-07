@@ -29,7 +29,9 @@ import {
 } from '@comprova/core'
 import { withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
+import { hasExternalUnavailability } from '@comprova/core'
 import { makeUsageService } from '../modules/usage/usage.service.js'
+import { validationBillingKey } from '@comprova/db'
 
 export interface FastPathTenantContext {
   readonly tenantId: string
@@ -734,16 +736,44 @@ export const runFastPath = async (
 
     // Evento de uso (F3.3): idempotente, com rastreamento de faturabilidade
     // e proteção de cota hard. Grava dentro da mesma transação da validation.
+    //
+    // Identidades separadas (ADR-0044 §3):
+    // - Execução técnica / tentativa (status não terminal): evento
+    //   `processing_attempt`, não faturável, com chave própria — NUNCA usa a
+    //   chave comercial canônica, para não bloquear o faturamento legítimo de
+    //   uma conclusão posterior (deep).
+    // - Unidade comercial faturável: evento `usage_event` com a chave canônica
+    //   `validation:<id>` compartilhada com o deep path; o banco garante, via
+    //   `usage_billing_unit (tenant_id, validation_id)`, que fast e deep não
+    //   gerem duas cobranças para a mesma validação.
+    // - Conclusão técnica ≠ elegibilidade comercial: um checker em timeout ou
+    //   uma fonte externa indisponível tornam a validação concluída NÃO
+    //   faturável (política provisória do ADR-0044 §3), sem alterar o status.
+    const externalUnavailability = hasExternalUnavailability(signals)
     const usage = makeUsageService({ db: deps.db })
-    await usage.recordUsageEventInTx(tx, {
-      tenantId: tenant.tenantId,
-      eventType: 'usage_event',
-      kind: 'fast',
-      units: 1,
-      validationId,
-      billable: status === 'completed',
-      source: 'fast',
-    })
+    if (status === 'completed') {
+      const billable = !externalUnavailability
+      await usage.recordUsageEventInTx(tx, {
+        tenantId: tenant.tenantId,
+        eventType: 'usage_event',
+        kind: 'fast',
+        units: 1,
+        validationId,
+        idempotencyKey: billable ? validationBillingKey(validationId) : null,
+        billable,
+        source: 'fast',
+      })
+    } else {
+      await usage.recordUsageEventInTx(tx, {
+        tenantId: tenant.tenantId,
+        eventType: 'processing_attempt',
+        kind: 'fast',
+        units: 1,
+        validationId,
+        billable: false,
+        source: 'fast',
+      })
+    }
 
     await tx.insert(t.auditLog).values({
       tenantId: tenant.tenantId,

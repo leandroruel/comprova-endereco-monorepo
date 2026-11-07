@@ -5,8 +5,16 @@ export const UsageEventTypeSchema = z.enum(['technical_execution', 'processing_a
 
 export type UsageEventType = z.infer<typeof UsageEventTypeSchema>
 
-/** Evento de uso individual (leitura). */
+/**
+ * Evento de uso individual (leitura) — contrato canônico F3.3.
+ *
+ * Este schema é a ÚNICA definição do item de evento: a resposta HTTP da API
+ * (`UsageEventItemSchema` em `apps/api/src/modules/usage/usage.schema.ts`)
+ * reutiliza este schema para nunca divergir do contrato compartilhado.
+ */
 export const UsageEventDtoSchema = z.object({
+  /** Identificador estável do evento (nulo em registros históricos). */
+  eventId: z.uuid().nullable(),
   tenantId: z.uuid(),
   occurredAt: z.string(),
   eventType: UsageEventTypeSchema,
@@ -20,6 +28,16 @@ export const UsageEventDtoSchema = z.object({
 })
 
 export type UsageEventDto = z.infer<typeof UsageEventDtoSchema>
+
+/** Resposta de listagem de eventos de uso (paginação). */
+export const UsageEventsDtoSchema = z.object({
+  events: z.array(UsageEventDtoSchema),
+  total: z.number().int(),
+  limit: z.number().int(),
+  offset: z.number().int(),
+})
+
+export type UsageEventsDto = z.infer<typeof UsageEventsDtoSchema>
 
 /** Agregado de consumo por tenant e período. */
 export const UsageConsumptionDtoSchema = z.object({

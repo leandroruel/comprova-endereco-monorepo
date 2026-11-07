@@ -22,7 +22,9 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
   documentos complexos), F2 (expansão/hardening da cobertura fiscal), F3.3
   (medição/cobrança) e F6 (operação/segurança).
 - **Próximo passo:** fechar F3.3 e o checklist de produção; a unidade de
-  cobrança e as regras de faturamento continuam decisões comerciais abertas.
+  cobrança definitiva, o tratamento comercial de indisponibilidade de fonte
+  externa (hoje: não faturável, política provisória do ADR-0044 §3b) e as
+  regras de faturamento continuam decisões comerciais abertas.
 - **Futuro:** F4 (fluxo do titular), F7 (NFAg-e/outras fontes) e F8 (SSI).
   F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda
   faltam decisões e o kit de verificação do produto.
@@ -811,15 +813,20 @@ de desenvolvimento e não representa cobrança pronta para produção.
 
 ### F3.3 — Medição de uso e cobrança
 
+**Estado:** implementada em revisão (PR #63) — idempotência e identidade
+comercial no banco, cotas soft/hard, consulta e reconciliação entregues; a
+**unidade de cobrança definitiva** e a tabela de preços seguem como decisão
+comercial aberta (ADR-0044).
+
 **Estado atual comprovado**
 
-| Item          | Evidência                                                                     | Situação                                                                     |
-| ------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Evento de uso | `packages/db/src/schemas/usage.ts` (`usage_event`)                            | Existe: tenant, ocorrido em, `kind`, `units`, `cost_micros`, `validation_id` |
-| Inserção      | `fastpath.ts` (`kind: 'fast'`), `deep-enrich.persistence.ts` (`kind: 'deep'`) | Uma vez por validação nova; replay não insere                                |
-| Planos/cotas  | busca no repo                                                                 | **Não existe**                                                               |
-| Ledger/fatura | busca no repo                                                                 | **Não existe**                                                               |
-| Stats         | `apps/api/src/modules/stats/stats.service.ts`                                 | Deriva de `validation`, **não** de `usage_event`                             |
+| Item          | Evidência                                                                       | Situação                                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Evento de uso | `packages/db/src/schemas/usage.ts` (`usage_event`)                              | Existe: tenant, ocorrido em, `kind`, `units`, `cost_micros`, `validation_id` + colunas F3.3 (`event_type`, `billable`, `source`, `idempotency_key`, `event_id`) |
+| Inserção      | `fastpath.ts` e `deep-enrich.persistence.ts` via `recordUsageEventInTx`         | Serviço transacional único; replay não insere; identidade comercial única por `tenantId + validationId` garantida por `usage_billing_unit` (banco)              |
+| Planos/cotas  | `tenant.monthly_quota` + `recordUsageEventInTx` (cota hard) + `/v1/usage/quota` | Cota soft/hard por tenant com `FOR UPDATE`; auditoria de alteração de cota fora de escopo (ADR-0044 §4)                                                         |
+| Ledger/fatura | busca no repo                                                                   | **Não existe** (fora de escopo)                                                                                                                                 |
+| Stats         | `apps/api/src/modules/stats/stats.service.ts`                                   | Deriva de `validation`, **não** de `usage_event`                                                                                                                |
 
 **Lacunas**
 
@@ -850,12 +857,16 @@ de desenvolvimento e não representa cobrança pronta para produção.
 **Critérios de conclusão**
 
 - Teste de concorrência: duas requisições simultâneas com a mesma
-  `idempotency-key` geram um evento.
-- Reprocessamento e replay não geram evento.
-- Consulta de reconciliação bate com `validation` para uma janela.
-- Regra de fonte indisponível documentada e testada.
+  `idempotency-key` geram um evento. → Implementado e testado
+  (`usage-metering.int.test.ts`).
+- Reprocessamento e replay não geram evento. → Implementado e testado.
+- Consulta de reconciliação bate com `validation` para uma janela. →
+  Implementado (`/v1/usage/reconcile`) e testado.
+- Regra de fonte indisponível documentada e testada. → Implementada
+  (ADR-0044 §3b, `hasExternalUnavailability`) e testada.
 - Unidade de cobrança declarada (mesmo que a decisão seja "pendente" e o evento
-  use uma unidade provisória).
+  use uma unidade provisória). → Declarada: "validação concluída faturável",
+  com a decisão definitiva pendente.
 
 **Riscos**
 

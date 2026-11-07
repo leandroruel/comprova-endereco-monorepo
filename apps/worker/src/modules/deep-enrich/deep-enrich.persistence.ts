@@ -1,4 +1,14 @@
-import { and, desc, eq, inArray, isNull, sql, recordUsageEventInTx, type DbTx } from '@comprova/db'
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  sql,
+  recordUsageEventInTx,
+  validationBillingKey,
+  type DbTx,
+} from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
 import { randomUUID } from 'node:crypto'
@@ -384,6 +394,12 @@ export interface OutcomeEventsWrite {
   readonly claimType: ClaimType
   readonly stillPartial: boolean
   readonly verdict: Verdict
+  /**
+   * Indisponibilidade de fonte externa detectada nos sinais desta execução
+   * (`hasExternalUnavailability`, ADR-0044 §3): torna a conclusão NÃO
+   * faturável, sem alterar o status técnico da validação.
+   */
+  readonly externalUnavailability: boolean
 }
 
 export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Promise<void> => {
@@ -401,13 +417,21 @@ export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Pr
   })
 
   // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
-  // geram uma unidade faturável. Resultados parciais (queued/partial) não
-  // claimam a chave de idempotência de conclusão nem consomem cota — a
-  // conclusão será registrada por esta mesma função quando o deep path de fato
-  // terminar (CodeRabbit k). A cota hard é aplicada a todo evento faturável
-  // dentro da mesma transação (CodeRabbit l).
+  // geram a unidade comercial. Resultados parciais (queued/partial) não claimam
+  // a identidade comercial nem consomem cota — a conclusão será registrada por
+  // esta mesma função quando o deep path de fato terminar (CodeRabbit k). A
+  // cota hard é aplicada a todo evento faturável dentro da mesma transação
+  // (CodeRabbit l).
+  //
+  // Identidade comercial compartilhada com o fast path (ADR-0044 §3): eventos
+  // FATURÁVEIS usam a chave canônica `validation:<id>` e a garantia estrutural
+  // de `usage_billing_unit (tenant_id, validation_id)` — se o fast já faturou
+  // esta validação, aqui é replay (não há segunda cobrança). Eventos NÃO
+  // faturáveis (indisponibilidade de fonte externa) usam chave própria, para
+  // nunca bloquearem um faturamento legítimo de uma reexecução posterior.
   if (write.stillPartial) return
 
+  const billable = !write.externalUnavailability
   await recordUsageEventInTx(tx, {
     tenantId: write.tenantId,
     eventType: 'usage_event',
@@ -415,8 +439,8 @@ export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Pr
     units: 1,
     costMicros: null,
     validationId: write.validationId,
-    idempotencyKey: `deep:${write.validationId}`,
-    billable: true,
+    idempotencyKey: billable ? validationBillingKey(write.validationId) : null,
+    billable,
     source: 'deep',
   })
 }

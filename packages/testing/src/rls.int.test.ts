@@ -212,6 +212,35 @@ describe('RLS multi-tenant isolation', () => {
     expect(asA.map((r) => r.idempotencyKey)).toContain(key)
     expect(asB.map((r) => r.idempotencyKey)).not.toContain(key)
   })
+
+  it('RLS usage_billing_unit: isola leitura e escrita entre tenants e bloqueia tenant incompatível', async () => {
+    const validationId = randomUUID()
+    await withTenant(appPool.db, tenantA, (tx) =>
+      tx.insert(t.usageBillingUnit).values({
+        tenantId: tenantA,
+        validationId,
+        eventId: null,
+      }),
+    )
+    const asA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.select({ validationId: t.usageBillingUnit.validationId }).from(t.usageBillingUnit),
+    )
+    const asB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ validationId: t.usageBillingUnit.validationId }).from(t.usageBillingUnit),
+    )
+    expect(asA.map((r) => r.validationId)).toEqual([validationId])
+    expect(asB).toHaveLength(0)
+
+    await expect(
+      withTenant(appPool.db, tenantA, (tx) =>
+        tx.insert(t.usageBillingUnit).values({
+          tenantId: tenantB, // tenant diferente do contexto (tenantA)
+          validationId: randomUUID(),
+          eventId: null,
+        }),
+      ),
+    ).rejects.toThrow()
+  })
 })
 
 describe('RLS Holder/KYC isolation (app_user)', () => {

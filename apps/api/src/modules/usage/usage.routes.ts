@@ -9,6 +9,7 @@ import {
   UsageConsumptionResponseSchema,
   UsageEventsQuerySchema,
   UsageEventsResponseSchema,
+  UsageQuotaQuerySchema,
   UsageQuotaResponseSchema,
   UsageReconciliationResponseSchema,
 } from './usage.schema.js'
@@ -38,8 +39,13 @@ export const registerUsageRoutes = (instance: FastifyInstance, deps: UsageRoutes
   app.get(
     '/usage/quota',
     {
-      preHandler: [authSessionOrM2M, requireReadScope],
+      preHandler: [authSessionOrM2M, requireReadScope, requireTenantMatch],
       schema: {
+        // `tenantId` no querystring é exigido pelo fluxo de SESSÃO (o tenant
+        // é validado contra a associação do usuário); para M2M o tenant vem
+        // da API key e, se `tenantId` for enviado, `requireTenantMatch`
+        // garante que corresponda.
+        querystring: UsageQuotaQuerySchema,
         response: { 200: UsageQuotaResponseSchema },
       },
     },

@@ -1,9 +1,26 @@
 import { z } from 'zod'
+import {
+  UsageConsumptionDtoSchema,
+  UsageConsumptionQuerySchema as SharedUsageConsumptionQuerySchema,
+  UsageEventDtoSchema,
+  UsageEventsDtoSchema,
+  UsageQuotaDtoSchema,
+  UsageReconciliationDtoSchema,
+} from '@comprova/contracts'
 
-/** Parâmetros de consulta de consumo por período. */
-export const UsageConsumptionQuerySchema = z.object({
-  periodStart: z.string().datetime().optional(),
-  periodEnd: z.string().datetime().optional(),
+/**
+ * Parâmetros de consulta de consumo/reconciliação.
+ *
+ * `tenantId` faz parte do querystring para o fluxo de SESSÃO de usuário
+ * (`requireSessionOrM2MVerify` lê `request.query.tenantId`). Ele precisa estar
+ * DECLARADO no schema: o type provider Zod substitui `request.query` pelo
+ * objeto parseado e `z.object` remove propriedades desconhecidas — sem a
+ * declaração, o middleware receberia `undefined` mesmo com o parâmetro
+ * presente. Para M2M o tenant é resolvido da API key autenticada; quando
+ * `tenantId` vem no query, `requireTenantMatch` exige que corresponda.
+ */
+export const UsageConsumptionQuerySchema = SharedUsageConsumptionQuerySchema.extend({
+  tenantId: z.string().uuid().optional(),
 })
 
 export type UsageConsumptionQuery = z.infer<typeof UsageConsumptionQuerySchema>
@@ -24,12 +41,17 @@ const parseIntParam = (val: string | undefined, fallback: number): number => {
 export const UsageEventsQuerySchema = z.object({
   periodStart: z.string().datetime().optional(),
   periodEnd: z.string().datetime().optional(),
+  // `tenantId` declarado pelo mesmo motivo do schema de consumo: o fluxo de
+  // sessão precisa lê-lo de `request.query` (ver UsageConsumptionQuerySchema).
+  tenantId: z.string().uuid().optional(),
   // `z.enum(['true','false'])` aceita apenas essas strings e as converte para
   // boolean. `z.coerce.boolean()` é EVITADO porque `Boolean("false")` é `true`.
+  // O transform preserva `undefined`: sem ele, ausência do parâmetro viraria
+  // `false` e o filtro de billable seria aplicado sempre.
   billable: z
     .enum(['true', 'false'] as const)
     .optional()
-    .transform((val) => val === 'true'),
+    .transform((val) => (val === undefined ? undefined : val === 'true')),
   eventType: z.string().optional(),
   limit: z
     .string()
@@ -45,86 +67,41 @@ export const UsageEventsQuerySchema = z.object({
 
 export type UsageEventsQuery = z.infer<typeof UsageEventsQuerySchema>
 
-/** Resposta de consumo agregado. */
-export const UsageConsumptionResponseSchema = z.object({
-  tenantId: z.string().uuid(),
-  periodStart: z.string(),
-  periodEnd: z.string(),
-  totalEvents: z.number().int(),
-  totalUnits: z.number().int(),
-  totalBillableUnits: z.number().int(),
-  totalCostMicros: z.number().nullable(),
-  byEventType: z.record(z.string(), z.number().int()),
+/** Parâmetros de consulta da situação de cota (sessão precisa de `tenantId`). */
+export const UsageQuotaQuerySchema = z.object({
+  tenantId: z.string().uuid().optional(),
 })
+
+export type UsageQuotaQuery = z.infer<typeof UsageQuotaQuerySchema>
+
+/** Resposta de consumo agregado — contrato compartilhado (`@comprova/contracts`). */
+export const UsageConsumptionResponseSchema = UsageConsumptionDtoSchema
 
 export type UsageConsumptionResponse = z.infer<typeof UsageConsumptionResponseSchema>
 
-/** Resposta de situação da cota. */
-export const UsageQuotaResponseSchema = z.object({
-  tenantId: z.string().uuid(),
-  monthlyQuota: z.number().nullable(),
-  consumedUnits: z.number().int(),
-  remainingUnits: z.number().nullable(),
-  hasHardLimit: z.boolean(),
-  softThresholdPercent: z.number().nullable(),
-  isSoftLimitReached: z.boolean(),
-  isHardLimitReached: z.boolean(),
-  periodStart: z.string(),
-  periodEnd: z.string(),
-})
+/** Resposta de situação da cota — contrato compartilhado (`@comprova/contracts`). */
+export const UsageQuotaResponseSchema = UsageQuotaDtoSchema
 
-export type UsageQuotaResponse = z.infer<typeof UsageQuotaResponseSchema>
-
-/** Item de evento de uso na listagem. */
-export const UsageEventItemSchema = z.object({
-  eventId: z.string().uuid().nullable(),
-  occurredAt: z.string(),
-  eventType: z.string(),
-  kind: z.string(),
-  units: z.number().int(),
-  costMicros: z.number().nullable(),
-  validationId: z.string().uuid().nullable(),
-  idempotencyKey: z.string().nullable(),
-  billable: z.boolean(),
-  source: z.string().nullable(),
-})
+/**
+ * Item de evento de uso na listagem — contrato compartilhado
+ * (`UsageEventDtoSchema` de `@comprova/contracts`), que inclui `eventId` e
+ * `tenantId`. Reutilizado (não redefinido) para não divergir do contrato.
+ */
+export const UsageEventItemSchema = UsageEventDtoSchema
 
 export type UsageEventItem = z.infer<typeof UsageEventItemSchema>
 
-/** Resposta de listagem de eventos. */
-export const UsageEventsResponseSchema = z.object({
-  events: z.array(UsageEventItemSchema),
-  total: z.number().int(),
-  limit: z.number().int(),
-  offset: z.number().int(),
-})
+/** Resposta de listagem de eventos — contrato compartilhado (`@comprova/contracts`). */
+export const UsageEventsResponseSchema = UsageEventsDtoSchema
 
 export type UsageEventsResponse = z.infer<typeof UsageEventsResponseSchema>
 
-/** Item de divergência na reconciliação. */
-export const ReconciliationDivergenceSchema = z.object({
-  type: z.enum([
-    'validation_without_event',
-    'duplicate_event',
-    'event_without_validation',
-    'unit_mismatch',
-    'billability_mismatch',
-  ]),
-  validationId: z.string().uuid().nullable(),
-  description: z.string(),
-})
+/** Item de divergência na reconciliação — contrato compartilhado. */
+export const ReconciliationDivergenceSchema = UsageReconciliationDtoSchema.shape.divergences.element
 
 export type ReconciliationDivergence = z.infer<typeof ReconciliationDivergenceSchema>
 
-/** Resposta de reconciliação. */
-export const UsageReconciliationResponseSchema = z.object({
-  tenantId: z.string().uuid(),
-  periodStart: z.string(),
-  periodEnd: z.string(),
-  completedValidations: z.number().int(),
-  usageEvents: z.number().int(),
-  billableEvents: z.number().int(),
-  divergences: z.array(ReconciliationDivergenceSchema),
-})
+/** Resposta de reconciliação — contrato compartilhado (`@comprova/contracts`). */
+export const UsageReconciliationResponseSchema = UsageReconciliationDtoSchema
 
 export type UsageReconciliationResponse = z.infer<typeof UsageReconciliationResponseSchema>

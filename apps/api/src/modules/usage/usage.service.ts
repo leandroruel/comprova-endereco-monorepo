@@ -2,6 +2,7 @@ import {
   and,
   desc,
   eq,
+  inArray,
   sql,
   withTenant,
   type Db,
@@ -11,6 +12,7 @@ import {
   type UsageEventRecorded,
 } from '@comprova/db'
 import * as t from '@comprova/db'
+import type { UsageEventType } from '@comprova/contracts'
 import type { UsageConsumptionQuery, UsageEventsQuery } from './usage.schema.js'
 
 const parseDate = (value: string | undefined): Date | undefined => {
@@ -196,8 +198,9 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
   ): Promise<{
     readonly events: {
       readonly eventId: string | null
+      readonly tenantId: string
       readonly occurredAt: string
-      readonly eventType: string
+      readonly eventType: UsageEventType
       readonly kind: string
       readonly units: number
       readonly costMicros: number | null
@@ -232,6 +235,7 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
       const base = tx
         .select({
           eventId: t.usageEvent.eventId,
+          tenantId: t.usageEvent.tenantId,
           occurredAt: t.usageEvent.occurredAt,
           eventType: t.usageEvent.eventType,
           kind: t.usageEvent.kind,
@@ -258,8 +262,9 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
       return {
         events: rows.map((row) => ({
           eventId: row.eventId ?? null,
+          tenantId: row.tenantId,
           occurredAt: row.occurredAt.toISOString(),
-          eventType: row.eventType,
+          eventType: row.eventType as UsageEventType,
           kind: row.kind,
           units: Number(row.units),
           costMicros: row.costMicros === null ? null : Number(row.costMicros),
@@ -348,6 +353,32 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
 
       const completedIds = new Set(completedValidations.map((v) => v.id))
 
+      // Validações concluídas cujo resultado decorre de INDISPONIBILIDADE de
+      // fonte externa (timeout de checker, fonte indisponível, falha interna —
+      // mesmos critérios de `hasExternalUnavailability`): pela política
+      // provisória do ADR-0044 §3 elas NÃO são faturáveis, portanto não são
+      // divergência de faturamento. Isso não "perdoa" qualquer evento não
+      // faturável: apenas conclusões com evidência de indisponibilidade são
+      // isentas, e a isenção é auditável pelos sinais persistidos.
+      const unavailableValidationIds = new Set<string>()
+      if (completedValidations.length > 0) {
+        const unavailableRows = await tx
+          .selectDistinct({ validationId: t.signal.validationId })
+          .from(t.signal)
+          .where(
+            and(
+              inArray(
+                t.signal.validationId,
+                completedValidations.map((v) => v.id),
+              ),
+              sql`(signal.source LIKE '%:timeout' OR signal.detail->>'reason' IN ('checker_timeout', 'source_unavailable', 'internal_error'))`,
+            ),
+          )
+        for (const row of unavailableRows) {
+          unavailableValidationIds.add(row.validationId)
+        }
+      }
+
       // Agrupa eventos por validationId (ignorando validationId nulo).
       const eventsByValidation = new Map<
         string,
@@ -387,8 +418,11 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
       // 1. Validação concluída sem evento faturável (validation_without_event)
       //    ou com evento apenas não-faturável (billability_mismatch).
       //    Um evento não faturável não é evidência suficiente de que a validação
-      //    concluída foi corretamente faturada.
+      //    concluída foi corretamente faturada — EXCETO quando a conclusão
+      //    decorre de indisponibilidade de fonte externa (política ADR-0044 §3).
       for (const v of completedValidations) {
+        if (unavailableValidationIds.has(v.id)) continue
+
         const entry = eventsByValidation.get(v.id)
         const billableEvents = entry?.billable ?? []
 

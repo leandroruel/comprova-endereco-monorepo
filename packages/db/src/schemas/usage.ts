@@ -55,6 +55,26 @@ export const usageEventIdempotency = pgTable(
   (t) => [primaryKey({ columns: [t.tenantId, t.idempotencyKey] })],
 )
 
+/**
+ * Identidade comercial da unidade faturável (ADR-0044 §3): única por
+ * (tenant_id, validation_id), independente do caminho técnico (fast/deep).
+ * Tabela não particionada — é a garantia estrutural no banco de que duas
+ * execuções concorrentes não geram duas unidades faturáveis para a mesma
+ * validação, mesmo com chaves de idempotência diferentes.
+ */
+export const usageBillingUnit = pgTable(
+  'usage_billing_unit',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenant.tenantId),
+    validationId: uuid('validation_id').notNull(),
+    eventId: uuid('event_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.validationId] })],
+)
+
 /** Trilha de auditoria administrativa de alterações de cota. */
 export const tenantQuotaAudit = pgTable('tenant_quota_audit', {
   auditId: bigserial('audit_id', { mode: 'number' }).primaryKey(),
@@ -85,6 +105,8 @@ export type UsageEvent = typeof usageEvent.$inferSelect
 export type NewUsageEvent = typeof usageEvent.$inferInsert
 export type UsageEventIdempotency = typeof usageEventIdempotency.$inferSelect
 export type NewUsageEventIdempotency = typeof usageEventIdempotency.$inferInsert
+export type UsageBillingUnit = typeof usageBillingUnit.$inferSelect
+export type NewUsageBillingUnit = typeof usageBillingUnit.$inferInsert
 export type TenantQuotaAudit = typeof tenantQuotaAudit.$inferSelect
 export type NewTenantQuotaAudit = typeof tenantQuotaAudit.$inferInsert
 export type AuditLog = typeof auditLog.$inferSelect

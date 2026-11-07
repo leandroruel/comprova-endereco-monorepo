@@ -5,6 +5,7 @@ import {
   decide,
   evaluateClaim,
   evidenceSetHashOfObservations,
+  hasExternalUnavailability,
   observationFromSignal,
   SCORER_VERSION,
   weightedScore,
@@ -364,6 +365,11 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       claimType,
       stillPartial,
       verdict: decision.verdict,
+      // Mesma política de faturabilidade do fast path (ADR-0044 §3): timeout
+      // de checker, fonte externa indisponível ou falha interna tornam a
+      // conclusão não faturável (aplica-se ao conjunto de sinais desta
+      // execução — T1 + T2).
+      externalUnavailability: hasExternalUnavailability([...signalsAfterT1, ...t2Signals]),
     })
 
     return { score, decision, stillPartial }

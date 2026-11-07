@@ -1,5 +1,8 @@
-import { createDbPool, eq, withTenant } from '@comprova/db'
+import { and, createDbPool, eq, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
+import { validationBillingKey } from '@comprova/db'
+import { z } from 'zod'
+import { UsageConsumptionDtoSchema, UsageEventDtoSchema, UsageQuotaDtoSchema } from '@comprova/contracts'
 import { runMigrations } from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import {
@@ -93,6 +96,7 @@ const setQuota = async (quota: number | null) => {
 const clearUsage = async () => {
   await adminPool.db.delete(t.usageEvent).where(eq(t.usageEvent.tenantId, tenantId))
   await adminPool.db.delete(t.usageEventIdempotency).where(eq(t.usageEventIdempotency.tenantId, tenantId))
+  await adminPool.db.delete(t.usageBillingUnit).where(eq(t.usageBillingUnit.tenantId, tenantId))
 }
 
 const clearValidations = async () => {
@@ -558,5 +562,426 @@ describe('usage metering — paginação e parsing', () => {
       apiKeySecret,
     )
     expect(res.statusCode).toBe(200)
+  })
+})
+
+describe('usage metering — contrato compartilhado (@comprova/contracts)', () => {
+  beforeEach(async () => {
+    await setQuota(1000)
+    await clearUsage()
+  })
+
+  it('a resposta HTTP de events valida contra UsageEventDtoSchema (com e sem validationId)', async () => {
+    const withValidation = randomUUID()
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx.insert(t.usageEvent).values([
+        {
+          eventId: randomUUID(),
+          tenantId,
+          eventType: 'usage_event',
+          kind: 'fast',
+          units: 1,
+          validationId: withValidation,
+          idempotencyKey: 'contract-1',
+          billable: true,
+          source: 'fast',
+          occurredAt: now,
+        },
+        {
+          eventId: randomUUID(),
+          tenantId,
+          eventType: 'technical_execution',
+          kind: 'fast',
+          units: 1,
+          validationId: null,
+          idempotencyKey: null,
+          billable: false,
+          source: 'fast',
+          occurredAt: now,
+        },
+      ])
+    })
+
+    const res = await injectM2M('GET', '/v1/usage/events?limit=50&offset=0', apiKeySecret)
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { events: unknown[] }
+    expect(body.events).toHaveLength(2)
+
+    const parsed = z.array(UsageEventDtoSchema).safeParse(body.events)
+    expect(parsed.success).toBe(true)
+
+    const events = body.events as { eventId: string | null; tenantId: string; validationId: string | null }[]
+    // eventId corresponde ao registro persistido e tenantId ao tenant autenticado.
+    const persisted = await withTenant(appPool.db, tenantId, (tx) =>
+      tx
+        .select({ eventId: t.usageEvent.eventId, validationId: t.usageEvent.validationId })
+        .from(t.usageEvent)
+        .where(eq(t.usageEvent.tenantId, tenantId)),
+    )
+    const persistedIds = new Set(persisted.map((row) => row.eventId))
+    for (const event of events) {
+      expect(event.tenantId).toBe(tenantId)
+      if (event.eventId !== null) expect(persistedIds.has(event.eventId)).toBe(true)
+    }
+    expect(events.filter((e) => e.validationId === withValidation)).toHaveLength(1)
+    expect(events.filter((e) => e.validationId === null)).toHaveLength(1)
+  })
+
+  it('respostas de consumption e quota validam contra os DTOs compartilhados', async () => {
+    const consumption = await injectM2M('GET', '/v1/usage/consumption', apiKeySecret)
+    expect(consumption.statusCode).toBe(200)
+    expect(UsageConsumptionDtoSchema.safeParse(consumption.json()).success).toBe(true)
+
+    const quota = await injectM2M('GET', '/v1/usage/quota', apiKeySecret)
+    expect(quota.statusCode).toBe(200)
+    expect(UsageQuotaDtoSchema.safeParse(quota.json()).success).toBe(true)
+  })
+})
+
+describe('usage metering — identidade comercial (uma unidade faturável por validação)', () => {
+  const getService = async () => {
+    const { makeUsageService } = await import('../src/modules/usage/usage.service.js')
+    return makeUsageService({ db: appPool.db })
+  }
+
+  const record = async (input: {
+    readonly tenantId: string
+    readonly validationId: string
+    readonly kind: 'fast' | 'deep'
+    readonly idempotencyKey: string | null
+  }) => {
+    const service = await getService()
+    return withTenant(appPool.db, input.tenantId, (tx) =>
+      service.recordUsageEventInTx(tx, {
+        tenantId: input.tenantId,
+        eventType: 'usage_event',
+        kind: input.kind,
+        units: 1,
+        validationId: input.validationId,
+        idempotencyKey: input.idempotencyKey,
+        billable: true,
+        source: input.kind,
+      }),
+    )
+  }
+
+  const billableCount = async (tenant: string, validationId: string): Promise<number> => {
+    const rows = await withTenant(appPool.db, tenant, (tx) =>
+      tx
+        .select({ eventId: t.usageEvent.eventId })
+        .from(t.usageEvent)
+        .where(
+          and(
+            eq(t.usageEvent.tenantId, tenant),
+            eq(t.usageEvent.validationId, validationId),
+            eq(t.usageEvent.billable, true),
+          ),
+        ),
+    )
+    return rows.length
+  }
+
+  beforeEach(async () => {
+    await setQuota(1000)
+    await clearUsage()
+  })
+
+  it('fast fatura e deep processa a mesma validação: apenas uma unidade faturável', async () => {
+    const validationId = randomUUID()
+
+    // Fast com chave arbitrária (comportamento legado): a identidade comercial
+    // é a validation, não a chave.
+    const fast = await record({ tenantId, validationId, kind: 'fast', idempotencyKey: 'fast-sim-1' })
+    expect(fast.replayed).toBe(false)
+
+    // Deep com a chave canônica.
+    const deep = await record({
+      tenantId,
+      validationId,
+      kind: 'deep',
+      idempotencyKey: validationBillingKey(validationId),
+    })
+    expect(deep.replayed).toBe(true)
+    expect(deep.eventId).toBe(fast.eventId)
+
+    expect(await billableCount(tenantId, validationId)).toBe(1)
+  })
+
+  it('deep fatura primeiro e fast tenta registrar a mesma validação: apenas uma unidade faturável', async () => {
+    const validationId = randomUUID()
+
+    const deep = await record({
+      tenantId,
+      validationId,
+      kind: 'deep',
+      idempotencyKey: validationBillingKey(validationId),
+    })
+    expect(deep.replayed).toBe(false)
+
+    const fast = await record({ tenantId, validationId, kind: 'fast', idempotencyKey: 'fast-sim-2' })
+    expect(fast.replayed).toBe(true)
+    expect(fast.eventId).toBe(deep.eventId)
+
+    expect(await billableCount(tenantId, validationId)).toBe(1)
+  })
+
+  it('fast e deep CONCORRENTES para a mesma validação: apenas uma unidade faturável', async () => {
+    const validationId = randomUUID()
+
+    const results = await Promise.allSettled([
+      record({ tenantId, validationId, kind: 'fast', idempotencyKey: 'race-fast' }),
+      record({ tenantId, validationId, kind: 'deep', idempotencyKey: 'race-deep' }),
+    ])
+
+    const fresh = results.filter((r) => r.status === 'fulfilled' && r.value.replayed === false)
+    expect(fresh).toHaveLength(1)
+
+    const billedRows = await withTenant(appPool.db, tenantId, (tx) =>
+      tx
+        .select({ eventId: t.usageEvent.eventId })
+        .from(t.usageEvent)
+        .where(and(eq(t.usageEvent.tenantId, tenantId), eq(t.usageEvent.billable, true))),
+    )
+    expect(billedRows).toHaveLength(1)
+
+    const unitRows = await adminPool.db
+      .select({ validationId: t.usageBillingUnit.validationId })
+      .from(t.usageBillingUnit)
+      .where(eq(t.usageBillingUnit.tenantId, tenantId))
+    expect(unitRows).toHaveLength(1)
+    expect(unitRows[0]!.validationId).toBe(validationId)
+  })
+
+  it('duas validações diferentes do mesmo tenant: duas unidades faturáveis legítimas', async () => {
+    const v1 = randomUUID()
+    const v2 = randomUUID()
+
+    const first = await record({
+      tenantId,
+      validationId: v1,
+      kind: 'fast',
+      idempotencyKey: validationBillingKey(v1),
+    })
+    const second = await record({
+      tenantId,
+      validationId: v2,
+      kind: 'fast',
+      idempotencyKey: validationBillingKey(v2),
+    })
+
+    expect(first.replayed).toBe(false)
+    expect(second.replayed).toBe(false)
+    expect(second.eventId).not.toBe(first.eventId)
+    expect(await billableCount(tenantId, v1)).toBe(1)
+    expect(await billableCount(tenantId, v2)).toBe(1)
+  })
+
+  it('mesmo validationId em tenants diferentes: isolamento correto', async () => {
+    const otherTenantId = await createTenant(adminPool.db, { name: 'usage-metering-other-tenant' })
+    const validationId = randomUUID()
+
+    const first = await record({
+      tenantId,
+      validationId,
+      kind: 'fast',
+      idempotencyKey: validationBillingKey(validationId),
+    })
+    const second = await record({
+      tenantId: otherTenantId,
+      validationId,
+      kind: 'fast',
+      idempotencyKey: validationBillingKey(validationId),
+    })
+
+    expect(first.replayed).toBe(false)
+    expect(second.replayed).toBe(false)
+    expect(second.eventId).not.toBe(first.eventId)
+    expect(await billableCount(tenantId, validationId)).toBe(1)
+    expect(await billableCount(otherTenantId, validationId)).toBe(1)
+
+    // Limpeza do tenant auxiliar (evita FK/RLS residues nos próximos testes).
+    await adminPool.db.delete(t.usageEvent).where(eq(t.usageEvent.tenantId, otherTenantId))
+    await adminPool.db
+      .delete(t.usageEventIdempotency)
+      .where(eq(t.usageEventIdempotency.tenantId, otherTenantId))
+    await adminPool.db.delete(t.usageBillingUnit).where(eq(t.usageBillingUnit.tenantId, otherTenantId))
+    await adminPool.db.delete(t.tenant).where(eq(t.tenant.tenantId, otherTenantId))
+  })
+
+  it('retry após falha transacional: sem duplicação de unidade faturável', async () => {
+    const validationId = randomUUID()
+    const key = validationBillingKey(validationId)
+
+    // A primeira tentativa falha no meio da transação: nada persiste
+    // (idempotência, identidade comercial e evento inclusive). A chamada é
+    // feita DENTRO da mesma transação do negócio, como no fast/deep.
+    const service = await getService()
+    await expect(
+      withTenant(appPool.db, tenantId, async (tx) => {
+        await service.recordUsageEventInTx(tx, {
+          tenantId,
+          eventType: 'usage_event',
+          kind: 'fast',
+          units: 1,
+          validationId,
+          idempotencyKey: key,
+          billable: true,
+          source: 'fast',
+        })
+        throw new Error('falha transacional simulada')
+      }),
+    ).rejects.toThrow('falha transacional simulada')
+
+    const unitRows = await adminPool.db
+      .select({ validationId: t.usageBillingUnit.validationId })
+      .from(t.usageBillingUnit)
+      .where(eq(t.usageBillingUnit.tenantId, tenantId))
+    expect(unitRows).toHaveLength(0)
+
+    // Retry: registra normalmente (não é replay da tentativa falha).
+    const retry = await record({ tenantId, validationId, kind: 'fast', idempotencyKey: key })
+    expect(retry.replayed).toBe(false)
+
+    // E um replay subsequente não duplica.
+    const replay = await record({ tenantId, validationId, kind: 'deep', idempotencyKey: key })
+    expect(replay.replayed).toBe(true)
+    expect(replay.eventId).toBe(retry.eventId)
+
+    expect(await billableCount(tenantId, validationId)).toBe(1)
+  })
+
+  it('replay após cota esgotada retorna o evento existente (unidade comercial protegida)', async () => {
+    const validationId = randomUUID()
+    const key = validationBillingKey(validationId)
+
+    await setQuota(1)
+    const first = await record({ tenantId, validationId, kind: 'fast', idempotencyKey: key })
+    expect(first.replayed).toBe(false)
+
+    // Cota já consumida: a MESMA validação continua retornando o evento
+    // registrado em vez de ser rejeitada ou de duplicar consumo.
+    const replay = await record({ tenantId, validationId, kind: 'deep', idempotencyKey: 'deep-mesmo-replay' })
+    expect(replay.replayed).toBe(true)
+    expect(replay.eventId).toBe(first.eventId)
+    expect(await billableCount(tenantId, validationId)).toBe(1)
+  })
+})
+
+describe('usage metering — autenticação por sessão e M2M', () => {
+  const signUp = async (email: string, password: string, name: string): Promise<void> => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/sign-up/email',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, name }),
+    })
+    expect(res.statusCode).toBe(200)
+  }
+
+  const loginAndGetCookie = async (email: string, password: string): Promise<string> => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/sign-in/email',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+    expect(res.statusCode).toBe(200)
+    const setCookie = res.headers['set-cookie']
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : String(setCookie ?? '')
+    const token = cookieHeader.match(/better-auth\.session_token=([^;]+)/)?.[1]
+    if (!token) throw new Error('Session token not found in cookie')
+    return token
+  }
+
+  const injectWithSession = async (method: string, url: string, cookie: string) =>
+    app.inject({ method, url, headers: { Cookie: `better-auth.session_token=${cookie}` } })
+
+  const createOrganization = async (cookie: string, name: string, email: string): Promise<string> => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/organizations',
+      headers: { Cookie: `better-auth.session_token=${cookie}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, termsVersion: '1.0.0' }),
+    })
+    expect(created.statusCode).toBe(201)
+    return (created.json() as { tenantId: string }).tenantId
+  }
+
+  let userACookie = ''
+  let userBCookie = ''
+  let orgATenantId = ''
+  let orgBTenantId = ''
+
+  beforeAll(async () => {
+    const suffix = randomUUID().slice(0, 8)
+    await signUp(`usage-a-${suffix}@exemplo.com`, 'SenhaForte123!', 'Usuário A')
+    await signUp(`usage-b-${suffix}@exemplo.com`, 'SenhaForte123!', 'Usuário B')
+    userACookie = await loginAndGetCookie(`usage-a-${suffix}@exemplo.com`, 'SenhaForte123!')
+    userBCookie = await loginAndGetCookie(`usage-b-${suffix}@exemplo.com`, 'SenhaForte123!')
+    orgATenantId = await createOrganization(userACookie, 'Org A Usage', `usage-a-${suffix}@exemplo.com`)
+    orgBTenantId = await createOrganization(userBCookie, 'Org B Usage', `usage-b-${suffix}@exemplo.com`)
+  })
+
+  it('sessão válida com tenant associado acessa as quatro rotas', async () => {
+    for (const url of [
+      `/v1/usage/consumption?tenantId=${orgATenantId}`,
+      `/v1/usage/quota?tenantId=${orgATenantId}`,
+      `/v1/usage/events?tenantId=${orgATenantId}`,
+      `/v1/usage/reconcile?tenantId=${orgATenantId}`,
+    ]) {
+      const res = await injectWithSession('GET', url, userACookie)
+      expect(res.statusCode, url).toBe(200)
+    }
+  })
+
+  it('sessão tentando acessar tenant de outra organização: 403', async () => {
+    for (const url of [
+      `/v1/usage/consumption?tenantId=${orgBTenantId}`,
+      `/v1/usage/quota?tenantId=${orgBTenantId}`,
+      `/v1/usage/events?tenantId=${orgBTenantId}`,
+      `/v1/usage/reconcile?tenantId=${orgBTenantId}`,
+    ]) {
+      const res = await injectWithSession('GET', url, userACookie)
+      expect(res.statusCode, url).toBe(403)
+    }
+  })
+
+  it('sessão sem tenantId na query: 400 (sem selecionar organização arbitrária)', async () => {
+    for (const url of [
+      '/v1/usage/consumption',
+      '/v1/usage/quota',
+      '/v1/usage/events',
+      '/v1/usage/reconcile',
+    ]) {
+      const res = await injectWithSession('GET', url, userACookie)
+      expect(res.statusCode, url).toBe(400)
+      expect((res.json() as { code?: string }).code).toBe('MISSING_TENANT_ID')
+    }
+  })
+
+  it('M2M válido sem tenantId no query resolve o tenant pela API key', async () => {
+    for (const url of [
+      '/v1/usage/consumption',
+      '/v1/usage/quota',
+      '/v1/usage/events',
+      '/v1/usage/reconcile',
+    ]) {
+      const res = await injectM2M('GET', url, apiKeySecret)
+      expect(res.statusCode, url).toBe(200)
+    }
+  })
+
+  it('M2M tentando manipular tenant por query string: 403', async () => {
+    const res = await injectM2M('GET', `/v1/usage/events?tenantId=${orgATenantId}`, apiKeySecret)
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('API key sem validate:read: 403 nos endpoints de uso', async () => {
+    const { plaintext } = await createApiKey(appPool.db, tenantId, PEPPER, {
+      keyType: 'm2m',
+      scopes: ['verify:m2m'],
+    })
+    const res = await injectM2M('GET', '/v1/usage/consumption', plaintext)
+    expect(res.statusCode).toBe(403)
   })
 })
