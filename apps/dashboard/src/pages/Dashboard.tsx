@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createValidation, getStats, type ValidationDto } from '@/api/client'
 import { type SessionUser } from '@/api/auth'
