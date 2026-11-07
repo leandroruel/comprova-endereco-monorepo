@@ -316,10 +316,10 @@ export function DashboardSidebar({
         // Collapsed rail keeps the 60px spec: 1px border + 11px padding on each
         // side leaves an exactly 36px column so the w-9 (36px) icon items center.
         collapsed
-          ? "w-[60px] px-[11px] py-3"
+          ? "w-15 px-2.75 py-3"
           : fluid
-            ? "w-full p-3 lg:w-[260px]"
-            : "w-[260px] p-3",
+            ? "w-full p-3 lg:w-65"
+            : "w-65 p-3",
         className,
       )}
     >
@@ -330,7 +330,7 @@ export function DashboardSidebar({
           margin borrows that space back from the rail's own padding, leaving
           every child exactly where it was. */}
       <div
-        className="-m-2 flex min-h-0 w-[calc(100%+16px)] flex-col gap-3 overflow-y-auto p-2 [scrollbar-width:none]"
+        className="-m-2 flex min-h-0 w-[calc(100%+16px)] flex-col gap-3 overflow-y-auto p-2 scrollbar-none"
       >
         {/* Workspace switcher / collapse control */}
         <div
@@ -351,7 +351,7 @@ export function DashboardSidebar({
               "-m-2 min-w-0 overflow-hidden p-2 transition-[max-width,opacity,transform] duration-300 ease-in-out",
               mobile && flat && searchActive
                 ? "max-w-0 scale-95 opacity-0"
-                : "max-w-[206px] scale-100 opacity-100",
+                : "max-w-51.5 scale-100 opacity-100",
             )}
           >
             <DashboardUserMenu
@@ -457,7 +457,7 @@ export function DashboardSidebar({
           {!flat && (searchActive && !collapsed ? (
             <div
               ref={searchFieldRef}
-              className="flex w-full items-center gap-2 rounded-full bg-background-tertiary-default py-2 pe-2.5 ps-2 ring-2 ring-inset ring-border-button-active transition-[background-color,box-shadow] duration-[var(--input-transition-ms)] ease"
+              className="flex w-full items-center gap-2 rounded-full bg-background-tertiary-default py-2 pe-2.5 ps-2 ring-2 ring-inset ring-border-button-active transition-[background-color,box-shadow] duration-(--input-transition-ms) ease"
             >
               <RiSearchLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
               <input
@@ -557,7 +557,7 @@ export function DashboardSidebar({
           user={user}
           onNavigate={onNavigate}
           onSignOut={onSignOut}
-          className={flat ? "!bg-background-secondary-default" : undefined}
+          className={flat ? "bg-background-secondary-default!" : undefined}
         />
       </div>
 
