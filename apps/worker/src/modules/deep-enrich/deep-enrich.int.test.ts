@@ -1562,11 +1562,21 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
     expect(completedCount).toBe(1)
   })
 
-  it('rollback da transação não deixa alterações parciais', async () => {
+    it('rollback da transação não deixa alterações parciais', async () => {
     // Garante que, quando a quota é excedida, nenhum sinal, claim ou
     // claim_evidence fica parcialmente persistido.
     await setQuota(0)
     const validationId = await createQueuedValidation('quota-rollback-1', '12345678000195')
+
+    // Sinais e claims criados antes do savepoint devem ser preservados
+    const signalsBefore = await adminPool.db
+      .select({ signalId: t.signal.signalId })
+      .from(t.signal)
+      .where(eq(t.signal.validationId, validationId))
+    const claimsBefore = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, validationId))
 
     const result = await deepEnrich(
       { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
@@ -1574,5 +1584,18 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
     )
     expect(result.status).toBe('blocked_quota')
     expect((await validationRow(validationId))?.status).toBe('blocked_quota')
+    expect(await countBillableEvents(validationId)).toBe(0)
+
+    // Sinais e claims criados antes do savepoint devem ser preservados
+    const signalsAfter = await adminPool.db
+      .select({ signalId: t.signal.signalId })
+      .from(t.signal)
+      .where(eq(t.signal.validationId, validationId))
+    const claimsAfter = await adminPool.db
+      .select({ claimId: t.claim.claimId })
+      .from(t.claim)
+      .where(eq(t.claim.validationId, validationId))
+    expect(signalsAfter.length).toBeGreaterThan(0)
+    expect(claimsAfter.length).toBeGreaterThan(0)
   })
 })
