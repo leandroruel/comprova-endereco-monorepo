@@ -7,7 +7,6 @@ import {
   type DebugAnalysisDto,
   type DebugNf3eQrCodeResponse,
 } from '@/api/client'
-import { DashboardLayout } from '@/components/layout'
 import { ExecutionTrace, TraceMetricsCard } from '@/components/trace'
 import type { SessionUser } from '@/api/auth'
 import { FileText, Play, Upload } from 'lucide-react'
@@ -329,20 +328,13 @@ export function DebugNf3eQrCodePage({
   const isAccepted = (f: File | null): boolean => f !== null && ACCEPTED_TYPES.includes(f.type)
 
   return (
-    <DashboardLayout
-      activePage="debug-nf3e-qrcode"
-      onNavigate={onNavigate}
-      userName={user?.name ?? undefined}
-      userEmail={user?.email ?? undefined}
-      userRole={user?.role ?? undefined}
-    >
-      <div className="mx-auto w-full max-w-7xl space-y-6">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">QRCode NF3e debugger</h1>
-          <p className="text-sm text-muted-foreground">
-            Envie um comprovante (PDF, JPEG ou PNG) e acompanhe cada passo da extração da referência fiscal
-          </p>
-        </div>
+    <div className="mx-auto w-full max-w-7xl space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold tracking-tight">QRCode NF3e debugger</h1>
+        <p className="text-sm text-muted-foreground">
+          Envie um comprovante (PDF, JPEG ou PNG) e acompanhe cada passo da extração da referência fiscal
+        </p>
+      </div>
 
         <Card>
           <CardContent className="p-6">
@@ -432,6 +424,5 @@ export function DebugNf3eQrCodePage({
           </>
         )}
       </div>
-    </DashboardLayout>
   )
 }

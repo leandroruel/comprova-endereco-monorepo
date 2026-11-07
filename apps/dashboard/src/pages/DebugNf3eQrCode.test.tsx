@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import type { DebugNf3eQrCodeResponse } from '@/api/client'
 import { DebugNf3eQrCodePage } from './DebugNf3eQrCode'
+import { DashboardLayout } from '@/components/layout'
 
 const pdf = (): File =>
   new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'conta.pdf', { type: 'application/pdf' })
@@ -170,7 +171,15 @@ describe('DebugNf3eQrCodePage', () => {
   it('mostra o usuário logado no menu do sidemenu, não o rótulo "Conta"', async () => {
     respondWith({ events: [], reference })
 
-    await render(<DebugNf3eQrCodePage user={{ name: 'Leandro Rocha', email: 'leandro@empresa.com' }} />)
+    await render(
+      <DashboardLayout
+        onNavigate={() => {}}
+        userName="Leandro Rocha"
+        userEmail="leandro@empresa.com"
+      >
+        <DebugNf3eQrCodePage user={{ name: 'Leandro Rocha', email: 'leandro@empresa.com' }} />
+      </DashboardLayout>,
+    )
 
     const trigger = page.getByRole('button', { name: 'Menu do usuário' })
     await expect.element(trigger.getByText('Leandro Rocha', { exact: true })).toBeVisible()

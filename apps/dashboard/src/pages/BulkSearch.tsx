@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { DashboardLayout } from '@/components/layout'
 import { Badge, Button, Card, CardContent, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, Download, FileText, Upload, XCircle } from 'lucide-react'
@@ -130,20 +129,13 @@ export function BulkSearchPage({
   }
 
   return (
-    <DashboardLayout
-      activePage="bulk"
-      onNavigate={handleNavigate}
-      userName={user?.name ?? undefined}
-      userEmail={user?.email ?? undefined}
-      userRole={user?.role ?? undefined}
-    >
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">Busca em lote</h1>
-          <p className="text-sm text-muted-foreground">
-            Envie múltiplos CNPJs/CPFs via CSV ou colagem — processamento em background
-          </p>
-        </div>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold tracking-tight">Busca em lote</h1>
+        <p className="text-sm text-muted-foreground">
+          Envie múltiplos CNPJs/CPFs via CSV ou colagem — processamento em background
+        </p>
+      </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
@@ -230,7 +222,6 @@ export function BulkSearchPage({
           )}
         </div>
       </div>
-    </DashboardLayout>
   )
 }
 

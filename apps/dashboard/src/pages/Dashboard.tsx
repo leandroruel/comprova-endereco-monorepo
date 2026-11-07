@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createValidation, getStats, type ValidationDto } from '@/api/client'
-import { authClient } from '@/api/auth'
-import { DashboardLayout } from '@/components/layout'
+import { authClient, type SessionUser } from '@/api/auth'
 import { ValidationCard } from '@/components/validation-card'
 import { E2eRunner } from '@/components/validation/e2e-runner'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
@@ -46,12 +45,14 @@ function StatCard({
   )
 }
 
-export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void }) {
-  const [session, setSession] = useState<{ user: { email: string; name: string; role?: string } } | null>(
-    null,
-  )
+export default function Dashboard({
+  user,
+  onNavigate,
+}: {
+  user?: SessionUser
+  onNavigate?: (page: string) => void
+}) {
   const [userRole, setUserRole] = useState<string>('user')
-  const [authChecked, setAuthChecked] = useState(false)
   const [document, setDocument] = useState('')
   const [mode, setMode] = useState<'fast' | 'auto' | 'deep'>('fast')
   const [history, setHistory] = useState<ValidationDto[]>([])
@@ -74,28 +75,14 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
   })
 
   useEffect(() => {
-    if (authChecked) return
-    void authClient.getSession().then((result) => {
-      if (result.data) {
-        const user = result.data.user as { readonly role?: string | null }
-        setSession(result.data)
-        setUserRole(user.role ?? 'user')
-      }
-      setAuthChecked(true)
-    })
-  }, [authChecked])
+    setUserRole(user?.role ?? 'user')
+  }, [user?.role])
 
-  if (!authChecked) {
+  if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Spinner />
       </div>
-    )
-  }
-
-  if (!session) {
-    return (
-      <LoginPage onSuccess={() => void authClient.getSession().then((r) => r.data && setSession(r.data))} />
     )
   }
 
@@ -113,28 +100,15 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
   }
 
   return (
-    <DashboardLayout
-      activePage="validations"
-      onNavigate={handleNavigate}
-      userName={session.user.name}
-      userEmail={session.user.email}
-      userRole={userRole}
-      onLogout={() => {
-        void authClient.signOut().then(() => {
-          setSession(null)
-          setHistory([])
-        })
-      }}
-    >
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Validação de endereço</h1>
-            <p className="text-sm text-muted-foreground">
-              Verifica CNPJ ou CPF contra múltiplas fontes de evidência
-            </p>
-          </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Validação de endereço</h1>
+          <p className="text-sm text-muted-foreground">
+            Verifica CNPJ ou CPF contra múltiplas fontes de evidência
+          </p>
         </div>
+      </div>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
@@ -233,6 +207,5 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (page: string) 
           ))}
         </div>
       </div>
-    </DashboardLayout>
   )
 }

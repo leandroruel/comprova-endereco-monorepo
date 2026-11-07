@@ -1,37 +1,14 @@
 'use client'
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  useTable,
-  tableFeatures,
-  coreFeatures,
-  rowSortingFeature,
-  rowPaginationFeature,
-  createSortedRowModel,
-  createPaginatedRowModel,
-  type ColumnDef,
-  type PaginationState,
-  type SortingState,
-} from '@tanstack/react-table'
 import { getOrganizations, type OrganizationDto } from '@/api/client'
-import { DashboardLayout } from '@/components/layout'
-import {
-  BUIBadge,
-  BUIButton,
-  BUIInput,
-  BUIPagination,
-  BUITable,
-  BUITableBody,
-  BUITableCell,
-  BUITableColumn,
-  BUITableHeader,
-  BUITableRow,
-  Card,
-  CardContent,
-} from '@/components/ui'
+import type { SessionUser } from '@/api/auth'
+import { DataGrid, type DataGridColumn } from '@/components/application/data-grid/data-grid'
+import { BUIBadge, BUIButton } from '@/components/ui'
+import { Card, CardContent } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import { Search, Building2, Users, Clock, CircleAlert, FileText } from 'lucide-react'
+import { Building2, Users, Clock, CircleAlert, FileText, AlertTriangle, RefreshCw } from 'lucide-react'
 
 const STATUS_LABELS: Record<string, string> = {
   active: 'Ativo',
@@ -49,125 +26,13 @@ const STATUS_CLASS: Record<string, string> = {
   onboarding: 'bg-blue-100 text-blue-800 border-blue-200',
 }
 
-const PAGE_SIZE = 10
-
-const features = tableFeatures({
-  ...coreFeatures,
-  rowSortingFeature,
-  rowPaginationFeature,
-  sortedRowModel: createSortedRowModel(),
-  paginatedRowModel: createPaginatedRowModel(),
-})
-
-type OrganizationColumnId = 'tenantId' | 'name' | 'document' | 'createdAt' | 'status' | 'actions'
-
-interface OrganizationColumn {
-  readonly id: OrganizationColumnId
-  readonly label: string
-  readonly sortable: boolean
-  /** Coluna que identifica a linha para leitores de tela (React Aria exige
-   *  pelo menos uma coluna com `isRowHeader`). */
-  readonly isRowHeader?: boolean
-  /** Markup da célula. A tabela do Board UI é uma coleção do React Aria, então
-   *  o conteúdo é renderizado aqui — não pelo `flexRender` do TanStack. */
-  readonly render: (organization: OrganizationDto) => ReactNode
-}
-
-/**
- * Definições de coluna no escopo do módulo, e não dentro do componente.
- *
- * `useMemo` é um hook e não pode ser chamado durante a avaliação do módulo —
- * era exatamente isso que disparava "Invalid hook call" ao abrir a página.
- * O TanStack Table também exige referências estáveis para `features` e
- * `columns` entre renders, então uma constante de módulo é o lugar correto.
- */
-const COLUMNS: readonly OrganizationColumn[] = [
-  {
-    id: 'tenantId',
-    label: 'ID',
-    sortable: true,
-    render: (organization) => (
-      <span className="font-mono text-xs text-muted-foreground">{organization.tenantId.slice(0, 8)}…</span>
-    ),
-  },
-  {
-    id: 'name',
-    label: 'Nome',
-    sortable: true,
-    isRowHeader: true,
-    render: (organization) => <span className="text-xs text-muted-foreground">{organization.name}</span>,
-  },
-  {
-    id: 'document',
-    label: 'Documento',
-    sortable: true,
-    render: (organization) =>
-      organization.document ? (
-        <span className="font-mono text-xs text-muted-foreground">{organization.document}</span>
-      ) : (
-        <span className="text-xs text-muted-foreground/50">—</span>
-      ),
-  },
-  {
-    id: 'createdAt',
-    label: 'Criado em',
-    sortable: true,
-    render: (organization) => (
-      <span className="text-xs text-muted-foreground">
-        {new Date(organization.createdAt).toLocaleDateString('pt-BR')}
-      </span>
-    ),
-  },
-  {
-    id: 'status',
-    label: 'Status',
-    sortable: true,
-    render: (organization) => (
-      <BUIBadge color="neutral" className={STATUS_CLASS[organization.status] ?? ''}>
-        {STATUS_LABELS[organization.status] ?? organization.status}
-      </BUIBadge>
-    ),
-  },
-  {
-    id: 'actions',
-    label: 'Ações',
-    sortable: false,
-    render: (organization) => (
-      <div className="flex items-center gap-2">
-        <BUIButton
-          variant="ghost"
-          size="xs"
-          onClick={() => {
-            alert(
-              `Organização: ${organization.name}\nID: ${organization.tenantId}\nStatus: ${organization.status}`,
-            )
-          }}
-        >
-          Ver
-        </BUIButton>
-      </div>
-    ),
-  },
-]
-
-/**
- * Colunas do TanStack Table: usadas apenas para ordenação e paginação.
- * O markup das células vem de `COLUMNS[].render`.
- */
-const columnDefs: ColumnDef<typeof features, OrganizationDto>[] = COLUMNS.map((column) => ({
-  id: column.id,
-  accessorFn: (organization) => String(organization[column.id as keyof OrganizationDto] ?? ''),
-  header: column.label,
-  enableSorting: column.sortable,
-}))
-
 function StatCard({
   icon,
   label,
   value,
   accent,
 }: {
-  readonly icon: ReactNode
+  readonly icon: React.ReactNode
   readonly label: string
   readonly value: string
   readonly accent?: string
@@ -194,190 +59,166 @@ function StatCard({
   )
 }
 
-export default function OrganizationsPage() {
-  const [search, setSearch] = useState('')
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: PAGE_SIZE,
+const COLUMNS: DataGridColumn<OrganizationDto>[] = [
+  { key: 'tenantId', header: 'ID', width: 200, format: (value) => String(value ?? '').slice(0, 8) + '…' },
+  { key: 'name', header: 'Nome', width: 260 },
+  { key: 'document', header: 'Documento', width: 180, format: (value) => value ?? '—' },
+  { key: 'createdAt', header: 'Criado em', width: 160, format: (value) => new Date(String(value)).toLocaleDateString('pt-BR') },
+  {
+    key: 'status',
+    header: 'Status',
+    width: 150,
+    format: (value) => {
+      const status = String(value ?? '')
+      return (
+        <BUIBadge color="neutral" className={STATUS_CLASS[status] ?? ''}>
+          {STATUS_LABELS[status] ?? status}
+        </BUIBadge>
+      )
+    },
+  },
+]
+
+export default function OrganizationsPage({
+  user,
+  onNavigate,
+}: {
+  user?: SessionUser
+  onNavigate?: (page: string) => void
+}) {
+  const [userRole, setUserRole] = useState<string>('user')
+
+  useEffect(() => {
+    setUserRole(user?.role ?? 'user')
+  }, [user?.role])
+
+  const organizationsQuery = useQuery({
+    queryKey: ['organizations'],
+    queryFn: getOrganizations,
+    staleTime: 30_000,
+    enabled: !!user,
   })
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }])
 
   const {
     data: organizations = [],
     isLoading,
     error,
-  } = useQuery({
-    queryKey: ['organizations'],
-    queryFn: getOrganizations,
-    staleTime: 30_000,
-  })
-
-  const filtered = useMemo(
-    () =>
-      organizations.filter(
-        (organization) =>
-          organization.name.toLowerCase().includes(search.toLowerCase()) ||
-          (organization.document ?? '').toLowerCase().includes(search.toLowerCase()) ||
-          organization.tenantId.toLowerCase().includes(search.toLowerCase()),
-      ),
-    [organizations, search],
-  )
-
-  const table = useTable({
-    features,
-    columns: columnDefs,
-    data: filtered,
-    // Estado controlado: sem escrever `state` de volta, os callbacks sozinhos
-    // deixam a tabela dessincronizada da UI (paginação e ordenação).
-    state: { sorting, pagination },
-    onSortingChange: setSorting,
-    onPaginationChange: setPagination,
-  })
+  } = organizationsQuery
 
   const total = organizations.length
-  const activeCount = organizations.filter((organization) => organization.status === 'active').length
-  const pendingCount = organizations.filter((organization) => organization.status === 'pending').length
-  const suspendedCount = organizations.filter((organization) => organization.status === 'suspended').length
+  const activeCount = organizations.filter((o) => o.status === 'active').length
+  const pendingCount = organizations.filter((o) => o.status === 'pending').length
+  const suspendedCount = organizations.filter((o) => o.status === 'suspended').length
 
-  const pageRows = table.getRowModel().rows.map((row) => row.original)
-  const totalPages = table.getPageCount()
-
-  const handleCreate = useCallback(() => {
-    alert('Cadastro de organização em breve')
-  }, [])
-
-  const handleSearchChange = useCallback((value: string) => {
-    setSearch(value)
-    // Busca nova sempre volta para a primeira página.
-    setPagination((prev) => ({ ...prev, pageIndex: 0 }))
-  }, [])
+  const columns = useMemo(() => COLUMNS, [])
 
   return (
-    <DashboardLayout activePage="organizations">
-      <div className="space-y-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Organizações</h1>
-            <p className="text-sm text-muted-foreground">Gerencie as organizações do sistema</p>
-          </div>
-
-          <div className="flex w-full items-center gap-2 lg:w-auto">
-            <div className="relative flex-1 lg:w-64">
-              <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <BUIInput
-                placeholder="Buscar organização…"
-                value={search}
-                onChange={handleSearchChange}
-                className="pl-9"
-              />
-            </div>
-            <BUIButton onClick={handleCreate}>
-              <Building2 className="mr-2 h-4 w-4" />
-              Nova organização
-            </BUIButton>
-          </div>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-4">
-          <StatCard
-            icon={<Users className="h-4 w-4 text-foreground/60" />}
-            label="Total"
-            value={String(total)}
-            accent="bg-muted"
-          />
-          <StatCard
-            icon={<Clock className="h-4 w-4 text-emerald-600" />}
-            label="Ativas"
-            value={String(activeCount)}
-            accent="bg-emerald-50"
-          />
-          <StatCard
-            icon={<CircleAlert className="h-4 w-4 text-amber-600" />}
-            label="Pendentes"
-            value={String(pendingCount)}
-            accent="bg-amber-50"
-          />
-          <StatCard
-            icon={<FileText className="h-4 w-4 text-red-600" />}
-            label="Suspensas"
-            value={String(suspendedCount)}
-            accent="bg-red-50"
-          />
-        </div>
-
-        <div className="rounded-xl border border-border bg-card shadow-sm">
-          <div className="overflow-auto">
-            <BUITable aria-label="Organizações" size="md">
-              <BUITableHeader columns={COLUMNS} dependencies={[sorting]}>
-                {(column) => {
-                  const sortDirection = table.getColumn(column.id)?.getIsSorted()
-
-                  return (
-                    <BUITableColumn
-                      key={column.id}
-                      id={column.id}
-                      isRowHeader={column.isRowHeader}
-                      className="font-medium select-none"
-                    >
-                      {column.sortable ? (
-                        <button
-                          type="button"
-                          onClick={() => table.getColumn(column.id)?.toggleSorting()}
-                          className="flex w-full cursor-pointer items-center gap-1 text-left"
-                          aria-label={`Ordenar por ${column.label}`}
-                        >
-                          {column.label}
-                          {sortDirection === 'desc' ? ' ▼' : sortDirection === 'asc' ? ' ▲' : ''}
-                        </button>
-                      ) : (
-                        column.label
-                      )}
-                    </BUITableColumn>
-                  )
+    <div className="space-y-6">
+      {/* Erro de API: aviso no topo, não esconde nada */}
+      {error && (
+        <div className="rounded-xl border border-border-error-default bg-red-50 p-3 shadow-sm">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="size-5 shrink-0 text-red-600" />
+            <div>
+              <p className="text-sm font-medium text-red-800">
+                Não foi possível carregar as organizações
+              </p>
+              {error instanceof Error && error.message.includes('HTTP 500') && (
+                <p className="text-xs text-red-600 mt-1">
+                  O servidor retornou um erro inesperado. Verifique se a API está rodando.
+                </p>
+              )}
+              {!isServerError(error) && (
+                <p className="text-xs text-red-600 mt-1">
+                  {error instanceof Error ? error.message : 'Erro inesperado'}
+                </p>
+              )}
+              <button
+                onClick={() => {
+                  void organizationsQuery.refetch()
                 }}
-              </BUITableHeader>
-              <BUITableBody
-                items={pageRows}
-                renderEmptyState={() =>
-                  isLoading ? 'Carregando organizações…' : 'Nenhuma organização encontrada'
-                }
+                className="mt-2 inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800"
               >
-                {(organization) => (
-                  <BUITableRow key={organization.tenantId} id={organization.tenantId}>
-                    {COLUMNS.map((column) => (
-                      <BUITableCell key={column.id}>{column.render(organization)}</BUITableCell>
-                    ))}
-                  </BUITableRow>
-                )}
-              </BUITableBody>
-            </BUITable>
+                <RefreshCw className="size-3.5" /> Tentar novamente
+              </button>
+            </div>
           </div>
         </div>
+      )}
 
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Exibindo {pagination.pageIndex * PAGE_SIZE + 1}
-              {'-'}
-              {Math.min((pagination.pageIndex + 1) * PAGE_SIZE, filtered.length)} de {filtered.length}{' '}
-              resultados
-            </p>
-            <BUIPagination
-              page={pagination.pageIndex + 1}
-              totalPages={totalPages}
-              onChange={(pageNumber: number) => table.setPageIndex(pageNumber - 1)}
-              previousLabel="Anterior"
-              nextLabel="Próximo"
-            />
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Organizações</h1>
+          <p className="text-sm text-muted-foreground">Gerencie as organizações do sistema</p>
+        </div>
+
+        <div className="flex items-center gap-2 w-full lg:w-auto">
+          <BUIButton
+            onClick={() => alert('Cadastro de organização em breve')}
+          >
+            <Building2 className="h-4 w-4 mr-2" />
+            Nova organização
+          </BUIButton>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-4">
+        <StatCard
+          icon={<Users className="h-4 w-4 text-foreground/60" />}
+          label="Total"
+          value={String(total)}
+          accent="bg-muted"
+        />
+        <StatCard
+          icon={<Clock className="h-4 w-4 text-emerald-600" />}
+          label="Ativas"
+          value={String(activeCount)}
+          accent="bg-emerald-50"
+        />
+        <StatCard
+          icon={<CircleAlert className="h-4 w-4 text-amber-600" />}
+          label="Pendentes"
+          value={String(pendingCount)}
+          accent="bg-amber-50"
+        />
+        <StatCard
+          icon={<FileText className="h-4 w-4 text-red-600" />}
+          label="Suspensas"
+          value={String(suspendedCount)}
+          accent="bg-red-50"
+        />
+      </div>
+
+      <div className="rounded-2xl border border-border-button-default bg-background-primary-default shadow-sm">
+        {isLoading ? (
+          <div className="flex h-[520px] items-center justify-center">
+            <div className="flex flex-col items-center gap-2">
+              <div className="h-8 w-8 rounded-full border-2 border-border border-t-transparent animate-spin" />
+              <p className="text-xs text-muted-foreground">Carregando organizações…</p>
+            </div>
           </div>
-        )}
-
-        {error && (
-          <p className="text-sm text-destructive">
-            {error instanceof Error ? error.message : 'Erro ao carregar organizações'}
-          </p>
+        ) : organizations.length === 0 ? (
+          <div className="flex h-[300px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-background-secondary p-8 text-center">
+            <Building2 className="mb-2 size-6 text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">Nenhuma organização cadastrada</p>
+            <p className="mt-1 text-xs text-muted-foreground/70">
+              Ainda não há organizações no sistema.
+            </p>
+          </div>
+        ) : (
+          <DataGrid
+            aria-label="Organizações"
+            data={organizations}
+            columns={columns}
+            getRowId={(row) => row.tenantId}
+            height={520}
+          />
         )}
       </div>
-    </DashboardLayout>
+    </div>
   )
+}
+
+function isServerError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('HTTP 500')
 }
