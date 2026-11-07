@@ -1,6 +1,27 @@
 # PROGRESS.md
 
-Estado: **Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-10-28)
+Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-06)
+
+## F3.3 — medição de uso, idempotência, cotas e reconciliação (2026-11-06)
+
+- Serviço transacional único (`packages/db/src/usage-metering.ts`) para fast e deep,
+  com ordem idempotência → identidade comercial → cota hard → evento, tudo na
+  mesma transação da operação de negócio.
+- **Identidade comercial no banco**: `usage_billing_unit (tenant_id, validation_id)`
+  garante no máximo uma unidade faturável por validação, independente do caminho
+  técnico ou da chave de idempotência (ADR-0044 §3a).
+- Política provisória de faturabilidade: timeout de checker, fonte externa
+  indisponível e falha interna tornam a conclusão NÃO faturável
+  (`hasExternalUnavailability` em `@comprova/core`, ADR-0044 §3b).
+- Cotas soft/hard por tenant com `SELECT ... FOR UPDATE`; `QuotaExceededError`
+  mapeado para 429 `QUOTA_EXCEEDED`.
+- Endpoints `/v1/usage/{consumption,quota,events,reconcile}` com sessão (tenant
+  validado contra a associação do usuário) e M2M (tenant da API key,
+  `requireTenantMatch`).
+- Contrato canônico em `@comprova/contracts` reutilizado pela resposta HTTP.
+- Migração `0053` com backfill histórico deduplicado e RLS nas tabelas novas.
+- Testes: PostgreSQL real (idempotência, cotas, concorrência fast/deep,
+  reconciliação, sessão/M2M, backfill de migration, RLS com `app_user`).
 
 ## Sincronização do roadmap (2026-10-28)
 

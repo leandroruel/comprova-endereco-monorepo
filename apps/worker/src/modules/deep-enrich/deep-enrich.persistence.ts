@@ -1,5 +1,15 @@
-import { and, desc, eq, inArray, isNull, sql } from '@comprova/db'
-import type { DbTx } from '@comprova/db'
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  QuotaExceededError,
+  sql,
+  recordUsageEventInTx,
+  validationBillingKey,
+  type DbTx,
+} from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
 import { randomUUID } from 'node:crypto'
@@ -385,9 +395,34 @@ export interface OutcomeEventsWrite {
   readonly claimType: ClaimType
   readonly stillPartial: boolean
   readonly verdict: Verdict
+  /**
+   * Indisponibilidade de fonte externa detectada nos sinais desta execução
+   * (`hasExternalUnavailability`, ADR-0044 §3): torna a conclusão NÃO
+   * faturável, sem alterar o status técnico da validação.
+   */
+  readonly externalUnavailability: boolean
 }
 
-export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Promise<void> => {
+/**
+ * Emite os eventos de resultado de uma validação (outbox + evento de uso).
+ *
+ * Publica `validation.completed` (ou `validation.updated` quando ainda parcial)
+ * na tabela `outbox`. Somente validações concluídas (`stillPartial === false`)
+ * geram a unidade comercial faturável e consomem cota; resultados parciais
+ * retornam cedo sem reclamar identidade comercial.
+ *
+ * O evento de uso é idempotente e compartilha a identidade comercial com o
+ * fast path (ADR-0044 §3): faturáveis usam a chave canônica
+ * `validation:<validationId>` (garantia de `usage_billing_unit`), não
+ * faturáveis usam chave própria para não bloquear faturamento futuro.
+ *
+ * @param tx transação aberta (mesma da conclusão da validação)
+ * @param write dados do evento de resultado (tenant, validação, claim, parcial, veredito, indisponibilidade externa)
+ */
+export const emitOutcomeEvents = async (
+  tx: DbTx,
+  write: OutcomeEventsWrite,
+): Promise<{ readonly blockedByQuota: boolean }> => {
   await tx.insert(t.outbox).values({
     aggregate: 'validation',
     aggregateId: write.validationId,
@@ -401,10 +436,53 @@ export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Pr
     },
   })
 
-  await tx.insert(t.usageEvent).values({
-    tenantId: write.tenantId,
-    kind: 'deep',
-    units: 1,
-    validationId: write.validationId,
-  })
+  // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
+  // geram a unidade comercial. Resultados parciais (queued/partial) não claimam
+  // a identidade comercial nem consomem cota — a conclusão será registrada por
+  // esta mesma função quando o deep path de fato terminar (CodeRabbit k). A
+  // cota hard é aplicada a todo evento faturável dentro da mesma transação
+  // (CodeRabbit l).
+  //
+  // Identidade comercial compartilhada com o fast path (ADR-0044 §3): eventos
+  // FATURÁVEIS usam a chave canônica `validation:<id>` e a garantia estrutural
+  // de `usage_billing_unit (tenant_id, validation_id)` — se o fast já faturou
+  // esta validação, aqui é replay (não há segunda cobrança). Eventos NÃO
+  // faturáveis (indisponibilidade de fonte externa) usam chave própria, para
+  // nunca bloquearem um faturamento legítimo de uma reexecução posterior.
+  if (write.stillPartial) return { blockedByQuota: false }
+
+  const billable = !write.externalUnavailability
+  try {
+    await recordUsageEventInTx(tx, {
+      tenantId: write.tenantId,
+      eventType: 'usage_event',
+      kind: 'deep',
+      units: 1,
+      costMicros: null,
+      validationId: write.validationId,
+      idempotencyKey: billable ? validationBillingKey(write.validationId) : null,
+      billable,
+      source: 'deep',
+    })
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      // A cota hard impediu o faturamento. Marcar a validação com um estado de
+      // negócio explícito (blocked_quota) em vez de deixá-la em queued/partial
+      // sem indicação do motivo. O erro NÃO é relançado: o caller decide o
+      // fluxo de retry baseado no retorno.
+      await tx
+        .update(t.validation)
+        .set({
+          status: 'blocked_quota',
+          quotaBlockedReason: err.message,
+          // A validação não foi concluída com sucesso; completed_at permanece
+          // nulo até que o processamento possa ser retomado (quota aumentada).
+          completedAt: null,
+        })
+        .where(eq(t.validation.validationId, write.validationId))
+      return { blockedByQuota: true }
+    }
+    throw err
+  }
+  return { blockedByQuota: false }
 }

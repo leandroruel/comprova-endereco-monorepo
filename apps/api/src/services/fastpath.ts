@@ -29,6 +29,9 @@ import {
 } from '@comprova/core'
 import { withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
+import { hasExternalUnavailability } from '@comprova/core'
+import { makeUsageService } from '../modules/usage/usage.service.js'
+import { validationBillingKey } from '@comprova/db'
 
 export interface FastPathTenantContext {
   readonly tenantId: string
@@ -127,6 +130,18 @@ const splitCnpj = (
   dv: digits.slice(12, 14),
 })
 
+/**
+ * Constrói o contexto de deep path a partir do registro do cadastro.
+ *
+ * Devolve `null` quando não há registro (endereço vem da entrada do usuário).
+ * Caso contrário, devolve a validade dos dígitos do documento e o registro com
+ * `buildingKey` e `unitKey` convertidos para hex (para não vazar binário no
+ * contexto persistido).
+ *
+ * @param registryRecord registro do cadastro, quando disponível
+ * @param docDigitsValid se os dígitos do documento são válidos
+ * @returns contexto de deep ou `null`
+ */
 export const deepContextOf = (
   registryRecord: EstabelecimentoRecord | undefined,
   docDigitsValid: boolean,
@@ -146,6 +161,20 @@ export const deepContextOf = (
         },
       }
 
+/**
+ * Determina o status técnico da validation a partir do modo, veredito e
+ * confiança da decisão.
+ *
+ * - `deep` → `queued` (o deep path conclui de forma assíncrona)
+ * - `auto` → `partial` quando veredito é `INSUFFICIENT_EVIDENCE` ou
+ *   confiança < 0,55; caso contrário `completed`
+ * - `fast` → `completed`
+ *
+ * @param mode modo de execução da validação
+ * @param verdict veredito da decisão
+ * @param confidence confiança da decisão
+ * @returns 'completed' | 'partial' | 'queued'
+ */
 const statusFor = (
   mode: 'fast' | 'deep' | 'auto',
   verdict: Verdict,
@@ -158,6 +187,14 @@ const statusFor = (
   return 'completed'
 }
 
+/**
+ * Reconstrói o `AssessmentExplanation` a partir da explicação armazenada no
+ * banco (JSON). Devolve `undefined` quando não há explicação ou quando o
+ * campo `code` não é uma string (ex.: registros antigos sem código).
+ *
+ * @param explanation explicação armazenada (summary, code, listas de evidências)
+ * @returns `AssessmentExplanation` ou `undefined`
+ */
 const explanationDetailFromStored = (
   explanation: {
     summary?: string
@@ -175,6 +212,17 @@ const explanationDetailFromStored = (
   }
 }
 
+/**
+ * Enriquece os componentes de endereço com o município do IBGE a partir do CEP.
+ *
+ * Só consulta o provedor de CEP quando há um CEP completo (8 dígitos) e o
+ * município ainda não está preenchido. Devolve a entrada inalterada quando não
+ * há provedor de CEP, o CEP é inválido ou o município não é encontrado.
+ *
+ * @param deps dependências (inclui o CepReader opcional)
+ * @param input componentes do endereço de entrada
+ * @returns componentes do endereço, com `municipioIbge` preenchido quando possível
+ */
 const enrichWithCep = async (
   deps: FastPathDeps,
   input: AddressComponents | null,
@@ -200,6 +248,20 @@ const addressFromRegistry = (record: EstabelecimentoRecord): AddressComponents =
   countryCode: 'BR',
 })
 
+/**
+ * Executa os checkers em sequência para um documento, encadeando os sinais
+ * produzidos (`priorSignals`). Cada checker roda com seu próprio `timeoutMs`
+ * via `Promise.race`: um checker em timeout vira um sinal `unknown` com
+ * `source '<id>:timeout'` e `detail.reason 'checker_timeout'`, sem abortar a
+ * execução dos demais. Erros não-timeout são propagados.
+ *
+ * @param deps dependências (checkers, clock, CEP, etc.)
+ * @param documentType tipo do documento ('CPF' | 'CNPJ')
+ * @param docDigitsValid se os dígitos do documento são válidos
+ * @param registryRecord registro do cadastro, quando disponível
+ * @param address referência do endereço canônico
+ * @returns sinais produzidos pelos checkers (prior + novos), em ordem
+ */
 const runCheckers = async (
   deps: FastPathDeps,
   documentType: 'CPF' | 'CNPJ',
@@ -247,6 +309,15 @@ const runCheckers = async (
     return [...priorSignals, ...produced]
   }, Promise.resolve([]))
 
+/**
+ * Carrega o resumo do claim (dados e contagem de evidências por stance)
+ * associado a uma validation.
+ *
+ * @param db instância do banco
+ * @param tenantId tenant proprietário
+ * @param validationId id da validation
+ * @returns claim e evidenceSummary, ou undefined quando não há claim
+ */
 const loadClaimSummary = async (
   db: Db,
   tenantId: string,
@@ -290,6 +361,21 @@ const loadClaimSummary = async (
     }
   })
 
+/**
+ * Carrega uma validation já persistida para replay de idempotência.
+ *
+ * Retorna o `FastPathResult` reconstruído a partir dos dados armazenados
+ * (validation, sinais associados, endereço de resposta em cache pela chave de
+ * idempotência e resumo do claim/evidências), com `idempotentReplay: true`.
+ * Lança `Error` quando a validation apontada pela chave não existe.
+ *
+ * @param db instância do banco
+ * @param tenantId tenant proprietário
+ * @param validationId id da validation a reproduzir
+ * @param policyVersion versão da policy a reportar no resultado
+ * @param idempotencyKey chave usada para recuperar o endereço em cache
+ * @returns resultado da validation previamente persistida
+ */
 const loadValidationForReplay = async (
   db: Db,
   tenantId: string,
@@ -392,6 +478,38 @@ const findExistingIdempotency = async (
   return row === undefined ? null : { validationId: row.validationId, requestHash: row.requestHash }
 }
 
+/**
+ * Executa o caminho rápido (fast path) de uma validação de endereço (F3.3).
+ *
+ * Fluxo:
+ * 1. Resolve idempotência: se a `idempotencyKey` já foi usada com o mesmo
+ *    corpo da requisição, devolve o resultado previamente persistido (replay)
+ *    sem reavaliar nem consumir cota novamente.
+ * 2. Resolve o registro no cadastro (CNPJ), enriquece o endereço (CEP) e
+ *    canoniciza o endereço de entrada.
+ * 3. Executa os checkers (T0), cada um com seu próprio `timeoutMs`; um
+ *    checker em timeout produz um sinal `unknown` com `source '<id>:timeout'`
+ *    e não falha a execução.
+ * 4. Avalia o claim com a policy, produz veredito, score, confiança e status
+ *    (`completed` / `partial` / `queued`).
+ * 5. Persiste subject, endereço canônico, claim, evidências, sinais e
+ *    validation dentro de uma única transação.
+ * 6. Registra um evento de uso idempotente:
+ *    - Conclusão técnica (`completed`): evento `usage_event`, faturável
+ *      (`billable = true`) salvo quando não há indisponibilidade de fonte
+ *      externa (`hasExternalUnavailability`); usa a chave canônica
+ *      `validation:<validationId>` para compartilhar a identidade comercial
+ *      com o deep path (no máximo uma cobrança por validação).
+ *    - Não terminal (`partial`/`queued`) ou indisponibilidade externa:
+ *      evento não-faturável com chave própria, sem consumir cota.
+ * 7. Emite `auditLog` e retorna o resultado (ou o replay do vencedor em caso
+ *    de conflito de idempotência dentro da transação).
+ *
+ * @param deps dependências (banco, registro, checkers, policy, clock, etc.)
+ * @param tenant contexto do tenant (tenantId, apiKeyId, issuerScopes)
+ * @param req requisição de validação (documento, endereço, modo, chave de idempotência)
+ * @returns resultado do fast path, incluindo sinais, veredito, status e endereço
+ */
 export const runFastPath = async (
   deps: FastPathDeps,
   tenant: FastPathTenantContext,
@@ -731,12 +849,46 @@ export const runFastPath = async (
       },
     })
 
-    await tx.insert(t.usageEvent).values({
-      tenantId: tenant.tenantId,
-      kind: 'fast',
-      units: 1,
-      validationId,
-    })
+    // Evento de uso (F3.3): idempotente, com rastreamento de faturabilidade
+    // e proteção de cota hard. Grava dentro da mesma transação da validation.
+    //
+    // Identidades separadas (ADR-0044 §3):
+    // - Execução técnica / tentativa (status não terminal): evento
+    //   `processing_attempt`, não faturável, com chave própria — NUNCA usa a
+    //   chave comercial canônica, para não bloquear o faturamento legítimo de
+    //   uma conclusão posterior (deep).
+    // - Unidade comercial faturável: evento `usage_event` com a chave canônica
+    //   `validation:<id>` compartilhada com o deep path; o banco garante, via
+    //   `usage_billing_unit (tenant_id, validation_id)`, que fast e deep não
+    //   gerem duas cobranças para a mesma validação.
+    // - Conclusão técnica ≠ elegibilidade comercial: um checker em timeout ou
+    //   uma fonte externa indisponível tornam a validação concluída NÃO
+    //   faturável (política provisória do ADR-0044 §3), sem alterar o status.
+    const externalUnavailability = hasExternalUnavailability(signals)
+    const usage = makeUsageService({ db: deps.db })
+    if (status === 'completed') {
+      const billable = !externalUnavailability
+      await usage.recordUsageEventInTx(tx, {
+        tenantId: tenant.tenantId,
+        eventType: 'usage_event',
+        kind: 'fast',
+        units: 1,
+        validationId,
+        idempotencyKey: billable ? validationBillingKey(validationId) : null,
+        billable,
+        source: 'fast',
+      })
+    } else {
+      await usage.recordUsageEventInTx(tx, {
+        tenantId: tenant.tenantId,
+        eventType: 'processing_attempt',
+        kind: 'fast',
+        units: 1,
+        validationId,
+        billable: false,
+        source: 'fast',
+      })
+    }
 
     await tx.insert(t.auditLog).values({
       tenantId: tenant.tenantId,

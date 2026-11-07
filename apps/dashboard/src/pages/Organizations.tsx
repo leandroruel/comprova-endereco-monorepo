@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getOrganizations, type OrganizationDto } from '@/api/client'
 import type { SessionUser } from '@/api/auth'
@@ -63,7 +63,12 @@ const COLUMNS: DataGridColumn<OrganizationDto>[] = [
   { key: 'tenantId', header: 'ID', width: 200, format: (value) => String(value ?? '').slice(0, 8) + '…' },
   { key: 'name', header: 'Nome', width: 260 },
   { key: 'document', header: 'Documento', width: 180, format: (value) => value ?? '—' },
-  { key: 'createdAt', header: 'Criado em', width: 160, format: (value) => new Date(String(value)).toLocaleDateString('pt-BR') },
+  {
+    key: 'createdAt',
+    header: 'Criado em',
+    width: 160,
+    format: (value) => new Date(String(value)).toLocaleDateString('pt-BR'),
+  },
   {
     key: 'status',
     header: 'Status',
@@ -80,30 +85,22 @@ const COLUMNS: DataGridColumn<OrganizationDto>[] = [
 ]
 
 export default function OrganizationsPage({
-  user,
-  onNavigate,
+  user: _user,
+  onNavigate: _onNavigate,
 }: {
   user?: SessionUser
   onNavigate?: (page: string) => void
 }) {
-  const [userRole, setUserRole] = useState<string>('user')
-
-  useEffect(() => {
-    setUserRole(user?.role ?? 'user')
-  }, [user?.role])
+  useEffect(() => {}, [])
 
   const organizationsQuery = useQuery({
     queryKey: ['organizations'],
     queryFn: getOrganizations,
     staleTime: 30_000,
-    enabled: !!user,
+    enabled: !!_user,
   })
 
-  const {
-    data: organizations = [],
-    isLoading,
-    error,
-  } = organizationsQuery
+  const { data: organizations = [], isLoading, error } = organizationsQuery
 
   const total = organizations.length
   const activeCount = organizations.filter((o) => o.status === 'active').length
@@ -120,9 +117,7 @@ export default function OrganizationsPage({
           <div className="flex items-start gap-3">
             <AlertTriangle className="size-5 shrink-0 text-red-600" />
             <div>
-              <p className="text-sm font-medium text-red-800">
-                Não foi possível carregar as organizações
-              </p>
+              <p className="text-sm font-medium text-red-800">Não foi possível carregar as organizações</p>
               {error instanceof Error && error.message.includes('HTTP 500') && (
                 <p className="text-xs text-red-600 mt-1">
                   O servidor retornou um erro inesperado. Verifique se a API está rodando.
@@ -153,9 +148,7 @@ export default function OrganizationsPage({
         </div>
 
         <div className="flex items-center gap-2 w-full lg:w-auto">
-          <BUIButton
-            onClick={() => alert('Cadastro de organização em breve')}
-          >
+          <BUIButton onClick={() => alert('Cadastro de organização em breve')}>
             <Building2 className="h-4 w-4 mr-2" />
             Nova organização
           </BUIButton>
@@ -201,9 +194,7 @@ export default function OrganizationsPage({
           <div className="flex h-[300px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-background-secondary p-8 text-center">
             <Building2 className="mb-2 size-6 text-muted-foreground/40" />
             <p className="text-sm font-medium text-muted-foreground">Nenhuma organização cadastrada</p>
-            <p className="mt-1 text-xs text-muted-foreground/70">
-              Ainda não há organizações no sistema.
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground/70">Ainda não há organizações no sistema.</p>
           </div>
         ) : (
           <DataGrid

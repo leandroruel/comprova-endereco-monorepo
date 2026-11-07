@@ -280,8 +280,8 @@ function ReferencePanel({ reference }: { readonly reference: DebugNf3eQrCodeResp
 }
 
 export function DebugNf3eQrCodePage({
-  onNavigate,
-  user,
+  onNavigate: _onNavigate,
+  user: _user,
 }: {
   onNavigate?: (page: string) => void
   user?: SessionUser
@@ -336,93 +336,93 @@ export function DebugNf3eQrCodePage({
         </p>
       </div>
 
-        <Card>
-          <CardContent className="p-6">
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDragLeave={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              className={cn(
-                'flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed py-12 text-center transition-colors',
-                isAccepted(file)
-                  ? 'border-foreground/30 bg-muted/30 hover:border-foreground'
-                  : 'border-border hover:border-foreground/30 hover:bg-muted/30',
-              )}
-              onClick={() => fileRef.current?.click()}
-            >
-              {uploading ? (
-                <div className="mb-3 h-6 w-6">
-                  <Spinner />
-                </div>
-              ) : (
-                <Upload className="mb-3 h-8 w-8 text-muted-foreground/40" />
-              )}
-              <p className="text-sm font-medium text-foreground">
-                {uploading ? 'Processando…' : 'Arraste um documento aqui'}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {isAccepted(file) ? file?.name : 'ou clique para selecionar (.pdf, .jpg, .png)'}
-              </p>
-              <input
-                ref={fileRef}
-                type="file"
-                accept={ACCEPTED_TYPES.join(',')}
-                className="hidden"
-                onChange={(e) => {
-                  const selected = e.target.files?.[0] ?? null
-                  handleFile(selected)
-                }}
-              />
-              {!isAccepted(file) && file && (
-                <p className="mt-2 text-sm text-red-500">
-                  Tipo não suportado: {file.type}. Envie PDF, JPEG ou PNG.
-                </p>
-              )}
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <Button disabled={uploading || !file || !isAccepted(file)} onClick={handleSubmit}>
-                {uploading ? <Play className="mr-2 h-3 w-3" /> : 'Analisar documento'}
-              </Button>
-              {error && <span className="flex-1 text-sm text-red-500">{error}</span>}
-            </div>
-          </CardContent>
-        </Card>
-
-        {uploading && <ExecutionTrace events={[]} loading />}
-
-        {response && (
-          <>
-            {response.analysis ? (
-              <DocumentPanel analysis={response.analysis} />
-            ) : (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Documento analisado
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    A análise completa não está disponível nesta resposta. O trace abaixo continua válido;
-                    reinicie a API para carregar o contrato atual do analyzer.
-                  </p>
-                </CardContent>
-              </Card>
+      <Card>
+        <CardContent className="p-6">
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDragLeave={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            className={cn(
+              'flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed py-12 text-center transition-colors',
+              isAccepted(file)
+                ? 'border-foreground/30 bg-muted/30 hover:border-foreground'
+                : 'border-border hover:border-foreground/30 hover:bg-muted/30',
             )}
-            <ReferencePanel reference={response.reference} />
+            onClick={() => fileRef.current?.click()}
+          >
+            {uploading ? (
+              <div className="mb-3 h-6 w-6">
+                <Spinner />
+              </div>
+            ) : (
+              <Upload className="mb-3 h-8 w-8 text-muted-foreground/40" />
+            )}
+            <p className="text-sm font-medium text-foreground">
+              {uploading ? 'Processando…' : 'Arraste um documento aqui'}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isAccepted(file) ? file?.name : 'ou clique para selecionar (.pdf, .jpg, .png)'}
+            </p>
+            <input
+              ref={fileRef}
+              type="file"
+              accept={ACCEPTED_TYPES.join(',')}
+              className="hidden"
+              onChange={(e) => {
+                const selected = e.target.files?.[0] ?? null
+                handleFile(selected)
+              }}
+            />
+            {!isAccepted(file) && file && (
+              <p className="mt-2 text-sm text-red-500">
+                Tipo não suportado: {file.type}. Envie PDF, JPEG ou PNG.
+              </p>
+            )}
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <Button disabled={uploading || !file || !isAccepted(file)} onClick={handleSubmit}>
+              {uploading ? <Play className="mr-2 h-3 w-3" /> : 'Analisar documento'}
+            </Button>
+            {error && <span className="flex-1 text-sm text-red-500">{error}</span>}
+          </div>
+        </CardContent>
+      </Card>
 
-            <ExecutionTrace events={response.events} elapsedMs={elapsedMs ?? undefined} />
+      {uploading && <ExecutionTrace events={[]} loading />}
 
-            {response.events.length > 0 ? (
-              <TraceMetricsCard
-                events={response.events}
-                elapsedMs={elapsedMs}
-                provenance={response.analysis?.provenance ?? undefined}
-              />
-            ) : null}
-          </>
-        )}
-      </div>
+      {response && (
+        <>
+          {response.analysis ? (
+            <DocumentPanel analysis={response.analysis} />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Documento analisado
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  A análise completa não está disponível nesta resposta. O trace abaixo continua válido;
+                  reinicie a API para carregar o contrato atual do analyzer.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+          <ReferencePanel reference={response.reference} />
+
+          <ExecutionTrace events={response.events} elapsedMs={elapsedMs ?? undefined} />
+
+          {response.events.length > 0 ? (
+            <TraceMetricsCard
+              events={response.events}
+              elapsedMs={elapsedMs ?? undefined}
+              provenance={response.analysis?.provenance ?? undefined}
+            />
+          ) : null}
+        </>
+      )}
+    </div>
   )
 }

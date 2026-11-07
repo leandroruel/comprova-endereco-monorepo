@@ -5,6 +5,7 @@ import {
   decide,
   evaluateClaim,
   evidenceSetHashOfObservations,
+  hasExternalUnavailability,
   observationFromSignal,
   SCORER_VERSION,
   weightedScore,
@@ -227,6 +228,7 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
   const claimType = claimTypeOf(state.subject.docType)
   const subjectType = subjectTypeOf(state.subject.docType)
 
+  let isCompleted = false
   const outcome = await withTenant(deps.db, input.tenantId, async (tx) => {
     const existingCheckerIds = new Set(signals.map((s) => `${s.checkerId}@${s.checkerVersion}`))
     const freshSignals = [...newSignals, ...t2Signals].filter(
@@ -357,20 +359,31 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
       await supersedeIssuedCredentials(tx, input.tenantId, input.validationId)
     }
 
-    await emitOutcomeEvents(tx, {
+    const { blockedByQuota } = await emitOutcomeEvents(tx, {
       tenantId: input.tenantId,
       validationId: input.validationId,
       claimId,
       claimType,
       stillPartial,
       verdict: decision.verdict,
+      // Mesma política de faturabilidade do fast path (ADR-0044 §3): timeout
+      // de checker, fonte externa indisponível ou falha interna tornam a
+      // conclusão não faturável. Considera APENAS os sinais desta execução
+      // (T1 = newSignals, T2 = t2Signals): um timeout antigo do checker do
+      // fast path (sinal herdado em `signalsAfterT1`) não torna não-faturável
+      // uma conclusão bem-sucedida do deep.
+      externalUnavailability: hasExternalUnavailability([...newSignals, ...t2Signals]),
     })
 
-    return { score, decision, stillPartial }
+    // Se a cota hard bloqueou o faturamento, a validação foi marcada como
+    // blocked_quota dentro de emitOutcomeEvents. O processamento foi concluído
+    // (mesmo que sem cobrança), então o status é 'completed' e não 'partial'.
+    isCompleted = blockedByQuota || !stillPartial
+    return { score, decision, stillPartial: blockedByQuota ? false : stillPartial }
   })
 
   return {
-    status: outcome.stillPartial ? 'partial' : 'completed',
+    status: isCompleted ? 'completed' : 'partial',
     verdict: outcome.decision.verdict,
     confidence: outcome.decision.confidence,
     score: Math.tanh(outcome.score),

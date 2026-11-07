@@ -15,7 +15,7 @@ import {
   YAxis,
 } from 'recharts'
 import { getOrganizations, getStats, type OrganizationDto } from '@/api/client'
-import { authClient, type SessionUser } from '@/api/auth'
+import { type SessionUser } from '@/api/auth'
 import { BUIBadge, BUIButton } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import {
@@ -241,13 +241,7 @@ function SegmentedControl<T extends string>({
   )
 }
 
-function Panel({
-  children,
-  className,
-}: {
-  readonly children: React.ReactNode
-  readonly className?: string
-}) {
+function Panel({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) {
   return (
     <section className={cn('rounded-2xl border border-border bg-card p-5 shadow-sm', className)}>
       {children}
@@ -321,10 +315,7 @@ export default function HomePage({
   )
 
   const organizationsPerPage = 4
-  const totalOrganizationPages = Math.max(
-    1,
-    Math.ceil(sortedOrganizations.length / organizationsPerPage),
-  )
+  const totalOrganizationPages = Math.max(1, Math.ceil(sortedOrganizations.length / organizationsPerPage))
   const safeOrganizationPage = Math.min(orgPage, totalOrganizationPages - 1)
   const visibleOrganizations = sortedOrganizations.slice(
     safeOrganizationPage * organizationsPerPage,
@@ -363,8 +354,7 @@ export default function HomePage({
   const growthDelta =
     previousMonth > 0 ? Math.round(((currentMonth - previousMonth) / previousMonth) * 100) : null
 
-  const completionRate =
-    stats !== undefined && stats.total > 0 ? stats.completed / stats.total : 0
+  const completionRate = stats !== undefined && stats.total > 0 ? stats.completed / stats.total : 0
 
   const statusPie = useMemo(
     () =>
@@ -421,371 +411,351 @@ export default function HomePage({
           >
             Atualizar
           </BUIButton>
-          <BUIButton
-            variant="primary"
-            leadingIcon={Plus}
-            onClick={() => onNavigate?.('validations')}
-          >
+          <BUIButton variant="primary" leadingIcon={Plus} onClick={() => onNavigate?.('validations')}>
             Nova validação
           </BUIButton>
         </div>
       </div>
 
-        <div className="grid gap-4 xl:grid-cols-12">
-          <Panel className="xl:col-span-5">
-            <PanelHeading
-              title="Organizações recentes"
-              description="Cadastradas na plataforma"
-              action={
-                <BUIButton
-                  variant="secondary"
-                  size="xs"
-                  onClick={() => onNavigate?.('organizations')}
+      <div className="grid gap-4 xl:grid-cols-12">
+        <Panel className="xl:col-span-5">
+          <PanelHeading
+            title="Organizações recentes"
+            description="Cadastradas na plataforma"
+            action={
+              <BUIButton variant="secondary" size="xs" onClick={() => onNavigate?.('organizations')}>
+                Ver todas
+              </BUIButton>
+            }
+          />
+
+          <div className="mt-2 flex items-end gap-2">
+            <span className="font-mono text-3xl font-semibold tabular-nums leading-none text-foreground">
+              {organizationsQuery.isLoading ? '—' : formatNumber(sortedOrganizations.length)}
+            </span>
+            <span className="pb-0.5 text-[11px] text-muted-foreground">organizações</span>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {visibleOrganizations.map((organization, index) => {
+              const status = ORG_STATUS[organization.status] ?? {
+                label: organization.status,
+                className: 'border-border bg-muted text-muted-foreground',
+              }
+              const gradient = AVATAR_GRADIENTS[index % AVATAR_GRADIENTS.length]
+              return (
+                <article
+                  key={organization.tenantId}
+                  className="rounded-xl border border-border bg-background/60 p-3"
                 >
-                  Ver todas
-                </BUIButton>
-              }
-            />
-
-            <div className="mt-2 flex items-end gap-2">
-              <span className="font-mono text-3xl font-semibold tabular-nums leading-none text-foreground">
-                {organizationsQuery.isLoading ? '—' : formatNumber(sortedOrganizations.length)}
-              </span>
-              <span className="pb-0.5 text-[11px] text-muted-foreground">organizações</span>
-            </div>
-
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              {visibleOrganizations.map((organization, index) => {
-                const status = ORG_STATUS[organization.status] ?? {
-                  label: organization.status,
-                  className: 'border-border bg-muted text-muted-foreground',
-                }
-                const gradient = AVATAR_GRADIENTS[index % AVATAR_GRADIENTS.length]
-                return (
-                  <article
-                    key={organization.tenantId}
-                    className="rounded-xl border border-border bg-background/60 p-3"
-                  >
-                    <div className="flex items-start gap-2.5">
-                      <span
-                        className={cn(
-                          'flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-semibold text-white',
-                          gradient,
-                        )}
-                      >
-                        {initialsOf(organization.name)}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-semibold text-foreground">
-                          {organization.name}
-                        </p>
-                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                          {relativeDate(organization.createdAt)}
-                          {organization.document !== null && ` · ${organization.document}`}
-                        </p>
-                        <BUIBadge color="neutral" className={cn('mt-2', status.className)}>
-                          {status.label}
-                        </BUIBadge>
-                      </div>
+                  <div className="flex items-start gap-2.5">
+                    <span
+                      className={cn(
+                        'flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-semibold text-white',
+                        gradient,
+                      )}
+                    >
+                      {initialsOf(organization.name)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-semibold text-foreground">{organization.name}</p>
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                        {relativeDate(organization.createdAt)}
+                        {organization.document !== null && ` · ${organization.document}`}
+                      </p>
+                      <BUIBadge color="neutral" className={cn('mt-2', status.className)}>
+                        {status.label}
+                      </BUIBadge>
                     </div>
-                  </article>
-                )
-              })}
+                  </div>
+                </article>
+              )
+            })}
 
-              {!organizationsQuery.isLoading && visibleOrganizations.length === 0 && (
-                <div className="col-span-full flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8 text-center">
-                  <Building2 className="mb-2 size-6 text-muted-foreground/40" />
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Nenhuma organização cadastrada
-                  </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground/70">
-                    Cadastre uma organização para vê-la aqui
-                  </p>
-                </div>
-              )}
-            </div>
+            {!organizationsQuery.isLoading && visibleOrganizations.length === 0 && (
+              <div className="col-span-full flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8 text-center">
+                <Building2 className="mb-2 size-6 text-muted-foreground/40" />
+                <p className="text-xs font-medium text-muted-foreground">Nenhuma organização cadastrada</p>
+                <p className="mt-1 text-[11px] text-muted-foreground/70">
+                  Cadastre uma organização para vê-la aqui
+                </p>
+              </div>
+            )}
+          </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <BUIButton
-                variant="secondary"
-                size="small"
-                leadingIcon={ArrowLeft}
-                className="w-full"
-                disabled={safeOrganizationPage === 0}
-                onClick={() => setOrgPage((page) => Math.max(0, page - 1))}
-              >
-                Anterior
-              </BUIButton>
-              <BUIButton
-                variant="secondary"
-                size="small"
-                trailingIcon={ArrowRight}
-                className="w-full"
-                disabled={safeOrganizationPage >= totalOrganizationPages - 1}
-                onClick={() =>
-                  setOrgPage((page) => Math.min(totalOrganizationPages - 1, page + 1))
-                }
-              >
-                Próximo
-              </BUIButton>
-            </div>
-          </Panel>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <BUIButton
+              variant="secondary"
+              size="small"
+              leadingIcon={ArrowLeft}
+              className="w-full"
+              disabled={safeOrganizationPage === 0}
+              onClick={() => setOrgPage((page) => Math.max(0, page - 1))}
+            >
+              Anterior
+            </BUIButton>
+            <BUIButton
+              variant="secondary"
+              size="small"
+              trailingIcon={ArrowRight}
+              className="w-full"
+              disabled={safeOrganizationPage >= totalOrganizationPages - 1}
+              onClick={() => setOrgPage((page) => Math.min(totalOrganizationPages - 1, page + 1))}
+            >
+              Próximo
+            </BUIButton>
+          </div>
+        </Panel>
 
-          <Panel className="xl:col-span-7">
-            <PanelHeading
-              title={CHART_TITLES[chartMode]}
-              description="Distribuição das validações do seu tenant"
-              action={
-                <SegmentedControl
-                  label="Agrupar validações"
-                  value={chartMode}
-                  options={CHART_MODES}
-                  onChange={setChartMode}
-                />
-              }
-            />
+        <Panel className="xl:col-span-7">
+          <PanelHeading
+            title={CHART_TITLES[chartMode]}
+            description="Distribuição das validações do seu tenant"
+            action={
+              <SegmentedControl
+                label="Agrupar validações"
+                value={chartMode}
+                options={CHART_MODES}
+                onChange={setChartMode}
+              />
+            }
+          />
 
-            <div className="mt-2 flex flex-wrap items-end gap-2">
-              <span className="font-mono text-3xl font-semibold tabular-nums leading-none text-foreground">
-                {statsQuery.isLoading ? '—' : formatNumber(seriesTotal)}
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <span className="font-mono text-3xl font-semibold tabular-nums leading-none text-foreground">
+              {statsQuery.isLoading ? '—' : formatNumber(seriesTotal)}
+            </span>
+            {stats !== undefined && stats.total > 0 && (
+              <span className="inline-flex items-center gap-1 pb-0.5 text-[11px] font-medium text-emerald-600">
+                <TrendingUp className="size-3" />
+                {formatRate(completionRate)} concluídas
               </span>
-              {stats !== undefined && stats.total > 0 && (
-                <span className="inline-flex items-center gap-1 pb-0.5 text-[11px] font-medium text-emerald-600">
-                  <TrendingUp className="size-3" />
-                  {formatRate(completionRate)} concluídas
-                </span>
-              )}
-            </div>
+            )}
+          </div>
 
-            <div className="mt-3">
-              {statsQuery.isLoading ? (
-                <div className="h-[240px] animate-pulse rounded-xl bg-muted" />
-              ) : seriesTotal === 0 ? (
-                <ChartEmpty message="Sem validações registradas ainda" />
-              ) : (
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart
-                    data={[...currentSeries]}
-                    margin={{ top: 8, right: 4, left: -20, bottom: 0 }}
-                    barCategoryGap="30%"
-                  >
-                    <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="4 4" />
-                    <XAxis
-                      dataKey="label"
-                      tickLine={false}
-                      axisLine={false}
-                      interval={0}
-                      tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
-                    />
-                    <YAxis
-                      allowDecimals={false}
-                      tickLine={false}
-                      axisLine={false}
-                      width={40}
-                      tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
-                    />
+          <div className="mt-3">
+            {statsQuery.isLoading ? (
+              <div className="h-[240px] animate-pulse rounded-xl bg-muted" />
+            ) : seriesTotal === 0 ? (
+              <ChartEmpty message="Sem validações registradas ainda" />
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart
+                  data={[...currentSeries]}
+                  margin={{ top: 8, right: 4, left: -20, bottom: 0 }}
+                  barCategoryGap="30%"
+                >
+                  <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="4 4" />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    interval={0}
+                    tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={false}
+                    width={40}
+                    tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'var(--color-accent)', opacity: 0.35 }}
+                    contentStyle={tooltipStyle}
+                    labelStyle={{ color: 'var(--color-muted-foreground)' }}
+                    formatter={(value) => [formatNumber(Number(value)), 'Validações']}
+                  />
+                  <Bar dataKey="value" radius={[6, 6, 6, 6]} background={{ fill: 'var(--color-muted)' }}>
+                    {currentSeries.map((point) => (
+                      <Cell key={point.label} fill={point.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-12">
+        <Panel className="xl:col-span-7">
+          <PanelHeading
+            title="Organizações ao longo do tempo"
+            description="Novas organizações por mês"
+            action={
+              <SegmentedControl
+                label="Período"
+                value={growthRange}
+                options={GROWTH_RANGES}
+                onChange={setGrowthRange}
+              />
+            }
+          />
+
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <span className="font-mono text-3xl font-semibold tabular-nums leading-none text-foreground">
+              {organizationsQuery.isLoading ? '—' : formatNumber(sortedOrganizations.length)}
+            </span>
+            {growthDelta !== null && (
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 pb-0.5 text-[11px] font-medium',
+                  growthDelta >= 0 ? 'text-emerald-600' : 'text-red-600',
+                )}
+              >
+                <TrendingUp className={cn('size-3', growthDelta < 0 && 'rotate-180')} />
+                {growthDelta >= 0 ? '+' : ''}
+                {growthDelta}% no mês
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3">
+            {organizationsQuery.isLoading ? (
+              <div className="h-[220px] animate-pulse rounded-xl bg-muted" />
+            ) : sortedOrganizations.length === 0 ? (
+              <ChartEmpty message="Sem organizações para exibir" />
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={[...growthSeries]} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="organizationGrowth" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--color-accent-500)" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="var(--color-accent-500)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="4 4" />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                    tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={false}
+                    width={40}
+                    tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
+                  />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    labelStyle={{ color: 'var(--color-muted-foreground)' }}
+                    formatter={(value) => [formatNumber(Number(value)), 'Organizações']}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="var(--color-accent-500)"
+                    strokeWidth={2}
+                    fill="url(#organizationGrowth)"
+                    activeDot={{ r: 4 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Panel>
+
+        <Panel className="xl:col-span-5">
+          <PanelHeading
+            title="Qualidade das validações"
+            description="Confiança média e andamento"
+            action={
+              <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {formatRate(stats?.avg_confidence)}
+              </span>
+            }
+          />
+
+          <div className="mt-4 grid items-center gap-4 sm:grid-cols-[150px_minmax(0,1fr)]">
+            <div className="relative mx-auto h-[150px] w-[150px]">
+              {statusPie.length > 0 && (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statusPie}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={48}
+                      outerRadius={66}
+                      paddingAngle={3}
+                      stroke="none"
+                    >
+                      {statusPie.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
+                      ))}
+                    </Pie>
                     <Tooltip
-                      cursor={{ fill: 'var(--color-accent)', opacity: 0.35 }}
                       contentStyle={tooltipStyle}
-                      labelStyle={{ color: 'var(--color-muted-foreground)' }}
                       formatter={(value) => [formatNumber(Number(value)), 'Validações']}
                     />
-                    <Bar dataKey="value" radius={[6, 6, 6, 6]} background={{ fill: 'var(--color-muted)' }}>
-                      {currentSeries.map((point) => (
-                        <Cell key={point.label} fill={point.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
+                  </PieChart>
                 </ResponsiveContainer>
               )}
-            </div>
-          </Panel>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-12">
-          <Panel className="xl:col-span-7">
-            <PanelHeading
-              title="Organizações ao longo do tempo"
-              description="Novas organizações por mês"
-              action={
-                <SegmentedControl
-                  label="Período"
-                  value={growthRange}
-                  options={GROWTH_RANGES}
-                  onChange={setGrowthRange}
-                />
-              }
-            />
-
-            <div className="mt-2 flex flex-wrap items-end gap-2">
-              <span className="font-mono text-3xl font-semibold tabular-nums leading-none text-foreground">
-                {organizationsQuery.isLoading ? '—' : formatNumber(sortedOrganizations.length)}
-              </span>
-              {growthDelta !== null && (
-                <span
-                  className={cn(
-                    'inline-flex items-center gap-1 pb-0.5 text-[11px] font-medium',
-                    growthDelta >= 0 ? 'text-emerald-600' : 'text-red-600',
-                  )}
-                >
-                  <TrendingUp className={cn('size-3', growthDelta < 0 && 'rotate-180')} />
-                  {growthDelta >= 0 ? '+' : ''}
-                  {growthDelta}% no mês
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-mono text-2xl font-semibold tabular-nums text-foreground">
+                  {statsQuery.isLoading ? '—' : formatNumber(stats?.total ?? 0)}
                 </span>
-              )}
+                <span className="text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
+                  total
+                </span>
+              </div>
             </div>
 
-            <div className="mt-3">
-              {organizationsQuery.isLoading ? (
-                <div className="h-[220px] animate-pulse rounded-xl bg-muted" />
-              ) : sortedOrganizations.length === 0 ? (
-                <ChartEmpty message="Sem organizações para exibir" />
-              ) : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart
-                    data={[...growthSeries]}
-                    margin={{ top: 8, right: 4, left: -20, bottom: 0 }}
-                  >
-                    <defs>
-                      <linearGradient id="organizationGrowth" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--color-accent-500)" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="var(--color-accent-500)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="4 4" />
-                    <XAxis
-                      dataKey="label"
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                      tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
-                    />
-                    <YAxis
-                      allowDecimals={false}
-                      tickLine={false}
-                      axisLine={false}
-                      width={40}
-                      tick={{ fill: 'var(--color-muted-foreground)', fontSize: 10 }}
-                    />
-                    <Tooltip
-                      contentStyle={tooltipStyle}
-                      labelStyle={{ color: 'var(--color-muted-foreground)' }}
-                      formatter={(value) => [formatNumber(Number(value)), 'Organizações']}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="value"
-                      stroke="var(--color-accent-500)"
-                      strokeWidth={2}
-                      fill="url(#organizationGrowth)"
-                      activeDot={{ r: 4 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </Panel>
-
-          <Panel className="xl:col-span-5">
-            <PanelHeading
-              title="Qualidade das validações"
-              description="Confiança média e andamento"
-              action={
-                <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <div className="space-y-2">
+              {statusPie.map((entry) => (
+                <div key={entry.name} className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                    {entry.name}
+                  </span>
+                  <span className="font-mono text-xs font-medium tabular-nums text-foreground">
+                    {formatNumber(entry.value)}
+                  </span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
+                <span className="text-xs text-muted-foreground">Confiança média</span>
+                <span className="font-mono text-xs font-medium tabular-nums text-foreground">
                   {formatRate(stats?.avg_confidence)}
                 </span>
-              }
-            />
-
-            <div className="mt-4 grid items-center gap-4 sm:grid-cols-[150px_minmax(0,1fr)]">
-              <div className="relative mx-auto h-[150px] w-[150px]">
-                {statusPie.length > 0 && (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={statusPie}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={48}
-                        outerRadius={66}
-                        paddingAngle={3}
-                        stroke="none"
-                      >
-                        {statusPie.map((entry) => (
-                          <Cell key={entry.name} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={tooltipStyle}
-                        formatter={(value) => [formatNumber(Number(value)), 'Validações']}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="font-mono text-2xl font-semibold tabular-nums text-foreground">
-                    {statsQuery.isLoading ? '—' : formatNumber(stats?.total ?? 0)}
-                  </span>
-                  <span className="text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
-                    total
-                  </span>
-                </div>
               </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">Score médio</span>
+                <span className="font-mono text-xs font-medium tabular-nums text-foreground">
+                  {stats === undefined ? '—' : stats.avg_score.toFixed(2)}
+                </span>
+              </div>
+              {statsQuery.isError && (
+                <p className="flex items-center gap-1.5 text-[11px] text-red-600">
+                  <AlertTriangle className="size-3.5" />
+                  Não foi possível carregar as métricas
+                </p>
+              )}
+            </div>
+          </div>
 
-              <div className="space-y-2">
-                {statusPie.map((entry) => (
-                  <div key={entry.name} className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span
-                        className="size-2 rounded-full"
-                        style={{ backgroundColor: entry.color }}
-                      />
-                      {entry.name}
-                    </span>
-                    <span className="font-mono text-xs font-medium tabular-nums text-foreground">
-                      {formatNumber(entry.value)}
-                    </span>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {qualityChips.map((chip) => {
+              const Icon = chip.icon
+              return (
+                <div key={chip.label} className="rounded-xl border border-border bg-background/60 px-3 py-2">
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <Icon className="size-3" />
+                    <span className="truncate">{chip.label}</span>
                   </div>
-                ))}
-                <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
-                  <span className="text-xs text-muted-foreground">Confiança média</span>
-                  <span className="font-mono text-xs font-medium tabular-nums text-foreground">
-                    {formatRate(stats?.avg_confidence)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">Score médio</span>
-                  <span className="font-mono text-xs font-medium tabular-nums text-foreground">
-                    {stats === undefined ? '—' : stats.avg_score.toFixed(2)}
-                  </span>
-                </div>
-                {statsQuery.isError && (
-                  <p className="flex items-center gap-1.5 text-[11px] text-red-600">
-                    <AlertTriangle className="size-3.5" />
-                    Não foi possível carregar as métricas
+                  <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-foreground">
+                    {statsQuery.isLoading ? '—' : formatNumber(chip.value)}
                   </p>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              {qualityChips.map((chip) => {
-                const Icon = chip.icon
-                return (
-                  <div key={chip.label} className="rounded-xl border border-border bg-background/60 px-3 py-2">
-                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <Icon className="size-3" />
-                      <span className="truncate">{chip.label}</span>
-                    </div>
-                    <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-foreground">
-                      {statsQuery.isLoading ? '—' : formatNumber(chip.value)}
-                    </p>
-                  </div>
-                )
-              })}
-            </div>
-          </Panel>
-        </div>
+                </div>
+              )
+            })}
+          </div>
+        </Panel>
       </div>
+    </div>
   )
 }

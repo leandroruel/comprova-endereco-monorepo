@@ -1,17 +1,13 @@
-"use client";
+'use client'
 
-import { useTemplateCopy } from "@/components/foundations/template-copy/template-copy";
+import { useTemplateCopy } from '@/components/foundations/template-copy/template-copy'
 
-import { useState } from "react";
-import { Button } from "@/components/base/buttons/button";
-import { Select, SelectItem } from "@/components/base/select/select";
-import { Switch } from "@/components/base/switch/switch";
-import { PlanArtFlame } from "./plan-art-flame";
-import {
-  SettingsCard,
-  SettingsRow,
-  SettingsSectionLabel,
-} from "./settings-rows";
+import { useState } from 'react'
+import { Button } from '@/components/base/buttons/button'
+import { Select, SelectItem } from '@/components/base/select/select'
+import { Switch } from '@/components/base/switch/switch'
+import { PlanArtFlame } from './plan-art-flame'
+import { SettingsCard, SettingsRow, SettingsSectionLabel } from './settings-rows'
 
 /**
  * Figma source: Board UI → "Settings/General" (node 4079:13037), the right
@@ -28,21 +24,21 @@ import {
  */
 
 /** Compact white select trigger (h 32, radius/lg) per the Figma rows. */
-const SELECT_TRIGGER = "h-8 w-auto gap-1 rounded-lg px-2 py-1.5";
+const SELECT_TRIGGER = 'h-8 w-auto gap-1 rounded-lg px-2 py-1.5'
 
 export function SettingsGeneral({ planArtSrc }: { planArtSrc?: string }) {
-  const localize = useTemplateCopy();
+  const localize = useTemplateCopy()
   const [toggles, setToggles] = useState({
     critical: true,
     system: false,
     sound: false,
     dispatch: false,
-  });
+  })
 
   const setToggle = (key: keyof typeof toggles) => (value: boolean) =>
-    setToggles((t) => ({ ...t, [key]: value }));
+    setToggles((t) => ({ ...t, [key]: value }))
 
-  return localize((
+  return localize(
     <div className="flex w-full flex-col gap-6">
       {/* Current plan */}
       <div className="relative w-full overflow-hidden rounded-2xl bg-background-secondary-default">
@@ -50,10 +46,7 @@ export function SettingsGeneral({ planArtSrc }: { planArtSrc?: string }) {
             Rendered through a WebGL shader: waving like a wind-torn flag with
             a continuous burning-edge effect (see plan-art-flame.tsx). */}
         <div aria-hidden className="absolute -top-[11px] start-[328px] size-[277px]">
-          <PlanArtFlame
-            src={planArtSrc}
-            className="size-full object-cover"
-          />
+          <PlanArtFlame src={planArtSrc} className="size-full object-cover" />
           {/* Fades into the card, whatever colour that is: the stops mix the
               card's own token rather than a hardcoded #f7f7f7, which stayed
               white and haloed the artwork in dark mode. Mixing toward 0% of
@@ -102,10 +95,7 @@ export function SettingsGeneral({ planArtSrc }: { planArtSrc?: string }) {
       <div className="flex w-full flex-col gap-2">
         <SettingsSectionLabel>Pull Requests</SettingsSectionLabel>
         <SettingsCard>
-          <SettingsRow
-            label="Review provider"
-            description="Select Github or other providers for reviews"
-          >
+          <SettingsRow label="Review provider" description="Select Github or other providers for reviews">
             <Select
               aria-label="Review provider"
               defaultSelectedKey="github"
@@ -116,15 +106,8 @@ export function SettingsGeneral({ planArtSrc }: { planArtSrc?: string }) {
               <SelectItem id="bitbucket">Bitbucket</SelectItem>
             </Select>
           </SettingsRow>
-          <SettingsRow
-            label="PR destination"
-            description="Open pull request links inside your app"
-          >
-            <Select
-              aria-label="PR destination"
-              defaultSelectedKey="inside"
-              triggerClassName={SELECT_TRIGGER}
-            >
+          <SettingsRow label="PR destination" description="Open pull request links inside your app">
+            <Select aria-label="PR destination" defaultSelectedKey="inside" triggerClassName={SELECT_TRIGGER}>
               <SelectItem id="inside">Inside BoardUI</SelectItem>
               <SelectItem id="browser">In the browser</SelectItem>
             </Select>
@@ -143,7 +126,7 @@ export function SettingsGeneral({ planArtSrc }: { planArtSrc?: string }) {
             <Switch
               aria-label="Critical requests"
               isSelected={toggles.critical}
-              onChange={setToggle("critical")}
+              onChange={setToggle('critical')}
             />
           </SettingsRow>
           <SettingsRow
@@ -153,18 +136,11 @@ export function SettingsGeneral({ planArtSrc }: { planArtSrc?: string }) {
             <Switch
               aria-label="System notifications"
               isSelected={toggles.system}
-              onChange={setToggle("system")}
+              onChange={setToggle('system')}
             />
           </SettingsRow>
-          <SettingsRow
-            label="Completion sound"
-            description="Sound effect a task is completed"
-          >
-            <Switch
-              aria-label="Completion sound"
-              isSelected={toggles.sound}
-              onChange={setToggle("sound")}
-            />
+          <SettingsRow label="Completion sound" description="Sound effect a task is completed">
+            <Switch aria-label="Completion sound" isSelected={toggles.sound} onChange={setToggle('sound')} />
           </SettingsRow>
           <SettingsRow
             label="Dispatch alerts"
@@ -173,11 +149,11 @@ export function SettingsGeneral({ planArtSrc }: { planArtSrc?: string }) {
             <Switch
               aria-label="Dispatch alerts"
               isSelected={toggles.dispatch}
-              onChange={setToggle("dispatch")}
+              onChange={setToggle('dispatch')}
             />
           </SettingsRow>
         </SettingsCard>
       </div>
-    </div>
-  ));
+    </div>,
+  )
 }
