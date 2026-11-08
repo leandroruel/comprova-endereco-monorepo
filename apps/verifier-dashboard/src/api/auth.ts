@@ -7,7 +7,7 @@ import { createAuthClient } from 'better-auth/react'
  * distinto do contexto administrativo.
  */
 export const authClient = createAuthClient({
-  baseURL: 'http://localhost:3000',
+  baseURL: import.meta.env.VITE_DASHBOARD_VERIFIER_AUTH_URL ?? 'http://localhost:3000',
 })
 
 /** Identidade do usuário logado no Verifier Dashboard. */
