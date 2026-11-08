@@ -93,20 +93,12 @@ const isRevokedInDb = async (db: Db, apiKeyId: string): Promise<boolean> => {
 
 export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
-    // Se há uma sessão de usuário válida (definida por makeSessionMiddleware),
-    // permite o acesso por sessão (ex.: dashboard do Verifier). Isso não reusa
-    // o token de sessão como credencial de API: é um contexto de autenticação
-    // distinto, verificado pelo cookie de sessão do Better Auth.
-    if (request.sessionUser !== undefined) {
-      return
-    }
-
     const header = request.headers.authorization
     const bearer = header?.startsWith('Bearer ') ? header.slice(7).trim() : undefined
     if (bearer === undefined || bearer.length === 0) {
-      // Sem bearer token e sem sessão: permite o request prosseguir.
-      // Cada rota específica é responsável por seu próprio guard de
-      // autenticação (requireSessionUser para sessão, requireScope para API key).
+      // Sem bearer token: permite o request prosseguir. Cada rota específica
+      // é responsável por seu próprio guard de autenticação
+      // (requireSessionUser para sessão, requireScope para API key).
       return
     }
     const prefix = keyPrefixOf(bearer)

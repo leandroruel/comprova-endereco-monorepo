@@ -98,8 +98,13 @@ export const makeOrganizationsController = (deps: {
       userId: string,
       reply: FastifyReply,
     ): Promise<OrganizationResponseType[] | FastifyReply> => {
-      const organizations = await service.listOrganizationsByUser(userId)
-      return reply.code(200).send(organizations)
+      try {
+        const organizations = await service.listOrganizationsByUser(userId)
+        return reply.code(200).send(organizations)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return sendProblem(reply, 500, 'INTERNAL_ERROR', `Erro ao listar organizações: ${message}`)
+      }
     },
 
     get: async (
