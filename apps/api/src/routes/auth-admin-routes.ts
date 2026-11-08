@@ -25,7 +25,6 @@ export const registerAuthAdminRoutes = (app: FastifyInstance, auth: AuthAdmin): 
         const proto = (request.headers['x-forwarded-proto'] as string | undefined) ?? 'http'
         const host =
           (request.headers['x-forwarded-host'] as string | undefined) ??
-          (request.headers.origin as string | undefined) ??
           request.headers.host ??
           'localhost'
         const url = `${proto}://${host}${betterAuthPath}`
