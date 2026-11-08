@@ -293,6 +293,9 @@ export default function HomePage({
   const statsQuery = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
+    // A rota /v1/stats exige role === 'admin' (backend). Só busca para admins
+    // para evitar 403 (erro no console) para usuários sem permissão.
+    enabled: user?.role === 'admin',
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   })
