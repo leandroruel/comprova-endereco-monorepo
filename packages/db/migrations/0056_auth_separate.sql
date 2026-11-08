@@ -120,13 +120,13 @@ CREATE INDEX idx_verifier_account_user ON verifier_account (user_id);
 -- gravações nas tabelas legacy (user/account/session) ocorram entre a
 -- cópia de usuários e a cópia de contas, de modo que o conjunto copiado
 -- permaneça consistente e não viole FK de account→user nem deixe
--- credenciais órfãs. O bloqueio é liberado automaticamente no final da
--- transação da migração (cada statement roda em sua própria transação
--- no runner de migrações; o LOCK TABLE abaixo garante consistência
--- statement-a-statement dentro desta migration).
-LOCK TABLE "user" IN ACCESS SHARE MODE;
-LOCK TABLE "account" IN ACCESS SHARE MODE;
-LOCK TABLE "session" IN ACCESS SHARE MODE;
+-- credenciais órfãs. Toda a migration roda dentro de uma única
+-- transação PostgreSQL (ver packages/db/src/runner.ts), então os locks
+-- abaixo persistem até o COMMIT final e bloqueiam writes concorrentes
+-- nas tabelas legacy durante o cutover.
+LOCK TABLE "user" IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE "account" IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE "session" IN SHARE ROW EXCLUSIVE MODE;
 
 -- Provisionar usuários existentes das tabelas legacy nas novas instâncias
 -- para que o login continue funcionando após a troca. Preserva o papel
