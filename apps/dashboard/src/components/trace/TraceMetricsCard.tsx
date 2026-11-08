@@ -5,6 +5,7 @@ import { Clock, DollarSign, Play, Wrench } from 'lucide-react'
 import type { DebugAnalysisDto, DebugTraceEventDto } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import { formatDuration } from './meta'
+import { cx } from '@/utils/cx'
 
 export interface TraceMetricsCardProps {
   readonly events: readonly DebugTraceEventDto[]
@@ -122,7 +123,7 @@ function computeStepTimes(
 
 export function TraceMetricsCard({ events, elapsedMs, provenance }: TraceMetricsCardProps) {
   const totalDuration = formatDuration(elapsedMs)
-  const markerMs = provenance?.processingTimeMs ?? null
+  const markerMs = provenance?.processingTimeMs ?? undefined
 
   const stepTimes = computeStepTimes(events, elapsedMs, markerMs)
 
@@ -219,19 +220,18 @@ export function TraceMetricsCard({ events, elapsedMs, provenance }: TraceMetrics
                     <span className="flex-1 min-w-0">
                       <div className="h-2 w-full rounded-full bg-border overflow-hidden">
                         <div
-                          className="h-full"
+                          className={cx('h-full', color)}
                           style={{
                             width:
                               step.durationMs !== null
                                 ? Math.min((step.durationMs / (totalDurationNum ?? 1)) * 100, 100)
                                 : 0,
                           }}
-                          className={color}
                         />
                       </div>
                       <div className="flex items-baseline gap-1 mt-1">
                         <span className="text-[11px] font-mono font-semibold text-foreground">
-                          {fmtMs(step.durationMs)}
+                          {fmtMs(step.durationMs ?? undefined)}
                         </span>
                         {pct !== null && <span className="text-[10px] text-foreground/40">({pct}%)</span>}
                       </div>

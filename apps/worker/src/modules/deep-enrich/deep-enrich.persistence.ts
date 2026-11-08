@@ -1,5 +1,15 @@
-import { and, desc, eq, inArray, isNull, sql } from '@comprova/db'
-import type { DbTx } from '@comprova/db'
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  QuotaExceededError,
+  sql,
+  recordUsageEventInTx,
+  validationBillingKey,
+  type DbTx,
+} from '@comprova/db'
 import * as t from '@comprova/db'
 import type { ClaimType, Signal, SubjectType, Verdict } from '@comprova/core'
 import { randomUUID } from 'node:crypto'
@@ -385,26 +395,190 @@ export interface OutcomeEventsWrite {
   readonly claimType: ClaimType
   readonly stillPartial: boolean
   readonly verdict: Verdict
+  /**
+   * Indisponibilidade de fonte externa detectada nos sinais desta execução
+   * (`hasExternalUnavailability`, ADR-0044 §3): torna a conclusão NÃO
+   * faturável, sem alterar o status técnico da validação.
+   */
+  readonly externalUnavailability: boolean
 }
 
-export const emitOutcomeEvents = async (tx: DbTx, write: OutcomeEventsWrite): Promise<void> => {
-  await tx.insert(t.outbox).values({
-    aggregate: 'validation',
-    aggregateId: write.validationId,
-    eventType: write.stillPartial ? 'validation.updated' : 'validation.completed',
-    payload: {
+/**
+ * Emite os eventos de resultado de uma validação (outbox + evento de uso).
+ *
+ * Publica `validation.completed` (ou `validation.updated` quando ainda parcial)
+ * na tabela `outbox`. Somente validações concluídas (`stillPartial === false`)
+ * geram a unidade comercial faturável e consomem cota; resultados parciais
+ * retornam cedo sem reclamar identidade comercial.
+ *
+ * O evento de uso é idempotente e compartilha a identidade comercial com o
+ * fast path (ADR-0044 §3): faturáveis usam a chave canônica
+ * `validation:<validationId>` (garantia de `usage_billing_unit`), não
+ * faturáveis usam chave própria para não bloquear faturamento futuro.
+ *
+ * @param tx transação aberta (mesma da conclusão da validação)
+ * @param write dados do evento de resultado (tenant, validação, claim, parcial, veredito, indisponibilidade externa)
+ */
+export const emitOutcomeEvents = async (
+  tx: DbTx,
+  write: OutcomeEventsWrite,
+): Promise<{ readonly blockedByQuota: boolean }> => {
+  // Evento de uso (F3.3): somente validações concluídas (stillPartial === false)
+  // geram a unidade comercial. Resultados parciais (queued/partial) não
+  // claimam a identidade comercial nem consomem cota — a conclusão será
+  // registrada por esta mesma função quando o deep path de fato terminar
+  // (CodeRabbit k). A cota hard é aplicada a todo evento faturável dentro da
+  // mesma transação (CodeRabbit l).
+  //
+  // Identidade comercial compartilhada com o fast path (ADR-0044 §3): eventos
+  // FATURÁVEIS usam a chave canônica `validation:<id>` e a garantia estrutural
+  // de `usage_billing_unit (tenant_id, validation_id)` — se o fast já faturou
+  // esta validação, aqui é replay (não há segunda cobrança). Eventos NÃO
+  // faturáveis (indisponibilidade de fonte externa) usam chave própria, para
+  // nunca bloquearem um faturamento legítimo de uma reexecução posterior.
+  if (write.stillPartial) {
+    // Idempotência: não duplica o mesmo evento lógico em retry de Activity.
+    // A chave de idempotência é (aggregate, aggregateId, eventType, payload),
+    // que representa a transição lógica e não apenas o tipo do evento.
+    const updatedPayload = {
       tenant_id: write.tenantId,
       validation_id: write.validationId,
       claim_id: write.claimId,
       claim_type: write.claimType,
       verdict: write.verdict,
-    },
+    }
+    const existing = await tx
+      .select({ outboxId: t.outbox.outboxId })
+      .from(t.outbox)
+      .where(
+        and(
+          eq(t.outbox.aggregate, 'validation'),
+          eq(t.outbox.aggregateId, write.validationId),
+          eq(t.outbox.eventType, 'validation.updated'),
+          sql`${t.outbox.payload} = ${JSON.stringify(updatedPayload)}::jsonb`,
+        ),
+      )
+      .limit(1)
+    if (existing.length > 0) {
+      return { blockedByQuota: false }
+    }
+    await tx.insert(t.outbox).values({
+      aggregate: 'validation',
+      aggregateId: write.validationId,
+      eventType: 'validation.updated',
+      payload: updatedPayload,
+    })
+    return { blockedByQuota: false }
+  }
+
+  const billable = !write.externalUnavailability
+  try {
+    await recordUsageEventInTx(tx, {
+      tenantId: write.tenantId,
+      eventType: 'usage_event',
+      kind: 'deep',
+      units: 1,
+      costMicros: null,
+      validationId: write.validationId,
+      idempotencyKey: billable ? validationBillingKey(write.validationId) : null,
+      billable,
+      source: 'deep',
+    })
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      // A cota hard impediu o faturamento. Marcar a validação com um estado de
+      // negócio explícito (blocked_quota) em vez de deixá-la em queued/partial
+      // sem indicação do motivo. O erro NÃO é relançado: o caller decide o
+      // fluxo de retry baseado no retorno.
+      await tx
+        .update(t.validation)
+        .set({
+          status: 'blocked_quota',
+          quotaBlockedReason: err.message,
+          // A validação não foi concluída com sucesso; completed_at permanece
+          // nulo até que o processamento possa ser retomado (quota aumentada).
+          completedAt: null,
+        })
+        .where(eq(t.validation.validationId, write.validationId))
+
+      // Publicar evento de conclusão bloqueada por quota (idempotente: não
+      // duplica o mesmo evento lógico em retry de Activity).
+      const blockedPayload = {
+        tenant_id: write.tenantId,
+        validation_id: write.validationId,
+        claim_id: write.claimId,
+        claim_type: write.claimType,
+        verdict: write.verdict,
+        quota_blocked_reason: err.message,
+      }
+      const existingBlocked = await tx
+        .select({ outboxId: t.outbox.outboxId })
+        .from(t.outbox)
+        .where(
+          and(
+            eq(t.outbox.aggregate, 'validation'),
+            eq(t.outbox.aggregateId, write.validationId),
+            eq(t.outbox.eventType, 'validation.blocked_quota'),
+            sql`${t.outbox.payload} = ${JSON.stringify(blockedPayload)}::jsonb`,
+          ),
+        )
+        .limit(1)
+      if (existingBlocked.length > 0) {
+        return { blockedByQuota: true }
+      }
+      await tx.insert(t.outbox).values({
+        aggregate: 'validation',
+        aggregateId: write.validationId,
+        eventType: 'validation.blocked_quota',
+        payload: blockedPayload,
+      })
+
+      return { blockedByQuota: true }
+    }
+    throw err
+  }
+
+  // O evento de uso foi gravado com sucesso. Agora publica o evento de
+  // conclusão na outbox (idempotente: não duplica o mesmo evento lógico em
+  // retry de Activity). Publicar ANTES de recordUsageEventInTx arriscaria
+  // emitir validation.completed para uma validação que acabou sendo bloqueada
+  // por cota. Publicar DEPOIS garante consistência entre o estado persistido e
+  // o evento publicado.
+  const completedPayload = {
+    tenant_id: write.tenantId,
+    validation_id: write.validationId,
+    claim_id: write.claimId,
+    claim_type: write.claimType,
+    verdict: write.verdict,
+  }
+  const existingCompleted = await tx
+    .select({ outboxId: t.outbox.outboxId })
+    .from(t.outbox)
+    .where(
+      and(
+        eq(t.outbox.aggregate, 'validation'),
+        eq(t.outbox.aggregateId, write.validationId),
+        eq(t.outbox.eventType, 'validation.completed'),
+        sql`${t.outbox.payload} = ${JSON.stringify(completedPayload)}::jsonb`,
+      ),
+    )
+    .limit(1)
+  if (existingCompleted.length > 0) {
+    return { blockedByQuota: false }
+  }
+  await tx.insert(t.outbox).values({
+    aggregate: 'validation',
+    aggregateId: write.validationId,
+    eventType: 'validation.completed',
+    payload: completedPayload,
   })
 
-  await tx.insert(t.usageEvent).values({
-    tenantId: write.tenantId,
-    kind: 'deep',
-    units: 1,
-    validationId: write.validationId,
-  })
+  // Quando o evento é gravado com sucesso, limpa o motivo de bloqueio por
+  // quota (se houver de uma tentativa anterior falhada).
+  await tx
+    .update(t.validation)
+    .set({ quotaBlockedReason: null })
+    .where(eq(t.validation.validationId, write.validationId))
+
+  return { blockedByQuota: false }
 }

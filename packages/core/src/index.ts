@@ -1,4 +1,5 @@
 export * from './types.js'
+export * from './billability.js'
 export * from './doc.js'
 export * from './async.js'
 export * from './address.js'

@@ -1,19 +1,13 @@
-"use client";
+'use client'
 
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { useTemplateCopy } from "@/components/foundations/template-copy/template-copy";
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useTemplateCopy } from '@/components/foundations/template-copy/template-copy'
 
-import {
-  RiLogoutBoxRLine,
-  RiPaletteLine,
-  RiSettings4Line,
-  RiUserSmileLine,
-} from "@remixicon/react";
-import { Avatar } from "@/components/base/avatar/avatar";
-import { ChevronDownSmall } from "@/components/foundations/icons/chevrons";
-import { ThemeToggle } from "@/components/application/theme/theme-toggle";
-import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { RiLogoutBoxRLine, RiPaletteLine, RiSettings4Line, RiUserSmileLine } from '@remixicon/react'
+import { Avatar } from '@/components/base/avatar/avatar'
+import { ChevronDownSmall } from '@/components/foundations/icons/chevrons'
+import { ThemeToggle } from '@/components/application/theme/theme-toggle'
+import { cn } from '@/lib/utils'
 
 /**
  * Figma source: Board UI → sidebar profile menu (node 3823:3699).
@@ -23,33 +17,33 @@ import { useState } from "react";
  */
 
 export interface SidebarUser {
-  name?: string | null;
-  email?: string | null;
-  role?: string | null;
+  name?: string | null
+  email?: string | null
+  role?: string | null
 }
 
 const displayNameOf = (user: SidebarUser): string => {
-  const name = user.name?.trim();
-  if (name !== undefined && name.length > 0) return name;
-  const email = user.email?.trim();
+  const name = user.name?.trim()
+  if (name !== undefined && name.length > 0) return name
+  const email = user.email?.trim()
   if (email !== undefined && email.length > 0) {
-    const local = email.split("@")[0]?.trim();
-    if (local !== undefined && local.length > 0) return local;
+    const local = email.split('@')[0]?.trim()
+    if (local !== undefined && local.length > 0) return local
   }
-  return "Conta";
-};
+  return 'Conta'
+}
 
 const initialsOf = (name: string): string => {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
-  return (first + last).toUpperCase() || "?";
-};
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  const first = parts[0]?.[0] ?? ''
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : ''
+  return (first + last).toUpperCase() || '?'
+}
 
 const menuItemClass = cn(
-  "flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none transition-colors",
-  "focus:bg-accent focus:text-accent-foreground motion-reduce:transition-none",
-);
+  'flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none transition-colors',
+  'focus:bg-accent focus:text-accent-foreground motion-reduce:transition-none',
+)
 
 export function DashboardTeamMenu({
   collapsed = false,
@@ -58,30 +52,30 @@ export function DashboardTeamMenu({
   onNavigate,
   onSignOut,
 }: {
-  collapsed?: boolean;
-  className?: string;
-  user?: SidebarUser;
-  onNavigate?: (page: string) => void;
-  onSignOut?: () => void;
+  collapsed?: boolean
+  className?: string
+  user?: SidebarUser
+  onNavigate?: (page: string) => void
+  onSignOut?: () => void
 }) {
-  const localize = useTemplateCopy();
-  const displayName = displayNameOf(user);
-  const initials = initialsOf(displayName);
-  const showEmail = user.email !== undefined && user.email !== null && user.email.includes("@");
+  const localize = useTemplateCopy()
+  const displayName = displayNameOf(user)
+  const initials = initialsOf(displayName)
+  const showEmail = user.email !== undefined && user.email !== null && user.email.includes('@')
 
-  return localize((
+  return localize(
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
           aria-label="Menu do usuário"
           className={cn(
-            "flex cursor-pointer items-center overflow-hidden",
-            "border-2 border-transparent hover:border-border-button-hover",
-            "transition-[width,background-color,border-color,padding] duration-300 ease-in-out",
+            'flex cursor-pointer items-center overflow-hidden',
+            'border-2 border-transparent hover:border-border-button-hover',
+            'transition-[width,background-color,border-color,padding] duration-300 ease-in-out',
             collapsed
-              ? "size-9 justify-start rounded-full bg-transparent p-0"
-              : "w-full justify-between rounded-xl bg-background-tertiary-default py-2 pe-4 ps-2.5",
+              ? 'size-9 justify-start rounded-full bg-transparent p-0'
+              : 'w-full justify-between rounded-xl bg-background-tertiary-default py-2 pe-4 ps-2.5',
             className,
           )}
         >
@@ -89,8 +83,8 @@ export function DashboardTeamMenu({
             <Avatar size="md" color="blue" initials={initials} />
             <span
               className={cn(
-                "flex min-w-0 flex-col items-start justify-center overflow-hidden transition-[max-width,opacity,filter] duration-300 ease-in-out",
-                collapsed ? "max-w-0 opacity-0 blur-[3px]" : "max-w-40 opacity-100 blur-0",
+                'flex min-w-0 flex-col items-start justify-center overflow-hidden transition-[max-width,opacity,filter] duration-300 ease-in-out',
+                collapsed ? 'max-w-0 opacity-0 blur-[3px]' : 'max-w-40 opacity-100 blur-0',
               )}
             >
               <span className="text-body-medium whitespace-nowrap text-text-primary">{displayName}</span>
@@ -101,8 +95,8 @@ export function DashboardTeamMenu({
           </span>
           <span
             className={cn(
-              "flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-background-tertiary-hover transition-[max-width,opacity] duration-300 ease-in-out",
-              collapsed ? "max-w-0 opacity-0" : "max-w-4 opacity-100",
+              'flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-background-tertiary-hover transition-[max-width,opacity] duration-300 ease-in-out',
+              collapsed ? 'max-w-0 opacity-0' : 'max-w-4 opacity-100',
             )}
           >
             <ChevronDownSmall className="size-4 text-text-secondary" />
@@ -115,7 +109,7 @@ export function DashboardTeamMenu({
           align="start"
           sideOffset={8}
           className={cn(
-            "w-[265px] rounded-2xl border border-border-button-default bg-background-primary-default p-2.5 shadow-dropdown",
+            'w-[265px] rounded-2xl border border-border-button-default bg-background-primary-default p-2.5 shadow-dropdown',
             className,
           )}
         >
@@ -134,21 +128,25 @@ export function DashboardTeamMenu({
 
           <DropdownMenu.Item
             className={menuItemClass}
-            onSelect={() => { onNavigate?.("profile"); }}
+            onSelect={() => {
+              onNavigate?.('profile')
+            }}
           >
             <RiUserSmileLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
             <span className="truncate text-body-medium text-text-primary">Perfil</span>
           </DropdownMenu.Item>
           <DropdownMenu.Item
             className={menuItemClass}
-            onSelect={() => { onNavigate?.("settings"); }}
+            onSelect={() => {
+              onNavigate?.('settings')
+            }}
           >
             <RiSettings4Line className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
             <span className="truncate text-body-medium text-text-primary">Configurações</span>
           </DropdownMenu.Item>
           {onSignOut && (
             <DropdownMenu.Item
-              className={cn(menuItemClass, "text-destructive focus:bg-destructive/10 focus:text-destructive")}
+              className={cn(menuItemClass, 'text-destructive focus:bg-destructive/10 focus:text-destructive')}
               onSelect={onSignOut}
             >
               <RiLogoutBoxRLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
@@ -177,6 +175,6 @@ export function DashboardTeamMenu({
           </div>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  ));
+    </DropdownMenu.Root>,
+  )
 }

@@ -3,7 +3,15 @@ import { ValidationProgressSchema } from './validation-progress.js'
 
 export const DocTypeSchema = z.enum(['CPF', 'CNPJ'])
 export const ValModeSchema = z.enum(['fast', 'deep', 'auto'])
-export const ValStatusSchema = z.enum(['queued', 'running', 'partial', 'completed', 'failed', 'expired'])
+export const ValStatusSchema = z.enum([
+  'queued',
+  'running',
+  'partial',
+  'completed',
+  'failed',
+  'expired',
+  'blocked_quota',
+])
 export const VerdictSchema = z.enum([
   'CONFIRMED_COMMERCIAL',
   'SHARED_VIRTUAL',

@@ -44,6 +44,8 @@ import { registerSigningKeyRoutes } from './modules/signing-keys/signing-keys.ro
 import { registerMetaRoutes } from './modules/meta/meta.routes.js'
 import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
+import { registerUsageRoutes } from './modules/usage/usage.routes.js'
+import { QuotaExceededError } from '@comprova/db'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerDocumentRoutes } from './modules/documents/documents.routes.js'
 import { makeDocumentIntelligenceClient } from '@comprova/providers'
@@ -237,6 +239,13 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         .send(problem(403, 'FORBIDDEN', err.message))
       return
     }
+    if (err instanceof QuotaExceededError) {
+      reply
+        .code(429)
+        .type(PROBLEM_CONTENT_TYPE)
+        .send(problem(429, 'QUOTA_EXCEEDED', err.message))
+      return
+    }
     deps.logger.error(
       {
         err: err instanceof Error ? err.message : String(err),
@@ -329,6 +338,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
       registerBatchRoutes(v1, { db: deps.db })
       registerStatsRoutes(v1, { db: deps.db })
+      registerUsageRoutes(v1, { db: deps.db })
       registerMetaRoutes(v1, { db: deps.db, cache })
       registerSubjectRoutes(v1, { db: deps.db })
     },

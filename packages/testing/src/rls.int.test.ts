@@ -26,6 +26,23 @@ const insertSubject = (tenantId: string) => ({
   docHmac: randomBytes(32),
 })
 
+/** Aguarda uma rejeição por RLS e afirma que o texto do erro é de RLS (não genérico). */
+const expectRlsReject = async (promise: Promise<unknown>): Promise<void> => {
+  let err: unknown
+  try {
+    await promise
+  } catch (e) {
+    err = e
+  }
+  expect(err).toBeDefined()
+  const msg = String(
+    (err as { cause?: { message?: string } } | undefined)?.cause?.message ??
+      (err as Error | undefined)?.message ??
+      '',
+  )
+  expect(msg).toMatch(/row-level security|policy/i)
+}
+
 describe('RLS multi-tenant isolation', () => {
   it('bloqueia insert sem contexto de tenant', async () => {
     await expect(appPool.db.insert(t.subject).values(insertSubject(tenantA))).rejects.toThrow()
@@ -139,6 +156,110 @@ describe('RLS multi-tenant isolation', () => {
     await expect(
       appPool.db.delete(t.auditLog).where(eq(t.auditLog.auditId, auditId as number)),
     ).rejects.toThrow()
+  })
+
+  it('RLS usage_event: isola leitura e escrita entre tenants (app_user)', async () => {
+    const idA = randomUUID()
+    const idB = randomUUID()
+    await withTenant(appPool.db, tenantA, (tx) =>
+      tx.insert(t.usageEvent).values({
+        eventId: idA,
+        tenantId: tenantA,
+        eventType: 'usage_event',
+        kind: 'fast',
+        units: 1,
+        billable: true,
+        source: 'fast',
+        occurredAt: new Date(),
+      }),
+    )
+    await withTenant(appPool.db, tenantB, (tx) =>
+      tx.insert(t.usageEvent).values({
+        eventId: idB,
+        tenantId: tenantB,
+        eventType: 'usage_event',
+        kind: 'deep',
+        units: 1,
+        billable: false,
+        source: 'deep',
+        occurredAt: new Date(),
+      }),
+    )
+
+    const asA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.select({ eventId: t.usageEvent.eventId }).from(t.usageEvent),
+    )
+    const asB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ eventId: t.usageEvent.eventId }).from(t.usageEvent),
+    )
+    // Cada tenant vê o próprio ID e não o do outro.
+    expect(asA.map((r) => r.eventId)).toEqual([idA])
+    expect(asB.map((r) => r.eventId)).toEqual([idB])
+  })
+
+  it('RLS usage_event: bloqueia insert com tenant incompatível ao contexto', async () => {
+    await expectRlsReject(
+      withTenant(appPool.db, tenantA, (tx) =>
+        tx.insert(t.usageEvent).values({
+          eventId: randomUUID(),
+          tenantId: tenantB, // tenant diferente do contexto (tenantA)
+          eventType: 'usage_event',
+          kind: 'fast',
+          units: 1,
+          billable: true,
+          source: 'fast',
+          occurredAt: new Date(),
+        }),
+      ),
+    )
+  })
+
+  it('RLS usage_event_idempotency: isola leitura e escrita entre tenants', async () => {
+    const key = 'idem-rls-' + randomUUID()
+    await withTenant(appPool.db, tenantA, (tx) =>
+      tx.insert(t.usageEventIdempotency).values({
+        tenantId: tenantA,
+        idempotencyKey: key,
+        eventId: null,
+      }),
+    )
+    const asA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.select({ idempotencyKey: t.usageEventIdempotency.idempotencyKey }).from(t.usageEventIdempotency),
+    )
+    const asB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ idempotencyKey: t.usageEventIdempotency.idempotencyKey }).from(t.usageEventIdempotency),
+    )
+    expect(asA.map((r) => r.idempotencyKey)).toContain(key)
+    expect(asB.map((r) => r.idempotencyKey)).not.toContain(key)
+  })
+
+  it('RLS usage_billing_unit: isola leitura e escrita entre tenants e bloqueia tenant incompatível', async () => {
+    const validationId = randomUUID()
+    await withTenant(appPool.db, tenantA, (tx) =>
+      tx.insert(t.usageBillingUnit).values({
+        tenantId: tenantA,
+        validationId,
+        eventId: null,
+      }),
+    )
+    const asA = await withTenant(appPool.db, tenantA, (tx) =>
+      tx.select({ validationId: t.usageBillingUnit.validationId }).from(t.usageBillingUnit),
+    )
+    const asB = await withTenant(appPool.db, tenantB, (tx) =>
+      tx.select({ validationId: t.usageBillingUnit.validationId }).from(t.usageBillingUnit),
+    )
+    expect(asA.map((r) => r.validationId)).toEqual([validationId])
+    expect(asB).toHaveLength(0)
+
+    await expectRlsReject(
+      withTenant(appPool.db, tenantA, (tx) =>
+        tx.insert(t.usageBillingUnit).values({
+          tenantId: tenantB, // tenant diferente do contexto (tenantA)
+          validationId: randomUUID(),
+          eventId: null,
+        }),
+      ),
+    )
   })
 })
 

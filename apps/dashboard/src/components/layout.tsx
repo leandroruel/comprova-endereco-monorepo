@@ -1,24 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react'
 import { DashboardSidebar } from '@/components/application/dashboard/dashboard-sidebar'
 import type { DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar'
-import {
-  RiBuilding2Line,
-  RiChatAiLine,
-  RiFileSearchLine,
-  RiHomeLine,
-  RiQrCodeLine,
-} from '@remixicon/react'
-
-/** Rótulo do segundo nível do breadcrumb; o Fast path é o default de validações. */
-const PAGE_LABELS: Readonly<Record<string, string>> = {
-  home: 'Visão geral',
-  validations: 'Fast path',
-  bulk: 'Busca em lote',
-  organizations: 'Organizações',
-  'debug-nf3e-qrcode': 'QRCode NF3e debugger',
-  profile: 'Perfil',
-  settings: 'Configurações',
-}
+import { RiBuilding2Line, RiChatAiLine, RiFileSearchLine, RiHomeLine, RiQrCodeLine } from '@remixicon/react'
 
 /** Itens de navegação da SPA: usam `onSelect` (render <button>) em vez de `href` (render <a>). */
 const baseNavItems: readonly DashboardNavItem[] = [
@@ -70,11 +53,14 @@ export function DashboardLayout({
     initials: 'C',
   }
 
-  const user = useMemo(() => ({
-    name: userName,
-    email: userEmail,
-    role: userRole,
-  }), [userName, userEmail, userRole])
+  const user = useMemo(
+    () => ({
+      name: userName,
+      email: userEmail,
+      role: userRole,
+    }),
+    [userName, userEmail, userRole],
+  )
 
   return (
     <div className="flex min-h-screen w-full bg-background-full">

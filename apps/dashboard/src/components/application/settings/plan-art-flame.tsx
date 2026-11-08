@@ -1,7 +1,7 @@
-"use client";
+'use client'
 
-import { useEffect, useRef, useState } from "react";
-import { cx } from "@/utils/cx";
+import { useEffect, useRef, useState } from 'react'
+import { cx } from '@/utils/cx'
 
 /**
  * The "Current plan" artwork (settings-plan-art.png) rendered through a WebGL
@@ -29,7 +29,7 @@ void main() {
   v_uv = a_pos * 0.5 + 0.5;
   gl_Position = vec4(a_pos, 0.0, 1.0);
 }
-`;
+`
 
 const FRAG = /* glsl */ `
 precision mediump float;
@@ -141,7 +141,7 @@ void main() {
 
   gl_FragColor = vec4(col, alpha);
 }
-`;
+`
 
 /**
  * Paints the built-in artwork — the three token-coloured blobs — into an
@@ -153,183 +153,176 @@ void main() {
  * the live custom properties rather than hardcoded, so it follows the theme.
  */
 function paintFallbackArt(size: number): HTMLCanvasElement | null {
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
 
-  const styles = getComputedStyle(document.documentElement);
-  const token = (name: string, fallback: string) =>
-    styles.getPropertyValue(name).trim() || fallback;
+  const styles = getComputedStyle(document.documentElement)
+  const token = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback
 
   // Soft-edged discs, matching the DOM fallback's positions and 70% alpha.
   // A radial gradient rather than ctx.filter = blur(): Safari leaves the
   // filter unimplemented on some versions, and a hard disc would read as a
   // pasted circle instead of a glow.
   const blob = (cx: number, cy: number, r: number, color: string) => {
-    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    gradient.addColorStop(0, color);
-    gradient.addColorStop(0.55, color);
-    gradient.addColorStop(1, "transparent");
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-  };
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+    gradient.addColorStop(0, color)
+    gradient.addColorStop(0.55, color)
+    gradient.addColorStop(1, 'transparent')
+    ctx.fillStyle = gradient
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
 
-  ctx.fillStyle = token("--color-background-tertiary-default", "#ebebeb");
-  ctx.fillRect(0, 0, size, size);
-  ctx.globalAlpha = 0.7;
-  blob(size * 0.125, size * 0.125, size * 0.42, token("--color-blue-400", "#3392ff"));
-  blob(size * 0.83, size * 0.58, size * 0.38, token("--color-lime-400", "#9ae600"));
-  blob(size * 0.5, size * 0.95, size * 0.42, token("--color-orange-400", "#ff8904"));
-  ctx.globalAlpha = 1;
+  ctx.fillStyle = token('--color-background-tertiary-default', '#ebebeb')
+  ctx.fillRect(0, 0, size, size)
+  ctx.globalAlpha = 0.7
+  blob(size * 0.125, size * 0.125, size * 0.42, token('--color-blue-400', '#3392ff'))
+  blob(size * 0.83, size * 0.58, size * 0.38, token('--color-lime-400', '#9ae600'))
+  blob(size * 0.5, size * 0.95, size * 0.42, token('--color-orange-400', '#ff8904'))
+  ctx.globalAlpha = 1
 
-  return canvas;
+  return canvas
 }
 
 export function PlanArtFlame({ src, className }: { src?: string; className?: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [failed, setFailed] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [failed, setFailed] = useState(false)
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false });
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false })
     if (!gl) {
-      setFailed(true);
-      return;
+      setFailed(true)
+      return
     }
 
-    const { width, height } = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    const { width, height } = canvas.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = width * dpr
+    canvas.height = height * dpr
+    gl.viewport(0, 0, canvas.width, canvas.height)
 
     const compile = (type: number, source: string) => {
-      const shader = gl.createShader(type)!;
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      return shader;
-    };
-    const program = gl.createProgram()!;
-    gl.attachShader(program, compile(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAG));
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      setFailed(true);
-      return;
+      const shader = gl.createShader(type)!
+      gl.shaderSource(shader, source)
+      gl.compileShader(shader)
+      return shader
     }
-    gl.useProgram(program);
+    const program = gl.createProgram()!
+    gl.attachShader(program, compile(gl.VERTEX_SHADER, VERT))
+    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAG))
+    gl.linkProgram(program)
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      setFailed(true)
+      return
+    }
+    gl.useProgram(program)
 
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-    const aPos = gl.getAttribLocation(program, "a_pos");
-    gl.enableVertexAttribArray(aPos);
-    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    const buffer = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
+    const aPos = gl.getAttribLocation(program, 'a_pos')
+    gl.enableVertexAttribArray(aPos)
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0)
 
-    const uTime = gl.getUniformLocation(program, "u_time");
-    const uMouse = gl.getUniformLocation(program, "u_mouse");
-    const uMouseStr = gl.getUniformLocation(program, "u_mouseStr");
-    gl.uniform1i(gl.getUniformLocation(program, "u_tex"), 0);
+    const uTime = gl.getUniformLocation(program, 'u_time')
+    const uMouse = gl.getUniformLocation(program, 'u_mouse')
+    const uMouseStr = gl.getUniformLocation(program, 'u_mouseStr')
+    gl.uniform1i(gl.getUniformLocation(program, 'u_tex'), 0)
 
     // Pointer tracked on window (overlays sit above the canvas, so listening
     // on the canvas itself would never fire); eased per-frame in the loop.
-    const target = { x: 0.5, y: 0.5, str: 0 };
-    const eased = { x: 0.5, y: 0.5, str: 0 };
+    const target = { x: 0.5, y: 0.5, str: 0 }
+    const eased = { x: 0.5, y: 0.5, str: 0 }
     const onPointerMove = (event: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = (event.clientX - rect.left) / rect.width;
-      const y = 1 - (event.clientY - rect.top) / rect.height; // GL y-up
-      const inside = x > -0.15 && x < 1.15 && y > -0.15 && y < 1.15;
+      const rect = canvas.getBoundingClientRect()
+      const x = (event.clientX - rect.left) / rect.width
+      const y = 1 - (event.clientY - rect.top) / rect.height // GL y-up
+      const inside = x > -0.15 && x < 1.15 && y > -0.15 && y < 1.15
       if (inside) {
-        target.x = x;
-        target.y = y;
+        target.x = x
+        target.y = y
       }
-      target.str = inside ? 1 : 0;
-    };
-    window.addEventListener("pointermove", onPointerMove);
+      target.str = inside ? 1 : 0
+    }
+    window.addEventListener('pointermove', onPointerMove)
 
     // NPOT-safe texture params (no mipmaps, clamp, linear).
-    const texture = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const texture = gl.createTexture()
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, texture)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-    let raf = 0;
-    let disposed = false;
-    const start = performance.now();
+    let raf = 0
+    let disposed = false
+    const start = performance.now()
     const draw = (now: number) => {
-      gl.uniform1f(uTime, (now - start) / 1000);
+      gl.uniform1f(uTime, (now - start) / 1000)
       // Ease the pointer hotspot so the heat trails the cursor smoothly.
-      eased.x += (target.x - eased.x) * 0.12;
-      eased.y += (target.y - eased.y) * 0.12;
-      eased.str += (target.str - eased.str) * 0.07;
-      gl.uniform2f(uMouse, eased.x, eased.y);
-      gl.uniform1f(uMouseStr, eased.str);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      raf = requestAnimationFrame(draw);
-    };
+      eased.x += (target.x - eased.x) * 0.12
+      eased.y += (target.y - eased.y) * 0.12
+      eased.str += (target.str - eased.str) * 0.07
+      gl.uniform2f(uMouse, eased.x, eased.y)
+      gl.uniform1f(uMouseStr, eased.str)
+      gl.clearColor(0, 0, 0, 0)
+      gl.clear(gl.COLOR_BUFFER_BIT)
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+      raf = requestAnimationFrame(draw)
+    }
 
     const upload = (source: TexImageSource) => {
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-      raf = requestAnimationFrame(draw);
-    };
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source)
+      raf = requestAnimationFrame(draw)
+    }
 
     if (src) {
-      const image = new Image();
+      const image = new Image()
       image.onload = () => {
-        if (disposed) return;
-        upload(image);
-      };
-      image.onerror = () => setFailed(true);
-      image.src = src;
+        if (disposed) return
+        upload(image)
+      }
+      image.onerror = () => setFailed(true)
+      image.src = src
     } else {
       // No artwork supplied: burn the built-in blobs instead of falling back
       // to a static gradient.
-      const art = paintFallbackArt(512);
+      const art = paintFallbackArt(512)
       if (!art) {
-        setFailed(true);
-        return;
+        setFailed(true)
+        return
       }
-      upload(art);
+      upload(art)
     }
 
     return () => {
-      disposed = true;
-      cancelAnimationFrame(raf);
-      window.removeEventListener("pointermove", onPointerMove);
-    };
-  }, [src]);
+      disposed = true
+      cancelAnimationFrame(raf)
+      window.removeEventListener('pointermove', onPointerMove)
+    }
+  }, [src])
 
   // Only when WebGL itself is unavailable: with no `src` the shader now runs
   // on generated artwork, so this is the no-context / broken-image path.
   if (failed) {
     return (
-      <div
-        aria-hidden
-        className={cx(
-          "relative overflow-hidden bg-background-tertiary-default",
-          className,
-        )}
-      >
+      <div aria-hidden className={cx('relative overflow-hidden bg-background-tertiary-default', className)}>
         <span className="absolute -top-1/4 -left-1/4 size-3/4 rounded-full bg-blue-400/70 blur-2xl" />
         <span className="absolute top-1/4 right-0 size-2/3 rounded-full bg-lime-400/70 blur-2xl" />
         <span className="absolute right-1/4 -bottom-1/4 size-3/4 rounded-full bg-orange-400/70 blur-2xl" />
       </div>
-    );
+    )
   }
-  return <canvas ref={canvasRef} className={className} aria-hidden />;
+  return <canvas ref={canvasRef} className={className} aria-hidden />
 }

@@ -11,6 +11,10 @@ const enrich = proxyActivities<DeepActivities>({
     maximumAttempts: 3,
     initialInterval: '5 seconds',
     backoffCoefficient: 2,
+    // `QuotaExceededError` (cota hard atingida) é um erro de negócio, não
+    // transitório: retry não vai liberar cota, então não se repete a activity.
+    // Falhas de banco/rede continuam sujeitas à política de retry acima.
+    nonRetryableErrorTypes: ['QuotaExceededError'],
   },
 })
 
