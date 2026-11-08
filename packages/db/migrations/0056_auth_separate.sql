@@ -116,6 +116,18 @@ CREATE INDEX idx_admin_account_user ON admin_account (user_id);
 CREATE INDEX idx_verifier_session_user ON verifier_session (user_id);
 CREATE INDEX idx_verifier_account_user ON verifier_account (user_id);
 
+-- Sincronizar o estado de auth antes da cópia: impedir que novas
+-- gravações nas tabelas legacy (user/account/session) ocorram entre a
+-- cópia de usuários e a cópia de contas, de modo que o conjunto copiado
+-- permaneça consistente e não viole FK de account→user nem deixe
+-- credenciais órfãs. Toda a migration roda dentro de uma única
+-- transação PostgreSQL (ver packages/db/src/runner.ts), então os locks
+-- abaixo persistem até o COMMIT final e bloqueiam writes concorrentes
+-- nas tabelas legacy durante o cutover.
+LOCK TABLE "user" IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE "account" IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE "session" IN SHARE ROW EXCLUSIVE MODE;
+
 -- Provisionar usuários existentes das tabelas legacy nas novas instâncias
 -- para que o login continue funcionando após a troca. Preserva o papel
 -- (role) de cada usuário.
@@ -139,15 +151,12 @@ INSERT INTO verifier_account (id, account_id, provider_id, user_id, access_token
   FROM "account"
   ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO admin_session (id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by)
-  SELECT id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by
-  FROM "session"
-  ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO verifier_session (id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by)
-  SELECT id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by
-  FROM "session"
-  ON CONFLICT (id) DO NOTHING;
+-- Não copiar linhas de "session" para as novas lojas de auth. Sessões
+-- legacy não são transferidas: cada usuário deve fazer login novamente
+-- no dashboard correspondente (admin ou verifier), gerando sessões
+-- novas e independentes nas tabelas admin_session / verifier_session.
+-- Isso evita que um token de sessão legado revogado continue válido em
+-- qualquer uma das novas instâncias (isolamento total de sessões).
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON admin_user, admin_session, admin_account, admin_verification TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON verifier_user, verifier_session, verifier_account, verifier_verification TO app_user;

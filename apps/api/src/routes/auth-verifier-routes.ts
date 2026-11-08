@@ -19,7 +19,16 @@ export const registerAuthVerifierRoutes = (app: FastifyInstance, auth: AuthVerif
         // Remove o segmento /verifier para expor o path esperado pelo Better
         // Auth (/api/auth/...).
         const betterAuthPath = authPath.replace(/\/v1\/auth\/verifier\//, '/api/auth/')
-        const url = `http://localhost${betterAuthPath}`
+        // Preserva a origem pública da requisição (x-forwarded-proto/host ou
+        // origin) para que o Better Auth gere cookies e redirects com a URL
+        // pública correta em vez de http://localhost.
+        const proto = (request.headers['x-forwarded-proto'] as string | undefined) ?? 'http'
+        const host =
+          (request.headers['x-forwarded-host'] as string | undefined) ??
+          (request.headers.origin as string | undefined) ??
+          request.headers.host ??
+          'localhost'
+        const url = `${proto}://${host}${betterAuthPath}`
         const headers = new Headers()
         for (const [key, value] of Object.entries(request.headers)) {
           if (key !== 'host' && key !== 'content-length') {

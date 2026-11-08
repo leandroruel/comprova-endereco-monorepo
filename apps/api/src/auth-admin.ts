@@ -30,6 +30,9 @@ export const createAuthAdmin = (db: Db, secret: string) =>
     session: {
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,
+      cookie: {
+        prefix: 'admin-auth',
+      },
     },
     plugins: [admin()],
   })

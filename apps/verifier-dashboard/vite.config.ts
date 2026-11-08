@@ -15,16 +15,16 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api/auth': {
-        target: 'http://localhost:3000/v1/auth/verifier',
+        target: import.meta.env.VITE_DASHBOARD_VERIFIER_AUTH_URL ?? 'http://localhost:3000/v1/auth/verifier',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/auth/, ''),
       },
       '/api': {
-        target: 'http://localhost:3000',
+        target: import.meta.env.VITE_API_URL ?? 'http://localhost:3000',
         changeOrigin: true,
       },
       '/v1': {
-        target: 'http://localhost:3000',
+        target: import.meta.env.VITE_API_URL ?? 'http://localhost:3000',
         changeOrigin: true,
       },
     },
