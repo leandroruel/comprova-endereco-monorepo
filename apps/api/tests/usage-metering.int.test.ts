@@ -1192,19 +1192,19 @@ describe('usage metering — autenticação por sessão e M2M', () => {
     expect(res.statusCode).toBe(200)
     const setCookie = res.headers['set-cookie']
     const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : String(setCookie ?? '')
-    const token = cookieHeader.match(/better-auth\.session_token=([^;]+)/)?.[1]
+    const token = cookieHeader.match(/legacy-auth\.session_token=([^;]+)/)?.[1]
     if (!token) throw new Error('Session token not found in cookie')
     return token
   }
 
   const injectWithSession = async (method: string, url: string, cookie: string) =>
-    app.inject({ method, url, headers: { Cookie: `better-auth.session_token=${cookie}` } })
+    app.inject({ method, url, headers: { Cookie: `legacy-auth.session_token=${cookie}` } })
 
   const createOrganization = async (cookie: string, name: string, email: string): Promise<string> => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/organizations',
-      headers: { Cookie: `better-auth.session_token=${cookie}`, 'Content-Type': 'application/json' },
+      headers: { Cookie: `legacy-auth.session_token=${cookie}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, termsVersion: '1.0.0' }),
     })
     expect(created.statusCode).toBe(201)

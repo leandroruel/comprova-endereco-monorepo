@@ -72,7 +72,7 @@ const loginAndGetCookie = async (email: string, password: string): Promise<strin
   const setCookie = res.headers['set-cookie']
   if (!setCookie) throw new Error('No set-cookie header')
   const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie
-  const match = cookieHeader.match(/better-auth\.session_token=([^;]+)/)
+  const match = cookieHeader.match(/legacy-auth\.session_token=([^;]+)/)
   const token = match?.[1]
   if (!token) throw new Error('Session token not found in cookie')
   return token
@@ -86,7 +86,7 @@ const injectWithSession = async (
   sessionCookie: string = ownerSessionCookie,
 ) => {
   const headers: Record<string, string> = {
-    Cookie: `better-auth.session_token=${sessionCookie}`,
+    Cookie: `legacy-auth.session_token=${sessionCookie}`,
   }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -113,6 +113,8 @@ beforeAll(async () => {
   // Cria uma organização via API (simulando onboarding)
   const createRes = await injectWithSession('POST', '/v1/organizations', {
     name: 'Organização Teste',
+    legalName: 'Organização Teste Ltda',
+    document: '12345678000190',
     email: 'owner@exemplo.com',
     termsVersion: '1.0.0',
   })
@@ -151,6 +153,12 @@ describe('Verifier Onboarding', () => {
     const orgs = res.json()
     expect(Array.isArray(orgs)).toBe(true)
     expect(orgs.length).toBeGreaterThan(0)
+    // A listagem deve incluir os dados cadastrais (document e legalName),
+    // caso contrário o grid do dashboard mostra o documento como vazio.
+    const created = orgs.find((o: { tenantId: string }) => o.tenantId === orgTenantId)
+    expect(created).toBeDefined()
+    expect(created.document).toBe('12345678000190')
+    expect(created.legalName).toBe('Organização Teste Ltda')
   })
 
   it('deve buscar uma organização à qual o usuário pertence', async () => {
@@ -353,7 +361,7 @@ describe('Verifier M2M Integration', () => {
       method: 'GET',
       url: `/v1/m2m/api-keys?tenantId=${orgTenantId}`,
       headers: {
-        Cookie: `better-auth.session_token=${ownerSessionCookie}`,
+        Cookie: `legacy-auth.session_token=${ownerSessionCookie}`,
       },
     })
     expect(res.statusCode).toBe(200)

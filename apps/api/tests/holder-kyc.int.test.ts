@@ -84,7 +84,7 @@ const loginAndGetCookie = async (email: string, password: string): Promise<strin
   const setCookie = res.headers['set-cookie']
   if (!setCookie) throw new Error('No set-cookie header')
   const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie
-  const match = cookieHeader.match(/better-auth\.session_token=([^;]+)/)
+  const match = cookieHeader.match(/legacy-auth\.session_token=([^;]+)/)
   const token = match?.[1]
   if (!token) throw new Error('Session token not found in cookie')
   return token
@@ -97,7 +97,7 @@ const injectWithSession = async (
   sessionCookie: string = ownerSessionCookie,
 ) => {
   const headers: Record<string, string> = {
-    Cookie: `better-auth.session_token=${sessionCookie}`,
+    Cookie: `legacy-auth.session_token=${sessionCookie}`,
   }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'

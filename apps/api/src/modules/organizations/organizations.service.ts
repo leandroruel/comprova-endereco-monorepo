@@ -216,6 +216,8 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
         .select({
           tenantId: t.tenant.tenantId,
           name: t.tenant.name,
+          legalName: t.tenant.legalName,
+          document: t.tenant.document,
           type: t.tenant.type,
           status: t.tenant.status,
           onboardingStatus: t.tenant.onboardingStatus,
@@ -692,6 +694,8 @@ function mapTenantToDto(tenant: {
 function mapTenantRowToDto(row: {
   tenantId: string
   name: string
+  legalName: string | null
+  document: string | null
   type: string
   status: string
   onboardingStatus: string
