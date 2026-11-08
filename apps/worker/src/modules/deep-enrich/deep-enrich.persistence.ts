@@ -437,17 +437,36 @@ export const emitOutcomeEvents = async (
   // faturáveis (indisponibilidade de fonte externa) usam chave própria, para
   // nunca bloquearem um faturamento legítimo de uma reexecução posterior.
   if (write.stillPartial) {
+    // Idempotência: não duplica o mesmo evento lógico em retry de Activity.
+    // A chave de idempotência é (aggregate, aggregateId, eventType, payload),
+    // que representa a transição lógica e não apenas o tipo do evento.
+    const updatedPayload = {
+      tenant_id: write.tenantId,
+      validation_id: write.validationId,
+      claim_id: write.claimId,
+      claim_type: write.claimType,
+      verdict: write.verdict,
+    }
+    const existing = await tx
+      .select({ outboxId: t.outbox.outboxId })
+      .from(t.outbox)
+      .where(
+        and(
+          eq(t.outbox.aggregate, 'validation'),
+          eq(t.outbox.aggregateId, write.validationId),
+          eq(t.outbox.eventType, 'validation.updated'),
+          sql`${t.outbox.payload} = ${JSON.stringify(updatedPayload)}::jsonb`,
+        ),
+      )
+      .limit(1)
+    if (existing.length > 0) {
+      return { blockedByQuota: false }
+    }
     await tx.insert(t.outbox).values({
       aggregate: 'validation',
       aggregateId: write.validationId,
       eventType: 'validation.updated',
-      payload: {
-        tenant_id: write.tenantId,
-        validation_id: write.validationId,
-        claim_id: write.claimId,
-        claim_type: write.claimType,
-        verdict: write.verdict,
-      },
+      payload: updatedPayload,
     })
     return { blockedByQuota: false }
   }
@@ -482,19 +501,36 @@ export const emitOutcomeEvents = async (
         })
         .where(eq(t.validation.validationId, write.validationId))
 
-      // Publicar evento de conclusão bloqueada por quota
+      // Publicar evento de conclusão bloqueada por quota (idempotente: não
+      // duplica o mesmo evento lógico em retry de Activity).
+      const blockedPayload = {
+        tenant_id: write.tenantId,
+        validation_id: write.validationId,
+        claim_id: write.claimId,
+        claim_type: write.claimType,
+        verdict: write.verdict,
+        quota_blocked_reason: err.message,
+      }
+      const existingBlocked = await tx
+        .select({ outboxId: t.outbox.outboxId })
+        .from(t.outbox)
+        .where(
+          and(
+            eq(t.outbox.aggregate, 'validation'),
+            eq(t.outbox.aggregateId, write.validationId),
+            eq(t.outbox.eventType, 'validation.blocked_quota'),
+            sql`${t.outbox.payload} = ${JSON.stringify(blockedPayload)}::jsonb`,
+          ),
+        )
+        .limit(1)
+      if (existingBlocked.length > 0) {
+        return { blockedByQuota: true }
+      }
       await tx.insert(t.outbox).values({
         aggregate: 'validation',
         aggregateId: write.validationId,
         eventType: 'validation.blocked_quota',
-        payload: {
-          tenant_id: write.tenantId,
-          validation_id: write.validationId,
-          claim_id: write.claimId,
-          claim_type: write.claimType,
-          verdict: write.verdict,
-          quota_blocked_reason: err.message,
-        },
+        payload: blockedPayload,
       })
 
       return { blockedByQuota: true }
@@ -503,21 +539,38 @@ export const emitOutcomeEvents = async (
   }
 
   // O evento de uso foi gravado com sucesso. Agora publica o evento de
-  // conclusão na outbox. Publicar ANTES de recordUsageEventInTx arriscaria
+  // conclusão na outbox (idempotente: não duplica o mesmo evento lógico em
+  // retry de Activity). Publicar ANTES de recordUsageEventInTx arriscaria
   // emitir validation.completed para uma validação que acabou sendo bloqueada
   // por cota. Publicar DEPOIS garante consistência entre o estado persistido e
   // o evento publicado.
+  const completedPayload = {
+    tenant_id: write.tenantId,
+    validation_id: write.validationId,
+    claim_id: write.claimId,
+    claim_type: write.claimType,
+    verdict: write.verdict,
+  }
+  const existingCompleted = await tx
+    .select({ outboxId: t.outbox.outboxId })
+    .from(t.outbox)
+    .where(
+      and(
+        eq(t.outbox.aggregate, 'validation'),
+        eq(t.outbox.aggregateId, write.validationId),
+        eq(t.outbox.eventType, 'validation.completed'),
+        sql`${t.outbox.payload} = ${JSON.stringify(completedPayload)}::jsonb`,
+      ),
+    )
+    .limit(1)
+  if (existingCompleted.length > 0) {
+    return { blockedByQuota: false }
+  }
   await tx.insert(t.outbox).values({
     aggregate: 'validation',
     aggregateId: write.validationId,
     eventType: 'validation.completed',
-    payload: {
-      tenant_id: write.tenantId,
-      validation_id: write.validationId,
-      claim_id: write.claimId,
-      claim_type: write.claimType,
-      verdict: write.verdict,
-    },
+    payload: completedPayload,
   })
 
   // Quando o evento é gravado com sucesso, limpa o motivo de bloqueio por

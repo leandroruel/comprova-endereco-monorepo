@@ -84,14 +84,24 @@ export const recordUsageEventInTx = async (
   const key = idempotencyKey ?? randomUUID()
   const eventId = randomUUID()
 
+  // Validar unidades: deve ser inteiro seguro e estritamente positivo para
+  // eventos faturáveis. Rejeita negativos, fracionários, zero, NaN, Infinity
+  // e valores fora do intervalo seguro de inteiros (Number.isSafeInteger).
+  // Operações não-faturáveis (units = 0) mantêm o comportamento existente.
+  if (billable && (!Number.isSafeInteger(units) || units <= 0)) {
+    throw new Error(`Invalid units value: ${units}. Units must be a positive integer.`)
+  }
+
   // Concorrência segura: bloqueia a linha do tenant apenas para eventos
   // faturáveis, impedindo que duas requisições simultâneas ultrapassem
   // silenciosamente um limite hard. Eventos não-faturáveis não consomem cota
   // e podem pular o lock. O lock é obtido FORA do savepoint para que persista
   // mesmo após rollback de savepoint, evitando que duas requisições
-  // concorrentes ambas decidam que há cota disponível.
+  // concorrentes ambas decidam que há cota disponível. FOR NO KEY UPDATE é
+  // suficiente (não modifica a chave primária) e evita promoção desnecessária
+  // de KEY SHARE para FOR UPDATE, reduzindo risco de deadlock.
   if (billable) {
-    await tx.execute(sql`SELECT 1 FROM tenant WHERE tenant_id = ${tenantId} FOR UPDATE`)
+    await tx.execute(sql`SELECT 1 FROM tenant WHERE tenant_id = ${tenantId} FOR NO KEY UPDATE`)
   }
 
   // Cria um savepoint para que, em caso de excedimento de cota hard, possamos
@@ -188,10 +198,9 @@ export const recordUsageEventInTx = async (
 
       if (tenantRow[0]?.monthlyQuota !== null && tenantRow[0]?.monthlyQuota !== undefined) {
         const quota = Number(tenantRow[0].monthlyQuota)
-        const { start, end } = defaultPeriod()
-        // Bind como string ISO para evitar erro de serialização do driver com Date.
-        const startStr = start.toISOString()
-        const endStr = end.toISOString()
+        // P2: período de consumo calculado a partir de transaction_timestamp()
+        // (mesma referência do Postgres usada no occurred_at do evento), para
+        // evitar divergência entre relógio da aplicação e relógio do banco.
         const consumed = await tx
           .select({
             total: sql<number>`COALESCE(sum(units), 0)::int`,
@@ -201,8 +210,8 @@ export const recordUsageEventInTx = async (
             and(
               eq(t.usageEvent.tenantId, tenantId),
               eq(t.usageEvent.billable, true),
-              sql`usage_event.occurred_at >= ${startStr}`,
-              sql`usage_event.occurred_at < ${endStr}`,
+              sql`usage_event.occurred_at >= date_trunc('month', transaction_timestamp())`,
+              sql`usage_event.occurred_at < date_trunc('month', transaction_timestamp()) + interval '1 month'`,
             ),
           )
         const consumedUnits = Number(consumed[0]?.total ?? 0)
@@ -219,8 +228,9 @@ export const recordUsageEventInTx = async (
       }
     }
 
-    // P2: ocorreu_em usa o mesmo now() do banco que delimita o período de cota,
-    // garantindo uma única fonte de tempo para gravação e verificação de cota.
+    // P2: occurred_at usa transaction_timestamp() do PostgreSQL, a mesma
+    // referência temporal usada para delimitar o período de cota na verificação
+    // acima — uma única fonte de tempo para gravação e verificação de cota.
     const inserted = await tx
       .insert(t.usageEvent)
       .values({
@@ -234,7 +244,7 @@ export const recordUsageEventInTx = async (
         idempotencyKey: key,
         billable,
         source: source ?? null,
-        occurredAt: sql`now()`,
+        occurredAt: sql`transaction_timestamp()`,
       })
       .returning({ eventId: t.usageEvent.eventId })
 

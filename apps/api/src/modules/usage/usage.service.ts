@@ -409,7 +409,7 @@ export const makeUsageService = (deps: UsageServiceDeps) => {
                 t.signal.validationId,
                 completedValidations.map((v) => v.id),
               ),
-              sql`(signal.source LIKE '%:timeout' OR signal.detail->>'reason' IN ('checker_timeout', 'source_unavailable', 'internal_error'))`,
+              sql`(signal.stance = 'unknown' AND (signal.source LIKE '%:timeout' OR signal.detail->>'reason' IN ('checker_timeout', 'source_unavailable', 'internal_error')))`,
             ),
           )
         for (const row of unavailableRows) {
