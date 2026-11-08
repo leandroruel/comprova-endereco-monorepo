@@ -1562,7 +1562,7 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
     expect(completedCount).toBe(1)
   })
 
-    it('rollback da transação não deixa alterações parciais', async () => {
+  it('rollback da transação não deixa alterações parciais', async () => {
     // Garante que, quando a quota é excedida, nenhum sinal, claim ou
     // claim_evidence fica parcialmente persistido.
     await setQuota(0)
