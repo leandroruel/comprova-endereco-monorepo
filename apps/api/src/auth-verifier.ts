@@ -35,6 +35,9 @@ export const createAuthVerifier = (db: Db, secret: string) =>
     session: {
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,
+      cookie: {
+        prefix: 'verifier-auth',
+      },
     },
   })
 

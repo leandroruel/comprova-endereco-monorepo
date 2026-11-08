@@ -37,7 +37,7 @@ import { createAuthVerifier } from './auth-verifier.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
 import { registerAuthAdminRoutes } from './routes/auth-admin-routes.js'
 import { registerAuthVerifierRoutes } from './routes/auth-verifier-routes.js'
-import { makeSessionMiddleware } from './plugins/session.js'
+import { makeSessionMiddleware, type AuthInstance } from './plugins/session.js'
 import { makeRedisCache, makeCachedReaders, makeApiKeyHasher } from '@comprova/db'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
@@ -284,9 +284,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     credentialTtlSeconds: fastPath.policy.credential_ttl_seconds,
   }
   const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
-  app.addHook('preHandler', makeSessionMiddleware(auth))
-  app.addHook('preHandler', authenticate)
-  registerAuthRoutes(app, auth)
 
   // Instâncias separadas do Better Auth para admin e verifier, com tabelas
   // de auth distintas (isolamento total de sessões entre os dashboards).
@@ -297,6 +294,17 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   )
   registerAuthAdminRoutes(app, authAdmin)
   registerAuthVerifierRoutes(app, authVerifier)
+
+  app.addHook(
+    'preHandler',
+    makeSessionMiddleware(
+      auth as unknown as AuthInstance,
+      authAdmin as unknown as AuthInstance,
+      authVerifier as unknown as AuthInstance,
+    ),
+  )
+  app.addHook('preHandler', authenticate)
+  registerAuthRoutes(app, auth)
   const deepTrigger = {
     config: {
       enabled: deps.config.TEMPORAL_ENABLED,
