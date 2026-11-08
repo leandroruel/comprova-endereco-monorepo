@@ -507,7 +507,21 @@ export interface CreateOrganizationInput {
   readonly name: string
   readonly legalName?: string | null
   readonly document?: string | null
+  readonly termsVersion: string
   readonly dataRegion?: string | null
+}
+
+/**
+ * GET /v1/organizations/terms-version — retorna a versão vigente dos termos
+ * da plataforma, definida pelo servidor.
+ */
+export async function getTermsVersion(): Promise<{ version: string | null; approved: boolean }> {
+  const res = await fetch(`${API_BASE}/v1/organizations/terms-version`, {
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${API_KEY}` },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return (await res.json()) as { version: string | null; approved: boolean }
 }
 
 export async function createOrganization(input: CreateOrganizationInput): Promise<OrganizationDto> {

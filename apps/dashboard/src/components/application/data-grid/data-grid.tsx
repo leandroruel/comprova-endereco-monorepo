@@ -492,9 +492,17 @@ export function DataGrid<T extends object>({
   const columnWidths = visibleColumns.map((column) => widths[column.key] ?? column.width ?? 160)
   const freezeFirstColumn = viewportWidth === 0 || viewportWidth >= GUTTER + (columnWidths[0] ?? 0) + 96
   const totalWidth = GUTTER + columnWidths.reduce((sum, width) => sum + width, 0)
+  // Faz a última coluna crescer (1fr) quando não há width definido, assim o row
+  // preenche 100% da largura do container mesmo quando a soma das colunas fixas
+  // é menor que o viewport.
+  const gridColumns = columnWidths.map((width, i) => {
+    const last = i === columnWidths.length - 1
+    const hasExplicitWidth = visibleColumns[i]!.width !== undefined
+    return last && !hasExplicitWidth ? '1fr' : `${width}px`
+  })
   const rowStyle: CSSProperties = {
-    gridTemplateColumns: `${GUTTER}px ${columnWidths.map((width) => `${width}px`).join(' ')}`,
-    width: totalWidth,
+    gridTemplateColumns: `${GUTTER}px ${gridColumns.join(' ')}`,
+    width: '100%',
     minWidth: '100%',
   }
   const firstRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN)
@@ -1219,7 +1227,7 @@ export function DataGrid<T extends object>({
                         isSelected={rowSelected}
                         onChange={(selected) => toggleRow(rowId, selected)}
                         className={cx(
-                          'absolute opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100',
+                          'absolute opacity-50 group-hover/row:opacity-100 group-focus-within/row:opacity-100',
                           rowSelected && 'opacity-100',
                         )}
                       />

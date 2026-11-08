@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { createOrganization, getOrganizations, type OrganizationDto } from '@/api/client'
+import { createOrganization, getOrganizations, getTermsVersion, type OrganizationDto } from '@/api/client'
 import type { SessionUser } from '@/api/auth'
 import { DataGrid, type DataGridColumn } from '@/components/application/data-grid/data-grid'
-import { BUIBadge, BUIButton } from '@/components/ui'
-import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTrigger } from '@/components/base/modal/modal'
+import { BUIBadge } from '@/components/ui'
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/base/modal/modal'
 import { Input } from '@/components/base/input/input'
 import { Button } from '@/components/base/buttons/button'
 import { Card, CardContent } from '@/components/ui'
@@ -65,7 +65,15 @@ function StatCard({
 const COLUMNS: DataGridColumn<OrganizationDto>[] = [
   { key: 'tenantId', header: 'ID', width: 200, format: (value) => String(value ?? '').slice(0, 8) + '…' },
   { key: 'name', header: 'Nome', width: 260 },
-  { key: 'document', header: 'Documento', width: 180, format: (value) => value ?? '—' },
+  {
+    key: 'document',
+    header: 'Documento',
+    width: 180,
+    format: (value) => {
+      const v = String(value ?? '').trim()
+      return v ? v : '—'
+    },
+  },
   {
     key: 'createdAt',
     header: 'Criado em',
@@ -75,7 +83,6 @@ const COLUMNS: DataGridColumn<OrganizationDto>[] = [
   {
     key: 'status',
     header: 'Status',
-    width: 150,
     format: (value) => {
       const status = String(value ?? '')
       return (
@@ -96,14 +103,37 @@ export default function OrganizationsPage({
 }) {
   useEffect(() => {}, [])
 
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [toastPhase, setToastPhase] = useState<'hidden' | 'shown' | 'leaving'>('hidden')
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const nameRef = useRef<HTMLInputElement>(null)
+  const legalNameRef = useRef<HTMLInputElement>(null)
+  const documentRef = useRef<HTMLInputElement>(null)
+  const dataRegionRef = useRef<HTMLInputElement>(null)
+
+  const showSuccessToast = () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToastPhase('shown')
+    toastTimer.current = setTimeout(() => {
+      setToastPhase('leaving')
+      toastTimer.current = setTimeout(() => setToastPhase('hidden'), 220)
+    }, 2000)
+  }
 
   const organizationsQuery = useQuery({
     queryKey: ['organizations'],
     queryFn: getOrganizations,
     staleTime: 30_000,
     enabled: !!_user,
+  })
+
+  const termsQuery = useQuery({
+    queryKey: ['terms-version'],
+    queryFn: getTermsVersion,
+    staleTime: 5 * 60_000,
   })
 
   const { data: organizations = [], isLoading, error } = organizationsQuery
@@ -120,13 +150,20 @@ export default function OrganizationsPage({
     setCreateError(null)
     setIsCreating(true)
     try {
-      const fd = new FormData(e.currentTarget as HTMLFormElement)
+      const termsVersion = termsQuery.data?.version ?? null
+      if (!termsVersion) {
+        throw new Error('Versão dos termos não disponível. Tente novamente mais tarde.')
+      }
       await createOrganization({
-        name: (fd.get('name') as string) ?? '',
-        legalName: (fd.get('legal-name') as string) || null,
-        document: (fd.get('document') as string) || null,
-        dataRegion: (fd.get('data-region') as string) || 'sa-east-1',
+        name: nameRef.current?.value.trim() ?? '',
+        legalName: legalNameRef.current?.value.trim() || null,
+        document: documentRef.current?.value.trim() || null,
+        termsVersion,
+        dataRegion: dataRegionRef.current?.value.trim() || 'sa-east-1',
       })
+      setCreateError(null)
+      setIsCreateOpen(false)
+      showSuccessToast()
       void organizationsQuery.refetch()
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Erro ao criar organização.')
@@ -167,6 +204,22 @@ export default function OrganizationsPage({
         </div>
       )}
 
+      {/* Toast de sucesso */}
+      {toastPhase !== 'hidden' && (
+        <div
+          className={cn(
+            'fixed top-6 left-1/2 -translate-x-1/2 z-100 flex w-[420px] flex-col items-center gap-2 rounded-xl border border-border-button-default bg-background-primary-default p-4 shadow-xl transition-all duration-300 ease-out',
+            toastPhase === 'shown' && 'opacity-100 translate-y-0',
+            toastPhase === 'leaving' && 'opacity-0 translate-y-[-12px] pointer-events-none',
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <Building2 className="size-5 shrink-0 text-emerald-600" />
+            <p className="text-body-regular text-text-primary">Organização criada com sucesso.</p>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Organizações</h1>
@@ -174,53 +227,69 @@ export default function OrganizationsPage({
         </div>
 
         <div className="flex items-center gap-2 w-full lg:w-auto">
-          <ModalTrigger>
-            <BUIButton leadingIcon={Building2}>Nova organização</BUIButton>
-            <Modal size="md">
-              {({ close }) => (
-                <>
-                  <ModalHeader
-                    title="Nova organização"
-                    description="Cadastre os dados básicos da empresa. O onboarding completo será finalizado pela própria empresa pelo dashboard do verifier."
-                    icon={Building2}
-                    showCloseButton
-                  />
-                  <ModalBody>
-                    <form onSubmit={handleSubmit}>
-                      <Input
-                        name="name"
-                        label="Nome da organização"
-                        placeholder="Ex: Comprova Endereço"
-                        defaultValue=""
-                      />
-                      <Input
-                        name="legal-name"
-                        label="Nome legal (opcional)"
-                        placeholder="Ex: Comprova Endereço Ltda."
-                        defaultValue=""
-                      />
-                      <Input
-                        name="document"
-                        label="Documento CNPJ (opcional)"
-                        placeholder="Ex: 12.345.678/0001-90"
-                        defaultValue=""
-                      />
-                      <Input name="data-region" label="Região de dados" defaultValue="sa-east-1" />
-                      {createError && <p className="mt-2 text-sm text-text-error-primary">{createError}</p>}
-                      <ModalFooter>
-                        <Button variant="secondary" onClick={() => close()}>
-                          Cancelar
-                        </Button>
-                        <Button variant="primary" type="submit" disabled={isCreating}>
-                          {isCreating ? 'Criando…' : 'Criar organização'}
-                        </Button>
-                      </ModalFooter>
-                    </form>
-                  </ModalBody>
-                </>
-              )}
-            </Modal>
-          </ModalTrigger>
+          <Button
+            variant="primary"
+            leadingIcon={Building2}
+            onClick={() => {
+              setCreateError(null)
+              setIsCreateOpen(true)
+            }}
+          >
+            Nova organização
+          </Button>
+          <Modal isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} size="md">
+            {({ close }) => (
+              <>
+                <ModalHeader
+                  title="Nova organização"
+                  description="Cadastre os dados básicos da empresa. O onboarding completo será finalizado pela própria empresa pelo dashboard do verifier."
+                  icon={Building2}
+                  showCloseButton
+                />
+                <ModalBody>
+                  <form onSubmit={handleSubmit}>
+                    <Input
+                      ref={nameRef}
+                      label="Nome da organização"
+                      placeholder="Ex: Comprova Endereço"
+                      defaultValue=""
+                    />
+                    <Input
+                      ref={legalNameRef}
+                      label="Nome legal (opcional)"
+                      placeholder="Ex: Comprova Endereço Ltda."
+                      defaultValue=""
+                    />
+                    <Input
+                      ref={documentRef}
+                      label="Documento CNPJ (opcional)"
+                      placeholder="Ex: 12.345.678/0001-90"
+                      defaultValue=""
+                    />
+                    <Input ref={dataRegionRef} label="Região de dados" defaultValue="sa-east-1" />
+                    <Input
+                      label="Versão dos termos"
+                      defaultValue={termsQuery.data?.version ?? '—'}
+                      isDisabled
+                    />
+                    {createError && <p className="mt-2 text-sm text-text-error-primary">{createError}</p>}
+                    <ModalFooter>
+                      <Button variant="secondary" onClick={() => close()}>
+                        Cancelar
+                      </Button>
+                      <Button
+                        variant="primary"
+                        type="submit"
+                        disabled={isCreating || !termsQuery.data?.version}
+                      >
+                        {isCreating ? 'Criando…' : 'Criar organização'}
+                      </Button>
+                    </ModalFooter>
+                  </form>
+                </ModalBody>
+              </>
+            )}
+          </Modal>
         </div>
       </div>
 
