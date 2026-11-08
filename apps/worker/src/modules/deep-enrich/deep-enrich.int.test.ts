@@ -1568,16 +1568,6 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
     await setQuota(0)
     const validationId = await createQueuedValidation('quota-rollback-1', '12345678000195')
 
-    // Sinais e claims criados antes do savepoint devem ser preservados
-    const signalsBefore = await adminPool.db
-      .select({ signalId: t.signal.signalId })
-      .from(t.signal)
-      .where(eq(t.signal.validationId, validationId))
-    const claimsBefore = await adminPool.db
-      .select({ claimId: t.claim.claimId })
-      .from(t.claim)
-      .where(eq(t.claim.validationId, validationId))
-
     const result = await deepEnrich(
       { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId },
