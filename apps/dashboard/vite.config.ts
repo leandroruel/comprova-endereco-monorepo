@@ -17,15 +17,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api/auth': {
+        target: 'http://localhost:3000/v1/auth/admin',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/auth/, ''),
+      },
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        rewrite: (path) => {
-          if (path.startsWith('/api/auth/')) {
-            return path.replace('/api/auth/', '/v1/auth/admin/')
-          }
-          return path
-        },
       },
       '/v1': {
         target: 'http://localhost:3000',

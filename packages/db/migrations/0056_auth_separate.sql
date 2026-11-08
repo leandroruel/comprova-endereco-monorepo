@@ -116,5 +116,38 @@ CREATE INDEX idx_admin_account_user ON admin_account (user_id);
 CREATE INDEX idx_verifier_session_user ON verifier_session (user_id);
 CREATE INDEX idx_verifier_account_user ON verifier_account (user_id);
 
+-- Provisionar usuários existentes das tabelas legacy nas novas instâncias
+-- para que o login continue funcionando após a troca. Preserva o papel
+-- (role) de cada usuário.
+INSERT INTO admin_user (id, name, email, email_verified, image, role, banned, ban_reason, ban_expires, created_at, updated_at)
+  SELECT id, name, email, email_verified, image, role, banned, ban_reason, ban_expires, created_at, updated_at
+  FROM "user"
+  ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO verifier_user (id, name, email, email_verified, image, role, banned, ban_reason, ban_expires, created_at, updated_at)
+  SELECT id, name, email, email_verified, image, role, banned, ban_reason, ban_expires, created_at, updated_at
+  FROM "user"
+  ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO admin_account (id, account_id, provider_id, user_id, access_token, refresh_token, id_token, access_token_expires_at, refresh_token_expires_at, scope, password, created_at, updated_at)
+  SELECT id, account_id, provider_id, user_id, access_token, refresh_token, id_token, access_token_expires_at, refresh_token_expires_at, scope, password, created_at, updated_at
+  FROM "account"
+  ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO verifier_account (id, account_id, provider_id, user_id, access_token, refresh_token, id_token, access_token_expires_at, refresh_token_expires_at, scope, password, created_at, updated_at)
+  SELECT id, account_id, provider_id, user_id, access_token, refresh_token, id_token, access_token_expires_at, refresh_token_expires_at, scope, password, created_at, updated_at
+  FROM "account"
+  ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO admin_session (id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by)
+  SELECT id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by
+  FROM "session"
+  ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO verifier_session (id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by)
+  SELECT id, expires_at, token, created_at, updated_at, ip_address, user_agent, user_id, impersonated_by
+  FROM "session"
+  ON CONFLICT (id) DO NOTHING;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON admin_user, admin_session, admin_account, admin_verification TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON verifier_user, verifier_session, verifier_account, verifier_verification TO app_user;
