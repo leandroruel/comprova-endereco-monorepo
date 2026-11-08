@@ -219,8 +219,8 @@ export const recordUsageEventInTx = async (
       }
     }
 
-    // 5. Registrar o evento de uso e atualizar as referências (idempotência e
-    //    identidade comercial).
+    // P2: ocorreu_em usa o mesmo now() do banco que delimita o período de cota,
+    // garantindo uma única fonte de tempo para gravação e verificação de cota.
     const inserted = await tx
       .insert(t.usageEvent)
       .values({
@@ -234,6 +234,7 @@ export const recordUsageEventInTx = async (
         idempotencyKey: key,
         billable,
         source: source ?? null,
+        occurredAt: sql`now()`,
       })
       .returning({ eventId: t.usageEvent.eventId })
 
