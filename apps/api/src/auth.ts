@@ -23,6 +23,7 @@ export const createAuth = (db: Db, secret: string) =>
       'http://verifier.localhost:5174',
       'http://localhost:3000',
     ],
+    advanced: { cookiePrefix: 'legacy-auth' },
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,

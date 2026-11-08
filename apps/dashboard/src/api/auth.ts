@@ -45,17 +45,6 @@ export const authClient = createAuthClient({
   // path para que as requisições de auth caiam em `/api/auth/sign-in/email`
   // e sejam encaminhadas para a instância do admin na porta 3000.
   basePath: '/api/auth',
-  // O `formCsrfMiddleware` do better-auth valida o cabeçalho `Origin` em
-  // requisições POST de auth quando há `Sec-Fetch-*` headers (navegador).
-  // O navegador não envia `Origin` em `fetch` same-origin com
-  // `credentials: 'include'`, então forçamos o header para evitar 403 CSRF.
-  fetchOptions: {
-    onRequest: (context) => {
-      if (typeof window !== 'undefined' && window.location) {
-        context.headers.set('origin', window.location.origin);
-      }
-    },
-  },
 })
 
 /** Identidade que o sidemenu exibe; nula enquanto a sessão não resolveu. */
