@@ -178,6 +178,9 @@ const ADMIN_PASSWORD = 'SenhaForte123!'
 const VERIFIER_EMAIL = `verifier-cookie-${Date.now()}@exemplo.com`
 const VERIFIER_PASSWORD = 'SenhaForte123!'
 
+let adminSetCookie: string | string[] | undefined
+let verifierSetCookie: string | string[] | undefined
+
 /**
  * Teste de isolamento de cookies de sessão entre as 3 instâncias do Better Auth.
  *
@@ -185,9 +188,6 @@ const VERIFIER_PASSWORD = 'SenhaForte123!'
  * legacy-auth) para que cookies de localhost não colidam entre dashboards.
  */
 describe('auth cookie prefix isolation', () => {
-  let adminSetCookie: string | string[] | undefined
-  let verifierSetCookie: string | string[] | undefined
-
   it('admin sign-in seta cookie com prefixo admin-auth', async () => {
     // Primeiro cria o usuário via sign-up
     await app.inject({
@@ -274,5 +274,85 @@ describe('auth cookie prefix isolation', () => {
     const body = res.json()
     expect(body.user).not.toBeNull()
     expect(body.user.email).toBe(ADMIN_EMAIL)
+  })
+})
+
+/**
+ * Contexto de sessão por origem do dashboard (makeSessionMiddleware).
+ *
+ * O browser envia todos os cookies de localhost para ambas as portas; sem a
+ * regra de seleção por origem, o cookie do admin autenticava o dashboard do
+ * verifier via /api/me + request.sessionUser.
+ */
+describe('auth session context por origem do dashboard', () => {
+  it('/api/me com Referer do verifier resolve a sessão do VERIFIER', async () => {
+    const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
+    const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        cookie: cookies,
+        referer: 'http://localhost:5174/dashboard',
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.email).toBe(VERIFIER_EMAIL)
+  })
+
+  it('/api/me com Origin do verifier (POST) resolve a sessão do VERIFIER', async () => {
+    const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
+    const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
+
+    // GET same-origin não envia Origin; POST envia. Validamos também o header
+    // Origin explicitamente, cenário das requests de mutação.
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        cookie: cookies,
+        origin: 'http://verifier.localhost:5174',
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.email).toBe(VERIFIER_EMAIL)
+  })
+
+  it('/api/me com Referer do admin resolve a sessão do ADMIN', async () => {
+    const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
+    const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        cookie: cookies,
+        referer: 'http://localhost:5173/organizations',
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.email).toBe(ADMIN_EMAIL)
+  })
+
+  it('/api/me sem Origin/Referer mantém o fallback legado (admin antes de verifier)', async () => {
+    const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
+    const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: { cookie: cookies },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.email).toBe(ADMIN_EMAIL)
   })
 })

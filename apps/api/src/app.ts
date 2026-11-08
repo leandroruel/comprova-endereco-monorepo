@@ -297,11 +297,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   app.addHook(
     'preHandler',
-    makeSessionMiddleware(
-      auth as unknown as AuthInstance,
-      authAdmin as unknown as AuthInstance,
-      authVerifier as unknown as AuthInstance,
-    ),
+    makeSessionMiddleware({
+      legacy: auth as unknown as AuthInstance,
+      admin: authAdmin as unknown as AuthInstance,
+      verifier: authVerifier as unknown as AuthInstance,
+    }),
   )
   app.addHook('preHandler', authenticate)
   registerAuthRoutes(app, auth)
