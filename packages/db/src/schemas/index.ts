@@ -1,5 +1,12 @@
 import { addressProfile, canonicalAddress } from './addresses.js'
 import { authAccount, authSession, authUser, authVerification } from './auth.js'
+import { adminAuthAccount, adminAuthSession, adminAuthUser, adminAuthVerification } from './auth.js'
+import {
+  verifierAuthAccount,
+  verifierAuthSession,
+  verifierAuthUser,
+  verifierAuthVerification,
+} from './auth.js'
 import { batch, batchItem } from './batches.js'
 import { addressSignalCache, claim, claimEvidence, signal } from './claims.js'
 import { evidence } from './evidence.js'
@@ -77,6 +84,14 @@ export const schema = {
   authSession,
   authAccount,
   authVerification,
+  adminAuthUser,
+  adminAuthSession,
+  adminAuthAccount,
+  adminAuthVerification,
+  verifierAuthUser,
+  verifierAuthSession,
+  verifierAuthAccount,
+  verifierAuthVerification,
   canonicalAddress,
   addressProfile,
   subject,
