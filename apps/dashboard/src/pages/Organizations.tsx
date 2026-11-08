@@ -1,11 +1,14 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getOrganizations, type OrganizationDto } from '@/api/client'
+import { createOrganization, getOrganizations, type OrganizationDto } from '@/api/client'
 import type { SessionUser } from '@/api/auth'
 import { DataGrid, type DataGridColumn } from '@/components/application/data-grid/data-grid'
 import { BUIBadge, BUIButton } from '@/components/ui'
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTrigger } from '@/components/base/modal/modal'
+import { Input } from '@/components/base/input/input'
+import { Button } from '@/components/base/buttons/button'
 import { Card, CardContent } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { Building2, Users, Clock, CircleAlert, FileText, AlertTriangle, RefreshCw } from 'lucide-react'
@@ -93,6 +96,9 @@ export default function OrganizationsPage({
 }) {
   useEffect(() => {}, [])
 
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [isCreating, setIsCreating] = useState(false)
+
   const organizationsQuery = useQuery({
     queryKey: ['organizations'],
     queryFn: getOrganizations,
@@ -108,6 +114,26 @@ export default function OrganizationsPage({
   const suspendedCount = organizations.filter((o) => o.status === 'suspended').length
 
   const columns = useMemo(() => COLUMNS, [])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setCreateError(null)
+    setIsCreating(true)
+    try {
+      const fd = new FormData(e.currentTarget as HTMLFormElement)
+      await createOrganization({
+        name: (fd.get('name') as string) ?? '',
+        legalName: (fd.get('legal-name') as string) || null,
+        document: (fd.get('document') as string) || null,
+        dataRegion: (fd.get('data-region') as string) || 'sa-east-1',
+      })
+      void organizationsQuery.refetch()
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Erro ao criar organização.')
+    } finally {
+      setIsCreating(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -148,10 +174,53 @@ export default function OrganizationsPage({
         </div>
 
         <div className="flex items-center gap-2 w-full lg:w-auto">
-          <BUIButton onClick={() => alert('Cadastro de organização em breve')}>
-            <Building2 className="h-4 w-4 mr-2" />
-            Nova organização
-          </BUIButton>
+          <ModalTrigger>
+            <BUIButton leadingIcon={Building2}>Nova organização</BUIButton>
+            <Modal size="md">
+              {({ close }) => (
+                <>
+                  <ModalHeader
+                    title="Nova organização"
+                    description="Cadastre os dados básicos da empresa. O onboarding completo será finalizado pela própria empresa pelo dashboard do verifier."
+                    icon={Building2}
+                    showCloseButton
+                  />
+                  <ModalBody>
+                    <form onSubmit={handleSubmit}>
+                      <Input
+                        name="name"
+                        label="Nome da organização"
+                        placeholder="Ex: Comprova Endereço"
+                        defaultValue=""
+                      />
+                      <Input
+                        name="legal-name"
+                        label="Nome legal (opcional)"
+                        placeholder="Ex: Comprova Endereço Ltda."
+                        defaultValue=""
+                      />
+                      <Input
+                        name="document"
+                        label="Documento CNPJ (opcional)"
+                        placeholder="Ex: 12.345.678/0001-90"
+                        defaultValue=""
+                      />
+                      <Input name="data-region" label="Região de dados" defaultValue="sa-east-1" />
+                      {createError && <p className="mt-2 text-sm text-text-error-primary">{createError}</p>}
+                      <ModalFooter>
+                        <Button variant="secondary" onClick={() => close()}>
+                          Cancelar
+                        </Button>
+                        <Button variant="primary" type="submit" disabled={isCreating}>
+                          {isCreating ? 'Criando…' : 'Criar organização'}
+                        </Button>
+                      </ModalFooter>
+                    </form>
+                  </ModalBody>
+                </>
+              )}
+            </Modal>
+          </ModalTrigger>
         </div>
       </div>
 

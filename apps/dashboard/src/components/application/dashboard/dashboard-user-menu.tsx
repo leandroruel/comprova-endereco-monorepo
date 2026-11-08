@@ -2,7 +2,7 @@
 
 import { useTemplateCopy } from '@/components/foundations/template-copy/template-copy'
 
-import { RiBuilding2Line, RiHomeLine, RiSettings4Line } from '@remixicon/react'
+import { RiHomeLine, RiSettings4Line } from '@remixicon/react'
 import type { ReactNode } from 'react'
 import { Avatar } from '@/components/base/avatar/avatar'
 import {
@@ -127,10 +127,6 @@ export function DashboardUserMenu({
           <DropdownItem onSelect={() => onNavigate?.('home')}>
             <RiHomeLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
             <span className="truncate text-body-medium text-text-primary">Principal</span>
-          </DropdownItem>
-          <DropdownItem onSelect={() => onNavigate?.('organizations')}>
-            <RiBuilding2Line className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-            <span className="truncate text-body-medium text-text-primary">Organizações</span>
           </DropdownItem>
           <DropdownItem onSelect={onOpenSettings}>
             <RiSettings4Line className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />

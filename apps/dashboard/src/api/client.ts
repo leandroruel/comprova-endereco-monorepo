@@ -497,3 +497,32 @@ export async function getOrganizations(): Promise<OrganizationDto[]> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return (await res.json()) as OrganizationDto[]
 }
+
+/**
+ * POST /v1/organizations — cadastra uma organização (básico).
+ * Usado pela plataforma para criar a empresa; o onboarding completo é
+ * finalizado pela própria empresa pelo dashboard do verifier.
+ */
+export interface CreateOrganizationInput {
+  readonly name: string
+  readonly legalName?: string | null
+  readonly document?: string | null
+  readonly dataRegion?: string | null
+}
+
+export async function createOrganization(input: CreateOrganizationInput): Promise<OrganizationDto> {
+  const res = await fetch(`${API_BASE}/v1/organizations`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    const problem = (await res.json().catch(() => ({}))) as { code?: string; title?: string }
+    throw new Error(problem.title ?? problem.code ?? `HTTP ${res.status}`)
+  }
+  return (await res.json()) as OrganizationDto
+}

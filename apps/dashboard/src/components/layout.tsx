@@ -1,7 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react'
 import { DashboardSidebar } from '@/components/application/dashboard/dashboard-sidebar'
 import type { DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar'
-import { RiBuilding2Line, RiChatAiLine, RiFileSearchLine, RiHomeLine, RiQrCodeLine } from '@remixicon/react'
+import { RiChatAiLine, RiFileSearchLine, RiHomeLine, RiQrCodeLine } from '@remixicon/react'
 
 /** Itens de navegação da SPA: usam `onSelect` (render <button>) em vez de `href` (render <a>). */
 const baseNavItems: readonly DashboardNavItem[] = [
@@ -11,7 +11,6 @@ const baseNavItems: readonly DashboardNavItem[] = [
 ]
 
 const adminNavItems: readonly DashboardNavItem[] = [
-  { key: 'organizations', label: 'Organizações', icon: RiBuilding2Line, onSelect: () => {} },
   { key: 'debug-nf3e-qrcode', label: 'QRCode NF3e debugger', icon: RiQrCodeLine, onSelect: () => {} },
 ]
 
