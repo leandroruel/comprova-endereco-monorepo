@@ -1096,12 +1096,14 @@ describe('HolderInformationRequest Integration', () => {
     expect(outra).toBeDefined()
     expect(outra.state).toBe('pending')
 
-    // Verifica eventos: apenas um evento expired para a vencida
+    // Verifica eventos: apenas um evento expired para a vencida, com o estado
+    // de origem real (pending) — e não o estado pós-atualização (expired).
     const events = await withTenant(appPool.db, tenantId, async (tx) => {
       return tx
         .select({
           eventType: t.holderInformationRequestEvent.eventType,
           holderInformationRequestId: t.holderInformationRequestEvent.holderInformationRequestId,
+          fromState: t.holderInformationRequestEvent.fromState,
         })
         .from(t.holderInformationRequestEvent)
         .where(
@@ -1113,6 +1115,7 @@ describe('HolderInformationRequest Integration', () => {
     })
     expect(events.length).toBe(1)
     expect(events[0]!.holderInformationRequestId).toBe(vencidaId)
+    expect(events[0]!.fromState).toBe('pending')
   })
 
   it('deve aplicar expiração em lote sem criar eventos quando nada venceu', async () => {
@@ -1748,6 +1751,67 @@ describe('HolderInformationRequest Integration', () => {
     const cancelEvents = events.filter((e) => e.eventType === 'cancelled')
     const expiredEvents = events.filter((e) => e.eventType === 'expired')
     expect(cancelEvents.length).toBe(1)
+    expect(expiredEvents.length).toBe(0)
+  })
+
+  it('não deve travar ao consultar por ID solicitação pendente com prazo futuro', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Prazo Futuro Consulta Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Prazo Futuro Consulta Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-prazo-futuro-consulta', true)
+
+    // Cria solicitação com prazo no futuro
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Prazo futuro na consulta',
+        items: [{ itemId: 'item-a', description: 'Item A', required: true }],
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const requestId = createRes.json().id
+
+    // Consulta por ID: o UPDATE condicional não deve afetar linhas (prazo
+    // futuro) e a reavaliação não pode entrar em loop; deve responder com o
+    // estado vigente.
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/information-requests/${requestId}?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.id).toBe(requestId)
+    expect(body.state).toBe('pending')
+
+    // Nenhum evento de expiração deve ser criado
+    const expiredEvents = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({ id: t.holderInformationRequestEvent.id })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+            eq(t.holderInformationRequestEvent.eventType, 'expired'),
+          ),
+        )
+    })
     expect(expiredEvents.length).toBe(0)
   })
 

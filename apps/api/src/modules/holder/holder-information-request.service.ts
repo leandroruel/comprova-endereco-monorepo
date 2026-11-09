@@ -102,43 +102,44 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
    *
    * O filtro de prazo é aplicado diretamente no PostgreSQL com
    * `clock_timestamp()`, evitando carregar todo o histórico do tenant.
-   * O UPDATE ... RETURNING atualiza em lote todas as elegíveis de uma só vez,
-   * preservando a atomicidade e o isolamento por tenant via RLS.
+   * Há um UPDATE por estado de origem (`pending`, `in_progress`): o RETURNING
+   * de um UPDATE devolve os valores pós-atualização, então um único UPDATE em
+   * lote informaria `fromState: 'expired'` para toda linha, perdendo o estado
+   * verdadeiro do evento de auditoria. A atomicidade e o isolamento por tenant
+   * via RLS permanecem.
    */
   const expireExpiredRequests = async (tx: DbTx, tenantId: string, actor: string): Promise<void> => {
     // clock_timestamp() retorna o momento efetivo da execução da instrução
     // SQL no banco, consistente com o relógio do PostgreSQL.
-    const updatedRows = await tx
-      .update(t.holderInformationRequest)
-      .set({
-        state: 'expired',
-        expiredAt: sql`clock_timestamp()`,
-        updatedAt: sql`clock_timestamp()`,
-      })
-      .where(
-        and(
-          eq(t.holderInformationRequest.tenantId, tenantId),
-          isNotNull(t.holderInformationRequest.expiresAt),
-          sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
-          sql`${t.holderInformationRequest.state} IN ('pending', 'in_progress')`,
-        ),
-      )
-      .returning({
-        id: t.holderInformationRequest.id,
-        fromState: t.holderInformationRequest.state,
-      })
+    for (const fromState of ['pending', 'in_progress'] as const) {
+      const updatedRows = await tx
+        .update(t.holderInformationRequest)
+        .set({
+          state: 'expired',
+          expiredAt: sql`clock_timestamp()`,
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(
+          and(
+            eq(t.holderInformationRequest.tenantId, tenantId),
+            eq(t.holderInformationRequest.state, fromState),
+            isNotNull(t.holderInformationRequest.expiresAt),
+            sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
+          ),
+        )
+        .returning({ id: t.holderInformationRequest.id })
 
-    // Insere eventos de auditoria para cada transição efetivamente realizada.
-    for (const row of updatedRows) {
-      const previousState = row.fromState as HolderInformationRequestState
-      await insertEvent(tx, tenantId, {
-        holderInformationRequestId: row.id,
-        eventType: 'expired',
-        fromState: previousState,
-        toState: 'expired',
-        actor,
-        details: JSON.stringify({ reason: 'expires_at vencido' }),
-      })
+      // Insere eventos de auditoria para cada transição efetivamente realizada.
+      for (const row of updatedRows) {
+        await insertEvent(tx, tenantId, {
+          holderInformationRequestId: row.id,
+          eventType: 'expired',
+          fromState,
+          toState: 'expired',
+          actor,
+          details: JSON.stringify({ reason: 'expires_at vencido' }),
+        })
+      }
     }
   }
 
@@ -146,8 +147,10 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
    * Transiciona para `expired` quando o prazo venceu e o estado ainda é
    * passível de expiração. Executado dentro da transação do chamador.
    *
-   * Se uma atualização concorrente alterar o registro antes do UPDATE, o
-   * registro é reavaliado recursivamente e o estado efetivo é retornado.
+   * Se o UPDATE condicional não afetar linhas — prazo empurrado para o futuro
+   * por outra operação ou transição concorrente entre a leitura e o UPDATE —
+   * o registro é recarregado e o estado vigente é retornado, sem repetir o
+   * ciclo de expiração.
    */
   const expireIfNeeded = async (
     tx: DbTx,
@@ -165,29 +168,28 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
       return currentState
     }
 
-    if (current.expiresAt !== null && current.expiresAt !== undefined) {
-      const [updated] = await tx
-        .update(t.holderInformationRequest)
-        .set({
-          state: 'expired',
-          expiredAt: sql`clock_timestamp()`,
-          updatedAt: sql`clock_timestamp()`,
-        })
-        .where(
-          and(
-            eq(t.holderInformationRequest.id, requestId),
-            eq(t.holderInformationRequest.tenantId, tenantId),
-            eq(t.holderInformationRequest.state, currentState),
-            sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
-          ),
-        )
-        .returning()
+    if (current.expiresAt === null || current.expiresAt === undefined) {
+      return currentState
+    }
 
-      if (!updated) {
-        // Atualização concorrente: reavaliar o registro atual.
-        return expireIfNeeded(tx, tenantId, requestId, actor)
-      }
+    const [updated] = await tx
+      .update(t.holderInformationRequest)
+      .set({
+        state: 'expired',
+        expiredAt: sql`clock_timestamp()`,
+        updatedAt: sql`clock_timestamp()`,
+      })
+      .where(
+        and(
+          eq(t.holderInformationRequest.id, requestId),
+          eq(t.holderInformationRequest.tenantId, tenantId),
+          eq(t.holderInformationRequest.state, currentState),
+          sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
+        ),
+      )
+      .returning()
 
+    if (updated) {
       await insertEvent(tx, tenantId, {
         holderInformationRequestId: requestId,
         eventType: 'expired',
@@ -200,7 +202,14 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
       return 'expired'
     }
 
-    return currentState
+    // O UPDATE não afetou linhas: o prazo não venceu (ex.: empurrado para o
+    // futuro por outra operação) ou o estado mudou concorrentemente entre a
+    // leitura e o UPDATE. Reavalia uma única vez com o estado vigente.
+    const reloaded = await findRequestById(tx, tenantId, requestId)
+
+    if (!reloaded) return null
+
+    return reloaded.state as HolderInformationRequestState
   }
 
   const toDto = (row: {
