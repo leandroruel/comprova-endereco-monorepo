@@ -124,6 +124,8 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
   const expireExpiredRequests = async (tx: DbTx, tenantId: string, actor: string): Promise<void> => {
     const now = new Date()
 
+    // Seleciona somente candidatas cujo prazo já venceu e estado ainda é
+    // passível de expiração, tudo em uma única consulta ao banco.
     const expiredCandidates = await tx
       .select({
         id: t.holderInformationRequest.id,

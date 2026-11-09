@@ -20,6 +20,21 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
     logger: deps.logger,
   })
 
+  const logControllerError = (operation: string, tenantId: string, error: unknown): void => {
+    deps.logger.error(
+      {
+        tenant_id: tenantId,
+        operation,
+        error_name: error instanceof Error ? error.name : 'unknown',
+        error_code:
+          error instanceof Error
+            ? ((error as { code?: string }).code ?? (error as { cause?: { code?: string } }).cause?.code)
+            : undefined,
+      },
+      'holder information request controller operation failed',
+    )
+  }
+
   return {
     createHolderInformationRequest: async (
       actor: string,
@@ -59,6 +74,7 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
             .type(PROBLEM_CONTENT_TYPE)
             .send(problem(400, 'INVALID_EXPIRES_AT', error.message))
         }
+        logControllerError('create', input.tenantId, error)
         return reply
           .code(500)
           .type(PROBLEM_CONTENT_TYPE)
@@ -157,6 +173,7 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
               .send(problem(409, 'INVALID_STATE_TRANSITION', error.message))
           }
         }
+        logControllerError('cancel', input.tenantId, error)
         return reply
           .code(500)
           .type(PROBLEM_CONTENT_TYPE)
