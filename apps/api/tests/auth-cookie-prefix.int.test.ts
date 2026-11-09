@@ -1,5 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
+import {
+  startTestDb,
+  startTestRedis,
+  TEST_APP_DB_PASSWORD,
+} from '@comprova/testing'
 import { runMigrations, createDbPool, sql } from '@comprova/db'
 import Redis from 'ioredis'
 import { createLogger, createMetrics } from '@comprova/observability'
@@ -225,9 +229,7 @@ describe('auth cookie prefix isolation', () => {
     expect(res.statusCode).toBe(200)
 
     verifierSetCookie = res.headers['set-cookie']
-    const verifierCookieStr = Array.isArray(verifierSetCookie)
-      ? verifierSetCookie.join('; ')
-      : verifierSetCookie
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : verifierSetCookie
     expect(verifierCookieStr).toContain('verifier-auth.session_token=')
   })
 
@@ -252,8 +254,7 @@ describe('auth cookie prefix isolation', () => {
     const respSetCookie = res.headers['set-cookie']
     const respCookieStr = Array.isArray(respSetCookie) ? respSetCookie.join('; ') : respSetCookie
     if (respCookieStr) {
-      const expiredAdminAuth =
-        respCookieStr.includes('admin-auth.session_token=') && respCookieStr.includes('Max-Age=0')
+      const expiredAdminAuth = respCookieStr.includes('admin-auth.session_token=') && respCookieStr.includes('Max-Age=0')
       expect(expiredAdminAuth).toBe(false)
     }
   })
@@ -286,9 +287,7 @@ describe('auth cookie prefix isolation', () => {
 describe('auth session context por origem do dashboard', () => {
   it('/api/me com Referer do verifier resolve a sessão do VERIFIER', async () => {
     const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
-    const verifierCookieStr = Array.isArray(verifierSetCookie)
-      ? verifierSetCookie.join('; ')
-      : (verifierSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
     const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
 
     const res = await app.inject({
@@ -306,9 +305,7 @@ describe('auth session context por origem do dashboard', () => {
 
   it('/api/me com Origin do verifier (POST) resolve a sessão do VERIFIER', async () => {
     const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
-    const verifierCookieStr = Array.isArray(verifierSetCookie)
-      ? verifierSetCookie.join('; ')
-      : (verifierSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
     const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
 
     // GET same-origin não envia Origin; POST envia. Validamos também o header
@@ -328,9 +325,7 @@ describe('auth session context por origem do dashboard', () => {
 
   it('/api/me com Referer do admin resolve a sessão do ADMIN', async () => {
     const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
-    const verifierCookieStr = Array.isArray(verifierSetCookie)
-      ? verifierSetCookie.join('; ')
-      : (verifierSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
     const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
 
     const res = await app.inject({
@@ -348,9 +343,7 @@ describe('auth session context por origem do dashboard', () => {
 
   it('/api/me sem Origin/Referer mantém o fallback legado (admin antes de verifier)', async () => {
     const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
-    const verifierCookieStr = Array.isArray(verifierSetCookie)
-      ? verifierSetCookie.join('; ')
-      : (verifierSetCookie ?? '')
+    const verifierCookieStr = Array.isArray(verifierSetCookie) ? verifierSetCookie.join('; ') : (verifierSetCookie ?? '')
     const cookies = `${adminCookieStr.split(';')[0]}; ${verifierCookieStr.split(';')[0]}`
 
     const res = await app.inject({

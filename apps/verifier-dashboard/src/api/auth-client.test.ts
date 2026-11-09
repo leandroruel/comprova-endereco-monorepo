@@ -47,7 +47,9 @@ describe('authClient real com fetch mockado (reprodução do 404)', () => {
   })
 
   it('signIn.email chama fetch com URL que inclui /api/auth (caminho do proxy Vite)', async () => {
-    mockFetch.mockResolvedValue(new Response(JSON.stringify({ token: 'abc', session: {} }), { status: 200 }))
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ token: 'abc', session: {} }), { status: 200 })
+    )
 
     const { authClient } = await import('./auth')
 
@@ -73,7 +75,9 @@ describe('authClient real com fetch mockado (reprodução do 404)', () => {
 
   it('sign-in 404 com error = { status: 404 } (sem message) → erro capturado, não silencioso', async () => {
     // Simula servidor retornando 404 com body vazio
-    mockFetch.mockResolvedValue(new Response('', { status: 404, statusText: 'Not Found' }))
+    mockFetch.mockResolvedValue(
+      new Response('', { status: 404, statusText: 'Not Found' })
+    )
 
     const { authClient } = await import('./auth')
 

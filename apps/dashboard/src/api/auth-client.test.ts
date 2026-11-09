@@ -30,14 +30,7 @@ describe('authClient admin sign-in (fetch mockado)', () => {
 
   it('signIn.email chama fetch com URL /api/auth/sign-in/email e header Origin', async () => {
     mockFetch.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          token: 'abc',
-          session: {},
-          user: { id: '1', email: 'a@b.com', name: 'A', role: 'admin' },
-        }),
-        { status: 200 },
-      ),
+      new Response(JSON.stringify({ token: 'abc', session: {}, user: { id: '1', email: 'a@b.com', name: 'A', role: 'admin' } }), { status: 200 })
     )
 
     const { authClient } = await import('./auth')

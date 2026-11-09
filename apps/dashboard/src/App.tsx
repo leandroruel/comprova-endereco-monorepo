@@ -48,10 +48,7 @@ export default function App() {
         userEmail={user?.email ?? undefined}
         userRole={user?.role ?? undefined}
         onLogout={() => {
-          void authClient
-            .signOut()
-            .then(() => window.location.reload())
-            .catch(() => window.location.reload())
+          void authClient.signOut().then(() => window.location.reload()).catch(() => window.location.reload())
         }}
       >
         {page === 'home' ? (
