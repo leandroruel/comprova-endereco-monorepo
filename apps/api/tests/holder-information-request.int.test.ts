@@ -1005,6 +1005,315 @@ describe('HolderInformationRequest Integration', () => {
     expect(getRes.json().state).toBe('expired')
   })
 
+  it('deve aplicar expiração em lote apenas para solicitações vencidas', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Expiração Lote Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Expiração Lote Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-lote-a', true)
+
+    // Cria três solicitações: uma vencida, uma dentro do prazo, uma cancelada.
+    const vencidaRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Vencida',
+        items: [{ itemId: 'item-vencida', description: 'Vencida', required: true }],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(vencidaRes.statusCode).toBe(201)
+    const vencidaId = vencidaRes.json().id
+
+    const validaRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Válida',
+        items: [{ itemId: 'item-valida', description: 'Válida', required: true }],
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(validaRes.statusCode).toBe(201)
+    const validaId = validaRes.json().id
+
+    const canceladaRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Cancelada',
+        items: [{ itemId: 'item-cancelada', description: 'Cancelada', required: true }],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(canceladaRes.statusCode).toBe(201)
+    const canceladaId = canceladaRes.json().id
+
+    // Cancela a terceira solicitação
+    await injectWithM2M(
+      'POST',
+      `/v1/information-requests/${canceladaId}/cancel?tenantId=${tenantId}`,
+      { toState: 'cancelled', reason: 'Não é mais necessário' },
+      key.secret,
+    )
+
+    // Vence o prazo da primeira diretamente no banco
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(t.holderInformationRequest.id, vencidaId))
+    })
+
+    // Lista para disparar a expiração em lote
+    const listRes = await injectWithM2M(
+      'GET',
+      `/v1/information-requests?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(listRes.statusCode).toBe(200)
+    const body = listRes.json()
+
+    // A vencida deve estar como expired
+    const vencida = body.requests.find((r: { id: string }) => r.id === vencidaId)
+    expect(vencida).toBeDefined()
+    expect(vencida.state).toBe('expired')
+
+    // A válida deve continuar como pending
+    const valida = body.requests.find((r: { id: string }) => r.id === validaId)
+    expect(valida).toBeDefined()
+    expect(valida.state).toBe('pending')
+
+    // A cancelada deve continuar como cancelled (não reativada por expiração)
+    const cancelada = body.requests.find((r: { id: string }) => r.id === canceladaId)
+    expect(cancelada).toBeDefined()
+    expect(cancelada.state).toBe('cancelled')
+
+    // Verifica eventos: apenas um evento expired para a vencida
+    const events = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({
+          eventType: t.holderInformationRequestEvent.eventType,
+          holderInformationRequestId: t.holderInformationRequestEvent.holderInformationRequestId,
+        })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.eventType, 'expired'),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    expect(events.length).toBe(1)
+    expect(events[0]!.holderInformationRequestId).toBe(vencidaId)
+  })
+
+  it('deve aplicar expiração em lote sem criar eventos quando nada venceu', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Expiração Lote Vazio Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Expiração Lote Vazio Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-lote-vazio', true)
+
+    // Cria solicitação dentro do prazo
+    await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Sem expiração',
+        items: [{ itemId: 'item-sem-expiração', description: 'Sem expiração', required: true }],
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      key.secret,
+    )
+
+    // Lista para disparar a expiração em lote (não deve criar eventos)
+    const listRes = await injectWithM2M(
+      'GET',
+      `/v1/information-requests?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(listRes.statusCode).toBe(200)
+    const body = listRes.json()
+    expect(body.requests.length).toBe(1)
+    expect(body.requests[0].state).toBe('pending')
+
+    // Verifica que nenhum evento de expiração foi criado
+    const events = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({ eventType: t.holderInformationRequestEvent.eventType })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.eventType, 'expired'),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    expect(events.length).toBe(0)
+  })
+
+  it('deve cancelar antes do prazo com resultado cancelled', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Cancel Antes Prazo Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Cancel Antes Prazo Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-cancel-antes-prazo', true)
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Cancelar antes do prazo',
+        items: [{ itemId: 'item-a', description: 'Item A', required: true }],
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const requestId = createRes.json().id
+
+    const cancelRes = await injectWithM2M(
+      'POST',
+      `/v1/information-requests/${requestId}/cancel?tenantId=${tenantId}`,
+      { toState: 'cancelled', reason: 'Antes do prazo' },
+      key.secret,
+    )
+    expect(cancelRes.statusCode).toBe(200)
+    expect(cancelRes.json().state).toBe('cancelled')
+
+    // Verifica evento de cancelamento
+    const events = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({
+          eventType: t.holderInformationRequestEvent.eventType,
+          fromState: t.holderInformationRequestEvent.fromState,
+          toState: t.holderInformationRequestEvent.toState,
+        })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    const cancelEvent = events.find((e) => e.eventType === 'cancelled')
+    expect(cancelEvent).toBeDefined()
+    expect(cancelEvent?.fromState).toBe('pending')
+    expect(cancelEvent?.toState).toBe('cancelled')
+  })
+
+  it('deve expirar em vez de cancelar quando prazo venceu entre leitura e atualização', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Corrida Expiração Cancel Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Corrida Expiração Cancel Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-corrida-exp-cancel', true)
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Corrida expiração x cancelamento',
+        items: [{ itemId: 'item-a', description: 'Item A', required: true }],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const requestId = createRes.json().id
+
+    // Vence o prazo diretamente no banco (simulando passagem do tempo entre
+    // leitura e atualização da requisição de cancelamento)
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(t.holderInformationRequest.id, requestId))
+    })
+
+    // Tenta cancelar: deve persistir expired, não cancelled
+    const cancelRes = await injectWithM2M(
+      'POST',
+      `/v1/information-requests/${requestId}/cancel?tenantId=${tenantId}`,
+      { toState: 'cancelled', reason: 'Após expiração' },
+      key.secret,
+    )
+    expect(cancelRes.statusCode).toBe(200)
+    expect(cancelRes.json().state).toBe('expired')
+    expect(cancelRes.json().cancelledAt).toBeNull()
+
+    // Verifica evento de expiração
+    const events = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({
+          eventType: t.holderInformationRequestEvent.eventType,
+          fromState: t.holderInformationRequestEvent.fromState,
+          toState: t.holderInformationRequestEvent.toState,
+        })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    const expiredEvent = events.find((e) => e.eventType === 'expired')
+    expect(expiredEvent).toBeDefined()
+    expect(expiredEvent?.fromState).toBe('pending')
+    expect(expiredEvent?.toState).toBe('expired')
+    expect(events.some((e) => e.eventType === 'cancelled')).toBe(false)
+  })
+
   it('não deve cancelar solicitação inexistente', async () => {
     const tenantId = await createOrganization(
       ownerSessionCookie,

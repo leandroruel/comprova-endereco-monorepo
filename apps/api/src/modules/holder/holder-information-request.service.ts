@@ -19,25 +19,6 @@ const errorCodeOf = (error: unknown, depth = 0): string | null => {
   return errorCodeOf((error as { cause?: unknown }).cause, depth + 1)
 }
 
-const HOLDER_INFORMATION_REQUEST_STATE_TRANSITIONS: Record<
-  HolderInformationRequestState,
-  readonly HolderInformationRequestState[]
-> = {
-  pending: ['in_progress', 'completed', 'cancelled', 'expired'],
-  in_progress: ['completed', 'cancelled', 'expired'],
-  completed: [],
-  cancelled: [],
-  expired: [],
-}
-
-const isValidTransition = (
-  fromState: HolderInformationRequestState | null,
-  toState: HolderInformationRequestState,
-): boolean => {
-  if (fromState === null) return toState === 'pending'
-  return HOLDER_INFORMATION_REQUEST_STATE_TRANSITIONS[fromState]?.includes(toState) ?? false
-}
-
 const isExpirableState = (state: HolderInformationRequestState): boolean => {
   return ['pending', 'in_progress'].includes(state)
 }
@@ -117,15 +98,20 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
 
   /**
    * Persiste `expired` para todas as solicitações vencidas do tenant cujos
-   * estados ainda são passíveis de expiração. Busca os candidatos primeiro e
-   * depois atualiza individualmente, evitando uso de expressões SQL cruas no
-   * UPDATE que poderiam não ser suportadas pelo driver.
+   * estados ainda são passíveis de expiração.
+   *
+   * O filtro de prazo é aplicado diretamente no PostgreSQL, evitando carregar
+   * todo o histórico do tenant e filtrar em JavaScript. A atualização e o
+   * evento de auditoria ocorrem na mesma transação, preservando o isolamento
+   * multi-tenant via RLS.
    */
   const expireExpiredRequests = async (tx: DbTx, tenantId: string, actor: string): Promise<void> => {
     const now = new Date()
 
-    // Seleciona somente candidatas cujo prazo já venceu e estado ainda é
-    // passível de expiração, tudo em uma única consulta ao banco.
+    // Seleciona candidatas com preenchimento de prazo diretamente no banco.
+    // O filtro de prazo vencido e estado passível é aplicado em JavaScript
+    // sobre esse subconjunto reduzido, evitando carregar todo o histórico do
+    // tenant.
     const expiredCandidates = await tx
       .select({
         id: t.holderInformationRequest.id,
@@ -447,20 +433,22 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
     const now = new Date()
 
     const [updated] = await withTenant(db, tenantId, async (tx) => {
-      // Buscar o registro atual dentro da transação de cancelamento.
+      // Verificar se a solicitação existe e pertence ao tenant.
       const current = await findRequestById(tx, tenantId, requestId)
 
       if (!current) throw new Error('holder information request not found')
 
       const currentState = current.state as HolderInformationRequestState
 
-      // Se a solicitação já estiver vencida, persistir `expired` em vez de `cancelled`.
-      if (
-        current.expiresAt !== null &&
-        current.expiresAt !== undefined &&
-        current.expiresAt < now &&
-        isExpirableState(currentState)
-      ) {
+      // Estados terminais não podem ser cancelados.
+      if (!isExpirableState(currentState)) {
+        throw new Error(`invalid state transition from '${currentState}' to 'cancelled'`)
+      }
+
+      // Se o prazo já venceu, persistir `expired` em vez de `cancelled`.
+      // Esta verificação é feita no momento efetivo da operação, não apenas
+      // na leitura inicial, para evitar corridas entre leitura e escrita.
+      if (current.expiresAt !== null && current.expiresAt !== undefined && current.expiresAt < now) {
         const [expiredRow] = await tx
           .update(t.holderInformationRequest)
           .set({
@@ -485,18 +473,16 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
           fromState: currentState,
           toState: 'expired',
           actor,
-          details: JSON.stringify({
-            reason: 'expires_at vencido antes do cancelamento',
-          }),
+          details: JSON.stringify({ reason: 'expires_at vencido antes do cancelamento' }),
         })
 
         return [expiredRow]
       }
 
-      if (!isValidTransition(currentState, 'cancelled')) {
-        throw new Error(`invalid state transition from '${currentState}' to 'cancelled'`)
-      }
-
+      // Tentar cancelar apenas se o estado permitir. O prazo é verificado no
+      // momento efetivo do UPDATE: se o prazo já venceu, o UPDATE abaixo não
+      // afetará linhas (porque o estado já mudou para 'expired' via outra
+      // operação), e então recarregamos e reavaliamos.
       const [row] = await tx
         .update(t.holderInformationRequest)
         .set({
@@ -513,7 +499,57 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
         )
         .returning()
 
-      if (!row) throw new Error('concurrent state transition detected')
+      if (!row) {
+        // Se não atualizou, pode ser porque o prazo venceu entre a leitura e o
+        // UPDATE, ou porque outra operação alterou o estado. Recarregar e
+        // reavaliar.
+        const reloaded = await findRequestById(tx, tenantId, requestId)
+
+        if (!reloaded) throw new Error('holder information request not found')
+
+        const reloadedState = reloaded.state as HolderInformationRequestState
+
+        // Se o prazo venceu e o estado ainda é passível de expiração, persistir
+        // `expired` em vez de `cancelled`.
+        if (
+          reloaded.expiresAt !== null &&
+          reloaded.expiresAt !== undefined &&
+          reloaded.expiresAt < now &&
+          isExpirableState(reloadedState)
+        ) {
+          const [expiredRow] = await tx
+            .update(t.holderInformationRequest)
+            .set({
+              state: 'expired',
+              expiredAt: now,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(t.holderInformationRequest.id, requestId),
+                eq(t.holderInformationRequest.tenantId, tenantId),
+                eq(t.holderInformationRequest.state, reloadedState),
+              ),
+            )
+            .returning()
+
+          if (!expiredRow) throw new Error('concurrent state transition detected')
+
+          await insertEvent(tx, tenantId, {
+            holderInformationRequestId: requestId,
+            eventType: 'expired',
+            fromState: reloadedState,
+            toState: 'expired',
+            actor,
+            details: JSON.stringify({ reason: 'expires_at vencido antes do cancelamento' }),
+          })
+
+          return [expiredRow]
+        }
+
+        // Estado terminal ou outro estado inválido para cancelamento.
+        throw new Error(`invalid state transition from '${reloadedState}' to 'cancelled'`)
+      }
 
       await insertEvent(tx, tenantId, {
         holderInformationRequestId: requestId,
