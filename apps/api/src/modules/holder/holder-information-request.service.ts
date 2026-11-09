@@ -1,4 +1,4 @@
-import { and, count, eq, isNotNull, lt, sql, withTenant } from '@comprova/db'
+import { and, count, eq, isNotNull, sql, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
@@ -107,23 +107,19 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
    */
   const expireExpiredRequests = async (tx: DbTx, tenantId: string, actor: string): Promise<void> => {
     // clock_timestamp() retorna o momento efetivo da execução da instrução
-    // SQL no banco, consistente com o relógio do PostgreSQL. Usamos lt() com
-    // o valor de now() do Node.js; a diferença de alguns milissegundos entre
-    // o relógio da aplicação e o do banco é insignificante para fins de
-    // expiração de solicitações.
-    const now = new Date()
+    // SQL no banco, consistente com o relógio do PostgreSQL.
     const updatedRows = await tx
       .update(t.holderInformationRequest)
       .set({
         state: 'expired',
-        expiredAt: now,
-        updatedAt: now,
+        expiredAt: sql`clock_timestamp()`,
+        updatedAt: sql`clock_timestamp()`,
       })
       .where(
         and(
           eq(t.holderInformationRequest.tenantId, tenantId),
           isNotNull(t.holderInformationRequest.expiresAt),
-          lt(t.holderInformationRequest.expiresAt, now),
+          sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
           sql`${t.holderInformationRequest.state} IN ('pending', 'in_progress')`,
         ),
       )
@@ -164,26 +160,25 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
     if (!current) return null
 
     const currentState = current.state as HolderInformationRequestState
-    const now = new Date()
 
-    if (
-      current.expiresAt !== null &&
-      current.expiresAt !== undefined &&
-      current.expiresAt < now &&
-      isExpirableState(currentState)
-    ) {
+    if (!isExpirableState(currentState)) {
+      return currentState
+    }
+
+    if (current.expiresAt !== null && current.expiresAt !== undefined) {
       const [updated] = await tx
         .update(t.holderInformationRequest)
         .set({
           state: 'expired',
-          expiredAt: now,
-          updatedAt: now,
+          expiredAt: sql`clock_timestamp()`,
+          updatedAt: sql`clock_timestamp()`,
         })
         .where(
           and(
             eq(t.holderInformationRequest.id, requestId),
             eq(t.holderInformationRequest.tenantId, tenantId),
             eq(t.holderInformationRequest.state, currentState),
+            sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
           ),
         )
         .returning()
@@ -443,8 +438,10 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
             eq(t.holderInformationRequest.tenantId, tenantId),
             eq(t.holderInformationRequest.state, currentState),
             // Apenas cancela se o prazo não venceu. clock_timestamp() é a
-            // hora efetiva de execução da instrução SQL no banco.
-            sql`${t.holderInformationRequest.expiresAt} IS NULL OR ${t.holderInformationRequest.expiresAt} >= clock_timestamp()`,
+            // hora efetiva de execução da instrução SQL no banco. O OR é
+            // agrupado explicitamente para não escapar das condições de ID,
+            // tenant e estado.
+            sql`(${t.holderInformationRequest.expiresAt} IS NULL OR ${t.holderInformationRequest.expiresAt} >= clock_timestamp())`,
           ),
         )
         .returning()
@@ -480,6 +477,8 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
                 eq(t.holderInformationRequest.id, requestId),
                 eq(t.holderInformationRequest.tenantId, tenantId),
                 eq(t.holderInformationRequest.state, reloadedState),
+                isNotNull(t.holderInformationRequest.expiresAt),
+                sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
               ),
             )
             .returning()
