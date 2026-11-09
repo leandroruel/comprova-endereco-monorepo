@@ -1,5 +1,6 @@
 import type { FastifyReply } from 'fastify'
 import type { Db } from '@comprova/db'
+import type { Logger } from '@comprova/observability'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import {
   type HolderInformationRequestCreatedResponseType,
@@ -10,10 +11,14 @@ import { makeHolderInformationRequestService } from './holder-information-reques
 
 export interface HolderInformationRequestControllerDeps {
   readonly db: Db
+  readonly logger: Logger
 }
 
 export const makeHolderInformationRequestController = (deps: HolderInformationRequestControllerDeps) => {
-  const service = makeHolderInformationRequestService(deps)
+  const service = makeHolderInformationRequestService({
+    db: deps.db,
+    logger: deps.logger,
+  })
 
   return {
     createHolderInformationRequest: async (
@@ -29,13 +34,17 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
       reply: FastifyReply,
     ): Promise<HolderInformationRequestCreatedResponseType | FastifyReply> => {
       try {
-        const request = await service.createHolderInformationRequest(actor, input.tenantId, {
-          holderId: input.holderId,
-          type: input.type,
-          purpose: input.purpose,
-          items: input.items as never,
-          expiresAt: input.expiresAt,
-        })
+        const request = await service.createHolderInformationRequest(
+          actor,
+          input.tenantId,
+          {
+            type: input.type,
+            purpose: input.purpose,
+            items: input.items as never,
+            expiresAt: input.expiresAt,
+          },
+          input.holderId,
+        )
         return reply.code(201).send(request)
       } catch (error) {
         if (error instanceof Error && error.message === 'holder not found') {

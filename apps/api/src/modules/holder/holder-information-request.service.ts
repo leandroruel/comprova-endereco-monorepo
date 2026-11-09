@@ -1,6 +1,7 @@
-import { and, count, eq, sql, withTenant } from '@comprova/db'
+import { and, count, eq, isNotNull, sql, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
+import type { Logger } from '@comprova/observability'
 import {
   type HolderInformationRequestDto,
   type HolderInformationRequestState,
@@ -8,6 +9,15 @@ import {
   type HolderInformationRequestItems,
 } from '@comprova/contracts'
 import type { Db, DbTx } from '@comprova/db'
+
+const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
+
+const errorCodeOf = (error: unknown, depth = 0): string | null => {
+  if (depth > 3 || typeof error !== 'object' || error === null) return null
+  const code = (error as { code?: unknown }).code
+  if (typeof code === 'string') return code
+  return errorCodeOf((error as { cause?: unknown }).cause, depth + 1)
+}
 
 const HOLDER_INFORMATION_REQUEST_STATE_TRANSITIONS: Record<
   HolderInformationRequestState,
@@ -32,8 +42,42 @@ const isExpirableState = (state: HolderInformationRequestState): boolean => {
   return ['pending', 'in_progress'].includes(state)
 }
 
-export const makeHolderInformationRequestService = (deps: { readonly db: Db }) => {
-  const { db } = deps
+/**
+ * Busca o registro atual de uma solicitação dentro do tenant informado.
+ * Retorna null se não existir ou não estiver acessível no tenant.
+ */
+const findRequestById = async (
+  tx: DbTx,
+  tenantId: string,
+  requestId: string,
+): Promise<{
+  id: string
+  tenantId: string
+  holderId: string
+  type: string
+  purpose: string
+  items: unknown
+  state: string
+  expiresAt: Date | null
+  createdBy: string
+  createdAt: Date
+  updatedAt: Date
+  completedAt: Date | null
+  cancelledAt: Date | null
+  expiredAt: Date | null
+} | null> => {
+  const [row] = await tx
+    .select()
+    .from(t.holderInformationRequest)
+    .where(
+      and(eq(t.holderInformationRequest.id, requestId), eq(t.holderInformationRequest.tenantId, tenantId)),
+    )
+    .limit(1)
+  return row ?? null
+}
+
+export const makeHolderInformationRequestService = (deps: { readonly db: Db; readonly logger: Logger }) => {
+  const { db, logger } = deps
 
   const insertEvent = async (
     tx: DbTx,
@@ -59,9 +103,84 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
     })
   }
 
+  const logServiceError = (operation: string, tenantId: string, error: unknown): void => {
+    logger.error(
+      {
+        tenant_id: tenantId,
+        operation,
+        error_name: errorNameOf(error),
+        error_code: errorCodeOf(error),
+      },
+      'holder information request operation failed',
+    )
+  }
+
+  /**
+   * Persiste `expired` para todas as solicitações vencidas do tenant cujos
+   * estados ainda são passíveis de expiração. Busca os candidatos primeiro e
+   * depois atualiza individualmente, evitando uso de expressões SQL cruas no
+   * UPDATE que poderiam não ser suportadas pelo driver.
+   */
+  const expireExpiredRequests = async (tx: DbTx, tenantId: string, actor: string): Promise<void> => {
+    const now = new Date()
+
+    const expiredCandidates = await tx
+      .select({
+        id: t.holderInformationRequest.id,
+        state: t.holderInformationRequest.state,
+        expiresAt: t.holderInformationRequest.expiresAt,
+      })
+      .from(t.holderInformationRequest)
+      .where(
+        and(
+          eq(t.holderInformationRequest.tenantId, tenantId),
+          isNotNull(t.holderInformationRequest.expiresAt),
+        ),
+      )
+
+    const nowMs = now.getTime()
+    for (const candidate of expiredCandidates) {
+      const expiresAtMs = candidate.expiresAt?.getTime() ?? 0
+      if (expiresAtMs >= nowMs) continue
+
+      const previousState = candidate.state as HolderInformationRequestState
+      if (!isExpirableState(previousState)) continue
+
+      const [updated] = await tx
+        .update(t.holderInformationRequest)
+        .set({
+          state: 'expired',
+          expiredAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(t.holderInformationRequest.id, candidate.id),
+            eq(t.holderInformationRequest.tenantId, tenantId),
+            eq(t.holderInformationRequest.state, previousState),
+          ),
+        )
+        .returning()
+
+      if (!updated) continue
+
+      await insertEvent(tx, tenantId, {
+        holderInformationRequestId: candidate.id,
+        eventType: 'expired',
+        fromState: previousState,
+        toState: 'expired',
+        actor,
+        details: JSON.stringify({ reason: 'expires_at vencido' }),
+      })
+    }
+  }
+
   /**
    * Transiciona para `expired` quando o prazo venceu e o estado ainda é
    * passível de expiração. Executado dentro da transação do chamador.
+   *
+   * Se uma atualização concorrente alterar o registro antes do UPDATE, o
+   * registro é reavaliado recursivamente e o estado efetivo é retornado.
    */
   const expireIfNeeded = async (
     tx: DbTx,
@@ -69,13 +188,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
     requestId: string,
     actor: string,
   ): Promise<HolderInformationRequestState | null> => {
-    const [current] = await tx
-      .select()
-      .from(t.holderInformationRequest)
-      .where(
-        and(eq(t.holderInformationRequest.id, requestId), eq(t.holderInformationRequest.tenantId, tenantId)),
-      )
-      .limit(1)
+    const current = await findRequestById(tx, tenantId, requestId)
 
     if (!current) return null
 
@@ -104,7 +217,10 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
         )
         .returning()
 
-      if (!updated) return null
+      if (!updated) {
+        // Atualização concorrente: reavaliar o registro atual.
+        return expireIfNeeded(tx, tenantId, requestId, actor)
+      }
 
       await insertEvent(tx, tenantId, {
         holderInformationRequestId: requestId,
@@ -157,19 +273,19 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
     actor: string,
     tenantId: string,
     create: {
-      readonly holderId: string
       readonly type: string
       readonly purpose: string
       readonly items: HolderInformationRequestItems
       readonly expiresAt?: string
     },
+    holderId: string,
   ): Promise<HolderInformationRequestDto> => {
     // Validar que o holder pertence ao tenant informado (mesma transação).
     const existingHolder = await withTenant(db, tenantId, async (tx) => {
       return tx
         .select({ holderId: t.holder.holderId, tenantId: t.holder.tenantId })
         .from(t.holder)
-        .where(and(eq(t.holder.holderId, create.holderId), eq(t.holder.tenantId, tenantId)))
+        .where(and(eq(t.holder.holderId, holderId), eq(t.holder.tenantId, tenantId)))
         .limit(1)
     })
 
@@ -186,7 +302,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
     }
 
     const requestId = randomUUID()
-    const now = new Date()
+    const createdAt = new Date()
 
     const [inserted] = await withTenant(db, tenantId, async (tx) => {
       const [row] = await tx
@@ -194,15 +310,15 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
         .values({
           id: requestId,
           tenantId,
-          holderId: create.holderId,
+          holderId,
           type: create.type,
           purpose: create.purpose,
           items: create.items,
           state: 'pending' as HolderInformationRequestState,
           expiresAt: create.expiresAt ? new Date(create.expiresAt) : null,
           createdBy: actor,
-          createdAt: now,
-          updatedAt: now,
+          createdAt,
+          updatedAt: createdAt,
         })
         .returning()
 
@@ -220,7 +336,10 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
       return [row]
     })
 
-    if (!inserted) throw new Error('failed to create holder information request')
+    if (!inserted) {
+      logServiceError('create', tenantId, new Error('insert returned no row'))
+      throw new Error('failed to create holder information request')
+    }
 
     return toDto(inserted)
   }
@@ -231,16 +350,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
     requestId: string,
   ): Promise<HolderInformationRequestDto | null> => {
     const result = await withTenant(db, tenantId, async (tx) => {
-      const [current] = await tx
-        .select()
-        .from(t.holderInformationRequest)
-        .where(
-          and(
-            eq(t.holderInformationRequest.id, requestId),
-            eq(t.holderInformationRequest.tenantId, tenantId),
-          ),
-        )
-        .limit(1)
+      const current = await findRequestById(tx, tenantId, requestId)
 
       if (!current) return null
 
@@ -248,16 +358,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
 
       if (currentState === null) return null
 
-      const [row] = await tx
-        .select()
-        .from(t.holderInformationRequest)
-        .where(
-          and(
-            eq(t.holderInformationRequest.id, requestId),
-            eq(t.holderInformationRequest.tenantId, tenantId),
-          ),
-        )
-        .limit(1)
+      const row = await findRequestById(tx, tenantId, requestId)
 
       if (!row) return null
       return toDto(row)
@@ -284,6 +385,12 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
     limit: number
     offset: number
   }> => {
+    // Garantir que solicitações vencidas sejam persistidas como `expired`
+    // antes da contagem e da listagem, preservando consistência e auditoria.
+    await withTenant(db, tenantId, async (tx) => {
+      await expireExpiredRequests(tx, tenantId, actor)
+    })
+
     const conditions = [eq(t.holderInformationRequest.tenantId, tenantId)]
 
     if (opts.holderId) {
@@ -335,17 +442,59 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
     requestId: string,
     transition: { readonly reason?: string },
   ): Promise<HolderInformationRequestDto> => {
-    // Obter estado atual com verificação de tenant.
-    const current = await getHolderInformationRequest(actor, tenantId, requestId)
-    if (!current) throw new Error('holder information request not found')
-
-    if (!isValidTransition(current.state, 'cancelled')) {
-      throw new Error(`invalid state transition from '${current.state}' to 'cancelled'`)
-    }
-
     const now = new Date()
 
     const [updated] = await withTenant(db, tenantId, async (tx) => {
+      // Buscar o registro atual dentro da transação de cancelamento.
+      const current = await findRequestById(tx, tenantId, requestId)
+
+      if (!current) throw new Error('holder information request not found')
+
+      const currentState = current.state as HolderInformationRequestState
+
+      // Se a solicitação já estiver vencida, persistir `expired` em vez de `cancelled`.
+      if (
+        current.expiresAt !== null &&
+        current.expiresAt !== undefined &&
+        current.expiresAt < now &&
+        isExpirableState(currentState)
+      ) {
+        const [expiredRow] = await tx
+          .update(t.holderInformationRequest)
+          .set({
+            state: 'expired',
+            expiredAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(t.holderInformationRequest.id, requestId),
+              eq(t.holderInformationRequest.tenantId, tenantId),
+              eq(t.holderInformationRequest.state, currentState),
+            ),
+          )
+          .returning()
+
+        if (!expiredRow) throw new Error('concurrent state transition detected')
+
+        await insertEvent(tx, tenantId, {
+          holderInformationRequestId: requestId,
+          eventType: 'expired',
+          fromState: currentState,
+          toState: 'expired',
+          actor,
+          details: JSON.stringify({
+            reason: 'expires_at vencido antes do cancelamento',
+          }),
+        })
+
+        return [expiredRow]
+      }
+
+      if (!isValidTransition(currentState, 'cancelled')) {
+        throw new Error(`invalid state transition from '${currentState}' to 'cancelled'`)
+      }
+
       const [row] = await tx
         .update(t.holderInformationRequest)
         .set({
@@ -357,7 +506,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
           and(
             eq(t.holderInformationRequest.id, requestId),
             eq(t.holderInformationRequest.tenantId, tenantId),
-            eq(t.holderInformationRequest.state, current.state),
+            eq(t.holderInformationRequest.state, currentState),
           ),
         )
         .returning()
@@ -367,7 +516,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
       await insertEvent(tx, tenantId, {
         holderInformationRequestId: requestId,
         eventType: 'cancelled',
-        fromState: current.state,
+        fromState: currentState,
         toState: 'cancelled',
         actor,
         details: JSON.stringify({ reason: transition.reason }),
@@ -376,7 +525,10 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db }) =
       return [row]
     })
 
-    if (!updated) throw new Error('failed to cancel holder information request')
+    if (!updated) {
+      logServiceError('cancel', tenantId, new Error('update returned no row'))
+      throw new Error('failed to cancel holder information request')
+    }
 
     return toDto(updated)
   }

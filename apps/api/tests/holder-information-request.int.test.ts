@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto'
-import { createDbPool, runMigrations } from '@comprova/db'
+import { and, eq, withTenant, createDbPool, runMigrations } from '@comprova/db'
+import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import Redis from 'ioredis'
@@ -227,11 +228,12 @@ describe('HolderInformationRequest Integration', () => {
 
     const holderId = await createHolder(key, tenantId, 'ext-ref-info-001', true)
 
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
     const res = await injectWithM2M(
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Comprovante de residência atualizado',
         items: [
@@ -242,7 +244,7 @@ describe('HolderInformationRequest Integration', () => {
             documentType: 'proof_of_address',
           },
         ],
-        expiresAt: '2027-01-01T00:00:00Z',
+        expiresAt,
       },
       key.secret,
     )
@@ -256,7 +258,7 @@ describe('HolderInformationRequest Integration', () => {
     expect(body.state).toBe('pending')
     expect(body.items).toHaveLength(1)
     expect(body.items[0].itemId).toBe('address-proof')
-    expect(body.expiresAt).toBe('2027-01-01T00:00:00.000Z')
+    expect(body.expiresAt).toBe(expiresAt)
   })
 
   it('não deve criar solicitação para Holder inexistente', async () => {
@@ -277,7 +279,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/00000000-0000-4000-8000-000000000000/information-requests?tenantId=${tenantId}`,
       {
-        holderId: '00000000-0000-4000-8000-000000000000',
         type: 'documento_complementar',
         purpose: 'Qualquer coisa',
         items: [
@@ -324,7 +325,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${ownerTenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Tentativa cruzada',
         items: [
@@ -363,7 +363,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Sem escrita',
         items: [
@@ -395,7 +394,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Itens duplicados',
         items: [
@@ -432,7 +430,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Prazo expirado',
         items: [
@@ -466,7 +463,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Para consulta',
         items: [
@@ -540,7 +536,6 @@ describe('HolderInformationRequest Integration', () => {
         'POST',
         `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
         {
-          holderId,
           type: 'documento_complementar',
           purpose: `Solicitação ${i}`,
           items: [
@@ -586,7 +581,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Para listagem',
         items: [
@@ -630,7 +624,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Para cancelar',
         items: [
@@ -677,7 +670,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Para cancelar duplo',
         items: [
@@ -709,6 +701,217 @@ describe('HolderInformationRequest Integration', () => {
       key.secret,
     )
     expect(res.statusCode).toBe(409)
+  })
+
+  it('deve persistir `expired` em vez de `cancelled` quando prazo já venceu', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Expiração Cancel Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Expiração Cancel Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-expiracao-cancel-info', true)
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Prazo vencido antes do cancelamento',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante',
+            required: true,
+          },
+        ],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const requestId = createRes.json().id
+
+    // Vence o prazo diretamente no banco
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(t.holderInformationRequest.id, requestId))
+    })
+
+    // Tenta cancelar: deve persistir `expired`, não `cancelled`
+    const cancelRes = await injectWithM2M(
+      'POST',
+      `/v1/information-requests/${requestId}/cancel?tenantId=${tenantId}`,
+      { toState: 'cancelled', reason: 'Após expiração' },
+      key.secret,
+    )
+    expect(cancelRes.statusCode).toBe(200)
+    expect(cancelRes.json().state).toBe('expired')
+    expect(cancelRes.json().cancelledAt).toBeNull()
+
+    // Verifica evento de expiração (não de cancelamento)
+    const events = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({ event_type: t.holderInformationRequestEvent.eventType })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    expect(events.some((e) => e.event_type === 'expired')).toBe(true)
+    expect(events.some((e) => e.event_type === 'cancelled')).toBe(false)
+  })
+
+  it('deve listar solicitações do tenant filtrando por holderId', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Filtro Holder Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Filtro Holder Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderIdA = await createHolder(key, tenantId, 'ext-ref-filtro-a', true)
+    const holderIdB = await createHolder(key, tenantId, 'ext-ref-filtro-b', true)
+
+    // Cria solicitações para cada holder
+    await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderIdA}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Holder A',
+        items: [{ itemId: 'item-a', description: 'Desc A', required: true }],
+      },
+      key.secret,
+    )
+    await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderIdB}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Holder B',
+        items: [{ itemId: 'item-b', description: 'Desc B', required: true }],
+      },
+      key.secret,
+    )
+
+    // Lista filtrando por holderIdA
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/information-requests?tenantId=${tenantId}&holderId=${holderIdA}`,
+      undefined,
+      key.secret,
+    )
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.requests.length).toBe(1)
+    expect(body.requests[0].holderId).toBe(holderIdA)
+  })
+
+  it('deve rejeitar filtro de estado inválido na listagem', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Estado Invalido Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Estado Invalido Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const res = await injectWithM2M(
+      'GET',
+      `/v1/information-requests?tenantId=${tenantId}&state=estado_inexistente`,
+      undefined,
+      key.secret,
+    )
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('deve aplicar expiração quando prazo vence antes de operação de leitura', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Expiração Info', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Expiração Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-expiracao-info', true)
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Para expirar',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante',
+            required: true,
+          },
+        ],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const requestId = createRes.json().id
+
+    // Avança o prazo diretamente no banco para simular expiração
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(t.holderInformationRequest.id, requestId))
+    })
+
+    // Consulta deve retornar estado `expired` (expiração aplicada lazy)
+    const getRes = await injectWithM2M(
+      'GET',
+      `/v1/information-requests/${requestId}?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(getRes.statusCode).toBe(200)
+    expect(getRes.json().state).toBe('expired')
+
+    // Verifica evento de expiração persistido
+    const events = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({ event_type: t.holderInformationRequestEvent.eventType })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    expect(events.some((e) => e.event_type === 'expired')).toBe(true)
   })
 
   it('não deve cancelar solicitação inexistente', async () => {
@@ -751,7 +954,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${outroHolderId}/information-requests?tenantId=${outroTenantId}`,
       {
-        holderId: outroHolderId,
         type: 'documento_complementar',
         purpose: 'Solicitação isolada',
         items: [
@@ -806,7 +1008,6 @@ describe('HolderInformationRequest Integration', () => {
       'POST',
       `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
       {
-        holderId,
         type: 'documento_complementar',
         purpose: 'Para auditoria',
         items: [
@@ -822,18 +1023,62 @@ describe('HolderInformationRequest Integration', () => {
     expect(createRes.statusCode).toBe(201)
     const requestId = createRes.json().id
 
-    // Verifica evento de criação
-    const res = await injectWithM2M(
+    // Verifica evento de criação persistido na tabela de eventos
+    const createdEvents = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({
+          event_type: t.holderInformationRequestEvent.eventType,
+          from_state: t.holderInformationRequestEvent.fromState,
+          to_state: t.holderInformationRequestEvent.toState,
+          actor: t.holderInformationRequestEvent.actor,
+        })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    expect(createdEvents.length).toBeGreaterThanOrEqual(1)
+    const createdEvent = createdEvents.find((e) => e.event_type === 'created')
+    expect(createdEvent).toBeDefined()
+    expect(createdEvent?.from_state).toBeNull()
+    expect(createdEvent?.to_state).toBe('pending')
+
+    // Verifica cancelamento via API
+    const cancelRes = await injectWithM2M(
       'POST',
       `/v1/information-requests/${requestId}/cancel?tenantId=${tenantId}`,
       { toState: 'cancelled', reason: 'Auditoria cancelamento' },
       key.secret,
     )
-    expect(res.statusCode).toBe(200)
+    expect(cancelRes.statusCode).toBe(200)
 
-    // Lista eventos via serviço direto não exposto por API nesta entrega,
-    // mas a consistência é verificada pelo estado final e pelo evento DB.
-    // Aqui confirmamos que o cancelamento foi persistido com estado correto.
+    // Verifica evento de cancelamento persistido
+    const cancelledEvents = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({
+          event_type: t.holderInformationRequestEvent.eventType,
+          from_state: t.holderInformationRequestEvent.fromState,
+          to_state: t.holderInformationRequestEvent.toState,
+          actor: t.holderInformationRequestEvent.actor,
+        })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    expect(cancelledEvents.length).toBeGreaterThanOrEqual(2)
+    const cancelEvent = cancelledEvents.find((e) => e.event_type === 'cancelled')
+    expect(cancelEvent).toBeDefined()
+    expect(cancelEvent?.from_state).toBe('pending')
+    expect(cancelEvent?.to_state).toBe('cancelled')
+
+    // Verifica estado final da solicitação
     const getRes = await injectWithM2M(
       'GET',
       `/v1/information-requests/${requestId}?tenantId=${tenantId}`,

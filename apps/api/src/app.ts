@@ -365,7 +365,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       })
       registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerHolderRoutes(v1, { db: deps.db })
-      registerHolderInformationRequestRoutes(v1, { db: deps.db })
+      registerHolderInformationRequestRoutes(v1, {
+        db: deps.db,
+        logger: deps.logger,
+      })
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })

@@ -55,7 +55,6 @@ export const HolderInformationRequestItemsSchema = z
 export type HolderInformationRequestItems = z.infer<typeof HolderInformationRequestItemsSchema>
 
 export const CreateHolderInformationRequestRequestSchema = z.object({
-  holderId: z.uuid(),
   type: z.string().min(1).max(100),
   purpose: z.string().min(1).max(1000),
   items: HolderInformationRequestItemsSchema,

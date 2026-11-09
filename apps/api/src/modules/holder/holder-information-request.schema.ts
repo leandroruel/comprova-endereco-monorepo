@@ -1,7 +1,9 @@
 import type { FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
+import { HolderInformationRequestStateSchema } from '@comprova/contracts'
 import type { Db } from '@comprova/db'
+import type { Logger } from '@comprova/observability'
 
 export const HolderInformationRequestIdParams = z.object({
   requestId: z.string().uuid(),
@@ -11,14 +13,13 @@ export const HolderInformationRequestListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
   holderId: z.string().uuid().optional(),
-  state: z.string().optional(),
+  state: HolderInformationRequestStateSchema.optional(),
   createdAfter: z.string().datetime().optional(),
   createdBefore: z.string().datetime().optional(),
   expiresBefore: z.string().datetime().optional(),
 })
 
 export const CreateHolderInformationRequestBody = z.object({
-  holderId: z.string().uuid(),
   type: z.string().min(1).max(100),
   purpose: z.string().min(1).max(1000),
   items: z
@@ -100,6 +101,7 @@ export type HolderInformationRequestTransitionBodyType = z.infer<
 
 export interface HolderInformationRequestRoutesDeps {
   readonly db: Db
+  readonly logger: Logger
 }
 
 export const sendHolderInformationRequestProblem = (

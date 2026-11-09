@@ -138,6 +138,7 @@ export const registerHolderInformationRequestRoutes = (
           tenantId: getTenantId(request),
           limit: request.query.limit,
           offset: request.query.offset,
+          holderId: request.query.holderId,
           state: request.query.state,
           createdAfter: request.query.createdAfter,
           createdBefore: request.query.createdBefore,
