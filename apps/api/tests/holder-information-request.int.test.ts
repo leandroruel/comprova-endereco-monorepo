@@ -792,7 +792,7 @@ describe('HolderInformationRequest Integration', () => {
     const holderIdB = await createHolder(key, tenantId, 'ext-ref-filtro-b', true)
 
     // Cria solicitações para cada holder
-    await injectWithM2M(
+    const createResA = await injectWithM2M(
       'POST',
       `/v1/holders/${holderIdA}/information-requests?tenantId=${tenantId}`,
       {
@@ -802,7 +802,8 @@ describe('HolderInformationRequest Integration', () => {
       },
       key.secret,
     )
-    await injectWithM2M(
+    expect(createResA.statusCode).toBe(201)
+    const createResB = await injectWithM2M(
       'POST',
       `/v1/holders/${holderIdB}/information-requests?tenantId=${tenantId}`,
       {
@@ -812,6 +813,7 @@ describe('HolderInformationRequest Integration', () => {
       },
       key.secret,
     )
+    expect(createResB.statusCode).toBe(201)
 
     // Lista filtrando por holderIdA
     const res = await injectWithM2M(
@@ -912,6 +914,95 @@ describe('HolderInformationRequest Integration', () => {
         )
     })
     expect(events.some((e) => e.event_type === 'expired')).toBe(true)
+  })
+
+  it('deve aplicar expiração durante a listagem antes de consultar por ID', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Expiração Listagem Info',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Expiração Listagem Info', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-expiracao-listagem', true)
+
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Para expirar na listagem',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante',
+            required: true,
+          },
+        ],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const requestId = createRes.json().id
+
+    // Vence o prazo diretamente no banco
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(t.holderInformationRequest.id, requestId))
+    })
+
+    // Lista filtrando por estado pending: não deve conter a solicitação vencida
+    const pendingRes = await injectWithM2M(
+      'GET',
+      `/v1/information-requests?tenantId=${tenantId}&state=pending`,
+      undefined,
+      key.secret,
+    )
+    expect(pendingRes.statusCode).toBe(200)
+    expect(pendingRes.json().requests.some((r: { id: string }) => r.id === requestId)).toBe(false)
+
+    // Lista filtrando por estado expired: deve conter a solicitação vencida
+    const expiredRes = await injectWithM2M(
+      'GET',
+      `/v1/information-requests?tenantId=${tenantId}&state=expired`,
+      undefined,
+      key.secret,
+    )
+    expect(expiredRes.statusCode).toBe(200)
+    expect(expiredRes.json().requests.some((r: { id: string }) => r.id === requestId)).toBe(true)
+
+    // Verifica evento de expiração persistido
+    const events = await withTenant(appPool.db, tenantId, async (tx) => {
+      return tx
+        .select({ event_type: t.holderInformationRequestEvent.eventType })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, requestId),
+            eq(t.holderInformationRequestEvent.tenantId, tenantId),
+          ),
+        )
+    })
+    expect(events.some((e) => e.event_type === 'expired')).toBe(true)
+
+    // Consulta por ID também retorna estado expirado
+    const getRes = await injectWithM2M(
+      'GET',
+      `/v1/information-requests/${requestId}?tenantId=${tenantId}`,
+      undefined,
+      key.secret,
+    )
+    expect(getRes.statusCode).toBe(200)
+    expect(getRes.json().state).toBe('expired')
   })
 
   it('não deve cancelar solicitação inexistente', async () => {
