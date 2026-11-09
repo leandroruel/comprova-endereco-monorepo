@@ -662,6 +662,9 @@ importers:
       '@testcontainers/redis':
         specifier: ^12.2.0
         version: 12.2.0(supports-color@10.2.2)
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
       testcontainers:
         specifier: ^12.2.0
         version: 12.2.0(supports-color@10.2.2)

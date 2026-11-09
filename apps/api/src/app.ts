@@ -69,10 +69,13 @@ export const buildFastPathDeps = (
   db: Db,
   config: AppConfig,
   cache?: ReturnType<typeof makeRedisCache>,
+  /** Conexão do database de referência (CNEFE/Receita). Ausente = modo single-database. */
+  referenceDb?: Db,
 ): FastPathDeps => {
-  const cached = cache !== undefined ? makeCachedReaders(db, cache) : null
-  const registry = cached?.registry ?? makeRegistryReader(db)
-  const cep = cached?.cep ?? makeCepReader(db)
+  const refDb = referenceDb ?? db
+  const cached = cache !== undefined ? makeCachedReaders(db, cache, referenceDb) : null
+  const registry = cached?.registry ?? makeRegistryReader(refDb)
+  const cep = cached?.cep ?? makeCepReader(refDb)
   const { policy, policyHash } = readPolicyFile(config.POLICY_VERSION)
   return {
     db,
@@ -80,11 +83,11 @@ export const buildFastPathDeps = (
     cep,
     checkers: makeT0Checkers({
       registry,
-      cnefe: cached?.cnefe ?? makeCnefeReader(db),
+      cnefe: cached?.cnefe ?? makeCnefeReader(refDb),
       cep,
-      profile: cached?.profile ?? makeProfileReader(db),
-      knownShared: cached?.knownShared ?? makeKnownSharedReader(db),
-      cnaeCategoria: cached?.cnaeCategoria ?? makeCnaeCategoriaReader(db),
+      profile: cached?.profile ?? makeProfileReader(db, refDb),
+      knownShared: cached?.knownShared ?? makeKnownSharedReader(refDb),
+      cnaeCategoria: cached?.cnaeCategoria ?? makeCnaeCategoriaReader(refDb),
     }),
     policy,
     policyHash,
@@ -96,6 +99,12 @@ export const buildFastPathDeps = (
 export interface AppDeps {
   readonly config: AppConfig
   readonly db: Db
+  /**
+   * Conexão do database de referência (CNEFE/Receita). Quando presente, os
+   * readers de referência deixam de consultar o `db` operacional. Opcional:
+   * ausente, o produto opera no modo single-database (transição).
+   */
+  readonly referenceDb?: Db
   readonly redis: Redis
   readonly logger: Logger
   readonly metrics: Metrics
@@ -276,7 +285,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const signingKeyProvider = await makeSigningKeyProvider(deps.config)
 
   const cache = makeRedisCache(deps.redis, deps.logger)
-  const fastPath = buildFastPathDeps(deps.db, deps.config, cache)
+  const fastPath = buildFastPathDeps(deps.db, deps.config, cache, deps.referenceDb)
   const objectStore = deps.objectStore ?? resolveObjectStore(deps.config)
   const credentialIssuer = {
     issuerOrigin: deps.config.CREDENTIAL_ISSUER_ORIGIN,
@@ -361,7 +370,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerBatchRoutes(v1, { db: deps.db })
       registerStatsRoutes(v1, { db: deps.db })
       registerUsageRoutes(v1, { db: deps.db })
-      registerMetaRoutes(v1, { db: deps.db, cache })
+      registerMetaRoutes(v1, { db: deps.db, cache, referenceDb: deps.referenceDb })
       registerSubjectRoutes(v1, { db: deps.db })
     },
     { prefix: '/v1' },

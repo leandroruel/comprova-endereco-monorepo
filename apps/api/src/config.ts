@@ -12,6 +12,13 @@ export const DEFAULT_EVIDENCE_MAX_CONCURRENCY = 4
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   DATABASE_ADMIN_URL: z.string().optional(),
+  /**
+   * Database de referência (CNEFE/Receita Federal), mesma instância do
+   * PostgreSQL. Quando presente, toda leitura das bases ref_* usa esta
+   * conexão (role somente leitura); quando ausente, o modo single-database
+   * é preservado durante a transição.
+   */
+  REFERENCE_DATABASE_URL: z.string().min(1).optional(),
   REDIS_URL: z.string().min(1),
   API_KEY_PEPPER: z.string().min(8),
   /**

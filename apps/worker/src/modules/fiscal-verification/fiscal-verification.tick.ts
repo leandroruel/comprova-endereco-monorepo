@@ -53,6 +53,8 @@ export interface FiscalCandidate {
 export interface FiscalVerificationTickDeps {
   /** Pool de manutenção (atravessa tenants no scan); cada item usa `withTenant`. */
   readonly db: Db
+  /** Database de referência (CNEFE/Receita). Ausente = modo single-database. */
+  readonly referenceDb?: Db
   readonly adapter: FiscalAdapter
   readonly logger: Logger
   /**
@@ -240,7 +242,13 @@ export const verifyFiscalTick = async (deps: FiscalVerificationTickDeps): Promis
       )
 
       const outcome = await verifyFiscalClaim(
-        { db: deps.db, adapter: deps.adapter, logger: deps.logger, now },
+        {
+          db: deps.db,
+          ...(deps.referenceDb !== undefined ? { referenceDb: deps.referenceDb } : {}),
+          adapter: deps.adapter,
+          logger: deps.logger,
+          now,
+        },
         input,
       )
 

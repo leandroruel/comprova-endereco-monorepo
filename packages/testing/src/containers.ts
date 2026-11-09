@@ -5,6 +5,9 @@ import { GenericContainer, Wait } from 'testcontainers'
 export interface TestDb {
   adminUrl: string
   appUrl: string
+  /** Database de referência (CNEFE/Receita) criado no mesmo container. */
+  referenceAdminUrl: string
+  referenceAppUrl: string
   stop(): Promise<void>
 }
 
@@ -32,9 +35,24 @@ export async function startTestDb(): Promise<TestDb> {
   const uri = container.getConnectionUri()
   const url = new URL(uri)
   const appUrl = `postgres://app_user:${APP_PASSWORD}@${url.hostname}:${url.port}${url.pathname}`
+  const referenceAdminUrl = `${url.protocol}//${url.username}:${url.password}@${url.hostname}:${url.port}/comprova_reference`
+  const referenceAppUrl = `postgres://app_user:${APP_PASSWORD}@${url.hostname}:${url.port}/comprova_reference`
+
+  // Cria o database de referência no MESMO container/instância, exatamente
+  // como o requisito de separação pede: domínios por database, mesma instância.
+  const postgres = (await import('postgres')).default
+  const admin = postgres(uri, { max: 1 })
+  try {
+    await admin`CREATE DATABASE "comprova_reference"`
+  } finally {
+    await admin.end()
+  }
+
   return {
     adminUrl: uri,
     appUrl,
+    referenceAdminUrl,
+    referenceAppUrl,
     stop: async () => {
       await container.stop()
     },

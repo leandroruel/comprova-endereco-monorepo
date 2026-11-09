@@ -4,8 +4,14 @@ import type { Db } from '../client.js'
 import { addressProfile, canonicalAddress } from '../schemas/addresses.js'
 import { refReceitaEstabelecimento } from '../schemas/reference-receita.js'
 
-/** Perfil agregado do endereço + CNPJs ativos vizinhos (fast path). */
-export const makeProfileReader = (db: Db): ProfileReader => ({
+/** Perfil agregado do endereço + CNPJs ativos vizinhos (fast path).
+ *
+ * `db` é a conexão operacional (`address_profile`/`canonical_address` são
+ * evidência do produto). `refDb` é a conexão do database de referência para
+ * `ref_receita_estabelecimento` — quando não informada, cai no `db` (modo
+ * single-database, mantido para compat durante a transição).
+ */
+export const makeProfileReader = (db: Db, refDb?: Db): ProfileReader => ({
   getProfile: async (buildingKey: Uint8Array) => {
     const rows = await db
       .select({
@@ -29,7 +35,7 @@ export const makeProfileReader = (db: Db): ProfileReader => ({
     buildingKey: Uint8Array,
     excludeBasico: string,
   ): Promise<readonly OtherActiveCnpj[]> =>
-    db
+    (refDb ?? db)
       .select({
         cnpjBasico: refReceitaEstabelecimento.cnpjBasico,
         cnpjOrdem: refReceitaEstabelecimento.cnpjOrdem,

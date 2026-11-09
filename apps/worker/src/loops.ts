@@ -77,14 +77,19 @@ export const startEvidenceAnalysisLoop = (
  * manutenção; o acesso aos dados do claim é feito com `withTenant`. Não emite
  * signal e, portanto, não altera o score.
  */
-export const startEvidenceVerificationLoop = (db: Db, logger: Logger, intervalMs = 2_000): (() => void) => {
+export const startEvidenceVerificationLoop = (
+  db: Db,
+  logger: Logger,
+  referenceDb?: Db,
+  intervalMs = 2_000,
+): (() => void) => {
   let running = false
   return startLoop(
     async () => {
       if (running) return
       running = true
       try {
-        await verifyEvidenceTick({ db, logger })
+        await verifyEvidenceTick({ db, logger, ...(referenceDb !== undefined ? { referenceDb } : {}) })
       } finally {
         running = false
       }
@@ -105,6 +110,7 @@ export const startFiscalVerificationLoop = (
   adapter: FiscalAdapter,
   reassess: (tenantId: string, validationId: string) => Promise<unknown>,
   logger: Logger,
+  referenceDb?: Db,
   intervalMs = 2_000,
 ): (() => void) => {
   let running = false
@@ -113,7 +119,13 @@ export const startFiscalVerificationLoop = (
       if (running) return
       running = true
       try {
-        await verifyFiscalTick({ db, adapter, reassess, logger })
+        await verifyFiscalTick({
+          db,
+          adapter,
+          reassess,
+          logger,
+          ...(referenceDb !== undefined ? { referenceDb } : {}),
+        })
       } finally {
         running = false
       }

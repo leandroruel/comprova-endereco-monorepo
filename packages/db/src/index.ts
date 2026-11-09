@@ -1,6 +1,7 @@
 export * from './client.js'
 export * from './schemas/index.js'
 export * from './runner.js'
+export * from './migrate-reference-data.js'
 export * from './adapters/index.js'
 export * from './usage-metering.js'
 export { and, count, eq, or, lte, gte, gt, isNull, isNotNull, desc, asc, inArray, sql } from 'drizzle-orm'

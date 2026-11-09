@@ -1,4 +1,5 @@
 import { flagNumber } from '../cli-args.js'
+import { runReferenceMigrations } from '../context.js'
 import type { CommandHandler } from './types.js'
 
 export const cnefeUf: CommandHandler = async (context, args) => {
@@ -6,7 +7,8 @@ export const cnefeUf: CommandHandler = async (context, args) => {
   if (file === undefined) throw new Error('usage: ingestor cnefe:uf <csv> [--limit N]')
   const limit = flagNumber(args, '--limit')
 
-  const stats = await context.withDb(4, async (db) => {
+  await runReferenceMigrations(context)
+  const stats = await context.withRefDb(4, async (db) => {
     const { ingestCnefeCsv } = await import('../modules/cnefe/cnefe.service.js')
     return ingestCnefeCsv(db, file, { ...(limit !== undefined ? { limit } : {}) })
   })

@@ -24,6 +24,8 @@ import { makeEvidenceWriter } from './modules/evidence/evidence.service.js'
 
 export interface WorkerContext {
   readonly pool: DbPool
+  /** Conexão do database de referência; null = modo single-database (transição). */
+  readonly referencePool: DbPool | null
   readonly policy: Policy
   readonly policyHash: string
   readonly t1Checkers: readonly Checker[]
@@ -77,10 +79,15 @@ export const buildWorkerContext = (env: WorkerEnv): WorkerContext => {
   const policyYaml = readFileSync(path.join(env.repoRoot, 'policies', `${env.policyVersion}.yaml`), 'utf8')
   const policy = loadPolicy(policyYaml)
   const pool = createDbPool(env.databaseUrl)
+  // Leituras de referência (CNEFE coords, partner graph) vão para o database
+  // de referência quando configurado; sem EB, leem do pool operacional
+  // (modo single-database preservado durante a transição).
+  const referencePool = env.referenceDbUrl !== undefined ? createDbPool(env.referenceDbUrl) : null
+  const refDb = referencePool?.db ?? pool.db
   const t1Checkers = makeT1Checkers({
     geocoder: makeNominatimGeocoder(env.nominatimUrl !== undefined ? { baseUrl: env.nominatimUrl } : {}),
-    cnefeCoords: makeCnefeCoordReader(pool.db),
-    partnerGraph: makePartnerGraphReader(pool.db),
+    cnefeCoords: makeCnefeCoordReader(refDb),
+    partnerGraph: makePartnerGraphReader(refDb),
     places: makeOverpassPlaces(env.overpassUrl !== undefined ? { baseUrl: env.overpassUrl } : {}),
   })
 
@@ -88,6 +95,7 @@ export const buildWorkerContext = (env: WorkerEnv): WorkerContext => {
 
   return {
     pool,
+    referencePool,
     policy,
     policyHash: policyHashOf(policyYaml),
     t1Checkers,

@@ -64,15 +64,19 @@ const TTL = {
 
 type CnefeCoord = { readonly lat: number; readonly lon: number }
 
-export const makeCachedReaders = (db: Db, cache: CacheStore): CachedReaders => {
-  const rawRegistry = makeRegistryReader(db)
-  const rawCep = makeCepReader(db)
-  const rawCnefe = makeCnefeReader(db)
-  const rawCnefeCoords = makeCnefeCoordReader(db)
-  const rawProfile = makeProfileReader(db)
-  const rawKnownShared = makeKnownSharedReader(db)
-  const rawCnaeCategoria = makeCnaeCategoriaReader(db)
-  const rawPartnerGraph = makePartnerGraphReader(db)
+export const makeCachedReaders = (db: Db, cache: CacheStore, referenceDb?: Db): CachedReaders => {
+  // Leituras de referência (CNEFE/Receita/CEP/CNAE/known-shared/partner-graph)
+  // e a parte de ref do profile vão para a conexão do database de referência
+  // quando configurada; sem ela, o modo single-database é preservado.
+  const refDb = referenceDb ?? db
+  const rawRegistry = makeRegistryReader(refDb)
+  const rawCep = makeCepReader(refDb)
+  const rawCnefe = makeCnefeReader(refDb)
+  const rawCnefeCoords = makeCnefeCoordReader(refDb)
+  const rawProfile = makeProfileReader(db, refDb)
+  const rawKnownShared = makeKnownSharedReader(refDb)
+  const rawCnaeCategoria = makeCnaeCategoriaReader(refDb)
+  const rawPartnerGraph = makePartnerGraphReader(refDb)
   const rawSignalCache = makeSignalCacheReader(db)
 
   const registry: RegistryReader = {

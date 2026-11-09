@@ -20,6 +20,8 @@
     "compose:logs:up": "docker compose -f docker-compose.yml -f docker-compose.elk.yml --profile elk up -d elasticsearch kibana-setup kibana filebeat",
     "compose:logs:down": "docker compose -f docker-compose.yml -f docker-compose.elk.yml --profile elk stop kibana filebeat kibana-setup elasticsearch",
     "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
+    "db:migrate:reference": "tsx --env-file=.env packages/db/src/migrate-reference-schema.ts",
+    "db:migrate-reference-data": "tsx --env-file=.env packages/db/src/migrate-reference.ts",
     "db:seed": "tsx --env-file=.env packages/db/src/bootstrap.ts",
     "db:provision-key": "tsx --env-file=.env apps/api/src/scripts/provision-signing-key.ts",
     "db:rotate-key": "tsx --env-file=.env apps/api/src/scripts/rotate-signing-key.ts",

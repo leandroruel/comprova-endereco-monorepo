@@ -12,7 +12,8 @@ export const keysRebuild: CommandHandler = async (context) => {
   const postgres = (await import('postgres')).default
   const { rebuildEstablishmentKeys } = await import('../modules/rebuild-keys/rebuild-keys.service.js')
 
-  const client = postgres(context.config.adminUrl, { max: 2 })
+  // Tabelas alvo (ref_receita_estabelecimento) ficam no database de referência.
+  const client = postgres(context.config.refAdminUrl, { max: 2 })
   const started = Date.now()
 
   try {

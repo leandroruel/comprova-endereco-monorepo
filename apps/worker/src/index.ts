@@ -121,7 +121,9 @@ if (stopEvidenceAnalysis === null) {
 // observação. Se não houver pool de manutenção, a RLS esconderia as linhas de
 // outros tenants, então o loop não sobe.
 const stopEvidenceVerification =
-  adminRetentionPool !== null ? startEvidenceVerificationLoop(adminRetentionPool.db, logger) : null
+  adminRetentionPool !== null
+    ? startEvidenceVerificationLoop(adminRetentionPool.db, logger, ctx.referencePool?.db)
+    : null
 if (stopEvidenceVerification === null) {
   logger.warn(
     { reason: 'EVIDENCE_VERIFICATION_ADMIN_URL_MISSING' },
@@ -140,6 +142,7 @@ const stopFiscalVerification =
         makeNf3eFiscalAdapter(),
         (tenantId, validationId) => deepEnrich(deepDeps, { tenantId, validationId }),
         logger,
+        ctx.referencePool?.db,
       )
     : null
 if (stopFiscalVerification === null) {
@@ -164,4 +167,6 @@ try {
   stopEvidenceAnalysis?.()
   stopEvidenceVerification?.()
   stopFiscalVerification?.()
+  if (ctx.referencePool !== null) await ctx.referencePool.end()
+  await ctx.pool.end()
 }

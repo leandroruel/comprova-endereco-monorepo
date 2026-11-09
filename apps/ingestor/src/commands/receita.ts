@@ -1,4 +1,5 @@
 import { flagNumber, flagValue, parseSnapshotMonth } from '../cli-args.js'
+import { runReferenceMigrations } from '../context.js'
 import type { CommandHandler } from './types.js'
 
 export const receitaEstabelecimentos: CommandHandler = async (context, args) => {
@@ -9,8 +10,9 @@ export const receitaEstabelecimentos: CommandHandler = async (context, args) => 
   const snapshotMonth = parseSnapshotMonth(flagValue(args, '--snapshot'))
   const limit = flagNumber(args, '--limit')
 
-  await context.runMigrations()
-  const stats = await context.withDb(4, async (db) => {
+  // Domínio de referência: estrutura e dados vão no database de referência.
+  await runReferenceMigrations(context)
+  const stats = await context.withRefDb(4, async (db) => {
     const { ingestReceitaEstabelecimentos } = await import('../modules/receita/receita.service.js')
     return ingestReceitaEstabelecimentos(db, file, snapshotMonth, {
       ...(limit !== undefined ? { limit } : {}),
@@ -27,8 +29,8 @@ export const receitaMunicipios: CommandHandler = async (context, args) => {
   const file = args[0]
   if (file === undefined) throw new Error('usage: ingestor receita:municipios <csv>')
 
-  await context.runMigrations()
-  const count = await context.withDb(1, async (db) => {
+  await runReferenceMigrations(context)
+  const count = await context.withRefDb(1, async (db) => {
     const { ingestReceitaMunicipios } = await import('../modules/receita/receita.service.js')
     return ingestReceitaMunicipios(db, file)
   })
@@ -36,7 +38,9 @@ export const receitaMunicipios: CommandHandler = async (context, args) => {
 }
 
 export const receitaIbgeDerive: CommandHandler = async (context) => {
-  const { ibgeCount, ufCount } = await context.withDb(1, async (db) => {
+  // Derivacões acontecem inteiramente dentro das tabelas ref_*
+  // (`ref_receita_estabelecimento`, `ref_receita_municipio`).
+  const { ibgeCount, ufCount } = await context.withRefDb(1, async (db) => {
     const { deriveMunicipioIbge, deriveMunicipioUf } = await import('../modules/cep/cep.service.js')
     return {
       ibgeCount: await deriveMunicipioIbge(db),

@@ -4,6 +4,8 @@ import path from 'node:path'
 
 export interface WorkerEnv {
   readonly databaseUrl: string
+  /** Database de referência (CNEFE/Receita). Ausente = modo single-database. */
+  readonly referenceDbUrl?: string
   readonly policyVersion: string
   readonly repoRoot: string
   readonly vlmEnabled: boolean
@@ -90,6 +92,7 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
 
   return {
     databaseUrl,
+    referenceDbUrl: nonEmpty(env.REFERENCE_DATABASE_URL),
     policyVersion: env.POLICY_VERSION ?? '2026.14.1',
     repoRoot: findRepoRoot(process.cwd()),
     evidenceAnalysisMaxBytes: parsedAnalysisMaxBytes,

@@ -10,17 +10,32 @@ const config = loadConfig()
 const logger = createLogger({ level: config.LOG_LEVEL, base: { service: 'api' }, file: config.LOG_FILE })
 const pool = createDbPool(config.DATABASE_URL)
 const adminPool = config.DATABASE_ADMIN_URL !== undefined ? createDbPool(config.DATABASE_ADMIN_URL) : null
+const refPool =
+  config.REFERENCE_DATABASE_URL !== undefined ? createDbPool(config.REFERENCE_DATABASE_URL) : null
 const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true })
 const metrics = createMetrics()
 
-const app = await buildApp({ config, db: pool.db, redis, logger, metrics })
+const app = await buildApp({
+  config,
+  db: pool.db,
+  ...(refPool !== null ? { referenceDb: refPool.db } : {}),
+  redis,
+  logger,
+  metrics,
+})
 
 const stopPublisher = config.WORKER_LOOPS
   ? startPublisherLoop({ db: pool.db, pepper: config.API_KEY_PEPPER, logger }, 2_000)
   : null
 const stopBatch =
   adminPool !== null
-    ? startBatchLoop({ adminDb: adminPool.db, fastPath: buildFastPathDeps(pool.db, config) }, 1_000)
+    ? startBatchLoop(
+        {
+          adminDb: adminPool.db,
+          fastPath: buildFastPathDeps(pool.db, config, undefined, refPool?.db),
+        },
+        1_000,
+      )
     : null
 
 const shutdown = async (signal: string): Promise<void> => {
@@ -32,6 +47,7 @@ const shutdown = async (signal: string): Promise<void> => {
     await app.close()
     await pool.end()
     if (adminPool !== null) await adminPool.end()
+    if (refPool !== null) await refPool.end()
     redis.disconnect()
   } catch (err) {
     hadError = true

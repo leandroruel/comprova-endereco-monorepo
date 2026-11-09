@@ -308,13 +308,17 @@ const ESTABELECIMENTOS: readonly EstabSeed[] = [
 
 const point = (lon: string, lat: string) => sql`ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography`
 
-export const seedGoldenDataset = async (db: Db): Promise<void> => {
-  await db
+export const seedGoldenDataset = async (db: Db, refDb?: Db): Promise<void> => {
+  // Estruturas de referência vão para o database de referência quando
+  // informado; evidence/cache de endereço (canonical_address, address_profile)
+  // e o resto do domínio ficam no database operacional.
+  const ref = refDb ?? db
+  await ref
     .insert(t.refCnaeDivisaoCategoria)
     .values(CNAE_CATEGORIAS.map((c) => ({ divisao: c.divisao, categoria: c.categoria })))
     .onConflictDoNothing()
 
-  await db
+  await ref
     .insert(t.refCep)
     .values([
       {
@@ -356,7 +360,7 @@ export const seedGoldenDataset = async (db: Db): Promise<void> => {
     ])
     .onConflictDoNothing()
 
-  await db
+  await ref
     .insert(t.refCnefeAddress)
     .values([
       {
@@ -410,7 +414,7 @@ export const seedGoldenDataset = async (db: Db): Promise<void> => {
     ])
     .onConflictDoNothing()
 
-  await db
+  await ref
     .insert(t.refReceitaEstabelecimento)
     .values(
       ESTABELECIMENTOS.map((seed) => ({
@@ -561,7 +565,7 @@ export const seedGoldenDataset = async (db: Db): Promise<void> => {
         cidadeExterior: null,
       },
     ]
-    await db
+    await ref
       .insert(t.refReceitaEstabelecimento)
       .values(
         coLocated.map((seed) => ({
@@ -596,7 +600,7 @@ export const seedGoldenDataset = async (db: Db): Promise<void> => {
       )
       .onConflictDoNothing()
 
-    await db
+    await ref
       .insert(t.refReceitaSocio)
       .values([
         {

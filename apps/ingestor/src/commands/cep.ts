@@ -3,8 +3,9 @@ import type { CommandHandler } from './types.js'
 
 export const cepsBackfill: CommandHandler = async (context, args) => {
   const limit = flagNumber(args, '--limit') ?? 500
-
-  const stats = await context.withDb(2, async (db) => {
+  // Leitura de `ref_receita_estabelecimento` + gravação em `ref_cep`: inteiro
+  // no database de referência.
+  const stats = await context.withRefDb(2, async (db) => {
     const { backfillCepsFromEstabelecimentos } = await import('../modules/cep/cep.service.js')
     return backfillCepsFromEstabelecimentos(db, { limit })
   })

@@ -39,6 +39,8 @@ import { loadClaimVerificationContext } from './claim-context.js'
 
 export interface EvidenceVerificationDeps {
   readonly db: Db
+  /** Database de referência (CNEFE/Receita). Ausente = modo single-database. */
+  readonly referenceDb?: Db
   readonly logger: Logger
   /** Versão do analisador cuja análise terminal será materializada. */
   readonly analyzerId?: string
@@ -171,7 +173,7 @@ const findNext = async (
 }
 
 const loadContext = async (deps: EvidenceVerificationDeps, candidate: VerificationCandidate) =>
-  loadClaimVerificationContext(deps.db, candidate.tenantId, candidate.claimId)
+  loadClaimVerificationContext(deps.db, candidate.tenantId, candidate.claimId, deps.referenceDb)
 
 const verificationDetailOf = (
   candidate: VerificationCandidate,

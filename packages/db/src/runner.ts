@@ -14,6 +14,12 @@ export const defaultMigrationsDir = (): string => {
   return path.resolve(here, '..', 'migrations')
 }
 
+/** Diretório das migrations do database de referência (CNEFE/Receita). */
+export const defaultReferenceMigrationsDir = (): string => {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  return path.resolve(here, '..', 'migrations-reference')
+}
+
 interface MigrationFile {
   readonly name: string
   readonly content: string

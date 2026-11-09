@@ -50,6 +50,8 @@ import {
 
 export interface FiscalVerificationDeps {
   readonly db: Db
+  /** Database de referência (CNEFE/Receita). Ausente = modo single-database. */
+  readonly referenceDb?: Db
   readonly adapter: FiscalAdapter
   readonly logger?: Logger
   readonly now?: () => Date
@@ -203,7 +205,7 @@ export const verifyFiscalClaim = async (
   input: FiscalLookupInput,
 ): Promise<FiscalMaterializationOutcome> => {
   const now = deps.now ?? (() => new Date())
-  const context = await loadClaimVerificationContext(deps.db, input.tenantId, input.claimId)
+  const context = await loadClaimVerificationContext(deps.db, input.tenantId, input.claimId, deps.referenceDb)
   if (context === null) return 'skipped'
 
   const result = await runAdapter(deps, input, context, now)
