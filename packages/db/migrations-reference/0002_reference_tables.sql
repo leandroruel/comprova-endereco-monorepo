@@ -135,9 +135,12 @@ CREATE TABLE ref_known_shared_address (
 
 CREATE TABLE ref_receita_municipio (
   codigo_receita int PRIMARY KEY,
-  codigo_ibge    int NOT NULL,
+  -- Nullable por design: o CSV da Receita não traz código IBGE e o
+  -- `refReceitaMunicipio` do Drizzle é nullable — a réplica espelha o
+  -- database operacional real, não o DDL histórico.
+  codigo_ibge    int,
   nome_norm      text NOT NULL,
-  uf             char(2) NOT NULL,
+  uf             char(2),
   UNIQUE (nome_norm, uf)
 );
 
