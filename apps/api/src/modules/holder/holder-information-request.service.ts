@@ -1,4 +1,4 @@
-import { and, count, eq, isNotNull, sql, withTenant } from '@comprova/db'
+import { and, count, eq, isNull, sql, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
@@ -8,7 +8,14 @@ import {
   type HolderInformationRequestItem,
   type HolderInformationRequestItems,
 } from '@comprova/contracts'
-import type { Db, DbTx } from '@comprova/db'
+import type { Db } from '@comprova/db'
+import {
+  expireExpiredRequests,
+  expireIfNeeded,
+  findRequestById,
+  insertHolderInformationRequestEvent,
+  isExpirableState,
+} from './holder-information-request.shared.js'
 
 const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
 
@@ -19,70 +26,8 @@ const errorCodeOf = (error: unknown, depth = 0): string | null => {
   return errorCodeOf((error as { cause?: unknown }).cause, depth + 1)
 }
 
-const isExpirableState = (state: HolderInformationRequestState): boolean => {
-  return ['pending', 'in_progress'].includes(state)
-}
-
-/**
- * Busca o registro atual de uma solicitação dentro do tenant informado.
- * Retorna null se não existir ou não estiver acessível no tenant.
- */
-const findRequestById = async (
-  tx: DbTx,
-  tenantId: string,
-  requestId: string,
-): Promise<{
-  id: string
-  tenantId: string
-  holderId: string
-  type: string
-  purpose: string
-  items: unknown
-  state: string
-  expiresAt: Date | null
-  createdBy: string
-  createdAt: Date
-  updatedAt: Date
-  completedAt: Date | null
-  cancelledAt: Date | null
-  expiredAt: Date | null
-} | null> => {
-  const [row] = await tx
-    .select()
-    .from(t.holderInformationRequest)
-    .where(
-      and(eq(t.holderInformationRequest.id, requestId), eq(t.holderInformationRequest.tenantId, tenantId)),
-    )
-    .limit(1)
-  return row ?? null
-}
-
 export const makeHolderInformationRequestService = (deps: { readonly db: Db; readonly logger: Logger }) => {
   const { db, logger } = deps
-
-  const insertEvent = async (
-    tx: DbTx,
-    tenantId: string,
-    event: {
-      readonly holderInformationRequestId: string
-      readonly eventType: string
-      readonly fromState: HolderInformationRequestState | null
-      readonly toState: HolderInformationRequestState
-      readonly actor: string
-      readonly details: string
-    },
-  ): Promise<void> => {
-    await tx.insert(t.holderInformationRequestEvent).values({
-      id: randomUUID(),
-      holderInformationRequestId: event.holderInformationRequestId,
-      tenantId,
-      eventType: event.eventType,
-      fromState: event.fromState,
-      toState: event.toState,
-      actor: event.actor,
-      details: event.details,
-    })
-  }
 
   const logServiceError = (operation: string, tenantId: string, error: unknown): void => {
     logger.error(
@@ -96,121 +41,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
     )
   }
 
-  /**
-   * Persiste `expired` para todas as solicitações vencidas do tenant cujos
-   * estados ainda são passíveis de expiração.
-   *
-   * O filtro de prazo é aplicado diretamente no PostgreSQL com
-   * `clock_timestamp()`, evitando carregar todo o histórico do tenant.
-   * Há um UPDATE por estado de origem (`pending`, `in_progress`): o RETURNING
-   * de um UPDATE devolve os valores pós-atualização, então um único UPDATE em
-   * lote informaria `fromState: 'expired'` para toda linha, perdendo o estado
-   * verdadeiro do evento de auditoria. A atomicidade e o isolamento por tenant
-   * via RLS permanecem.
-   */
-  const expireExpiredRequests = async (tx: DbTx, tenantId: string, actor: string): Promise<void> => {
-    // clock_timestamp() retorna o momento efetivo da execução da instrução
-    // SQL no banco, consistente com o relógio do PostgreSQL.
-    for (const fromState of ['pending', 'in_progress'] as const) {
-      const updatedRows = await tx
-        .update(t.holderInformationRequest)
-        .set({
-          state: 'expired',
-          expiredAt: sql`clock_timestamp()`,
-          updatedAt: sql`clock_timestamp()`,
-        })
-        .where(
-          and(
-            eq(t.holderInformationRequest.tenantId, tenantId),
-            eq(t.holderInformationRequest.state, fromState),
-            isNotNull(t.holderInformationRequest.expiresAt),
-            sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
-          ),
-        )
-        .returning({ id: t.holderInformationRequest.id })
-
-      // Insere eventos de auditoria para cada transição efetivamente realizada.
-      for (const row of updatedRows) {
-        await insertEvent(tx, tenantId, {
-          holderInformationRequestId: row.id,
-          eventType: 'expired',
-          fromState,
-          toState: 'expired',
-          actor,
-          details: JSON.stringify({ reason: 'expires_at vencido' }),
-        })
-      }
-    }
-  }
-
-  /**
-   * Transiciona para `expired` quando o prazo venceu e o estado ainda é
-   * passível de expiração. Executado dentro da transação do chamador.
-   *
-   * Se o UPDATE condicional não afetar linhas — prazo empurrado para o futuro
-   * por outra operação ou transição concorrente entre a leitura e o UPDATE —
-   * o registro é recarregado e o estado vigente é retornado, sem repetir o
-   * ciclo de expiração.
-   */
-  const expireIfNeeded = async (
-    tx: DbTx,
-    tenantId: string,
-    requestId: string,
-    actor: string,
-  ): Promise<HolderInformationRequestState | null> => {
-    const current = await findRequestById(tx, tenantId, requestId)
-
-    if (!current) return null
-
-    const currentState = current.state as HolderInformationRequestState
-
-    if (!isExpirableState(currentState)) {
-      return currentState
-    }
-
-    if (current.expiresAt === null || current.expiresAt === undefined) {
-      return currentState
-    }
-
-    const [updated] = await tx
-      .update(t.holderInformationRequest)
-      .set({
-        state: 'expired',
-        expiredAt: sql`clock_timestamp()`,
-        updatedAt: sql`clock_timestamp()`,
-      })
-      .where(
-        and(
-          eq(t.holderInformationRequest.id, requestId),
-          eq(t.holderInformationRequest.tenantId, tenantId),
-          eq(t.holderInformationRequest.state, currentState),
-          sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
-        ),
-      )
-      .returning()
-
-    if (updated) {
-      await insertEvent(tx, tenantId, {
-        holderInformationRequestId: requestId,
-        eventType: 'expired',
-        fromState: currentState,
-        toState: 'expired',
-        actor,
-        details: JSON.stringify({ reason: 'expires_at vencido' }),
-      })
-
-      return 'expired'
-    }
-
-    // O UPDATE não afetou linhas: o prazo não venceu (ex.: empurrado para o
-    // futuro por outra operação) ou o estado mudou concorrentemente entre a
-    // leitura e o UPDATE. Reavalia uma única vez com o estado vigente.
-    const reloaded = await findRequestById(tx, tenantId, requestId)
-
-    if (!reloaded) return null
-
-    return reloaded.state as HolderInformationRequestState
-  }
+  const insertEvent = insertHolderInformationRequestEvent
 
   const toDto = (row: {
     id: string
@@ -430,10 +261,9 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
         throw new Error(`invalid state transition from '${currentState}' to 'cancelled'`)
       }
 
-      // Tentar cancelar apenas se o prazo ainda não venceu no momento
-      // efetivo da operação. A condição `expires_at IS NULL OR expires_at >=
-      // clock_timestamp()` é avaliada pelo PostgreSQL dentro do UPDATE,
-      // evitando corrida entre leitura e escrita.
+      // Cancelar apenas se o prazo ainda não venceu no momento efetivo da
+      // operação. `expires_at > clock_timestamp()` (estrito) garante que a
+      // igualdade já é tratada como prazo encerrado.
       const [row] = await tx
         .update(t.holderInformationRequest)
         .set({
@@ -446,21 +276,14 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
             eq(t.holderInformationRequest.id, requestId),
             eq(t.holderInformationRequest.tenantId, tenantId),
             eq(t.holderInformationRequest.state, currentState),
-            // Apenas cancela se o prazo não venceu. clock_timestamp() é a
-            // hora efetiva de execução da instrução SQL no banco. O OR é
-            // agrupado explicitamente para não escapar das condições de ID,
-            // tenant e estado.
-            sql`(${t.holderInformationRequest.expiresAt} IS NULL OR ${t.holderInformationRequest.expiresAt} >= clock_timestamp())`,
+            sql`(${t.holderInformationRequest.expiresAt} IS NULL OR ${t.holderInformationRequest.expiresAt} > clock_timestamp())`,
           ),
         )
         .returning()
 
       if (!row) {
-        // O UPDATE não afetou linhas porque:
-        // 1) o prazo venceu entre a leitura e o UPDATE (outra operação
-        //    já expirou a solicitação), ou
-        // 2) outra operação alterou o estado concorrentemente.
-        // Recarregar e reavaliar.
+        // O UPDATE não afetou linhas porque o prazo venceu entre a leitura e o
+        // UPDATE ou outra operação alterou o estado concorrentemente.
         const reloaded = await findRequestById(tx, tenantId, requestId)
 
         if (!reloaded) throw new Error('holder information request not found')
@@ -486,8 +309,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
                 eq(t.holderInformationRequest.id, requestId),
                 eq(t.holderInformationRequest.tenantId, tenantId),
                 eq(t.holderInformationRequest.state, reloadedState),
-                isNotNull(t.holderInformationRequest.expiresAt),
-                sql`${t.holderInformationRequest.expiresAt} < clock_timestamp()`,
+                sql`${t.holderInformationRequest.expiresAt} <= clock_timestamp()`,
               ),
             )
             .returning()
@@ -518,6 +340,31 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
         actor,
         details: JSON.stringify({ reason: transition.reason }),
       })
+
+      // Revogar todos os tokens ativos na mesma transação. A ordem de locks é
+      // solicitação (UPDATE acima) → token.
+      const revokedTokens = await tx
+        .update(t.holderAccessToken)
+        .set({ revokedAt: sql`clock_timestamp()` })
+        .where(
+          and(
+            eq(t.holderAccessToken.tenantId, tenantId),
+            eq(t.holderAccessToken.holderInformationRequestId, requestId),
+            isNull(t.holderAccessToken.revokedAt),
+          ),
+        )
+        .returning({ tokenId: t.holderAccessToken.tokenId })
+
+      for (const token of revokedTokens) {
+        await insertEvent(tx, tenantId, {
+          holderInformationRequestId: requestId,
+          eventType: 'access_token_revoked',
+          fromState: 'cancelled',
+          toState: 'cancelled',
+          actor,
+          details: JSON.stringify({ tokenId: token.tokenId, reason: 'request_cancelled' }),
+        })
+      }
 
       return [row]
     })

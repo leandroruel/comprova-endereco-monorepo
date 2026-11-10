@@ -60,6 +60,9 @@ import { registerOrganizationsRoutes } from './modules/organizations/organizatio
 import { registerM2MRoutes } from './modules/m2m/m2m.routes.js'
 import { registerHolderRoutes } from './modules/holder/holder.routes.js'
 import { registerHolderInformationRequestRoutes } from './modules/holder/holder-information-request.routes.js'
+import { registerHolderAccessRoutes } from './modules/holder/holder-access.routes.js'
+import { registerHolderAccessTokenRoutes } from './modules/holder/holder-access-token.routes.js'
+import { makeHolderRateLimits } from './plugins/holder-rate-limit.js'
 import { AuthorizationError } from './modules/m2m/m2m.service.js'
 import { requireWriteScope } from './plugins/scope.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
@@ -169,7 +172,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['content-type', 'authorization', 'cookie'],
+    allowedHeaders: ['content-type', 'authorization', 'cookie', 'x-holder-token'],
     exposedHeaders: ['set-cookie'],
     preflight: true,
     preflightContinue: false,
@@ -193,7 +196,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     reply.header('access-control-allow-origin', origin)
     reply.header('access-control-allow-credentials', 'true')
     reply.header('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-    reply.header('access-control-allow-headers', 'content-type, authorization, cookie')
+    reply.header('access-control-allow-headers', 'content-type, authorization, cookie, x-holder-token')
     reply.header('access-control-expose-headers', 'set-cookie')
     reply.header('vary', 'Origin')
   })
@@ -277,6 +280,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const hasher = makeApiKeyHasher(deps.config.API_KEY_PEPPER)
   const authenticate = makeAuthenticate(deps.db, hasher)
   const rateLimit = makeRateLimiter(deps.redis)
+  const holderRateLimits = makeHolderRateLimits(deps.redis, deps.logger)
 
   // Provider de assinatura por tenant resolvido no boot. `local` (default)
   // lê `CREDENTIAL_SIGNING_KEYS` e mantém a privada só em memória; `aws-kms`
@@ -369,6 +373,23 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
         db: deps.db,
         logger: deps.logger,
       })
+      registerHolderAccessTokenRoutes(v1, {
+        db: deps.db,
+        pepper: deps.config.API_KEY_PEPPER,
+        logger: deps.logger,
+      })
+      registerHolderAccessRoutes(
+        v1,
+        {
+          db: deps.db,
+          store: objectStore,
+          pepper: deps.config.API_KEY_PEPPER,
+          logger: deps.logger,
+          metrics: deps.metrics,
+          maxDocumentBytes: evidenceMaxBytes,
+        },
+        holderRateLimits,
+      )
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })

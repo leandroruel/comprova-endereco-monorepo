@@ -30,6 +30,31 @@ local refill = math.max(0, math.ceil((burst - tokens) / safe_rate))
 return {allowed, math.floor(tokens), refill}
 `
 
+export interface TokenBucketResult {
+  readonly allowed: boolean
+  readonly remaining: number
+  readonly refillSeconds: number
+}
+
+/**
+ * Consome um token do bucket identificado por `key`. A chave deve ser opaca
+ * (nunca um token/IP em texto puro): os chamadores aplicam SHA-256 antes.
+ */
+export const consumeTokenBucket = async (
+  redis: Redis,
+  key: string,
+  rate: number,
+  burst: number,
+): Promise<TokenBucketResult> => {
+  const result = (await redis.eval(TOKEN_BUCKET_LUA, 1, key, rate, burst)) as [number, number, number]
+  const [allowed, remaining, refill] = result
+  return {
+    allowed: allowed === 1,
+    remaining,
+    refillSeconds: refill,
+  }
+}
+
 export function makeRateLimiter(redis: Redis) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
     const tenant = request.tenant
@@ -37,21 +62,17 @@ export function makeRateLimiter(redis: Redis) {
       return
     }
     const key = `rl:${tenant.tenantId}:${tenant.apiKeyId}`
-    const result = (await redis.eval(TOKEN_BUCKET_LUA, 1, key, tenant.rateLimitRps, tenant.burst)) as [
-      number,
-      number,
-      number,
-    ]
-    const [allowed, remaining, refill] = result
+    const result = await consumeTokenBucket(redis, key, tenant.rateLimitRps, tenant.burst)
     reply.header('RateLimit-Limit', tenant.burst)
-    reply.header('RateLimit-Remaining', Math.max(0, remaining))
-    reply.header('RateLimit-Reset', refill)
-    if (allowed !== 1) {
-      reply.header('Retry-After', Math.max(1, refill))
+    reply.header('RateLimit-Remaining', Math.max(0, result.remaining))
+    reply.header('RateLimit-Reset', result.refillSeconds)
+    if (!result.allowed) {
+      const retryAfter = Math.max(1, result.refillSeconds)
+      reply.header('Retry-After', retryAfter)
       return reply
         .code(429)
         .type(PROBLEM_CONTENT_TYPE)
-        .send(problems.rateLimited(`Retry after ${Math.max(1, refill)} seconds`))
+        .send(problems.rateLimited(`Retry after ${retryAfter} seconds`))
     }
   }
 }
