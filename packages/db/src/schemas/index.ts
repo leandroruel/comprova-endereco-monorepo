@@ -32,6 +32,8 @@ import { organizationInvitation, organizationMember } from './organizations.js'
 import { auditLog, tenantQuotaAudit, usageBillingUnit, usageEvent, usageEventIdempotency } from './usage.js'
 import { validation, validationIdempotency } from './validations.js'
 import { holder } from './holder.js'
+import { holderInformationRequest } from './holder-information-request.js'
+import { holderInformationRequestEvent } from './holder-information-request-event.js'
 import { kycProcess, kycEvent } from './kyc.js'
 
 export * from './enums.js'
@@ -53,6 +55,8 @@ export * from './events.js'
 export * from './usage.js'
 export * from './batches.js'
 export * from './holder.js'
+export * from './holder-information-request.js'
+export * from './holder-information-request-event.js'
 export * from './kyc.js'
 
 /**
@@ -114,6 +118,8 @@ export const schema = {
   tenantQuotaAudit,
   auditLog,
   holder,
+  holderInformationRequest,
+  holderInformationRequestEvent,
   kycProcess,
   kycEvent,
   batch,

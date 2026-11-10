@@ -59,6 +59,7 @@ import { registerMeRoute } from './modules/me/me.route.js'
 import { registerOrganizationsRoutes } from './modules/organizations/organizations.routes.js'
 import { registerM2MRoutes } from './modules/m2m/m2m.routes.js'
 import { registerHolderRoutes } from './modules/holder/holder.routes.js'
+import { registerHolderInformationRequestRoutes } from './modules/holder/holder-information-request.routes.js'
 import { AuthorizationError } from './modules/m2m/m2m.service.js'
 import { requireWriteScope } from './plugins/scope.js'
 import { docHmacKeyFromPepper, type FastPathDeps } from './services/fastpath.js'
@@ -364,6 +365,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       })
       registerM2MRoutes(v1, { db: deps.db, apiKeyPepper: deps.config.API_KEY_PEPPER })
       registerHolderRoutes(v1, { db: deps.db })
+      registerHolderInformationRequestRoutes(v1, {
+        db: deps.db,
+        logger: deps.logger,
+      })
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
