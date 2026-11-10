@@ -5,6 +5,7 @@ export interface Metrics {
   httpRequests: Counter<string>
   httpDuration: Histogram<string>
   httpErrors: Counter<string>
+  holderDocumentUploads: Counter<string>
 }
 
 export function createMetrics(): Metrics {
@@ -33,5 +34,13 @@ export function createMetrics(): Metrics {
     registers: [registry],
   })
 
-  return { registry, httpRequests, httpDuration, httpErrors }
+  // Uploads de documento do Holder (F4.2): started, stored, deleted, failed.
+  const holderDocumentUploads = new Counter({
+    name: 'holder_document_uploads_total',
+    help: 'Holder document upload lifecycle events',
+    labelNames: ['outcome'],
+    registers: [registry],
+  })
+
+  return { registry, httpRequests, httpDuration, httpErrors, holderDocumentUploads }
 }
