@@ -605,6 +605,13 @@ describe('F4.2 — acesso do Holder', () => {
     expect(await countEvents(requestId, 'holder_accessed')).toBe(1)
   })
 
+  it('a assertion de não exposição falha se holderId for introduzido indevidamente', () => {
+    // A assertion precisa operar sobre o objeto, não sobre a string do JSON.
+    const view: Record<string, unknown> = { requestId: randomUUID(), items: [] }
+    expect(view).not.toHaveProperty('holderId')
+    expect(() => expect({ ...view, holderId: randomUUID() }).not.toHaveProperty('holderId')).toThrow()
+  })
+
   it('registra holder_accessed no máximo uma vez por token', async () => {
     const { requestId } = await createRequest('acc-first-access')
     const issued = await issueTokenOk(requestId)
@@ -851,6 +858,39 @@ describe('F4.2 — acesso do Holder', () => {
     expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
   })
 
+  it('retry conclui o evento quando o storage já removeu mas o banco não concluiu', async () => {
+    const { requestId } = await createRequest('acc-delete-db-after-storage')
+    const issued = await issueTokenOk(requestId)
+    const documentId = await uploadDocumentOk(issued.token, 'address-proof', requestId)
+    if (typeof documentId !== 'string') throw new Error('documento não gravado')
+
+    const [row] = await adminSql`
+      SELECT storage_key FROM holder_information_request_document WHERE document_id = ${documentId}`
+    const storageKey = row!.storage_key as string
+
+    // Simula o estado deixado por uma falha de banco APÓS a exclusão física:
+    // tombstone commitado, objeto já ausente do storage e nenhum evento
+    // `holder_document_removed`. A próxima chamada deve concluir o processo.
+    await adminSql`
+      UPDATE holder_information_request_document
+         SET deleted_at = clock_timestamp(), updated_at = clock_timestamp()
+       WHERE document_id = ${documentId}`
+    storeObjects.delete(storageKey)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(0)
+
+    const url = `/v1/holder-access/items/address-proof/documents/${documentId}`
+    const res = await injectAsHolder('DELETE', url, issued.token)
+    expect(res.statusCode).toBe(204)
+    expect(storeObjects.has(storageKey)).toBe(false)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
+
+    // Exclusão repetida com objeto já inexistente é idempotente.
+    const again = await injectAsHolder('DELETE', url, issued.token)
+    expect(again.statusCode).toBe(204)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
+    expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(0)
+  })
+
   it('DELETE: token ausente, malformado ou desconhecido → 401 uniforme', async () => {
     const { requestId } = await createRequest('acc-delete-auth')
     const issued = await issueTokenOk(requestId)
@@ -1010,6 +1050,48 @@ describe('F4.2 — acesso do Holder', () => {
     )
     expect(notFound.statusCode).toBe(404)
     expect(notFound.headers['cache-control']).toBe('no-store')
+
+    // Token expirado → 401, também sem cache.
+    const now = Date.now()
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderAccessToken)
+        .set({ createdAt: new Date(now - 120_000), expiresAt: new Date(now - 60_000) })
+        .where(eq(t.holderAccessToken.tokenId, issued.tokenId))
+    })
+    const expired = await injectAsHolder('GET', '/v1/holder-access', issued.token)
+    expect(expired.statusCode).toBe(401)
+    expect(expired.headers['cache-control']).toBe('no-store')
+
+    // Token revogado → 401, também sem cache.
+    const revoke = await injectWithM2M(
+      'DELETE',
+      `/v1/information-requests/${requestId}/access-tokens/${issued.tokenId}?tenantId=${tenantId}`,
+    )
+    expect(revoke.statusCode).toBe(204)
+    const revoked = await injectAsHolder('GET', '/v1/holder-access', issued.token)
+    expect(revoked.statusCode).toBe(401)
+    expect(revoked.headers['cache-control']).toBe('no-store')
+
+    // Estado incompatível → 409, também sem cache.
+    const completed = await createRequest('acc-cache-state', [
+      { itemId: 'current-address', description: 'Endereço atual', required: true },
+    ])
+    const completedToken = await issueTokenOk(completed.requestId)
+    await injectAsHolder('PUT', '/v1/holder-access/items/current-address', completedToken.token, {
+      payload: JSON.stringify({ value: 'Endereço' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect((await injectAsHolder('POST', '/v1/holder-access/submit', completedToken.token)).statusCode).toBe(
+      200,
+    )
+    const stateConflict = await injectAsHolder(
+      'DELETE',
+      `/v1/holder-access/items/current-address/documents/${randomUUID()}`,
+      completedToken.token,
+    )
+    expect(stateConflict.statusCode).toBe(409)
+    expect(stateConflict.headers['cache-control']).toBe('no-store')
   })
 })
 

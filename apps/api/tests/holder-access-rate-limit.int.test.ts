@@ -359,6 +359,50 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
     })
   })
 
+  it('recupera capacidade conforme a taxa do bucket de upload', async () => {
+    const { requestId, token } = await createRequestWithToken()
+    // IP dedicado: não consome o bucket de IP usado pelos demais testes.
+    const remoteAddress = '10.9.9.12'
+    const url = '/v1/holder-access/items/address-proof/documents'
+
+    for (let i = 0; i < 3; i += 1) {
+      const part = multipartPayload(PNG_BYTES)
+      const res = await injectAsHolder('POST', url, token, {
+        payload: part.payload,
+        headers: part.headers,
+        remoteAddress,
+      })
+      expect(res.statusCode).toBe(200)
+    }
+
+    const blockedPart = multipartPayload(PNG_BYTES)
+    const blocked = await injectAsHolder('POST', url, token, {
+      payload: blockedPart.payload,
+      headers: blockedPart.headers,
+      remoteAddress,
+    })
+    expect(blocked.statusCode).toBe(429)
+
+    // Upload é 10/min: 1 token a cada 6 s. Após a espera, o bucket refila e a
+    // requisição volta a ser aceita.
+    await new Promise((resolve) => setTimeout(resolve, 6_500))
+
+    const recoveredPart = multipartPayload(PNG_BYTES)
+    const recovered = await injectAsHolder('POST', url, token, {
+      payload: recoveredPart.payload,
+      headers: recoveredPart.headers,
+      remoteAddress,
+    })
+    expect(recovered.statusCode).toBe(200)
+
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderAccessToken)
+        .set({ revokedAt: new Date() })
+        .where(eq(t.holderAccessToken.holderInformationRequestId, requestId))
+    })
+  })
+
   it('Redis indisponível → 503 fail-closed (nunca permite)', async () => {
     const { token } = await createRequestWithToken()
 

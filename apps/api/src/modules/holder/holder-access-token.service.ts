@@ -118,13 +118,35 @@ export const makeHolderAccessTokenService = (deps: {
       }
 
       const tokenId = randomUUID()
-      // `expires_at` é calculado inteiramente pelo relógio do PostgreSQL, no
-      // mesmo statement do INSERT. A cláusula `WHERE` revalida o prazo da
-      // solicitação no momento da escrita: se ela expirar entre a checagem
-      // acima e este INSERT, nenhuma linha é criada — nunca emitimos um token
-      // já inutilizável. `clock_timestamp()` (não `now()`) garante que o
-      // instante real da operação seja considerado.
+      // `expires_at` é calculado inteiramente pelo relógio do PostgreSQL, com
+      // um único `clock_timestamp()` (CTE `clock`) usado na revalidação do
+      // prazo, no cálculo do TTL e na checagem final. Isso garante, de forma
+      // estrita, `expires_at > instante do banco no INSERT`: nenhuma linha é
+      // criada se a solicitação expirar entre a checagem acima e esta
+      // operação, e jamais emitimos um token já inutilizável.
       const inserted = (await tx.execute(sql`
+        WITH clock AS (
+          SELECT clock_timestamp() AS ts
+        ),
+        candidate AS (
+          SELECT
+            ${tokenId}::uuid AS token_id,
+            r.tenant_id AS tenant_id,
+            r.holder_id AS holder_id,
+            r.id AS holder_information_request_id,
+            ${tokenPrefix}::text AS token_prefix,
+            ${tokenHash}::bytea AS token_hash,
+            ${actor}::text AS created_by,
+            LEAST(
+              c.ts + ${TOKEN_TTL_DAYS} * interval '1 day',
+              COALESCE(r.expires_at, c.ts + ${TOKEN_TTL_CEILING_DAYS} * interval '1 day')
+            ) AS expires_at
+          FROM holder_information_request r
+          CROSS JOIN clock c
+          WHERE r.id = ${requestId}::uuid
+            AND r.tenant_id = ${tenantId}::uuid
+            AND (r.expires_at IS NULL OR r.expires_at > c.ts)
+        )
         INSERT INTO holder_access_token (
           token_id,
           tenant_id,
@@ -136,24 +158,16 @@ export const makeHolderAccessTokenService = (deps: {
           expires_at
         )
         SELECT
-          ${tokenId}::uuid,
-          r.tenant_id,
-          r.holder_id,
-          r.id,
-          ${tokenPrefix},
-          ${tokenHash},
-          ${actor},
-          LEAST(
-            clock_timestamp() + ${TOKEN_TTL_DAYS} * interval '1 day',
-            COALESCE(
-              r.expires_at,
-              clock_timestamp() + ${TOKEN_TTL_CEILING_DAYS} * interval '1 day'
-            )
-          )
-        FROM holder_information_request r
-        WHERE r.id = ${requestId}::uuid
-          AND r.tenant_id = ${tenantId}::uuid
-          AND (r.expires_at IS NULL OR r.expires_at > clock_timestamp())
+          token_id,
+          tenant_id,
+          holder_id,
+          holder_information_request_id,
+          token_prefix,
+          token_hash,
+          created_by,
+          expires_at
+        FROM candidate
+        WHERE expires_at > (SELECT ts FROM clock)
         RETURNING
           (extract(epoch FROM expires_at) * 1000)::double precision AS expires_at_ms,
           (extract(epoch FROM created_at) * 1000)::double precision AS created_at_ms
