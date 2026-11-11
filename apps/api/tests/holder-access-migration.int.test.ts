@@ -182,23 +182,25 @@ describe('F4.2 — assertion de memberships do holder_token_resolver', () => {
 
   it('falha da assertion não deixa alterações parciais (rollback transacional)', async () => {
     await cleanup()
-    await admin.unsafe('CREATE ROLE f42_partial_rollback')
-    await admin.unsafe('GRANT holder_token_resolver TO f42_partial_rollback')
+    try {
+      await admin.unsafe('CREATE ROLE f42_partial_rollback')
+      await admin.unsafe('GRANT holder_token_resolver TO f42_partial_rollback')
 
-    // A migration roda cada arquivo em uma transação (runner). Simula-se uma
-    // alteração anterior no mesmo arquivo e verifica-se que a falha da
-    // assertion desfaz tudo, sem estado parcial.
-    await expect(
-      admin.begin(async (tx) => {
-        await tx.unsafe('CREATE TABLE f42_partial_marker (id integer)')
-        await tx.unsafe(membershipAssertion)
-      }),
-    ).rejects.toThrow(/must not participate in any role membership/)
+      // A migration roda cada arquivo em uma transação (runner). Simula-se uma
+      // alteração anterior no mesmo arquivo e verifica-se que a falha da
+      // assertion desfaz tudo, sem estado parcial.
+      await expect(
+        admin.begin(async (tx) => {
+          await tx.unsafe('CREATE TABLE f42_partial_marker (id integer)')
+          await tx.unsafe(membershipAssertion)
+        }),
+      ).rejects.toThrow(/must not participate in any role membership/)
 
-    const [marker] = await admin`SELECT to_regclass('public.f42_partial_marker') AS marker`
-    expect(marker!.marker).toBeNull()
-
-    await cleanup()
+      const [marker] = await admin`SELECT to_regclass('public.f42_partial_marker') AS marker`
+      expect(marker!.marker).toBeNull()
+    } finally {
+      await cleanup()
+    }
     const [role] = await admin`SELECT 1 FROM pg_roles WHERE rolname = 'f42_partial_rollback'`
     expect(role).toBeUndefined()
   })

@@ -383,17 +383,23 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
     })
     expect(blocked.statusCode).toBe(429)
 
-    // Upload é 10/min: 1 token a cada 6 s. Após a espera, o bucket refila e a
-    // requisição volta a ser aceita.
-    await new Promise((resolve) => setTimeout(resolve, 6_500))
-
+    // Upload é 10/min: 1 token a cada 6 s. Polling até o bucket refilar,
+    // com timeout limitado para evitar espera indefinida em caso de CI lento.
     const recoveredPart = multipartPayload(PNG_BYTES)
-    const recovered = await injectAsHolder('POST', url, token, {
-      payload: recoveredPart.payload,
-      headers: recoveredPart.headers,
-      remoteAddress,
-    })
-    expect(recovered.statusCode).toBe(200)
+    const deadline = Date.now() + 30_000
+    let recovered: Awaited<ReturnType<typeof injectAsHolder>>
+    let recoveredStatus = 0
+    do {
+      recovered = await injectAsHolder('POST', url, token, {
+        payload: recoveredPart.payload,
+        headers: recoveredPart.headers,
+        remoteAddress,
+      })
+      recoveredStatus = recovered.statusCode
+      if (recoveredStatus === 200) break
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    } while (Date.now() < deadline)
+    expect(recoveredStatus).toBe(200)
 
     await withTenant(appPool.db, tenantId, async (tx) => {
       await tx

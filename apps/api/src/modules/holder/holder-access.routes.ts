@@ -55,6 +55,11 @@ export const registerHolderAccessRoutes = (
   ): Promise<HolderTokenContext | FastifyReply> => {
     const token = headerToken(request)
     if (token === undefined || !isHolderTokenFormat(token)) {
+      // Verifica o orçamento de tentativas inválidas ANTES de consultar o
+      // banco. Se o bucket está esgotado, retorna 429 sem consumir a tentativa
+      // nem acessar o banco (#3).
+      const blocked = await rateLimits.invalidReadOnly(request, reply)
+      if (blocked !== undefined) return blocked as FastifyReply
       return invalidToken(request, reply)
     }
     const context = await controller.resolveToken(token)

@@ -36,9 +36,9 @@ CREATE TABLE holder_access_token (
     REFERENCES holder_information_request (id, tenant_id),
   CONSTRAINT holder_access_token_prefix_check CHECK (char_length(token_prefix) BETWEEN 8 AND 64),
   CONSTRAINT holder_access_token_hash_check CHECK (octet_length(token_hash) = 32),
-  CONSTRAINT holder_access_token_expiry_check CHECK (expires_at > created_at),
-  CONSTRAINT holder_access_token_prefix_unique UNIQUE (token_prefix)
+  CONSTRAINT holder_access_token_expiry_check CHECK (expires_at > created_at)
 );
+CREATE INDEX idx_holder_access_token_prefix ON holder_access_token (token_prefix);
 CREATE INDEX idx_holder_access_token_tenant ON holder_access_token (tenant_id);
 CREATE INDEX idx_holder_access_token_request ON holder_access_token (tenant_id, holder_information_request_id);
 -- Contagem de tokens efetivamente utilizáveis por solicitação (emissão).

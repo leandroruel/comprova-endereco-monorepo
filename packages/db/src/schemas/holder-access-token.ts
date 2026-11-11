@@ -48,7 +48,7 @@ export const holderAccessToken = pgTable(
     check('holder_access_token_prefix_check', sql`char_length(token_prefix) BETWEEN 8 AND 64`),
     check('holder_access_token_hash_check', sql`octet_length(token_hash) = 32`),
     check('holder_access_token_expiry_check', sql`expires_at > created_at`),
-    unique('holder_access_token_prefix_unique').on(t.tokenPrefix),
+    index('idx_holder_access_token_prefix').on(t.tokenPrefix),
     index('idx_holder_access_token_tenant').on(t.tenantId),
     index('idx_holder_access_token_request').on(t.tenantId, t.holderInformationRequestId),
     // Contagem de tokens efetivamente utilizáveis por solicitação (emissão).

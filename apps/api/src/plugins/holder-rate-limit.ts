@@ -74,6 +74,8 @@ export interface HolderRateLimits {
   readonly token: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | void>
   readonly upload: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | void>
   readonly invalid: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | void>
+  /** Read-only check do bucket de tentativas inválidas (não consome tentativa). */
+  readonly invalidReadOnly: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | void>
 }
 
 export const makeHolderRateLimits = (redis: Redis, logger: Logger): HolderRateLimits => {
@@ -134,5 +136,40 @@ export const makeHolderRateLimits = (redis: Redis, logger: Logger): HolderRateLi
       return enforce('upload', hashKeyPart(token.slice(0, 16)), request, reply)
     },
     invalid: (request, reply) => enforce('invalid', hashKeyPart(clientIpOf(request)), request, reply),
+    invalidReadOnly: async (request, reply) => {
+      const config = HOLDER_RATE_LIMIT_LAYERS.invalid
+      const key = `rl:holder:invalid:${hashKeyPart(clientIpOf(request))}`
+      try {
+        const [tokensRaw, tsRaw] = (await redis.hmget(key, 'tokens', 'ts')) as [string | null, string | null]
+        const now = Date.now() / 1000
+        const tokens = tokensRaw !== null ? parseFloat(tokensRaw) : config.burst
+        const ts = tsRaw !== null ? parseFloat(tsRaw) : now
+        const delta = Math.max(0, now - ts)
+        const available = Math.min(config.burst, tokens + delta * config.ratePerSecond)
+        if (available < 1) {
+          const safeRate = Math.max(config.ratePerSecond, 0.001)
+          const refillSeconds = Math.max(1, Math.ceil((config.burst - available) / safeRate))
+          reply.header('Retry-After', refillSeconds)
+          return reply
+            .code(429)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(429, 'RATE_LIMITED', 'Rate limit exceeded', `Retry after ${refillSeconds} seconds`))
+        }
+      } catch (error) {
+        logger.error(
+          {
+            layer: 'invalid',
+            request_id: request.id,
+            route: request.routeOptions.url,
+            error_name: error instanceof Error ? error.name : 'unknown',
+          },
+          'holder rate limit unavailable',
+        )
+        return reply
+          .code(503)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(problem(503, 'RATE_LIMIT_UNAVAILABLE', 'Rate limit unavailable'))
+      }
+    },
   }
 }
