@@ -140,7 +140,12 @@ const injectAsHolder = (
   method: string,
   url: string,
   token: string | undefined,
-  extra?: { payload?: Buffer; headers?: Record<string, string>; target?: typeof app },
+  extra?: {
+    payload?: Buffer
+    headers?: Record<string, string>
+    target?: typeof app
+    remoteAddress?: string
+  },
 ) => {
   const target = extra?.target ?? app
   const headers: Record<string, string> = { ...(extra?.headers ?? {}) }
@@ -149,7 +154,7 @@ const injectAsHolder = (
     method,
     url,
     headers,
-    remoteAddress: FIXED_IP,
+    remoteAddress: extra?.remoteAddress ?? FIXED_IP,
     ...(extra?.payload ? { payload: extra.payload } : {}),
   })
 }
@@ -264,6 +269,13 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
     expect(exceeded.headers['retry-after']).toBeDefined()
     // Respostas de erro do limitador também não podem ser cacheadas.
     expect(exceeded.headers['cache-control']).toBe('no-store')
+
+    // O bucket de tentativas inválidas é por IP: outro IP não é afetado.
+    const otherIp = await injectAsHolder('GET', '/v1/holder-access', undefined, {
+      remoteAddress: '10.9.9.10',
+    })
+    expect(otherIp.statusCode).toBe(401)
+    expect(otherIp.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
   })
 
   it('limite de uploads por token: 3 OK (burst), depois 429', async () => {
@@ -297,6 +309,53 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
         .update(t.holderAccessToken)
         .set({ revokedAt: new Date() })
         .where(eq(t.holderAccessToken.holderInformationRequestId, requestId))
+    })
+  })
+
+  it('isolamento por token: esgotar uploads de um token não bloqueia outro', async () => {
+    const first = await createRequestWithToken()
+    const second = await createRequestWithToken()
+
+    for (let i = 0; i < 3; i += 1) {
+      const part = multipartPayload(PNG_BYTES)
+      const res = await injectAsHolder(
+        'POST',
+        '/v1/holder-access/items/address-proof/documents',
+        first.token,
+        { payload: part.payload, headers: part.headers },
+      )
+      expect(res.statusCode).toBe(200)
+    }
+
+    const blockedPart = multipartPayload(PNG_BYTES)
+    const blocked = await injectAsHolder(
+      'POST',
+      '/v1/holder-access/items/address-proof/documents',
+      first.token,
+      { payload: blockedPart.payload, headers: blockedPart.headers },
+    )
+    expect(blocked.statusCode).toBe(429)
+
+    // O segundo token tem bucket próprio e continua aceitando uploads.
+    const otherPart = multipartPayload(PNG_BYTES)
+    const other = await injectAsHolder(
+      'POST',
+      '/v1/holder-access/items/address-proof/documents',
+      second.token,
+      { payload: otherPart.payload, headers: otherPart.headers },
+    )
+    expect(other.statusCode).toBe(200)
+
+    // Limpeza do estado de emissão para não afetar outros testes.
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderAccessToken)
+        .set({ revokedAt: new Date() })
+        .where(eq(t.holderAccessToken.holderInformationRequestId, first.requestId))
+      await tx
+        .update(t.holderAccessToken)
+        .set({ revokedAt: new Date() })
+        .where(eq(t.holderAccessToken.holderInformationRequestId, second.requestId))
     })
   })
 

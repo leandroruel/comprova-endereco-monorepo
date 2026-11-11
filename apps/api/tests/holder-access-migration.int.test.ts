@@ -180,3 +180,48 @@ describe('F4.2 — assertion de memberships do holder_token_resolver', () => {
     await expect(admin.unsafe(membershipAssertion)).resolves.toBeDefined()
   })
 })
+
+describe('F4.2 — privilégios efetivos do holder_token_resolver', () => {
+  it('mantém os atributos seguros após a migration', async () => {
+    const [role] = await admin`
+      SELECT rolcanlogin, rolsuper, rolinherit, rolcreaterole, rolcreatedb,
+             rolreplication, rolbypassrls
+        FROM pg_roles
+       WHERE rolname = 'holder_token_resolver'`
+
+    expect(role).toEqual({
+      rolcanlogin: false,
+      rolsuper: false,
+      rolinherit: false,
+      rolcreaterole: false,
+      rolcreatedb: false,
+      rolreplication: false,
+      rolbypassrls: false,
+    })
+  })
+
+  it('só tem SELECT na tabela de tokens e nenhum CREATE em public', async () => {
+    const grants = await admin`
+      SELECT table_name, privilege_type
+        FROM information_schema.role_table_grants
+       WHERE grantee = 'holder_token_resolver'
+       ORDER BY table_name, privilege_type`
+    expect(grants).toEqual([{ table_name: 'holder_access_token', privilege_type: 'SELECT' }])
+
+    const [schema] = await admin`
+      SELECT has_schema_privilege('holder_token_resolver', 'public', 'CREATE') AS can_create`
+    expect(schema!.can_create).toBe(false)
+
+    const [table] = await admin`
+      SELECT has_table_privilege('holder_token_resolver', 'holder_access_token', 'SELECT') AS can_select,
+             has_table_privilege('holder_token_resolver', 'holder_access_token', 'INSERT') AS can_insert,
+             has_table_privilege('holder_token_resolver', 'holder_access_token', 'UPDATE') AS can_update,
+             has_table_privilege('holder_token_resolver', 'holder_access_token', 'DELETE') AS can_delete`
+    expect(table).toEqual({
+      can_select: true,
+      can_insert: false,
+      can_update: false,
+      can_delete: false,
+    })
+  })
+})

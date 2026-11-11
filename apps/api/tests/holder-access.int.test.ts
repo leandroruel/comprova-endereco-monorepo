@@ -891,6 +891,78 @@ describe('F4.2 — acesso do Holder', () => {
     expect(res.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
   })
 
+  it('DELETE: token expirado → 401 (não 404)', async () => {
+    const { requestId } = await createRequest('acc-delete-expired')
+    const issued = await issueTokenOk(requestId)
+
+    // `holder_access_token_expiry_check` exige expires_at > created_at: um
+    // token vencido só pode ter sido criado antes do vencimento.
+    const now = Date.now()
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderAccessToken)
+        .set({ createdAt: new Date(now - 120_000), expiresAt: new Date(now - 60_000) })
+        .where(eq(t.holderAccessToken.tokenId, issued.tokenId))
+    })
+
+    const res = await injectAsHolder(
+      'DELETE',
+      `/v1/holder-access/items/address-proof/documents/${randomUUID()}`,
+      issued.token,
+    )
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
+  })
+
+  it('DELETE: solicitação cancelada → 401 uniforme (token revogado no cancelamento)', async () => {
+    const { requestId } = await createRequest('acc-delete-cancelled')
+    const issued = await issueTokenOk(requestId)
+    const cancelRes = await injectWithM2M(
+      'POST',
+      `/v1/information-requests/${requestId}/cancel?tenantId=${tenantId}`,
+      { toState: 'cancelled', reason: 'Cancelado' },
+    )
+    expect(cancelRes.statusCode).toBe(200)
+
+    // O cancelamento revoga os tokens na mesma transação; a autenticação
+    // falha antes de qualquer checagem de estado, sem revelar que a
+    // solicitação existe (401, nunca 404/409).
+    const res = await injectAsHolder(
+      'DELETE',
+      `/v1/holder-access/items/address-proof/documents/${randomUUID()}`,
+      issued.token,
+    )
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
+  })
+
+  it('DELETE: documento de outra solicitação → 404 e documento original intacto', async () => {
+    const original = await createRequest('acc-delete-owner-a')
+    const issuedOriginal = await issueTokenOk(original.requestId)
+    const documentId = await uploadDocumentOk(issuedOriginal.token, 'address-proof', original.requestId)
+    if (typeof documentId !== 'string') throw new Error('documento não gravado')
+
+    // Outra solicitação do mesmo tenant, com o mesmo item.
+    const other = await createRequest('acc-delete-owner-b')
+    const issuedOther = await issueTokenOk(other.requestId)
+
+    const res = await injectAsHolder(
+      'DELETE',
+      `/v1/holder-access/items/address-proof/documents/${documentId}`,
+      issuedOther.token,
+    )
+    expect(res.statusCode).toBe(404)
+    expect(res.json().code).toBe('HOLDER_DOCUMENT_NOT_FOUND')
+
+    // O documento da solicitação original não foi tombstoned nem removido.
+    const rows = await adminSql`
+      SELECT deleted_at FROM holder_information_request_document WHERE document_id = ${documentId}`
+    expect(rows[0]!.deleted_at).toBeNull()
+    const view = await injectAsHolder('GET', '/v1/holder-access', issuedOriginal.token)
+    expect(view.statusCode).toBe(200)
+    expect(view.json().items[0].documents).toHaveLength(1)
+  })
+
   it('DELETE: solicitação completed → 409 (não 404)', async () => {
     const { requestId } = await createRequest('acc-delete-completed', [
       { itemId: 'current-address', description: 'Endereço atual', required: true },
