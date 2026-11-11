@@ -607,7 +607,152 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
     itemId: string,
     documentId: string,
   ): Promise<HolderDeleteDocumentResult> => {
-    // 1. Autoriza primeiro: revalida token, tenant e item.
+    // 1. Verifica tombstone primeiro, antes de exigir autorização completa.
+    //    Isso permite recuperar a finalização mesmo quando o token expirou ou
+    //    a solicitação já não é mutável (completed/expired/cancelled) — o
+    //    contexto do token (resolvido por resolveToken) já garante
+    //    tenant/request/holder.
+    const tombstoneResult = await withTenant(db, context.tenantId, async (tx) => {
+      const [existing] = await tx
+        .select({
+          storageKey: t.holderInformationRequestDocument.storageKey,
+          deletedAt: t.holderInformationRequestDocument.deletedAt,
+        })
+        .from(t.holderInformationRequestDocument)
+        .where(
+          and(
+            eq(t.holderInformationRequestDocument.documentId, documentId),
+            eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
+            eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
+            eq(t.holderInformationRequestDocument.itemId, itemId),
+          ),
+        )
+        .limit(1)
+
+      if (!existing) {
+        return { kind: 'not_tombstoned' } as const
+      }
+
+      if (existing.deletedAt === null) {
+        return { kind: 'not_tombstoned' } as const
+      }
+
+      // Já tombstoned: busca o estado da solicitação para o evento de auditoria.
+      const [requestRow] = await tx
+        .select({ state: t.holderInformationRequest.state })
+        .from(t.holderInformationRequest)
+        .where(
+          and(
+            eq(t.holderInformationRequest.id, context.requestId),
+            eq(t.holderInformationRequest.tenantId, context.tenantId),
+          ),
+        )
+        .limit(1)
+
+      return {
+        kind: 'tombstoned',
+        storageKey: existing.storageKey,
+        state: requestRow?.state ?? null,
+      } as const
+    })
+
+    if (tombstoneResult.kind === 'tombstoned') {
+      const { storageKey, state } = tombstoneResult
+
+      // Fast path: já concluído por uma chamada anterior (evento de remoção
+      // existe). Verifica com itemId para evitar falso positivo (#2).
+      const [alreadyRemoved] = await withTenant(db, context.tenantId, async (tx) =>
+        tx
+          .select({ id: t.holderInformationRequestEvent.id })
+          .from(t.holderInformationRequestEvent)
+          .where(
+            and(
+              eq(t.holderInformationRequestEvent.tenantId, context.tenantId),
+              eq(t.holderInformationRequestEvent.holderInformationRequestId, context.requestId),
+              eq(t.holderInformationRequestEvent.eventType, 'holder_document_removed'),
+              sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'documentId' = ${documentId}`,
+              sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'itemId' = ${itemId}`,
+            ),
+          )
+          .limit(1),
+      )
+
+      if (alreadyRemoved) return { kind: 'deleted' }
+
+      // Prossegue para remoção física + finalização.
+      const finalState = (state ?? 'in_progress') as HolderInformationRequestState
+
+      // Tombstone já commitado; só agora removemos o objeto físico.
+      try {
+        await store.delete(storageKey)
+      } catch (error) {
+        metrics?.holderDocumentUploads.inc({ outcome: 'failed' })
+        logError('document_delete', context.tenantId, error)
+        return { kind: 'storage_unavailable' }
+      }
+
+      metrics?.holderDocumentUploads.inc({ outcome: 'deleted' })
+
+      try {
+        await withTenant(db, context.tenantId, async (tx) => {
+          await tx
+            .select({ documentId: t.holderInformationRequestDocument.documentId })
+            .from(t.holderInformationRequestDocument)
+            .where(
+              and(
+                eq(t.holderInformationRequestDocument.documentId, documentId),
+                eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
+                eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
+                isNotNull(t.holderInformationRequestDocument.deletedAt),
+              ),
+            )
+            .limit(1)
+            .for('update')
+
+          const [alreadyRemoved] = await tx
+            .select({ id: t.holderInformationRequestEvent.id })
+            .from(t.holderInformationRequestEvent)
+            .where(
+              and(
+                eq(t.holderInformationRequestEvent.tenantId, context.tenantId),
+                eq(t.holderInformationRequestEvent.holderInformationRequestId, context.requestId),
+                eq(t.holderInformationRequestEvent.eventType, 'holder_document_removed'),
+                sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'documentId' = ${documentId}`,
+                sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'itemId' = ${itemId}`,
+              ),
+            )
+            .limit(1)
+
+          if (alreadyRemoved) return
+
+          await tx
+            .delete(t.holderInformationRequestDocument)
+            .where(
+              and(
+                eq(t.holderInformationRequestDocument.documentId, documentId),
+                eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
+                eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
+              ),
+            )
+
+          await insertHolderInformationRequestEvent(tx, context.tenantId, {
+            holderInformationRequestId: context.requestId,
+            eventType: 'holder_document_removed',
+            fromState: finalState,
+            toState: finalState,
+            actor,
+            details: JSON.stringify({ documentId, itemId }),
+          })
+        })
+      } catch (error) {
+        logError('document_delete_finalize', context.tenantId, error)
+        return { kind: 'audit_unavailable' }
+      }
+
+      return { kind: 'deleted' }
+    }
+
+    // 2. Documento não está tombstoned: fluxo normal com autorização completa.
     const authorizedResult = await withTenant(db, context.tenantId, async (tx) => {
       const authorized = await authorizeInTx(tx, context, actor)
       if (authorized.kind !== 'ok') {
@@ -619,43 +764,13 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         return { kind: 'auth', result: { kind: 'item_not_found', itemId } } as const
       }
 
-      // 2. Solicitação não mutável (completed/expired/cancelled): só permite
-      //    prosseguir se já houver um tombstone a ser finalizado (#9). Caso
-      //    contrário, retorna 409 (estado incompatível), mesmo que o
-      //    documento não exista mais.
+      // Estado não mutável (completed/expired/cancelled) sem tombstone: 409.
       if (!isMutable(authorized.state)) {
-        const [existing] = await tx
-          .select({
-            storageKey: t.holderInformationRequestDocument.storageKey,
-            deletedAt: t.holderInformationRequestDocument.deletedAt,
-          })
-          .from(t.holderInformationRequestDocument)
-          .where(
-            and(
-              eq(t.holderInformationRequestDocument.documentId, documentId),
-              eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
-              eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
-              eq(t.holderInformationRequestDocument.itemId, itemId),
-            ),
-          )
-          .limit(1)
-
-        if (existing && existing.deletedAt !== null) {
-          // Já tombstoned: vai direto para a remoção física + finalização.
-          return {
-            kind: 'tombstoned',
-            storageKey: existing.storageKey,
-            state: authorized.state,
-          } as const
-        }
-
         return {
           kind: 'auth',
           result: { kind: 'invalid_state', state: authorized.state },
         } as const
       }
-
-      // 3. Estado mutável: fluxo normal de exclusão.
       // Fast path: já concluído por uma chamada anterior.
       const [alreadyRemoved] = await tx
         .select({ id: t.holderInformationRequestEvent.id })
@@ -666,6 +781,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
             eq(t.holderInformationRequestEvent.holderInformationRequestId, context.requestId),
             eq(t.holderInformationRequestEvent.eventType, 'holder_document_removed'),
             sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'documentId' = ${documentId}`,
+            sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'itemId' = ${itemId}`,
           ),
         )
         .limit(1)
@@ -729,6 +845,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
               eq(t.holderInformationRequestEvent.holderInformationRequestId, context.requestId),
               eq(t.holderInformationRequestEvent.eventType, 'holder_document_removed'),
               sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'documentId' = ${documentId}`,
+              sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'itemId' = ${itemId}`,
             ),
           )
           .limit(1)
@@ -802,6 +919,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
               eq(t.holderInformationRequestEvent.holderInformationRequestId, context.requestId),
               eq(t.holderInformationRequestEvent.eventType, 'holder_document_removed'),
               sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'documentId' = ${documentId}`,
+              sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'itemId' = ${itemId}`,
             ),
           )
           .limit(1)

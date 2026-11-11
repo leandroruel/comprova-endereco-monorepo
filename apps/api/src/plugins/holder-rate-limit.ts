@@ -140,7 +140,10 @@ export const makeHolderRateLimits = (redis: Redis, logger: Logger): HolderRateLi
       const config = HOLDER_RATE_LIMIT_LAYERS.invalid
       const key = `rl:holder:invalid:${hashKeyPart(clientIpOf(request))}`
       try {
-        const [tokensRaw, tsRaw] = (await redis.hmget(key, 'tokens', 'ts')) as [string | null, string | null]
+        const [tokensRaw, tsRaw] = (await withTimeout(
+          redis.hmget(key, 'tokens', 'ts'),
+          REDIS_TIMEOUT_MS,
+        )) as [string | null, string | null]
         const now = Date.now() / 1000
         const tokens = tokensRaw !== null ? parseFloat(tokensRaw) : config.burst
         const ts = tsRaw !== null ? parseFloat(tsRaw) : now
