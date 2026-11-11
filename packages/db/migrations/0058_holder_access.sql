@@ -15,7 +15,7 @@ SET application_name = 'comprova-migrations';
 
 CREATE TABLE holder_access_token (
   token_id uuid PRIMARY KEY,
-  tenant_id uuid NOT NULL REFERENCES tenant (tenant_id),
+  tenant_id uuid NOT NULL,
   holder_id uuid NOT NULL,
   holder_information_request_id uuid NOT NULL,
   token_prefix text NOT NULL,
@@ -25,6 +25,9 @@ CREATE TABLE holder_access_token (
   expires_at timestamptz NOT NULL,
   revoked_at timestamptz,
   first_accessed_at timestamptz,
+  CONSTRAINT holder_access_token_tenant_fk
+    FOREIGN KEY (tenant_id)
+    REFERENCES tenant (tenant_id),
   CONSTRAINT holder_access_token_holder_tenant_fk
     FOREIGN KEY (holder_id, tenant_id)
     REFERENCES holder (holder_id, tenant_id),
@@ -33,6 +36,7 @@ CREATE TABLE holder_access_token (
     REFERENCES holder_information_request (id, tenant_id),
   CONSTRAINT holder_access_token_prefix_check CHECK (char_length(token_prefix) BETWEEN 8 AND 64),
   CONSTRAINT holder_access_token_hash_check CHECK (octet_length(token_hash) = 32),
+  CONSTRAINT holder_access_token_expiry_check CHECK (expires_at > created_at),
   CONSTRAINT holder_access_token_prefix_unique UNIQUE (token_prefix)
 );
 CREATE INDEX idx_holder_access_token_tenant ON holder_access_token (tenant_id);
@@ -92,8 +96,8 @@ CREATE TABLE holder_information_request_document (
   tenant_id uuid NOT NULL,
   holder_information_request_id uuid NOT NULL,
   item_id text NOT NULL,
-  upload_state text NOT NULL CHECK (upload_state IN ('pending', 'stored')),
-  storage_key text NOT NULL UNIQUE,
+  upload_state text NOT NULL,
+  storage_key text NOT NULL,
   content_type text,
   size_bytes bigint,
   sha256 bytea,
@@ -104,6 +108,10 @@ CREATE TABLE holder_information_request_document (
   CONSTRAINT holder_information_request_document_request_tenant_fk
     FOREIGN KEY (holder_information_request_id, tenant_id)
     REFERENCES holder_information_request (id, tenant_id),
+  CONSTRAINT holder_information_request_document_storage_key_unique
+    UNIQUE (storage_key),
+  CONSTRAINT holder_information_request_document_upload_state_check
+    CHECK (upload_state IN ('pending', 'stored')),
   CONSTRAINT holder_information_request_document_storage_key_check
     CHECK (storage_key LIKE 'tenants/%/holder-requests/%'),
   CONSTRAINT holder_information_request_document_state_check
@@ -221,8 +229,13 @@ BEGIN
     RAISE EXCEPTION 'holder_token_resolver has unexpected role attributes: %', r;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM pg_auth_members WHERE member = r.oid) THEN
-    RAISE EXCEPTION 'holder_token_resolver must not be a member of any role';
+  IF EXISTS (
+    SELECT 1
+      FROM pg_auth_members
+     WHERE member = r.oid OR roleid = r.oid
+  ) THEN
+    RAISE EXCEPTION
+      'holder_token_resolver must not participate in any role membership (as member or as granted role)';
   END IF;
 
   SELECT EXISTS (

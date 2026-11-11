@@ -25,9 +25,12 @@ export interface HolderRateLimitLayer {
 }
 
 export const HOLDER_RATE_LIMIT_LAYERS = {
-  ip: { ratePerSecond: 2, burst: 120 },
-  token: { ratePerSecond: 2, burst: 120 },
-  upload: { ratePerSecond: 10 / 60, burst: 10 },
+  // 60/min com burst 30.
+  ip: { ratePerSecond: 1, burst: 30 },
+  token: { ratePerSecond: 1, burst: 30 },
+  // 10/min com burst 3.
+  upload: { ratePerSecond: 10 / 60, burst: 3 },
+  // 10/min (tentativas inválidas por IP).
   invalid: { ratePerSecond: 10 / 60, burst: 10 },
 } as const satisfies Record<string, HolderRateLimitLayer>
 

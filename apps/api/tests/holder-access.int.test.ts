@@ -24,12 +24,21 @@ const PDF_BYTES = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x3
 
 /** Fake store com conteúdo inspecionável: verifica remoção física real. */
 const storeObjects = new Map<string, Uint8Array>()
+/** Quantas remoções físicas ainda devem falhar (simula indisponibilidade do storage). */
+let failingDeletesRemaining = 0
+/** Quantas vezes cada chave teve remoção física tentada. */
+const deleteAttempts = new Map<string, number>()
 const fakeStore: ObjectStore = {
   put: async (key, data): Promise<StoredObject> => {
     storeObjects.set(key, Uint8Array.from(data))
     return { key, uri: `memory://${key}`, sha256: sha256Of(data), bytes: data.byteLength }
   },
   delete: async (key) => {
+    deleteAttempts.set(key, (deleteAttempts.get(key) ?? 0) + 1)
+    if (failingDeletesRemaining > 0) {
+      failingDeletesRemaining -= 1
+      throw new Error('object storage unavailable')
+    }
     storeObjects.delete(key)
   },
 }
@@ -285,7 +294,7 @@ const countEvents = async (requestId: string, eventType: string): Promise<number
 
 const tokenRowsOf = async (requestId: string) =>
   adminSql`
-    SELECT token_id, token_prefix, token_hash, expires_at, revoked_at, first_accessed_at
+    SELECT token_id, token_prefix, token_hash, expires_at, created_at, revoked_at, first_accessed_at
     FROM holder_access_token
     WHERE holder_information_request_id = ${requestId}
     ORDER BY created_at`
@@ -410,6 +419,76 @@ describe('F4.2 — emissão de tokens (Verifier)', () => {
     expect(await tokenRowsOf(requestId)).toHaveLength(0)
   })
 
+  it('calcula a expiração com o relógio do PostgreSQL e respeita o prazo da solicitação', async () => {
+    const { requestId } = await createRequest('acc-emit-db-clock')
+    // Prazo bem menor que o TTL padrão de 7 dias: o token deve ser limitado
+    // pelo `expires_at` da solicitação (relógio do banco).
+    await adminSql`
+      UPDATE holder_information_request
+         SET expires_at = clock_timestamp() + interval '90 minutes'
+       WHERE id = ${requestId}`
+
+    const issued = await issueTokenOk(requestId)
+    const [row] = await adminSql`
+      SELECT expires_at FROM holder_information_request WHERE id = ${requestId}`
+
+    const requestExpiresAt = (row!.expires_at as Date).getTime()
+    const tokenExpiresAt = new Date(issued.expiresAt).getTime()
+    const createdAt = new Date(issued.createdAt).getTime()
+
+    expect(tokenExpiresAt).toBe(requestExpiresAt)
+    expect(tokenExpiresAt).toBeGreaterThan(createdAt)
+    expect(tokenExpiresAt).toBeGreaterThan(Date.now() + 60 * 60_000)
+    expect(tokenExpiresAt).toBeLessThan(Date.now() + 2 * 60 * 60_000)
+
+    // Nenhum token além do prazo da solicitação foi emitido.
+    const tokens = await tokenRowsOf(requestId)
+    expect(tokens).toHaveLength(1)
+    expect((tokens[0]!.expires_at as Date).getTime()).toBeLessThanOrEqual(requestExpiresAt)
+  })
+
+  it('não emite token quando a solicitação vence antes da escrita (relógio do banco)', async () => {
+    const { requestId } = await createRequest('acc-emit-race')
+    // Janela mínima: a solicitação está válida, mas vence em 150 ms no relógio
+    // do PostgreSQL. Após a espera, a emissão deve persistir `expired` e
+    // responder 409 sem criar token.
+    await adminSql`
+      UPDATE holder_information_request
+         SET expires_at = clock_timestamp() + interval '150 milliseconds'
+       WHERE id = ${requestId}`
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    const res = await issueToken(requestId)
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('HOLDER_INFORMATION_REQUEST_EXPIRED')
+
+    const [row] = await adminSql`
+      SELECT state FROM holder_information_request WHERE id = ${requestId}`
+    expect(row!.state).toBe('expired')
+    expect(await tokenRowsOf(requestId)).toHaveLength(0)
+  })
+
+  it('expiração do token nunca fica antes da criação (constraint do banco)', async () => {
+    const { requestId } = await createRequest('acc-emit-expiry-constraint')
+    const issued = await issueTokenOk(requestId)
+    const tokens = await tokenRowsOf(requestId)
+    expect(tokens).toHaveLength(1)
+    const row = tokens[0]!
+    expect((row.expires_at as Date).getTime()).toBeGreaterThan((row.created_at as Date).getTime())
+    expect(issued.expiresAt).toBe((row.expires_at as Date).toISOString())
+  })
+
+  it('emissão responde Cache-Control: no-store (sucesso e erro)', async () => {
+    const { requestId } = await createRequest('acc-emit-cache')
+    const created = await issueToken(requestId)
+    expect(created.statusCode).toBe(201)
+    expect(created.headers['cache-control']).toBe('no-store')
+
+    const missing = await issueToken(randomUUID())
+    expect(missing.statusCode).toBe(404)
+    expect(missing.headers['cache-control']).toBe('no-store')
+  })
+
   it('limita a 5 tokens ativos; revogados não contam', async () => {
     const { requestId } = await createRequest('acc-emit-limite')
     for (let i = 0; i < 5; i += 1) {
@@ -494,7 +573,7 @@ describe('F4.2 — acesso do Holder', () => {
   })
 
   it('holder consulta a solicitação com token válido (sem dados do Verifier)', async () => {
-    const { requestId } = await createRequest('acc-view', [
+    const { requestId, holderId } = await createRequest('acc-view', [
       {
         itemId: 'address-proof',
         description: 'Comprovante',
@@ -518,8 +597,9 @@ describe('F4.2 — acesso do Holder', () => {
     expect(view.items[0].value).toBeNull()
     expect(view.items[0].documents).toEqual([])
     // Nunca expõe tenant/holder/criador.
+    expect(view).not.toHaveProperty('holderId')
     expect(JSON.stringify(view)).not.toContain(tenantId)
-    expect(JSON.stringify(view)).not.toHaveProperty('holderId')
+    expect(JSON.stringify(view)).not.toContain(holderId)
     expect(JSON.stringify(view)).not.toContain('createdBy')
 
     expect(await countEvents(requestId, 'holder_accessed')).toBe(1)
@@ -726,6 +806,138 @@ describe('F4.2 — acesso do Holder', () => {
       issued.token,
     )
     expect(res.statusCode).toBe(404)
+    expect(res.json().code).toBe('HOLDER_DOCUMENT_NOT_FOUND')
+  })
+
+  it('retry: falha na remoção física mantém tombstone e a próxima chamada repete o delete', async () => {
+    const { requestId } = await createRequest('acc-delete-retry')
+    const issued = await issueTokenOk(requestId)
+    const documentId = await uploadDocumentOk(issued.token, 'address-proof', requestId)
+    if (typeof documentId !== 'string') throw new Error('documento não gravado')
+
+    const rowsBefore = await adminSql`
+      SELECT storage_key FROM holder_information_request_document WHERE document_id = ${documentId}`
+    const storageKey = rowsBefore[0]!.storage_key as string
+    expect(storeObjects.has(storageKey)).toBe(true)
+
+    const url = `/v1/holder-access/items/address-proof/documents/${documentId}`
+
+    // Primeira tentativa: o storage falha. A API mantém o tombstone e responde
+    // 204 (a operação é idempotente do ponto de vista do cliente).
+    failingDeletesRemaining = 1
+    const first = await injectAsHolder('DELETE', url, issued.token)
+    expect(first.statusCode).toBe(204)
+
+    const rowsAfterFailure = await adminSql`
+      SELECT deleted_at FROM holder_information_request_document WHERE document_id = ${documentId}`
+    expect(rowsAfterFailure[0]!.deleted_at).not.toBeNull()
+    expect(storeObjects.has(storageKey)).toBe(true)
+    expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(1)
+    // O evento de remoção física só existe quando o objeto sai do storage.
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(0)
+
+    // Segunda tentativa: repete a remoção física e registra o evento.
+    failingDeletesRemaining = 0
+    const second = await injectAsHolder('DELETE', url, issued.token)
+    expect(second.statusCode).toBe(204)
+    expect(storeObjects.has(storageKey)).toBe(false)
+    expect(deleteAttempts.get(storageKey)).toBe(2)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
+    expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(1)
+
+    // Terceira chamada: idempotente, sem evento duplicado.
+    const third = await injectAsHolder('DELETE', url, issued.token)
+    expect(third.statusCode).toBe(204)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
+  })
+
+  it('DELETE: token ausente, malformado ou desconhecido → 401 uniforme', async () => {
+    const { requestId } = await createRequest('acc-delete-auth')
+    const issued = await issueTokenOk(requestId)
+    const url = `/v1/holder-access/items/address-proof/documents/${randomUUID()}`
+
+    const missing = await injectAsHolder('DELETE', url, undefined)
+    expect(missing.statusCode).toBe(401)
+    expect(missing.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
+
+    const malformed = await injectAsHolder('DELETE', url, 'hlt_malformado')
+    expect(malformed.statusCode).toBe(401)
+    expect(malformed.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
+
+    const unknown = await injectAsHolder('DELETE', url, `hlt_${'z'.repeat(43)}`)
+    expect(unknown.statusCode).toBe(401)
+    expect(unknown.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
+
+    // Token válido, documento inexistente → 404 (não confunde auth com recurso).
+    const validToken = await injectAsHolder('DELETE', url, issued.token)
+    expect(validToken.statusCode).toBe(404)
+  })
+
+  it('DELETE: token revogado → 401 (não 404)', async () => {
+    const { requestId } = await createRequest('acc-delete-revoked')
+    const issued = await issueTokenOk(requestId)
+    const revoke = await injectWithM2M(
+      'DELETE',
+      `/v1/information-requests/${requestId}/access-tokens/${issued.tokenId}?tenantId=${tenantId}`,
+    )
+    expect(revoke.statusCode).toBe(204)
+
+    const res = await injectAsHolder(
+      'DELETE',
+      `/v1/holder-access/items/address-proof/documents/${randomUUID()}`,
+      issued.token,
+    )
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
+  })
+
+  it('DELETE: solicitação completed → 409 (não 404)', async () => {
+    const { requestId } = await createRequest('acc-delete-completed', [
+      { itemId: 'current-address', description: 'Endereço atual', required: true },
+    ])
+    const issued = await issueTokenOk(requestId)
+    await injectAsHolder('PUT', '/v1/holder-access/items/current-address', issued.token, {
+      payload: JSON.stringify({ value: 'Endereço' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect((await injectAsHolder('POST', '/v1/holder-access/submit', issued.token)).statusCode).toBe(200)
+
+    const res = await injectAsHolder(
+      'DELETE',
+      `/v1/holder-access/items/current-address/documents/${randomUUID()}`,
+      issued.token,
+    )
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('HOLDER_INFORMATION_REQUEST_STATE')
+  })
+
+  it('Cache-Control: no-store em sucesso, erro de auth e erro de validação', async () => {
+    const { requestId } = await createRequest('acc-cache')
+    const issued = await issueTokenOk(requestId)
+
+    const ok = await injectAsHolder('GET', '/v1/holder-access', issued.token)
+    expect(ok.statusCode).toBe(200)
+    expect(ok.headers['cache-control']).toBe('no-store')
+
+    const unauthorized = await injectAsHolder('GET', '/v1/holder-access', undefined)
+    expect(unauthorized.statusCode).toBe(401)
+    expect(unauthorized.headers['cache-control']).toBe('no-store')
+
+    const invalidParams = await injectAsHolder(
+      'DELETE',
+      '/v1/holder-access/items/address-proof/documents/nao-e-uuid',
+      issued.token,
+    )
+    expect(invalidParams.statusCode).toBe(400)
+    expect(invalidParams.headers['cache-control']).toBe('no-store')
+
+    const notFound = await injectAsHolder(
+      'DELETE',
+      `/v1/holder-access/items/address-proof/documents/${randomUUID()}`,
+      issued.token,
+    )
+    expect(notFound.statusCode).toBe(404)
+    expect(notFound.headers['cache-control']).toBe('no-store')
   })
 })
 
@@ -870,7 +1082,7 @@ describe('F4.2 — submit do Holder', () => {
     // O cancelamento revoga todos os tokens ativos: o token não resolve mais.
     const view = await injectAsHolder('GET', '/v1/holder-access', issued.token)
     expect(view.statusCode).toBe(401)
-    expect(view.json().code).toBe('HOLDER_TOKEN_INVALID')
+    expect(view.json().code).toBe('HOLDER_ACCESS_UNAUTHORIZED')
   })
 
   it('token com prazo vencido → 401 (resolver não retorna)', async () => {
@@ -878,9 +1090,12 @@ describe('F4.2 — submit do Holder', () => {
     const issued = await issueTokenOk(requestId)
 
     await withTenant(appPool.db, tenantId, async (tx) => {
+      // `holder_access_token_expiry_check` exige expires_at > created_at: para
+      // simular um token vencido, a criação também recua no tempo.
+      const now = Date.now()
       await tx
         .update(t.holderAccessToken)
-        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .set({ createdAt: new Date(now - 120_000), expiresAt: new Date(now - 60_000) })
         .where(eq(t.holderAccessToken.tokenId, issued.tokenId))
     })
 

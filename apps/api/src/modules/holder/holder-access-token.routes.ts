@@ -1,5 +1,5 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { makeHolderAccessTokenController } from './holder-access-token.controller.js'
 import {
@@ -22,6 +22,20 @@ export const registerHolderAccessTokenRoutes = (
   const app = instance.withTypeProvider<ZodTypeProvider>()
   const controller = makeHolderAccessTokenController(deps)
 
+  /**
+   * A emissão devolve um bearer token de uso único. Em `onSend` o header cobre
+   * também respostas de erro (404/409/429/500), impedindo cache por proxy,
+   * navegador ou CDN.
+   */
+  const noStore = async (
+    _request: FastifyRequest,
+    reply: FastifyReply,
+    payload: unknown,
+  ): Promise<unknown> => {
+    reply.header('Cache-Control', 'no-store')
+    return payload
+  }
+
   const getActor = (request: FastifyRequest): string => {
     if (request.sessionUser) return `session:${request.sessionUser.id}`
     if (request.tenant) return `api-key:${request.tenant.apiKeyId}`
@@ -39,6 +53,7 @@ export const registerHolderAccessTokenRoutes = (
         requireTenantMatch,
         requireScope('holders:write'),
       ],
+      onSend: [noStore],
       schema: {
         params: HolderInformationRequestAccessTokenParams,
         querystring: z.object({ tenantId: z.string().uuid() }),

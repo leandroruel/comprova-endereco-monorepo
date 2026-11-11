@@ -64,8 +64,9 @@ const createFixture = async (tenantId: string, externalReference: string): Promi
 const insertToken = async (fixture: Fixture, overrides?: { revoked?: boolean; expired?: boolean }) => {
   const token = newHolderAccessToken()
   const tokenId = randomUUID()
-  const expiresAt =
-    overrides?.expired === true ? new Date(Date.now() - 60_000) : new Date(Date.now() + 7 * 24 * 3600_000)
+  const expired = overrides?.expired === true
+  const now = Date.now()
+  const expiresAt = expired ? new Date(now - 60_000) : new Date(now + 7 * 24 * 3600_000)
   await withTenant(appPool.db, fixture.tenantId, async (tx) => {
     await tx.insert(t.holderAccessToken).values({
       tokenId,
@@ -75,8 +76,11 @@ const insertToken = async (fixture: Fixture, overrides?: { revoked?: boolean; ex
       tokenPrefix: holderTokenPrefixOf(token),
       tokenHash: hashHolderAccessToken(token, PEPPER),
       createdBy: 'test',
+      // `holder_access_token_expiry_check` exige expires_at > created_at:
+      // um token expirado só pode ter sido criado antes do vencimento.
+      ...(expired ? { createdAt: new Date(now - 120_000) } : {}),
       expiresAt,
-      ...(overrides?.revoked === true ? { revokedAt: new Date(Date.now() - 1000) } : {}),
+      ...(overrides?.revoked === true ? { revokedAt: new Date(now - 1000) } : {}),
     })
   })
   return { tokenId, token }

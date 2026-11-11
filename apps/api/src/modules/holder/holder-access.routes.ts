@@ -21,6 +21,17 @@ const headerToken = (request: FastifyRequest): string | undefined => {
   return undefined
 }
 
+/**
+ * Respostas do Holder contêm dados pessoais, respostas e metadados de
+ * documentos. O header é aplicado em `onSend` para cobrir também respostas de
+ * erro (401/404/409/429/503), nunca dependendo de cache implícito de proxy ou
+ * navegador.
+ */
+const noStore = async (_request: FastifyRequest, reply: FastifyReply, payload: unknown): Promise<unknown> => {
+  reply.header('Cache-Control', 'no-store')
+  return payload
+}
+
 export const registerHolderAccessRoutes = (
   instance: FastifyInstance,
   deps: HolderAccessRoutesDeps,
@@ -35,7 +46,7 @@ export const registerHolderAccessRoutes = (
     return reply
       .code(401)
       .type(PROBLEM_CONTENT_TYPE)
-      .send(problem(401, 'HOLDER_TOKEN_INVALID', 'Token de acesso inválido ou ausente'))
+      .send(problem(401, 'HOLDER_ACCESS_UNAUTHORIZED', 'Token de acesso inválido ou ausente'))
   }
 
   const resolve = async (
@@ -60,6 +71,7 @@ export const registerHolderAccessRoutes = (
     '/holder-access',
     {
       preHandler: [rateLimits.ip, rateLimits.token],
+      onSend: [noStore],
       schema: { response: { 200: HolderAccessResponse } },
     },
     async (request, reply) => {
@@ -73,6 +85,7 @@ export const registerHolderAccessRoutes = (
     '/holder-access/items/:itemId',
     {
       preHandler: [rateLimits.ip, rateLimits.token],
+      onSend: [noStore],
       schema: {
         params: HolderItemIdParams,
         body: HolderSaveItemBody,
@@ -96,6 +109,7 @@ export const registerHolderAccessRoutes = (
     '/holder-access/items/:itemId/documents',
     {
       preHandler: [rateLimits.ip, rateLimits.token, rateLimits.upload],
+      onSend: [noStore],
       schema: { params: HolderItemIdParams },
     },
     async (request, reply) => {
@@ -146,6 +160,7 @@ export const registerHolderAccessRoutes = (
     '/holder-access/items/:itemId/documents/:documentId',
     {
       preHandler: [rateLimits.ip, rateLimits.token],
+      onSend: [noStore],
       schema: { params: HolderDocumentParams },
     },
     async (request, reply) => {
@@ -164,6 +179,7 @@ export const registerHolderAccessRoutes = (
     '/holder-access/submit',
     {
       preHandler: [rateLimits.ip, rateLimits.token],
+      onSend: [noStore],
       schema: { response: { 200: HolderAccessResponse } },
     },
     async (request, reply) => {

@@ -13,8 +13,8 @@ import { hashHolderAccessToken, holderTokenPrefixOf, newHolderAccessToken } from
 
 /** Máximo de tokens efetivamente utilizáveis por solicitação. */
 export const HOLDER_ACCESS_TOKEN_MAX_ACTIVE = 5
-const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
-const TOKEN_TTL_CEILING_MS = 30 * 24 * 60 * 60 * 1000
+const TOKEN_TTL_DAYS = 7
+const TOKEN_TTL_CEILING_DAYS = 30
 
 const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
 
@@ -117,26 +117,57 @@ export const makeHolderAccessTokenService = (deps: {
         return { kind: 'limit' } as const
       }
 
-      const now = Date.now()
-      const requestExpiresAt = request.expiresAt?.getTime() ?? now + TOKEN_TTL_CEILING_MS
-      const expiresAt = new Date(Math.min(now + TOKEN_TTL_MS, requestExpiresAt))
-
       const tokenId = randomUUID()
-      const [row] = await tx
-        .insert(t.holderAccessToken)
-        .values({
-          tokenId,
-          tenantId,
-          holderId: request.holderId,
-          holderInformationRequestId: requestId,
-          tokenPrefix,
-          tokenHash,
-          createdBy: actor,
-          expiresAt,
-        })
-        .returning({ createdAt: t.holderAccessToken.createdAt })
+      // `expires_at` é calculado inteiramente pelo relógio do PostgreSQL, no
+      // mesmo statement do INSERT. A cláusula `WHERE` revalida o prazo da
+      // solicitação no momento da escrita: se ela expirar entre a checagem
+      // acima e este INSERT, nenhuma linha é criada — nunca emitimos um token
+      // já inutilizável. `clock_timestamp()` (não `now()`) garante que o
+      // instante real da operação seja considerado.
+      const inserted = (await tx.execute(sql`
+        INSERT INTO holder_access_token (
+          token_id,
+          tenant_id,
+          holder_id,
+          holder_information_request_id,
+          token_prefix,
+          token_hash,
+          created_by,
+          expires_at
+        )
+        SELECT
+          ${tokenId}::uuid,
+          r.tenant_id,
+          r.holder_id,
+          r.id,
+          ${tokenPrefix},
+          ${tokenHash},
+          ${actor},
+          LEAST(
+            clock_timestamp() + ${TOKEN_TTL_DAYS} * interval '1 day',
+            COALESCE(
+              r.expires_at,
+              clock_timestamp() + ${TOKEN_TTL_CEILING_DAYS} * interval '1 day'
+            )
+          )
+        FROM holder_information_request r
+        WHERE r.id = ${requestId}::uuid
+          AND r.tenant_id = ${tenantId}::uuid
+          AND (r.expires_at IS NULL OR r.expires_at > clock_timestamp())
+        RETURNING
+          (extract(epoch FROM expires_at) * 1000)::double precision AS expires_at_ms,
+          (extract(epoch FROM created_at) * 1000)::double precision AS created_at_ms
+      `)) as unknown as readonly { expires_at_ms: number; created_at_ms: number }[]
 
-      if (!row) throw new Error('failed to insert holder access token')
+      const row = inserted[0]
+      if (!row) {
+        // A solicitação deixou de ser válida entre a checagem e o INSERT.
+        // Persiste `expired` (e o evento) na mesma transação antes do 409.
+        const expiredState = await expireIfNeeded(tx, tenantId, requestId, actor)
+        if (expiredState === 'expired') return { kind: 'expired' } as const
+        if (expiredState === null) return { kind: 'not_found' } as const
+        return { kind: 'state', state: expiredState } as const
+      }
 
       await insertHolderInformationRequestEvent(tx, tenantId, {
         holderInformationRequestId: requestId,
@@ -147,7 +178,15 @@ export const makeHolderAccessTokenService = (deps: {
         details: JSON.stringify({ tokenId, prefix: tokenPrefix }),
       })
 
-      return { kind: 'created', tokenId, token, expiresAt, createdAt: row.createdAt } as const
+      return {
+        kind: 'created',
+        tokenId,
+        token,
+        // `execute` cru devolve timestamps como texto; o epoch em milissegundos
+        // evita ambiguidade de parsing/timezone.
+        expiresAt: new Date(row.expires_at_ms),
+        createdAt: new Date(row.created_at_ms),
+      } as const
     })
   }
 

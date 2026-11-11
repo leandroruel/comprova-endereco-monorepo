@@ -55,7 +55,7 @@ export type HolderAccessResult =
   | { readonly kind: 'document_not_found' }
   | { readonly kind: 'storage_unavailable' }
 
-export type HolderDeleteDocumentResult = { readonly kind: 'deleted' } | { readonly kind: 'not_found' }
+export type HolderDeleteDocumentResult = HolderAccessResult | { readonly kind: 'deleted' }
 
 export interface HolderAccessDeps {
   readonly db: Db
@@ -608,13 +608,23 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
   ): Promise<HolderDeleteDocumentResult> => {
     const tombstone = await withTenant(db, context.tenantId, async (tx) => {
       const authorized = await authorizeInTx(tx, context, actor)
-      if (authorized.kind !== 'ok') return { kind: 'not_found' } as const
-      if (!isMutable(authorized.state)) return { kind: 'not_found' } as const
+      if (authorized.kind !== 'ok') {
+        return { kind: 'auth', result: mapAuthorize(authorized) as HolderAccessResult } as const
+      }
+      // Estado incompatível (ex.: `completed`) é 409, não 404.
+      if (!isMutable(authorized.state)) {
+        return {
+          kind: 'auth',
+          result: { kind: 'invalid_state', state: authorized.state },
+        } as const
+      }
 
       const item = findItem(authorized.request, itemId)
-      if (!item) return { kind: 'not_found' } as const
+      if (!item) {
+        return { kind: 'auth', result: { kind: 'item_not_found', itemId } } as const
+      }
 
-      const [tombstoned] = await tx
+      const [marked] = await tx
         .update(t.holderInformationRequestDocument)
         .set({ deletedAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()` })
         .where(
@@ -628,8 +638,70 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         )
         .returning({ storageKey: t.holderInformationRequestDocument.storageKey })
 
-      if (!tombstoned) {
-        const [existing] = await tx
+      if (marked) {
+        await insertHolderInformationRequestEvent(tx, context.tenantId, {
+          holderInformationRequestId: context.requestId,
+          eventType: 'holder_document_removal_requested',
+          fromState: authorized.state,
+          toState: authorized.state,
+          actor,
+          details: JSON.stringify({ documentId, itemId }),
+        })
+
+        return {
+          kind: 'tombstoned',
+          storageKey: marked.storageKey,
+          state: authorized.state,
+        } as const
+      }
+
+      const [existing] = await tx
+        .select({ storageKey: t.holderInformationRequestDocument.storageKey })
+        .from(t.holderInformationRequestDocument)
+        .where(
+          and(
+            eq(t.holderInformationRequestDocument.documentId, documentId),
+            eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
+            eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
+            eq(t.holderInformationRequestDocument.itemId, itemId),
+          ),
+        )
+        .limit(1)
+
+      if (!existing) {
+        return { kind: 'auth', result: { kind: 'document_not_found' } } as const
+      }
+
+      // Já tombstoned: não repete `holder_document_removal_requested`, mas
+      // devolve a storage key para que a remoção física seja tentada de novo
+      // (a chamada anterior pode ter falhado no object storage).
+      return {
+        kind: 'tombstoned',
+        storageKey: existing.storageKey,
+        state: authorized.state,
+      } as const
+    })
+
+    if (tombstone.kind === 'auth') return tombstone.result
+
+    // Tombstone já commitado; só agora removemos o objeto físico. A remoção é
+    // idempotente, então toda chamada DELETE repete a tentativa.
+    try {
+      await store.delete(tombstone.storageKey)
+    } catch (error) {
+      metrics?.holderDocumentUploads.inc({ outcome: 'failed' })
+      logError('document_delete', context.tenantId, error)
+      // Tombstone permanece: uma nova chamada reattempta a remoção física.
+      return { kind: 'deleted' }
+    }
+
+    metrics?.holderDocumentUploads.inc({ outcome: 'deleted' })
+
+    try {
+      await withTenant(db, context.tenantId, async (tx) => {
+        // Serializa finalizações concorrentes na mesma linha tombstoned: o
+        // evento `holder_document_removed` é inserido no máximo uma vez.
+        await tx
           .select({ documentId: t.holderInformationRequestDocument.documentId })
           .from(t.holderInformationRequestDocument)
           .where(
@@ -637,34 +709,26 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
               eq(t.holderInformationRequestDocument.documentId, documentId),
               eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
               eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
-              eq(t.holderInformationRequestDocument.itemId, itemId),
             ),
           )
           .limit(1)
-        // Já removido: DELETE é idempotente.
-        return existing ? ({ kind: 'already' } as const) : ({ kind: 'not_found' } as const)
-      }
+          .for('update')
 
-      await insertHolderInformationRequestEvent(tx, context.tenantId, {
-        holderInformationRequestId: context.requestId,
-        eventType: 'holder_document_removal_requested',
-        fromState: authorized.state,
-        toState: authorized.state,
-        actor,
-        details: JSON.stringify({ documentId, itemId }),
-      })
+        const [alreadyRemoved] = await tx
+          .select({ id: t.holderInformationRequestEvent.id })
+          .from(t.holderInformationRequestEvent)
+          .where(
+            and(
+              eq(t.holderInformationRequestEvent.tenantId, context.tenantId),
+              eq(t.holderInformationRequestEvent.holderInformationRequestId, context.requestId),
+              eq(t.holderInformationRequestEvent.eventType, 'holder_document_removed'),
+              sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'documentId' = ${documentId}`,
+            ),
+          )
+          .limit(1)
 
-      return { kind: 'tombstoned', storageKey: tombstoned.storageKey, state: authorized.state } as const
-    })
+        if (alreadyRemoved) return
 
-    if (tombstone.kind === 'not_found') return { kind: 'not_found' }
-    if (tombstone.kind === 'already') return { kind: 'deleted' }
-
-    // Tombstone já commitado; só agora removemos o objeto físico.
-    try {
-      await store.delete(tombstone.storageKey)
-      metrics?.holderDocumentUploads.inc({ outcome: 'deleted' })
-      await withTenant(db, context.tenantId, async (tx) => {
         await insertHolderInformationRequestEvent(tx, context.tenantId, {
           holderInformationRequestId: context.requestId,
           eventType: 'holder_document_removed',
@@ -676,7 +740,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       })
     } catch (error) {
       metrics?.holderDocumentUploads.inc({ outcome: 'failed' })
-      logError('document_delete', context.tenantId, error)
+      logError('document_delete_event', context.tenantId, error)
     }
 
     return { kind: 'deleted' }

@@ -8,6 +8,7 @@ import type { ObjectStore, StoredObject } from '@comprova/providers'
 import Redis from 'ioredis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
+import { HOLDER_RATE_LIMIT_LAYERS } from '../src/plugins/holder-rate-limit.js'
 
 const PEPPER = 'test-pepper-123'
 
@@ -242,21 +243,33 @@ const createRequestWithToken = async () => {
 }
 
 describe('F4.2 — rate limiting do acesso do Holder', () => {
+  it('usa exatamente os limites aprovados para F4.2', () => {
+    expect(HOLDER_RATE_LIMIT_LAYERS).toEqual({
+      ip: { ratePerSecond: 1, burst: 30 },
+      token: { ratePerSecond: 1, burst: 30 },
+      upload: { ratePerSecond: 10 / 60, burst: 3 },
+      invalid: { ratePerSecond: 10 / 60, burst: 10 },
+    })
+  })
+
   it('limite de tentativas inválidas por IP: 10 × 401, depois 429', async () => {
     for (let i = 0; i < 10; i += 1) {
       const res = await injectAsHolder('GET', '/v1/holder-access', undefined)
       expect(res.statusCode).toBe(401)
+      expect(res.headers['cache-control']).toBe('no-store')
     }
     const exceeded = await injectAsHolder('GET', '/v1/holder-access', undefined)
     expect(exceeded.statusCode).toBe(429)
     expect(exceeded.json().code).toBe('RATE_LIMITED')
     expect(exceeded.headers['retry-after']).toBeDefined()
+    // Respostas de erro do limitador também não podem ser cacheadas.
+    expect(exceeded.headers['cache-control']).toBe('no-store')
   })
 
-  it('limite de uploads por token: 10 OK, depois 429', async () => {
+  it('limite de uploads por token: 3 OK (burst), depois 429', async () => {
     const { requestId, token } = await createRequestWithToken()
 
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 3; i += 1) {
       const part = multipartPayload(PNG_BYTES)
       const res = await injectAsHolder('POST', '/v1/holder-access/items/address-proof/documents', token, {
         payload: part.payload,
@@ -276,7 +289,7 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
     // Leitura continua funcionando (outra camada) e o estado não foi corrompido.
     const view = await injectAsHolder('GET', '/v1/holder-access', token)
     expect(view.statusCode).toBe(200)
-    expect(view.json().items[0].documents).toHaveLength(10)
+    expect(view.json().items[0].documents).toHaveLength(3)
 
     // Limpeza do estado de emissão para não afetar outros testes.
     await withTenant(appPool.db, tenantId, async (tx) => {
@@ -296,6 +309,7 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
 
     expect(res.statusCode).toBe(503)
     expect(res.json().code).toBe('RATE_LIMIT_UNAVAILABLE')
+    expect(res.headers['cache-control']).toBe('no-store')
     // O timeout do limitador responde rápido (500 ms + folga), não trava a rota.
     expect(elapsed).toBeLessThan(5_000)
   })

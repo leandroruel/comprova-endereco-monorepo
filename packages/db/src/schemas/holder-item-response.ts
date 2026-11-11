@@ -24,12 +24,13 @@ export const holderItemResponse = pgTable(
     foreignKey({
       columns: [t.holderInformationRequestId, t.tenantId],
       foreignColumns: [holderInformationRequest.id, holderInformationRequest.tenantId],
+      name: 'holder_item_response_request_tenant_fk',
     }),
     unique('holder_item_response_request_item_unique').on(t.holderInformationRequestId, t.itemId),
     check('holder_item_response_value_length_check', sql`char_length(value) BETWEEN 1 AND 5000`),
     check('holder_item_response_value_trimmed_check', sql`value = btrim(value)`),
-    index('holder_item_response_tenant_idx').on(t.tenantId),
-    index('holder_item_response_request_idx').on(t.holderInformationRequestId),
+    index('idx_holder_item_response_tenant').on(t.tenantId),
+    index('idx_holder_item_response_request').on(t.holderInformationRequestId),
   ],
 )
 

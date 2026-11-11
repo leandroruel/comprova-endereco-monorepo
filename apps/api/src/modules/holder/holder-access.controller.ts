@@ -70,7 +70,7 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
         return reply
           .code(401)
           .type(PROBLEM_CONTENT_TYPE)
-          .send(problem(401, 'HOLDER_TOKEN_INVALID', 'Token de acesso inválido'))
+          .send(problem(401, 'HOLDER_ACCESS_UNAUTHORIZED', 'Token de acesso inválido'))
       case 'expired':
         return reply
           .code(409)
@@ -176,13 +176,10 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
         input.itemId,
         input.documentId,
       )
-      if (result.kind === 'not_found') {
-        return reply
-          .code(404)
-          .type(PROBLEM_CONTENT_TYPE)
-          .send(problem(404, 'HOLDER_DOCUMENT_NOT_FOUND', 'Documento não encontrado'))
-      }
-      return reply.code(204).send()
+      if (result.kind === 'deleted') return reply.code(204).send()
+      // Demais resultados seguem o mesmo mapeamento dos outros endpoints:
+      // token inválido → 401, estado incompatível → 409, documento ausente → 404.
+      return sendResult(result, reply)
     },
 
     submit: async (

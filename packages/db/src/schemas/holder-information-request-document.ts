@@ -34,8 +34,13 @@ export const holderInformationRequestDocument = pgTable(
     foreignKey({
       columns: [t.holderInformationRequestId, t.tenantId],
       foreignColumns: [holderInformationRequest.id, holderInformationRequest.tenantId],
+      name: 'holder_information_request_document_request_tenant_fk',
     }),
     unique('holder_information_request_document_storage_key_unique').on(t.storageKey),
+    check(
+      'holder_information_request_document_upload_state_check',
+      sql`upload_state IN ('pending', 'stored')`,
+    ),
     check(
       'holder_information_request_document_state_check',
       sql`(upload_state = 'pending' AND content_type IS NULL AND size_bytes IS NULL AND sha256 IS NULL AND original_filename IS NULL)
@@ -50,9 +55,13 @@ export const holderInformationRequestDocument = pgTable(
       sql`sha256 IS NULL OR octet_length(sha256) = 32`,
     ),
     check('holder_information_request_document_size_check', sql`size_bytes IS NULL OR size_bytes > 0`),
-    index('holder_information_request_document_tenant_idx').on(t.tenantId),
-    index('holder_information_request_document_request_idx').on(t.tenantId, t.holderInformationRequestId),
-    index('holder_information_request_document_item_idx').on(t.holderInformationRequestId, t.itemId),
+    index('idx_holder_information_request_document_tenant').on(t.tenantId),
+    index('idx_holder_information_request_document_request').on(t.tenantId, t.holderInformationRequestId),
+    // Intenções pendentes: inspeção operacional de objetos potencialmente órfãos.
+    index('idx_holder_information_request_document_pending')
+      .on(t.tenantId, t.holderInformationRequestId, t.createdAt)
+      .where(sql`upload_state = 'pending'`),
+    index('idx_holder_information_request_document_item').on(t.holderInformationRequestId, t.itemId),
   ],
 )
 
