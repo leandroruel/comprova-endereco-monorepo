@@ -121,6 +121,11 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
           .code(503)
           .type(PROBLEM_CONTENT_TYPE)
           .send(problem(503, 'EVIDENCE_STORAGE_UNAVAILABLE', 'Armazenamento indisponível'))
+      case 'audit_unavailable':
+        return reply
+          .code(503)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(problem(503, 'EVIDENCE_AUDIT_UNAVAILABLE', 'Falha ao persistir auditoria de remoção'))
     }
   }
 

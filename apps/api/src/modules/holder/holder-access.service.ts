@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql, withTenant } from '@comprova/db'
+import { and, eq, inArray, isNotNull, isNull, sql, withTenant } from '@comprova/db'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type {
@@ -54,6 +54,7 @@ export type HolderAccessResult =
     }
   | { readonly kind: 'document_not_found' }
   | { readonly kind: 'storage_unavailable' }
+  | { readonly kind: 'audit_unavailable' }
 
 export type HolderDeleteDocumentResult = HolderAccessResult | { readonly kind: 'deleted' }
 
@@ -606,6 +607,26 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
     itemId: string,
     documentId: string,
   ): Promise<HolderDeleteDocumentResult> => {
+    // Fast path: já concluído por uma chamada anterior. O evento
+    // `holder_document_removed` é a fonte da verdade de conclusão e sobrevive
+    // à remoção da linha de metadados, então a dedupe não depende dela.
+    const [alreadyRemoved] = await withTenant(db, context.tenantId, async (tx) =>
+      tx
+        .select({ id: t.holderInformationRequestEvent.id })
+        .from(t.holderInformationRequestEvent)
+        .where(
+          and(
+            eq(t.holderInformationRequestEvent.tenantId, context.tenantId),
+            eq(t.holderInformationRequestEvent.holderInformationRequestId, context.requestId),
+            eq(t.holderInformationRequestEvent.eventType, 'holder_document_removed'),
+            sql`${t.holderInformationRequestEvent.details}::jsonb ->> 'documentId' = ${documentId}`,
+          ),
+        )
+        .limit(1),
+    )
+
+    if (alreadyRemoved) return { kind: 'deleted' }
+
     const tombstone = await withTenant(db, context.tenantId, async (tx) => {
       const authorized = await authorizeInTx(tx, context, actor)
       if (authorized.kind !== 'ok') {
@@ -711,6 +732,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
               eq(t.holderInformationRequestDocument.documentId, documentId),
               eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
               eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
+              isNotNull(t.holderInformationRequestDocument.deletedAt),
             ),
           )
           .limit(1)
@@ -731,6 +753,20 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
 
         if (alreadyRemoved) return
 
+        // Remove os metadados somente após a exclusão física confirmada. A
+        // auditoria `holder_document_removed` fica na tabela de eventos e
+        // sobrevive à remoção desta linha, portanto a dedupe não depende
+        // da existência do documento.
+        await tx
+          .delete(t.holderInformationRequestDocument)
+          .where(
+            and(
+              eq(t.holderInformationRequestDocument.documentId, documentId),
+              eq(t.holderInformationRequestDocument.tenantId, context.tenantId),
+              eq(t.holderInformationRequestDocument.holderInformationRequestId, context.requestId),
+            ),
+          )
+
         await insertHolderInformationRequestEvent(tx, context.tenantId, {
           holderInformationRequestId: context.requestId,
           eventType: 'holder_document_removed',
@@ -741,8 +777,12 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         })
       })
     } catch (error) {
-      metrics?.holderDocumentUploads.inc({ outcome: 'failed' })
-      logError('document_delete_event', context.tenantId, error)
+      logError('document_delete_finalize', context.tenantId, error)
+      // A exclusão física já foi confirmada, mas a finalização (remoção dos
+      // metadados + gravação da auditoria) não foi persistida. O tombstone e
+      // os metadados permanecem para que uma nova chamada DELETE conclua a
+      // operação. Não é erro de storage.
+      return { kind: 'audit_unavailable' }
     }
 
     return { kind: 'deleted' }

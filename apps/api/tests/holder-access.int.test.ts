@@ -783,15 +783,16 @@ describe('F4.2 — acesso do Holder', () => {
     )
     expect(del.statusCode).toBe(204)
 
-    // Tombstone permanece; objeto físico foi removido.
+    // Após a exclusão física confirmada, os metadados são removidos: não
+    // resta linha ativa nem tombstone residual para o documento.
     const rowsAfter = await adminSql`
       SELECT deleted_at, upload_state FROM holder_information_request_document WHERE document_id = ${documentId}`
-    expect(rowsAfter[0]!.deleted_at).not.toBeNull()
+    expect(rowsAfter).toEqual([])
     expect(storeObjects.has(storageKey)).toBe(false)
     expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(1)
     expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
 
-    // DELETE idempotente.
+    // DELETE idempotente após a conclusão: evento não é duplicado.
     const delAgain = await injectAsHolder(
       'DELETE',
       `/v1/holder-access/items/address-proof/documents/${documentId}`,
@@ -799,6 +800,7 @@ describe('F4.2 — acesso do Holder', () => {
     )
     expect(delAgain.statusCode).toBe(204)
     expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(1)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
 
     const view = await injectAsHolder('GET', '/v1/holder-access', issued.token)
     expect(view.json().items[0].documents).toEqual([])
@@ -916,11 +918,60 @@ describe('F4.2 — acesso do Holder', () => {
 
     const rowsAfter = await adminSql`
       SELECT deleted_at FROM holder_information_request_document WHERE document_id = ${documentId}`
-    expect(rowsAfter[0]!.deleted_at).not.toBeNull()
+    // Após a conclusão, não resta metadado nem tombstone residual.
+    expect(rowsAfter).toEqual([])
 
     // Exatamente um pedido de remoção e um evento de conclusão.
     expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(1)
     expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
+  })
+
+  it('falha na transação de finalização após exclusão física → 503 recuperável e retry conclui o evento uma vez', async () => {
+    const { requestId } = await createRequest('acc-delete-finalize-fail')
+    const issued = await issueTokenOk(requestId)
+    const documentId = await uploadDocumentOk(issued.token, 'address-proof', requestId)
+    if (typeof documentId !== 'string') throw new Error('documento não gravado')
+
+    const [row] = await adminSql`
+      SELECT storage_key FROM holder_information_request_document WHERE document_id = ${documentId}`
+    const storageKey = row!.storage_key as string
+    const url = `/v1/holder-access/items/address-proof/documents/${documentId}`
+
+    // Bloqueia DELETE na tabela de documentos: a finalização (remoção de
+    // metadados + gravação da auditoria) falhará após a exclusão física já
+    // ter sido confirmada. O INSERT do evento de pedido de remoção (fase 1)
+    // não é afetado, pois incide sobre outra tabela.
+    await adminSql`REVOKE DELETE ON holder_information_request_document FROM app_user`
+    try {
+      const first = await injectAsHolder('DELETE', url, issued.token)
+      expect(first.statusCode).toBe(503)
+      expect(first.json().code).toBe('EVIDENCE_AUDIT_UNAVAILABLE')
+      expect(first.headers['cache-control']).toBe('no-store')
+
+      // Objeto físico já saiu do storage; tombstone e metadados permanecem
+      // para que uma nova chamada conclua a operação.
+      expect(storeObjects.has(storageKey)).toBe(false)
+      const tombstone = await adminSql`
+        SELECT deleted_at FROM holder_information_request_document WHERE document_id = ${documentId}`
+      expect(tombstone).toHaveLength(1)
+      expect(tombstone[0]!.deleted_at).not.toBeNull()
+      expect(await countEvents(requestId, 'holder_document_removed')).toBe(0)
+    } finally {
+      // Restaura o privilégio mesmo se a asserção acima falhar.
+      await adminSql`GRANT DELETE ON holder_information_request_document TO app_user`
+    }
+
+    // Retry: storage já está removido (idempotente) e a finalização agora
+    // consegue remover os metadados e persistir a auditoria exatamente uma vez.
+    const second = await injectAsHolder('DELETE', url, issued.token)
+    expect(second.statusCode).toBe(204)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
+    expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(1)
+
+    // Após a conclusão, não resta metadado nem tombstone residual.
+    const rowsAfter = await adminSql`
+      SELECT deleted_at FROM holder_information_request_document WHERE document_id = ${documentId}`
+    expect(rowsAfter).toEqual([])
   })
 
   it('DELETE: token ausente, malformado ou desconhecido → 401 uniforme', async () => {
