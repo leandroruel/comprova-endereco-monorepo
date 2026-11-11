@@ -829,11 +829,13 @@ describe('F4.2 — acesso do Holder', () => {
 
     const url = `/v1/holder-access/items/address-proof/documents/${documentId}`
 
-    // Primeira tentativa: o storage falha. A API mantém o tombstone e responde
-    // 204 (a operação é idempotente do ponto de vista do cliente).
+    // Primeira tentativa: o storage falha. A API NÃO responde sucesso —
+    // devolve 503 e mantém o tombstone e a storage key para o retry.
     failingDeletesRemaining = 1
     const first = await injectAsHolder('DELETE', url, issued.token)
-    expect(first.statusCode).toBe(204)
+    expect(first.statusCode).toBe(503)
+    expect(first.json().code).toBe('EVIDENCE_STORAGE_UNAVAILABLE')
+    expect(first.headers['cache-control']).toBe('no-store')
 
     const rowsAfterFailure = await adminSql`
       SELECT deleted_at FROM holder_information_request_document WHERE document_id = ${documentId}`
@@ -889,6 +891,36 @@ describe('F4.2 — acesso do Holder', () => {
     expect(again.statusCode).toBe(204)
     expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
     expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(0)
+  })
+
+  it('duas tentativas concorrentes de DELETE não duplicam eventos nem corrompem o tombstone', async () => {
+    const { requestId } = await createRequest('acc-delete-concurrent')
+    const issued = await issueTokenOk(requestId)
+    const documentId = await uploadDocumentOk(issued.token, 'address-proof', requestId)
+    if (typeof documentId !== 'string') throw new Error('documento não gravado')
+
+    const [row] = await adminSql`
+      SELECT storage_key FROM holder_information_request_document WHERE document_id = ${documentId}`
+    const storageKey = row!.storage_key as string
+
+    const url = `/v1/holder-access/items/address-proof/documents/${documentId}`
+    const [a, b] = await Promise.all([
+      injectAsHolder('DELETE', url, issued.token),
+      injectAsHolder('DELETE', url, issued.token),
+    ])
+
+    // Ambas concluem a remoção física; nenhuma retorna erro.
+    expect(a.statusCode).toBe(204)
+    expect(b.statusCode).toBe(204)
+    expect(storeObjects.has(storageKey)).toBe(false)
+
+    const rowsAfter = await adminSql`
+      SELECT deleted_at FROM holder_information_request_document WHERE document_id = ${documentId}`
+    expect(rowsAfter[0]!.deleted_at).not.toBeNull()
+
+    // Exatamente um pedido de remoção e um evento de conclusão.
+    expect(await countEvents(requestId, 'holder_document_removal_requested')).toBe(1)
+    expect(await countEvents(requestId, 'holder_document_removed')).toBe(1)
   })
 
   it('DELETE: token ausente, malformado ou desconhecido → 401 uniforme', async () => {

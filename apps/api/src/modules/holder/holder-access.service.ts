@@ -691,8 +691,10 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
     } catch (error) {
       metrics?.holderDocumentUploads.inc({ outcome: 'failed' })
       logError('document_delete', context.tenantId, error)
-      // Tombstone permanece: uma nova chamada reattempta a remoção física.
-      return { kind: 'deleted' }
+      // O tombstone (e a storage key) permanece commitado: uma nova chamada
+      // reattempta a remoção física. Nunca respondemos sucesso enquanto o
+      // objeto ainda pode existir no storage.
+      return { kind: 'storage_unavailable' }
     }
 
     metrics?.holderDocumentUploads.inc({ outcome: 'deleted' })
