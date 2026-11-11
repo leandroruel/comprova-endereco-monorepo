@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, foreignKey, index, pgTable, text, timestamp, uuid, unique } from 'drizzle-orm/pg-core'
+import { check, foreignKey, index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { bytea } from './custom-types.js'
 import { holder } from './holder.js'
 import { holderInformationRequest } from './holder-information-request.js'
