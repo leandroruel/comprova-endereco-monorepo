@@ -12,6 +12,11 @@ import {
   storeEvidenceObject,
   type StoredEvidenceObject,
 } from '../../services/evidence-artifact.js'
+import {
+  detectDocumentContentType,
+  normalizeDocumentContentType,
+  type DocumentContentType,
+} from '../../services/document-content.js'
 
 /**
  * F1.1 — intake seguro do comprovante.
@@ -29,7 +34,7 @@ export const EVIDENCE_INTAKE_STATUS = 'pending'
 
 export const EVIDENCE_INTAKE_CONTENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const
 
-export type EvidenceIntakeContentType = (typeof EVIDENCE_INTAKE_CONTENT_TYPES)[number]
+export type EvidenceIntakeContentType = DocumentContentType
 
 const INTAKE_CONTENT_TYPE_SET: ReadonlySet<string> = new Set(EVIDENCE_INTAKE_CONTENT_TYPES)
 
@@ -78,27 +83,14 @@ const idempotencyMismatch = (): EvidenceIntakeError =>
 const persistenceFailed = (): EvidenceIntakeError =>
   new EvidenceIntakeError(problems.evidencePersistenceFailed())
 
-const normalizeDeclaredContentType = (value: string | undefined): string | null => {
-  if (value === undefined) return null
-  const [base] = value.split(';')
-  const normalized = (base ?? '').trim().toLowerCase()
-  if (normalized === 'image/jpg') return 'image/jpeg'
-  return normalized
-}
-
-const startsWith = (data: Uint8Array, signature: readonly number[]): boolean =>
-  data.byteLength >= signature.length && signature.every((byte, index) => data[index] === byte)
+const normalizeDeclaredContentType = normalizeDocumentContentType
 
 /**
  * Sniffing dos formatos aceitos. Não confia em filename, extensão ou no
  * `Content-Type` declarado: o tipo persistido é sempre o detectado aqui.
  */
-export const detectEvidenceIntakeContentType = (data: Uint8Array): EvidenceIntakeContentType | null => {
-  if (startsWith(data, [0x25, 0x50, 0x44, 0x46, 0x2d])) return 'application/pdf' // %PDF-
-  if (startsWith(data, [0xff, 0xd8, 0xff])) return 'image/jpeg' // SOI + marker
-  if (startsWith(data, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png'
-  return null
-}
+export const detectEvidenceIntakeContentType = (data: Uint8Array): EvidenceIntakeContentType | null =>
+  detectDocumentContentType(data)
 
 const resolveContentType = (
   data: Uint8Array,

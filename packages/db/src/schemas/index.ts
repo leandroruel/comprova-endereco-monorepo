@@ -34,6 +34,9 @@ import { validation, validationIdempotency } from './validations.js'
 import { holder } from './holder.js'
 import { holderInformationRequest } from './holder-information-request.js'
 import { holderInformationRequestEvent } from './holder-information-request-event.js'
+import { holderAccessToken } from './holder-access-token.js'
+import { holderItemResponse } from './holder-item-response.js'
+import { holderInformationRequestDocument } from './holder-information-request-document.js'
 import { kycProcess, kycEvent } from './kyc.js'
 
 export * from './enums.js'
@@ -57,6 +60,9 @@ export * from './batches.js'
 export * from './holder.js'
 export * from './holder-information-request.js'
 export * from './holder-information-request-event.js'
+export * from './holder-access-token.js'
+export * from './holder-item-response.js'
+export * from './holder-information-request-document.js'
 export * from './kyc.js'
 
 /**
@@ -120,6 +126,9 @@ export const schema = {
   holder,
   holderInformationRequest,
   holderInformationRequestEvent,
+  holderAccessToken,
+  holderItemResponse,
+  holderInformationRequestDocument,
   kycProcess,
   kycEvent,
   batch,
