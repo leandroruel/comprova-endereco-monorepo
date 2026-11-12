@@ -319,15 +319,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   )
   app.addHook('preHandler', authenticate)
   registerAuthRoutes(app, auth)
-  const deepTrigger = {
-    config: {
-      enabled: deps.config.TEMPORAL_ENABLED,
-      address: deps.config.TEMPORAL_ADDRESS,
-      namespace: deps.config.TEMPORAL_NAMESPACE,
-      taskQueue: deps.config.TEMPORAL_TASK_QUEUE,
-    },
-    logger: deps.logger,
-  }
 
   await app.register(
     async (v1) => {
@@ -335,7 +326,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerValidationRoutes(v1, {
         db: deps.db,
         fastPath,
-        deepTrigger,
         vlmEnabled: deps.config.VLM_ENABLED,
         credentialIssuer,
         objectStore,

@@ -19,18 +19,12 @@ import {
   type FastPathRequest,
   type FastPathResult,
 } from '../../services/fastpath.js'
-import { startDeepWorkflow, type DeepTriggerDeps } from '../../services/deep-trigger.js'
-import {
-  CredentialIssuanceError,
-  issueCredential,
-  type CredentialIssuerDeps,
-} from '../../services/credential-issuer.js'
-import { contestValidation, getValidationDetails, setWorkflowId } from './validations.service.js'
+import { CredentialIssuanceError, issueCredential, type CredentialIssuerDeps } from '../../services/credential-issuer.js'
+import { contestValidation, getValidationDetails } from './validations.service.js'
 
 export interface ValidationControllerDeps {
   readonly db: Db
   readonly fastPath: FastPathDeps
-  readonly deepTrigger: DeepTriggerDeps
   readonly vlmEnabled: boolean
   /** Assinatura/identidade do issuer resolvidas no boot (`app.ts`). */
   readonly credentialIssuer: CredentialIssuerDeps
@@ -286,27 +280,6 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
 
     reply.header('Location', `/v1/validations/${result.validationId}`)
     if (body.mode === 'deep') reply.code(202)
-    if (body.mode === 'deep' || (body.mode === 'auto' && result.status === 'partial')) {
-      void startDeepWorkflow(deps.deepTrigger, {
-        tenantId: tenant.tenantId,
-        validationId: result.validationId,
-        maxTier: body.options.max_tier,
-      })
-        .then(async (workflowId) => {
-          if (workflowId !== null) {
-            await setWorkflowId(deps.db, tenant.tenantId, result.validationId, workflowId)
-          }
-        })
-        .catch((error: unknown) => {
-          deps.deepTrigger.logger.error(
-            {
-              err: error instanceof Error ? error.message : String(error),
-              validation_id: result.validationId,
-            },
-            'failed to persist deep workflow id',
-          )
-        })
-    }
     return reply.send(dtoFromResult(result))
   },
 
