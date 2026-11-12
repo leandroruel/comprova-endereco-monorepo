@@ -130,8 +130,7 @@ export interface E2eRunnerDeps {
  */
 export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const create =
-    deps?.create ??
-    ((document: string, address?: AddressInput | null) => createValidation(document, 'fast', address))
+    deps?.create ?? ((document: string, address?: AddressInput | null) => createValidation(document, address))
   const upload = deps?.upload ?? uploadEvidence
   const poll = deps?.poll ?? getValidation
   const lookupCep = deps?.lookupCep ?? getAddressByCep
