@@ -73,10 +73,7 @@ const tenant = await createTenant(adminPool.db, { name: 'deep-tenant' })
 
 // Resetar quota antes de cada teste para evitar esgotamento entre testes
 beforeEach(async () => {
-  await adminPool.db
-    .update(t.tenant)
-    .set({ monthlyQuota: null })
-    .where(eq(t.tenant.tenantId, tenant))
+  await adminPool.db.update(t.tenant).set({ monthlyQuota: null }).where(eq(t.tenant.tenantId, tenant))
 })
 
 // Chave de assinatura do tenant (FASE 14): o material privado vive no resolver
