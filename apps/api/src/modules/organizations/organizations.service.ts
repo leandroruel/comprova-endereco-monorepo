@@ -41,7 +41,8 @@ export interface OrganizationsServiceDeps {
  * fechado se não estiver definida.
  */
 const INVITE_TOKEN_PEPPER: string =
-  process.env.INVITE_TOKEN_PEPPER ?? (process.env.NODE_ENV === 'production'
+  process.env.INVITE_TOKEN_PEPPER ??
+  (process.env.NODE_ENV === 'production'
     ? (() => {
         throw new Error('INVITE_TOKEN_PEPPER é obrigatório em produção')
       })()
