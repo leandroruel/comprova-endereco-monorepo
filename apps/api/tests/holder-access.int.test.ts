@@ -1440,7 +1440,12 @@ describe('F4.2 — concorrência', () => {
 
   it('upload + submit inicia processamento automático via outbox', async () => {
     const { requestId } = await createRequest('acc-flow-upload', [
-      { itemId: 'current-address', description: 'Comprovante de endereço', required: true, documentType: 'utility_bill' },
+      {
+        itemId: 'current-address',
+        description: 'Comprovante de endereço',
+        required: true,
+        documentType: 'utility_bill',
+      },
     ])
     const issued = await issueTokenOk(requestId)
 
@@ -1476,9 +1481,8 @@ describe('F4.2 — concorrência', () => {
     expect(payload.tenant_id).toBe(tenantId)
 
     // Executa o processamento do holder (simula o worker).
-    const { makeHolderSubmissionProcessingService } = await import(
-      '../src/modules/holder/holder-submission-processing.service.js'
-    )
+    const { makeHolderSubmissionProcessingService } =
+      await import('../src/modules/holder/holder-submission-processing.service.js')
     const processingService = makeHolderSubmissionProcessingService({
       db: appPool.db,
       store: fakeStore,
@@ -1493,25 +1497,19 @@ describe('F4.2 — concorrência', () => {
     expect(claimed).not.toBeNull()
     expect(claimed!.state).toBe('processing')
 
-    const docs = await processingService.listActiveDocuments(appPool.db, tenantId, requestId)
+    const docs = await withTenant(appPool.db, tenantId, async (tx) => {
+      return await processingService.listActiveDocuments(tx, tenantId, requestId)
+    })
     expect(docs.length).toBe(1)
     expect(docs[0]!.storageKey).toBe(storageKey)
 
-    const result = await processingService.processDocuments(
-      appPool.db,
-      tenantId,
-      requestId,
-      docs,
-    )
+    const result = await withTenant(appPool.db, tenantId, async (tx) => {
+      return await processingService.processDocuments(tx, tenantId, requestId, docs)
+    })
     expect(result.processed).toBe(1)
     expect(result.failed).toBe(0)
 
-    await processingService.finalizeProcessing(
-      processing!.processingId,
-      tenantId,
-      'processed',
-      null,
-    )
+    await processingService.finalizeProcessing(processing!.processingId, tenantId, 'processed', null)
 
     // Verifica o estado final.
     const finalState = await adminSql`
@@ -1537,17 +1535,14 @@ describe('F4.2 — concorrência', () => {
     const issued = await issueTokenOk(requestId)
 
     const pngPart = multipartPayload(PNG_BYTES)
-    await injectAsHolder(
-      'POST',
-      '/v1/holder-access/items/current-address/documents',
-      issued.token,
-      { payload: pngPart.payload, headers: pngPart.headers },
-    )
+    await injectAsHolder('POST', '/v1/holder-access/items/current-address/documents', issued.token, {
+      payload: pngPart.payload,
+      headers: pngPart.headers,
+    })
     await injectAsHolder('POST', '/v1/holder-access/submit', issued.token)
 
-    const { makeHolderSubmissionProcessingService } = await import(
-      '../src/modules/holder/holder-submission-processing.service.js'
-    )
+    const { makeHolderSubmissionProcessingService } =
+      await import('../src/modules/holder/holder-submission-processing.service.js')
     const processingService = makeHolderSubmissionProcessingService({
       db: appPool.db,
       store: fakeStore,
@@ -1557,14 +1552,13 @@ describe('F4.2 — concorrência', () => {
     // Primeiro processamento.
     await processingService.ensureProcessing(requestId, tenantId)
     const claimed1 = await processingService.claimProcessing(requestId, tenantId, 0)
-    const docs = await processingService.listActiveDocuments(appPool.db, tenantId, requestId)
-    await processingService.processDocuments(appPool.db, tenantId, requestId, docs)
-    await processingService.finalizeProcessing(
-      claimed1!.processingId,
-      tenantId,
-      'processed',
-      null,
-    )
+    const docs = await withTenant(appPool.db, tenantId, async (tx) => {
+      return await processingService.listActiveDocuments(tx, tenantId, requestId)
+    })
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await processingService.processDocuments(tx, tenantId, requestId, docs)
+    })
+    await processingService.finalizeProcessing(claimed1!.processingId, tenantId, 'processed', null)
 
     // Segundo processamento (reprocessamento idempotente).
     const claimed2 = await processingService.claimProcessing(requestId, tenantId, 0)
@@ -1584,17 +1578,14 @@ describe('F4.2 — concorrência', () => {
     const issued = await issueTokenOk(requestId)
 
     const pngPart = multipartPayload(PNG_BYTES)
-    await injectAsHolder(
-      'POST',
-      '/v1/holder-access/items/current-address/documents',
-      issued.token,
-      { payload: pngPart.payload, headers: pngPart.headers },
-    )
+    await injectAsHolder('POST', '/v1/holder-access/items/current-address/documents', issued.token, {
+      payload: pngPart.payload,
+      headers: pngPart.headers,
+    })
     await injectAsHolder('POST', '/v1/holder-access/submit', issued.token)
 
-    const { makeHolderSubmissionProcessingService } = await import(
-      '../src/modules/holder/holder-submission-processing.service.js'
-    )
+    const { makeHolderSubmissionProcessingService } =
+      await import('../src/modules/holder/holder-submission-processing.service.js')
     const processingService = makeHolderSubmissionProcessingService({
       db: appPool.db,
       store: fakeStore,
@@ -1603,26 +1594,20 @@ describe('F4.2 — concorrência', () => {
 
     await processingService.ensureProcessing(requestId, tenantId)
     const claimed = await processingService.claimProcessing(requestId, tenantId, 0)
-    const docs = await processingService.listActiveDocuments(appPool.db, tenantId, requestId)
+    const docs = await withTenant(appPool.db, tenantId, async (tx) => {
+      return await processingService.listActiveDocuments(tx, tenantId, requestId)
+    })
 
     // Simula falha: injetamos um erro forçando um documento com storage_key inválida
     // (o store.delete não será chamado, mas o processDocument apenas cria artefato + análise)
     // Neste teste, apenas verificamos que o processamento não trava.
-    const result = await processingService.processDocuments(
-      appPool.db,
-      tenantId,
-      requestId,
-      docs,
-    )
+    const result = await withTenant(appPool.db, tenantId, async (tx) => {
+      return await processingService.processDocuments(tx, tenantId, requestId, docs)
+    })
     expect(result.processed).toBe(1)
     expect(result.failed).toBe(0)
 
-    await processingService.finalizeProcessing(
-      claimed!.processingId,
-      tenantId,
-      'processed',
-      null,
-    )
+    await processingService.finalizeProcessing(claimed!.processingId, tenantId, 'processed', null)
 
     const finalState = await adminSql`
       SELECT state FROM holder_submission_processing
