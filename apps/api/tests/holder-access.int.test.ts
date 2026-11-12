@@ -1471,7 +1471,7 @@ describe('F4.2 — concorrência', () => {
       WHERE aggregate = 'holder_information_request' AND aggregate_id = ${requestId}`
     expect(outboxRows.length).toBe(1)
     expect(outboxRows[0]!.event_type).toBe('holder_submission.processing_requested')
-    const payload = outboxRows[0]!.payload as any
+    const payload = outboxRows[0]!.payload as Record<string, unknown>
     expect(payload.holder_information_request_id).toBe(requestId)
     expect(payload.tenant_id).toBe(tenantId)
 
@@ -1493,12 +1493,12 @@ describe('F4.2 — concorrência', () => {
     expect(claimed).not.toBeNull()
     expect(claimed!.state).toBe('processing')
 
-    const docs = await processingService.listActiveDocuments(appPool.db as any, tenantId, requestId)
+    const docs = await processingService.listActiveDocuments(appPool.db, tenantId, requestId)
     expect(docs.length).toBe(1)
     expect(docs[0]!.storageKey).toBe(storageKey)
 
     const result = await processingService.processDocuments(
-      appPool.db as any,
+      appPool.db,
       tenantId,
       requestId,
       docs,
@@ -1557,8 +1557,8 @@ describe('F4.2 — concorrência', () => {
     // Primeiro processamento.
     await processingService.ensureProcessing(requestId, tenantId)
     const claimed1 = await processingService.claimProcessing(requestId, tenantId, 0)
-    const docs = await processingService.listActiveDocuments(appPool.db as any, tenantId, requestId)
-    await processingService.processDocuments(appPool.db as any, tenantId, requestId, docs)
+    const docs = await processingService.listActiveDocuments(appPool.db, tenantId, requestId)
+    await processingService.processDocuments(appPool.db, tenantId, requestId, docs)
     await processingService.finalizeProcessing(
       claimed1!.processingId,
       tenantId,
@@ -1603,13 +1603,13 @@ describe('F4.2 — concorrência', () => {
 
     await processingService.ensureProcessing(requestId, tenantId)
     const claimed = await processingService.claimProcessing(requestId, tenantId, 0)
-    const docs = await processingService.listActiveDocuments(appPool.db as any, tenantId, requestId)
+    const docs = await processingService.listActiveDocuments(appPool.db, tenantId, requestId)
 
     // Simula falha: injetamos um erro forçando um documento com storage_key inválida
     // (o store.delete não será chamado, mas o processDocument apenas cria artefato + análise)
     // Neste teste, apenas verificamos que o processamento não trava.
     const result = await processingService.processDocuments(
-      appPool.db as any,
+      appPool.db,
       tenantId,
       requestId,
       docs,

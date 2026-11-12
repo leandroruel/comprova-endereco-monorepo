@@ -7,10 +7,6 @@ import { E2eRunner } from '@/components/validation/e2e-runner'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
 
-const VLM_ENABLED = false
-
-const MODES: readonly ('fast' | 'auto' | 'deep')[] = VLM_ENABLED ? ['fast', 'auto', 'deep'] : ['fast']
-
 function StatCard({
   icon,
   label,
