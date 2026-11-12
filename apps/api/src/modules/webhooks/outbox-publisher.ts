@@ -36,7 +36,8 @@ const createDeliveriesForNewEvents = async (deps: PublisherDeps): Promise<number
     .from(t.outbox)
     .where(isNull(t.outbox.publishedAt))
     .orderBy(t.outbox.outboxId)
-    .limit(deps.batchSize ?? 20)) as readonly {
+    .limit(deps.batchSize ?? 20)
+    .for('update', { skipLocked: true })) as readonly {
     outboxId: number
     aggregate: string
     aggregateId: string
