@@ -1061,7 +1061,7 @@ describe('deepEnrich (activity core)', () => {
           idempotencyKey,
         },
       )
-      expect(created.status).toBe('queued')
+      expect(created.status).toBe('completed')
       return created.validationId
     }
 
@@ -1070,8 +1070,8 @@ describe('deepEnrich (activity core)', () => {
 
       const before = await validationRow(validationId)
       expect(before?.createdAt?.toISOString()).toBe(T0.toISOString())
-      // Nada de `completed_at` antecipado: a validação ainda não concluiu.
-      expect(before?.status).toBe('queued')
+      // A validação já concluiu no fast path (fluxo determinístico único).
+      expect(before?.status).toBe('completed')
       expect(before?.completedAt).toBeNull()
 
       const result = await deepEnrich(
@@ -1422,7 +1422,7 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
         idempotencyKey,
       },
     )
-    expect(created.status).toBe('queued')
+    expect(created.status).toBe('completed')
     return created.validationId
   }
 
