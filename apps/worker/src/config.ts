@@ -8,19 +8,15 @@ export interface WorkerEnv {
   readonly referenceDbUrl?: string
   readonly policyVersion: string
   readonly repoRoot: string
-  readonly vlmEnabled: boolean
   readonly logLevel: string
   readonly logFile?: string
   readonly nominatimUrl?: string
   readonly overpassUrl?: string
-  readonly googleStreetViewKey?: string
-  readonly openAiKey?: string
   readonly s3Endpoint?: string
   readonly s3Region?: string
   readonly s3Bucket?: string
   readonly s3AccessKeyId?: string
   readonly s3SecretAccessKey?: string
-  readonly storeStreetViewImages?: boolean
   /** Limite de bytes que o analisador F1.2 carrega em memória. */
   readonly evidenceAnalysisMaxBytes: number
   /**
@@ -50,8 +46,6 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
   const optional = {
     nominatimUrl: nonEmpty(env.NOMINATIM_URL),
     overpassUrl: nonEmpty(env.OVERPASS_URL),
-    googleStreetViewKey: nonEmpty(env.GOOGLE_STREET_VIEW_KEY),
-    openAiKey: nonEmpty(env.OPENAI_API_KEY),
     s3Endpoint: nonEmpty(env.S3_ENDPOINT),
     s3Region: nonEmpty(env.S3_REGION),
     s3Bucket: nonEmpty(env.S3_BUCKET),
@@ -98,10 +92,8 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     evidenceAnalysisMaxBytes: parsedAnalysisMaxBytes,
     documentIntelligenceTimeoutMs: parsedDiTimeoutMs,
     documentIntelligenceMaxFileSizeMb: parsedDiMaxFileSizeMb,
-    vlmEnabled: env.VLM_ENABLED === 'true',
     logLevel: env.LOG_LEVEL ?? 'info',
     logFile: nonEmpty(env.LOG_FILE),
     ...Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined)),
-    ...(env.STORE_STREET_VIEW_IMAGES === 'true' ? { storeStreetViewImages: true } : {}),
   }
 }

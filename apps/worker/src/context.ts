@@ -1,4 +1,4 @@
-import { FACADE_PROMPT, makeStreetViewVlm, makeT1Checkers, type EvidenceWriter } from '@comprova/checkers'
+import { makeT1Checkers, type EvidenceWriter } from '@comprova/checkers'
 import { loadPolicy, policyHashOf, type Checker, type Policy, type SignalCacheReader } from '@comprova/core'
 import {
   createDbPool,
@@ -9,12 +9,9 @@ import {
 } from '@comprova/db'
 import {
   makeFakeObjectStore,
-  makeGoogleStreetView,
   makeNominatimGeocoder,
-  makeOpenAIVisionModel,
   makeOverpassPlaces,
   makeS3ObjectStore,
-  makeStubVisionModel,
   type EvidenceObjectStore,
 } from '@comprova/providers'
 import { readFileSync } from 'node:fs'
@@ -58,21 +55,9 @@ export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore =>
       })
     : makeFakeObjectStore()
 
-export const buildT2Checkers = (env: WorkerEnv, evidenceWriter: EvidenceWriter): readonly Checker[] => {
-  if (!env.vlmEnabled) return []
-  const streetView = makeGoogleStreetView({ apiKey: env.googleStreetViewKey })
-  const vision =
-    env.openAiKey !== undefined && env.openAiKey !== ''
-      ? makeOpenAIVisionModel({ apiKey: env.openAiKey, prompt: FACADE_PROMPT })
-      : makeStubVisionModel()
-  return [
-    makeStreetViewVlm({
-      streetView,
-      vision,
-      evidenceWriter,
-      ...(env.storeStreetViewImages === true ? { storeImages: true } : {}),
-    }),
-  ]
+export const buildT2Checkers = (_env: WorkerEnv, _evidenceWriter: EvidenceWriter): readonly Checker[] => {
+  // T2/VLM checkers (Street View, OpenAI Vision) estão fora do escopo do MVP.
+  return []
 }
 
 export const buildWorkerContext = (env: WorkerEnv): WorkerContext => {
