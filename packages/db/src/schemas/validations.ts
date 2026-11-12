@@ -35,7 +35,7 @@ export const validation = pgTable(
       .notNull()
       .references(() => subject.subjectId),
     addressId: uuid('address_id'),
-    mode: valModeEnum('mode').notNull(),
+    mode: valModeEnum('mode').notNull().default('fast'),
     status: valStatusEnum('status').notNull(),
     verdict: verdictEnum('verdict'),
     score: real('score'),

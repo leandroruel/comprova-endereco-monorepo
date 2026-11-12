@@ -42,11 +42,6 @@ const app = await buildApp({
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
   },
   db: appPool.db,
@@ -74,7 +69,6 @@ const postCnpj = (headers: Record<string, string> = {}) =>
     payload: {
       document: { type: 'CNPJ', value: '12345678000195' },
       address: null,
-      mode: 'fast',
       legal_basis: 'FRAUD_PREVENTION',
     },
   })
@@ -95,7 +89,6 @@ const postCpf = (headers: Record<string, string> = {}) =>
         uf: 'SP',
         municipio: 'Sao Paulo',
       },
-      mode: 'fast',
       legal_basis: 'CONSENT',
       consent_ref: 'consent-claim-test',
     },
@@ -608,7 +601,6 @@ describe('consistencia de endereco entre POST, GET e replay (BAIXO-7)', () => {
       payload: {
         document: { type: 'CPF', value: '529.982.247-25' },
         address: null,
-        mode: 'fast',
         legal_basis: 'CONSENT',
         consent_ref: 'consent-no-address',
       },

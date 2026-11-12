@@ -109,11 +109,6 @@ const app = await buildApp({
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
   },
   db: appPool.db,
@@ -194,7 +189,6 @@ describe('scope enforcement', () => {
       payload: {
         document: { type: 'CNPJ', value: '12345678000195' },
         address: null,
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
@@ -253,7 +247,6 @@ describe('scope enforcement', () => {
       payload: {
         document: { type: 'CNPJ', value: '12345678000195' },
         address: null,
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
@@ -302,7 +295,6 @@ describe('scope enforcement', () => {
       payload: {
         document: { type: 'CNPJ', value: '12345678000195' },
         address: null,
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
@@ -320,7 +312,6 @@ describe('scope enforcement', () => {
         payload: {
           document: { type: 'CNPJ', value: '12345678000195' },
           address: null,
-          mode: 'fast',
           legal_basis: 'FRAUD_PREVENTION',
         },
       },
@@ -351,7 +342,6 @@ describe('scope enforcement', () => {
         url: '/v1/batches',
         payload: {
           documents: [{ type: 'CNPJ', value: '12345678000195' }],
-          mode: 'fast',
           legal_basis: 'FRAUD_PREVENTION',
         },
       },
@@ -402,7 +392,6 @@ describe('scope enforcement', () => {
       payload: {
         document: { type: 'CNPJ', value: '12345678000195' },
         address: null,
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })

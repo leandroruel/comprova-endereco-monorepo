@@ -95,7 +95,6 @@ describe('partner_graph (F4)', () => {
         documentValue: '23456789000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'f4-partner-1',
       },
     )

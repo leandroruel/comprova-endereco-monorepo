@@ -46,11 +46,6 @@ const app = await buildApp({
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
   },
   db: appPool.db,
@@ -125,7 +120,6 @@ describe('webhooks', () => {
       payload: {
         document: { type: 'CNPJ', value: '12345678000195' },
         address: null,
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
@@ -188,7 +182,6 @@ describe('webhooks', () => {
       payload: {
         document: { type: 'CNPJ', value: '23456789000195' },
         address: null,
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
@@ -227,7 +220,6 @@ describe('batch', () => {
           { type: 'CNPJ', value: '12345678000195' },
           { type: 'CNPJ', value: '11111111111111' },
         ],
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
@@ -248,11 +240,6 @@ describe('batch', () => {
       TERMS_VERSION: '1.0.0',
       TERMS_APPROVED: 'true',
       TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-      TEMPORAL_ENABLED: false,
-      VLM_ENABLED: false,
-      TEMPORAL_ADDRESS: 'localhost:7233',
-      TEMPORAL_NAMESPACE: 'default',
-      TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
       WORKER_LOOPS: false,
     })
 
@@ -281,7 +268,6 @@ describe('batch', () => {
       headers: authJson,
       payload: {
         documents: [{ type: 'CNPJ', value: '12345678000195' }],
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })

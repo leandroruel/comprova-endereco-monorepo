@@ -29,7 +29,7 @@ export const createBatch = async (
       userId,
       status: 'queued',
       totalItems: items.length,
-      mode: body.mode,
+      mode: 'fast',
       legalBasis: body.legal_basis,
     })
     await tx.insert(t.batchItem).values(items)

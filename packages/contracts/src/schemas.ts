@@ -58,7 +58,6 @@ export const AddressInputSchema = z.object({
 export const CreateValidationRequestSchema = z.object({
   document: DocumentSchema,
   address: AddressInputSchema.nullable().default(null),
-  mode: ValModeSchema.default('auto'),
   legal_basis: LegalBasisSchema,
   consent_ref: z.string().min(1).nullable().default(null),
   callback_url: z.url().nullable().default(null),
@@ -249,7 +248,6 @@ export const BatchItemSchema = z.object({
 
 export const BatchRequestSchema = z.object({
   items: z.array(BatchItemSchema).min(1).max(1000),
-  mode: ValModeSchema.default('fast'),
   legal_basis: LegalBasisSchema,
 })
 

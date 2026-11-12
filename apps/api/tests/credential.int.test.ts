@@ -185,11 +185,6 @@ const config: AppConfig = {
   TERMS_VERSION: '1.0.0',
   TERMS_APPROVED: 'true',
   TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-  TEMPORAL_ENABLED: false,
-  VLM_ENABLED: false,
-  TEMPORAL_ADDRESS: 'localhost:7233',
-  TEMPORAL_NAMESPACE: 'default',
-  TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
   WORKER_LOOPS: false,
 }
 const app = await buildApp({
@@ -217,7 +212,6 @@ const postCnpj = (apiKey = key.plaintext) =>
     payload: {
       document: { type: 'CNPJ', value: '12345678000195' },
       address: null,
-      mode: 'fast',
       legal_basis: 'FRAUD_PREVENTION',
     },
   })
@@ -443,7 +437,6 @@ describe('emissão e verificação independente', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'fast',
         idempotencyKey: null,
       },
     )
@@ -541,7 +534,6 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
       validationId: otherValidationId,
       tenantId: otherTenant,
       subjectId: otherSubject,
-      mode: 'fast',
       status: 'completed',
       verdict: 'CONFIRMED_COMMERCIAL',
       score: 0.9,
@@ -577,7 +569,6 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
       validationId,
       tenantId,
       subjectId,
-      mode: 'auto',
       status: 'partial',
       verdict: 'INSUFFICIENT_EVIDENCE',
       score: 0,
@@ -660,7 +651,6 @@ describe('elegibilidade (não emitir credencial parcial)', () => {
       validationId,
       tenantId,
       subjectId,
-      mode: 'fast',
       status: 'completed',
       verdict: 'CONFIRMED_COMMERCIAL',
       score: 0.9,

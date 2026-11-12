@@ -52,7 +52,6 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
         body: CreateValidationRequestSchema,
         response: {
           200: ValidationDtoSchema,
-          202: ValidationDtoSchema,
           422: ProblemSchema,
         },
       },

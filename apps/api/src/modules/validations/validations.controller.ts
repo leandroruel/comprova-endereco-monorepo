@@ -256,7 +256,6 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       addressInput:
         body.document.type === 'CPF' && body.address !== null ? addressComponentsFromDto(body.address) : null,
       legalBasis: body.legal_basis,
-      mode: body.mode,
       idempotencyKey: idempotencyKey ?? null,
       consentRef: body.consent_ref,
       userId: userId ?? null,
@@ -274,7 +273,6 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     }
 
     reply.header('Location', `/v1/validations/${result.validationId}`)
-    if (body.mode === 'deep') reply.code(202)
     return reply.send(dtoFromResult(result))
   },
 

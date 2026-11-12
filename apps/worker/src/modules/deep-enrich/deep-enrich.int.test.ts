@@ -145,7 +145,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'deep-test-1',
       },
     )
@@ -183,7 +182,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '90123456000131',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'deep-test-2',
       },
     )
@@ -227,7 +225,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'fast',
         idempotencyKey: 'deep-billability-timeout',
       },
     )
@@ -272,7 +269,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'fase14-immutability',
       },
     )
@@ -357,7 +353,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'fiscal-assessment-integration',
       },
     )
@@ -460,7 +455,6 @@ describe('deepEnrich (activity core)', () => {
           documentValue: '12345678000195',
           addressInput: null,
           legalBasis: 'FRAUD_PREVENTION',
-          mode: 'auto',
           idempotencyKey: `f3-1-${randomUUID()}`,
         },
       )
@@ -631,7 +625,6 @@ describe('deepEnrich (activity core)', () => {
           documentValue: '12345678000195',
           addressInput: null,
           legalBasis: 'FRAUD_PREVENTION',
-          mode: 'auto',
           idempotencyKey: `f3-1-dedup-${randomUUID()}`,
         },
       )
@@ -796,7 +789,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'fase7-legacy',
       },
     )
@@ -864,7 +856,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'fast',
         idempotencyKey: 'fase19-material',
       },
     )
@@ -950,7 +941,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'fast',
         idempotencyKey: 'baixo8-legacy',
       },
     )
@@ -1052,7 +1042,6 @@ describe('deepEnrich (activity core)', () => {
           documentValue,
           addressInput: null,
           legalBasis: 'FRAUD_PREVENTION',
-          mode: 'deep',
           idempotencyKey,
         },
       )
@@ -1414,7 +1403,6 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
         documentValue,
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'deep',
         idempotencyKey,
       },
     )

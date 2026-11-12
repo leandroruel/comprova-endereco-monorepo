@@ -50,7 +50,6 @@ export interface FastPathRequest {
   readonly documentValue: string
   readonly addressInput: AddressComponents | null
   readonly legalBasis: string
-  readonly mode: 'fast' | 'deep' | 'auto'
   readonly idempotencyKey: string | null
   readonly consentRef?: string | null
   readonly userId?: string | null
@@ -64,7 +63,6 @@ export const requestHashOf = (req: FastPathRequest): string =>
         d: req.documentValue,
         a: req.addressInput,
         l: req.legalBasis,
-        m: req.mode,
       }),
     )
     .digest('hex')
@@ -162,28 +160,17 @@ export const deepContextOf = (
       }
 
 /**
- * Determina o status técnico da validation a partir do modo, veredito e
+ * Determina o status técnico da validation a partir do veredito e
  * confiança da decisão.
  *
- * - `deep` → `queued` (o deep path conclui de forma assíncrona)
- * - `auto` → `partial` quando veredito é `INSUFFICIENT_EVIDENCE` ou
- *   confiança < 0,55; caso contrário `completed`
- * - `fast` → `completed`
+ * Sempre `completed`: a validação é avaliada de forma determinística e
+ * síncrona no fluxo único do MVP.
  *
- * @param mode modo de execução da validação
  * @param verdict veredito da decisão
  * @param confidence confiança da decisão
- * @returns 'completed' | 'partial' | 'queued'
+ * @returns 'completed'
  */
-const statusFor = (
-  mode: 'fast' | 'deep' | 'auto',
-  verdict: Verdict,
-  confidence: number,
-): 'completed' | 'partial' | 'queued' => {
-  if (mode === 'deep') return 'queued'
-  if (mode === 'auto') {
-    return verdict === 'INSUFFICIENT_EVIDENCE' || confidence < 0.55 ? 'partial' : 'completed'
-  }
+const statusFor = (): 'completed' => {
   return 'completed'
 }
 
@@ -635,7 +622,7 @@ export const runFastPath = async (
   })
   const explanationDetail = buildAssessmentExplanation(decision, evidenceList)
   const normalizedScore = Math.tanh(score)
-  const status = statusFor(req.mode, decision.verdict, decision.confidence)
+  const status = statusFor()
   const validationId = randomUUID()
   const expiresAt = new Date(now.getTime() + 30 * 86_400_000)
   // `now` é o instante em que a requisição COMEÇOU (`created_at`); a conclusão da
@@ -808,7 +795,7 @@ export const runFastPath = async (
       tenantId: tenant.tenantId,
       subjectId,
       addressId,
-      mode: req.mode,
+      mode: 'fast',
       status,
       verdict: decision.verdict,
       score: normalizedScore,
@@ -831,7 +818,7 @@ export const runFastPath = async (
       },
       deepContext: deepContextOf(registryRecord, docDigitsValid),
       createdAt: now,
-      completedAt,
+      completedAt: completedAt,
       expiresAt,
     })
 
@@ -871,22 +858,22 @@ export const runFastPath = async (
       await usage.recordUsageEventInTx(tx, {
         tenantId: tenant.tenantId,
         eventType: 'usage_event',
-        kind: 'fast',
+        kind: 'validation',
         units: 1,
         validationId,
         idempotencyKey: billable ? validationBillingKey(validationId) : null,
         billable,
-        source: 'fast',
+        source: 'validation',
       })
     } else {
       await usage.recordUsageEventInTx(tx, {
         tenantId: tenant.tenantId,
         eventType: 'processing_attempt',
-        kind: 'fast',
+        kind: 'validation',
         units: 1,
         validationId,
         billable: false,
-        source: 'fast',
+        source: 'validation',
       })
     }
 
@@ -896,7 +883,7 @@ export const runFastPath = async (
       action: 'validation.create',
       targetType: 'validation',
       targetId: validationId,
-      details: { mode: req.mode, verdict: decision.verdict, status },
+      details: { verdict: decision.verdict, status },
     })
 
     return { replay: null, subjectId, addressId }

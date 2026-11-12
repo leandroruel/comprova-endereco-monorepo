@@ -78,7 +78,6 @@ const processItem = async (deps: BatchProcessorDeps, item: PendingItem): Promise
       documentValue: item.docDigits,
       addressInput: null,
       legalBasis: item.legalBasis,
-      mode: 'fast',
       idempotencyKey: `batch:${item.batchId}:${item.itemId}`,
       // V-1: registra o actor humano que originou o lote. Não há api_key nesta
       // origem (a credencial é a sessão do usuário), então `api_key_id` fica NULL

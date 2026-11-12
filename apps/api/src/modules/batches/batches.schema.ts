@@ -11,7 +11,6 @@ export const CreateBatchRequest = z.object({
     )
     .min(1)
     .max(1000),
-  mode: z.enum(['fast', 'deep', 'auto']).default('fast'),
   legal_basis: z.enum(['FRAUD_PREVENTION', 'CONTRACT_EXECUTION', 'CONSENT']),
 })
 export type CreateBatchBody = z.infer<typeof CreateBatchRequest>

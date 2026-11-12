@@ -30,7 +30,7 @@ async function createBatch(documents: Array<{ type: 'CPF' | 'CNPJ'; value: strin
     method: 'POST',
     credentials: 'include',
     headers: { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documents, mode: 'fast', legal_basis: 'FRAUD_PREVENTION' }),
+    body: JSON.stringify({ documents, legal_basis: 'FRAUD_PREVENTION' }),
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()

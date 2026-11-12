@@ -107,7 +107,6 @@ const mkValidation = async (cnpj: string, idem: string) =>
       documentValue: cnpj,
       addressInput: null,
       legalBasis: 'FRAUD_PREVENTION',
-      mode: 'auto',
       idempotencyKey: idem,
     },
   )
@@ -213,7 +212,6 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
       tenantId: tenant,
       subjectId,
       addressId,
-      mode: 'auto',
       status: 'partial',
       policyVersion: '2026.12.1',
       legalBasis: 'FRAUD_PREVENTION',
