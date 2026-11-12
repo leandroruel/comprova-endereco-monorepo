@@ -4,8 +4,7 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireWriteScope } from '../../plugins/scope.js'
-import type { CredentialsControllerDeps } from './credentials.controller.js'
-import { makeCredentialsController } from './credentials.controller.js'
+import { makeCredentialsController, type CredentialsControllerDeps } from './credentials.controller.js'
 
 export type CredentialRoutesDeps = CredentialsControllerDeps
 

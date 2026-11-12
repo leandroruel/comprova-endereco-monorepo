@@ -1,11 +1,5 @@
 import { createPublicKey, verify as ed25519Verify, type KeyObject } from 'node:crypto'
-import type {
-  GetPublicKeyCommandInput,
-  GetPublicKeyCommandOutput,
-  SignCommandInput,
-  SignCommandOutput,
-} from '@aws-sdk/client-kms'
-import { GetPublicKeyCommand, KMSClient, SignCommand } from '@aws-sdk/client-kms'
+import { GetPublicKeyCommand, KMSClient, SignCommand, type GetPublicKeyCommandInput, type GetPublicKeyCommandOutput, type SignCommandInput, type SignCommandOutput } from '@aws-sdk/client-kms'
 import { ed25519PublicKeyBytes, ed25519PublicKeyFromBytes } from '@comprova/credential'
 import {
   SigningKeyProviderError,

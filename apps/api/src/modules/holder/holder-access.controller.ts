@@ -1,7 +1,6 @@
 import type { FastifyReply } from 'fastify'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
-import type { HolderAccessResult, HolderDeleteDocumentResult } from './holder-access.service.js'
-import { makeHolderAccessService } from './holder-access.service.js'
+import { type HolderAccessResult, type HolderDeleteDocumentResult, makeHolderAccessService } from './holder-access.service.js'
 import type { HolderAccessRoutesDeps, HolderProcessingResponseType } from './holder-access.schema.js'
 
 const mapInvalidItem = (

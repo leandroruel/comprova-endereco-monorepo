@@ -7,12 +7,12 @@ import {
   PROBLEM_CONTENT_TYPE,
   problem,
   problems,
+  type CreateValidationRequest,
   type ValidationDto,
 } from '@comprova/contracts'
 import { isValidDocument, type AddressComponents } from '@comprova/core'
 import type { Db } from '@comprova/db'
 import type { FastifyReply } from 'fastify'
-import type { CreateValidationRequest } from '@comprova/contracts'
 import {
   runFastPath,
   type FastPathDeps,

@@ -1,5 +1,4 @@
-import { and, desc, eq, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { and, desc, eq, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { digitsOnly } from '@comprova/core'
 import { randomUUID } from 'node:crypto'

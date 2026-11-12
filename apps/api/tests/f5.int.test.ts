@@ -27,7 +27,7 @@ const key = (await createApiKey(adminPool.db, tenant, PEPPER)).plaintext
 const logLines: string[] = []
 const logger = createLogger({
   level: 'info',
-  stream: { write: (line: string) => void logLines.push(line) },
+  stream: { write: (line: string) => logLines.push(line) },
 })
 
 const appPool = createDbPool(db.appUrl)

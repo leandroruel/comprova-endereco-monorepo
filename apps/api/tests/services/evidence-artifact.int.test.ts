@@ -7,8 +7,7 @@ import {
 } from '@comprova/testing'
 import { createDbPool, eq, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
-import { makeFakeObjectStore, sha256Of } from '@comprova/providers'
-import type { ObjectStore } from '@comprova/providers'
+import { makeFakeObjectStore, sha256Of, type ObjectStore } from '@comprova/providers'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import {

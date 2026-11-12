@@ -1,8 +1,7 @@
 import { PROBLEM_CONTENT_TYPE, problems } from '@comprova/contracts'
 import type { FastifyReply } from 'fastify'
 import type { CreateWebhookBody } from './webhooks.schema.js'
-import type { WebhookServiceDeps } from './webhooks.service.js'
-import { createWebhook, deleteWebhook, listWebhooks } from './webhooks.service.js'
+import { createWebhook, deleteWebhook, listWebhooks, type WebhookServiceDeps } from './webhooks.service.js'
 
 export interface WebhookController {
   readonly create: (

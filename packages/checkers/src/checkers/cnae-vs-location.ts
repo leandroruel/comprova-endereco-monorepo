@@ -1,7 +1,5 @@
-import type { CnaeCategoria, CnaeCategoriaReader } from '@comprova/core'
-import type { CheckContext, Checker, Signal } from '@comprova/core'
-import { findSignalByChecker } from '../utils.js'
-import { makeSignal } from '../utils.js'
+import type { CnaeCategoria, CnaeCategoriaReader, CheckContext, Checker, Signal } from '@comprova/core'
+import { findSignalByChecker, makeSignal } from '../utils.js'
 
 const ID = 'cnae_vs_location'
 const VERSION = '1.0.0'

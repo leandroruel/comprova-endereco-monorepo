@@ -1,5 +1,4 @@
-import { and, eq, isNull, sql, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { and, eq, isNull, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'

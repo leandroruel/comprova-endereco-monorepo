@@ -2,8 +2,7 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { PROBLEM_CONTENT_TYPE, problems } from '@comprova/contracts'
 import { requireReadScope } from '../../plugins/scope.js'
-import type { StatsControllerDeps } from './stats.controller.js'
-import { makeStatsController } from './stats.controller.js'
+import { makeStatsController, type StatsControllerDeps } from './stats.controller.js'
 import { StatsResponse } from './stats.schema.js'
 
 export type StatsRoutesDeps = StatsControllerDeps

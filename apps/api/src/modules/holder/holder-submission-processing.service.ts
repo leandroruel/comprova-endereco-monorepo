@@ -1,10 +1,8 @@
-import { and, eq, isNull, sql, withTenant } from '@comprova/db'
-import type { Db, DbTx } from '@comprova/db'
+import { and, eq, isNull, insertPendingEvidenceAnalysis, sql, withTenant, type Db, type DbTx, type PendingEvidenceAnalysisInput } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
 import type { ObjectStore } from '@comprova/providers'
-import { insertPendingEvidenceAnalysis, type PendingEvidenceAnalysisInput } from '@comprova/db'
 
 const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
 

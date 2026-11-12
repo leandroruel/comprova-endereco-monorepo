@@ -4,8 +4,7 @@ import {
   UPLOADED_DOCUMENT_CHECKER,
   UPLOADED_DOCUMENT_SOURCE,
 } from '@comprova/core'
-import { and, desc, eq, sql, withTenant } from '@comprova/db'
-import type { Db, DbTx } from '@comprova/db'
+import { and, desc, eq, sql, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { encryptSecret } from '../../shared/secretbox.js'
 import { buildValidationProgress, type ValidationProgressVerification } from './validation-progress.js'

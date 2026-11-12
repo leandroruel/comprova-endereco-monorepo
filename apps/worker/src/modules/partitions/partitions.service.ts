@@ -1,5 +1,4 @@
-import { sql } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { sql, type Db } from '@comprova/db'
 
 const PARTITIONED_TABLES = ['validation', 'signal', 'usage_event'] as const
 const MONTHS_BEHIND = 2

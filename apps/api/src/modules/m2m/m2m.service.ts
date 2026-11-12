@@ -1,9 +1,7 @@
-import { and, eq, isNull, or, gt, withTenant } from '@comprova/db'
+import { and, eq, isNull, or, gt, withTenant, makeApiKeyHasher, newApiKey, keyPrefixOf, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
-import type { Db } from '@comprova/db'
 import { cacheInvalidate } from '../../plugins/auth.js'
-import { makeApiKeyHasher, newApiKey, keyPrefixOf } from '@comprova/db'
 import { validateScopesForKeyType } from '../../plugins/scope.js'
 
 export class AuthorizationError extends Error {

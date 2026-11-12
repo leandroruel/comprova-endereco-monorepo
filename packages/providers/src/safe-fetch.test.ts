@@ -263,7 +263,7 @@ describe('safe fetch', () => {
 
     it('aplica timeout à resolução DNS', async () => {
       const guard = createSafeExternalFetch({
-        resolve: () => new Promise<readonly { address: string; family: 4 | 6 }[]>(() => {}),
+        resolve: () => new Promise<readonly { address: string; family: 4 | 6 }[]>(() => undefined),
       })
       await expect(
         guard('https://slow-dns.example/hook', {

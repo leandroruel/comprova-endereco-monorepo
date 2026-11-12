@@ -2,8 +2,7 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { requireReadScope, requireSessionOrM2MVerify, requireTenantMatch } from '../../plugins/scope.js'
 import type { Db } from '@comprova/db'
-import type { UsageControllerDeps } from './usage.controller.js'
-import { makeUsageController } from './usage.controller.js'
+import { makeUsageController, type UsageControllerDeps } from './usage.controller.js'
 import {
   UsageConsumptionQuerySchema,
   UsageConsumptionResponseSchema,

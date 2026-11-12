@@ -1,6 +1,5 @@
 import { PROBLEM_CONTENT_TYPE, problems, problem } from '@comprova/contracts'
-import { and, eq, sql } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { and, eq, sql, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 

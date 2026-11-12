@@ -1,6 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
-import { useCallback } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getOrganization, listMembers, listApiKeys, listOrganizations } from '@/api/client'
 import {
   Card,
@@ -68,7 +66,7 @@ export function DashboardPage({ user, setRoute, activeOrgId }: DashboardPageProp
   })
 
   const handleRefresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+    queryClient.invalidateQueries({ queryKey: ['api-keys'] })
     refetchKeys()
   }, [queryClient, refetchKeys])
 

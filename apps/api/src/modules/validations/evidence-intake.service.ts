@@ -1,11 +1,9 @@
 import { problem, problems, type Problem } from '@comprova/contracts'
 import { CUSTOMER_DOCUMENT_INTAKE_SOURCE } from '@comprova/core'
-import { and, eq, insertPendingEvidenceAnalysis, withTenant } from '@comprova/db'
-import type { Db, DbTx } from '@comprova/db'
+import { and, eq, insertPendingEvidenceAnalysis, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
-import { sha256Of } from '@comprova/providers'
-import type { ObjectStore } from '@comprova/providers'
+import { sha256Of, type ObjectStore } from '@comprova/providers'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   insertEvidenceArtifact,

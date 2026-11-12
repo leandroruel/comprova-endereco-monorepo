@@ -1,5 +1,4 @@
-import type { PartnerGraphReader } from '@comprova/core'
-import type { CheckContext, Checker, Signal } from '@comprova/core'
+import type { PartnerGraphReader, CheckContext, Checker, Signal } from '@comprova/core'
 import { makeSignal } from '../utils.js'
 
 const ID = 'partner_graph'

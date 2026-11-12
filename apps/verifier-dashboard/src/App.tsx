@@ -149,7 +149,7 @@ export default function App() {
                   ? organizationsError.message
                   : 'Erro ao carregar organizações'}
               </p>
-              <Button onClick={() => void resolveRoute()}>Tentar novamente</Button>
+              <Button onClick={() => resolveRoute()}>Tentar novamente</Button>
             </CardContent>
           </Card>
         </div>

@@ -16,9 +16,8 @@ import {
   type FiscalReasonCode,
   type FiscalVerificationResult,
 } from '@comprova/core'
-import { withTenant } from '@comprova/db'
+import { withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
-import type { Db } from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import { fiscalVerificationResultSchema } from '@comprova/providers'
 import { createHash, randomUUID } from 'node:crypto'

@@ -777,11 +777,11 @@ describe('F2.2b — primeira consulta real NF3e/SVRS', () => {
           servername: _servername,
           ...rest
         } = options
-        void _protocol
-        void _hostname
-        void _port
-        void _lookup
-        void _servername
+        _protocol
+        _hostname
+        _port
+        _lookup
+        _servername
         return httpRequest({ ...rest, protocol: 'http:', hostname: '127.0.0.1', port })
       },
     })

@@ -16,8 +16,7 @@ import {
   startHolderSubmissionProcessingLoop,
   startValidationRetentionLoop,
 } from './loops.js'
-import { deepEnrich } from './modules/deep-enrich/deep-enrich.service.js'
-import type { DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
+import { deepEnrich, type DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
 
 const env = workerEnvFromProcess()
 

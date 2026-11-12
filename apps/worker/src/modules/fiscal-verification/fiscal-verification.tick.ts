@@ -1,8 +1,6 @@
-import type { FiscalReference } from '@comprova/core'
-import { toFiscalLookupInput, type FiscalAdapter, type FiscalLookupInput } from '@comprova/core'
-import { eq, sql, withTenant } from '@comprova/db'
+import { toFiscalLookupInput, type FiscalAdapter, type FiscalLookupInput, type FiscalReference } from '@comprova/core'
+import { eq, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
-import type { Db } from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import {
   clearVerificationAttempt,

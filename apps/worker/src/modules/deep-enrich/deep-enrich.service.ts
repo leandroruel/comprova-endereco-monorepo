@@ -1,5 +1,4 @@
-import type { Db } from '@comprova/db'
-import { withTenant } from '@comprova/db'
+import { withTenant, type Db } from '@comprova/db'
 import {
   buildAssessmentExplanation,
   decide,

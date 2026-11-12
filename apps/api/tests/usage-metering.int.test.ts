@@ -1,9 +1,7 @@
-import { and, createDbPool, eq, withTenant } from '@comprova/db'
+import { and, createDbPool, eq, runMigrations, validationBillingKey, withTenant, QuotaExceededError } from '@comprova/db'
 import * as t from '@comprova/db'
-import { validationBillingKey, QuotaExceededError } from '@comprova/db'
 import { z } from 'zod'
 import { UsageConsumptionDtoSchema, UsageEventDtoSchema, UsageQuotaDtoSchema } from '@comprova/contracts'
-import { runMigrations } from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import {
   startTestDb,

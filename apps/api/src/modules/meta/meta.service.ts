@@ -1,5 +1,4 @@
-import { cacheable, sql } from '@comprova/db'
-import type { CacheStore, Db } from '@comprova/db'
+import { cacheable, sql, type CacheStore, type Db } from '@comprova/db'
 import type { MetaPayload } from './meta.schema.js'
 
 // `MAX()` nas colunas de versão não tem índice: cada execução varre a tabela.

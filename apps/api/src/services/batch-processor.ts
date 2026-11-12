@@ -146,7 +146,7 @@ export const batchTick = async (deps: BatchProcessorDeps): Promise<number> => {
 
 export const startBatchLoop = (deps: BatchProcessorDeps, intervalMs = 1_000): (() => void) => {
   const timer = setInterval(() => {
-    void batchTick(deps).catch(() => undefined)
+    batchTick(deps).catch(() => undefined)
   }, intervalMs)
   return () => clearInterval(timer)
 }

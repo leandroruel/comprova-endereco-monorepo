@@ -24,7 +24,7 @@ describe('ingestLineStream', () => {
     const stats = await ingestLineStream(iterator, {
       batchSize: 2,
       parse,
-      write: async (b) => void writes.push([...b]),
+      write: async (b) => writes.push([...b]),
     })
 
     expect(writes).toEqual([[1, 2], [3, 4], [5]])
@@ -37,7 +37,7 @@ describe('ingestLineStream', () => {
     const stats = await ingestLineStream(iterator, {
       batchSize: 10,
       parse,
-      write: async (b) => void writes.push([...b]),
+      write: async (b) => writes.push([...b]),
     })
 
     expect(writes).toEqual([[1, 2]])
@@ -51,7 +51,7 @@ describe('ingestLineStream', () => {
       batchSize: 10,
       limit: 2,
       parse,
-      write: async (b) => void writes.push([...b]),
+      write: async (b) => writes.push([...b]),
     })
 
     expect(writes).toEqual([[1, 2]])
@@ -65,7 +65,7 @@ describe('ingestLineStream', () => {
       batchSize: 10,
       limit: 2,
       parse,
-      write: async (b) => void writes.push([...b]),
+      write: async (b) => writes.push([...b]),
     })
 
     expect(writes).toEqual([[1, 2]])
@@ -78,7 +78,7 @@ describe('ingestLineStream', () => {
     const stats = await ingestLineStream(iterator, {
       batchSize: 10,
       parse,
-      write: async (b) => void writes.push([...b]),
+      write: async (b) => writes.push([...b]),
     })
 
     expect(writes).toEqual([])

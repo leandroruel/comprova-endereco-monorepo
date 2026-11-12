@@ -32,7 +32,9 @@ class TestObjectStore implements ObjectStore {
     return { key, uri: `test://${key}`, sha256: sha256Of(data), bytes: data.byteLength }
   }
 
-  async delete(_key: string) {}
+  async delete(_key: string) {
+    return
+  }
 }
 
 const store = new TestObjectStore()

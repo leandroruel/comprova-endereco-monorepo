@@ -1,6 +1,5 @@
 import { addressKeys, canonicalizeAddress, type CnaeCategoria } from '@comprova/core'
-import { type Db } from '@comprova/db'
-import { sql } from '@comprova/db'
+import { type Db, sql } from '@comprova/db'
 import * as t from '@comprova/db'
 
 export const CNAE_CATEGORIAS: ReadonlyArray<{ readonly divisao: string; readonly categoria: CnaeCategoria }> =

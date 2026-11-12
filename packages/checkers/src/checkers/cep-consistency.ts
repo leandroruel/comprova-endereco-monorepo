@@ -1,5 +1,4 @@
-import type { CepReader } from '@comprova/core'
-import type { CheckContext, Checker, Signal } from '@comprova/core'
+import type { CepReader, CheckContext, Checker, Signal } from '@comprova/core'
 import { makeSignal } from '../utils.js'
 
 const ID = 'cep_consistency'

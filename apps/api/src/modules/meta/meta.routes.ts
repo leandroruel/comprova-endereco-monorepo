@@ -2,8 +2,7 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { requireReadScope, requireSessionOrM2MVerify } from '../../plugins/scope.js'
 import type { Db } from '@comprova/db'
-import type { MetaControllerDeps } from './meta.controller.js'
-import { makeMetaController } from './meta.controller.js'
+import { makeMetaController, type MetaControllerDeps } from './meta.controller.js'
 import { MetaResponse } from './meta.schema.js'
 
 export type MetaRoutesDeps = MetaControllerDeps & {

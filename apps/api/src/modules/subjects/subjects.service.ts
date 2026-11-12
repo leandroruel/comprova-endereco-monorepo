@@ -1,5 +1,4 @@
-import { and, eq, inArray, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { and, eq, inArray, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 
 export interface SubjectValidation {

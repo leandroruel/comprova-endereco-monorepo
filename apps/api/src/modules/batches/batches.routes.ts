@@ -1,8 +1,7 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
-import type { BatchControllerDeps } from './batches.controller.js'
-import { makeBatchController } from './batches.controller.js'
+import { makeBatchController, type BatchControllerDeps } from './batches.controller.js'
 import {
   BatchDetailsResponse,
   BatchExportQuery,

@@ -1,7 +1,5 @@
-import type { CnefeCoordReader } from '@comprova/core'
-import type { CheckContext, Checker, Signal } from '@comprova/core'
-import type { GeocodeProvider } from '@comprova/providers'
-import { haversineMeters } from '@comprova/providers'
+import type { CnefeCoordReader, CheckContext, Checker, Signal } from '@comprova/core'
+import { haversineMeters, type GeocodeProvider } from '@comprova/providers'
 import { makeSignal } from '../utils.js'
 
 const ID = 'geocode_consensus'

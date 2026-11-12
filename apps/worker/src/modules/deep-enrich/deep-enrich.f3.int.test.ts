@@ -324,6 +324,6 @@ describe('deep T2: gating por ambiguidade e max_tier', () => {
       .from(t.evidence)
       .where(lte(t.evidence.retentionUntil, new Date()))
     expect(remaining.length).toBe(0)
-    void evidenceId
+    evidenceId
   })
 })

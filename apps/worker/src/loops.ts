@@ -14,7 +14,7 @@ const DAY_MS = 86_400_000
 
 const startLoop = (tick: () => Promise<unknown>, intervalMs: number, logger?: Logger): (() => void) => {
   const timer = setInterval(() => {
-    void tick().catch((error: unknown) => {
+    tick().catch((error: unknown) => {
       logger?.error(
         {
           reason: 'WORKER_LOOP_TICK_FAILED',

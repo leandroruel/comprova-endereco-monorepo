@@ -7,8 +7,7 @@ import {
   type CreateOrganizationRequest,
   type CreateOrganizationMemberRequest,
 } from '@comprova/contracts'
-import { randomUUID } from 'node:crypto'
-import { createHmac } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 
 /**
  * Serviço de organizações Verifier.

@@ -1,8 +1,7 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
-import type { SubjectControllerDeps } from './subjects.controller.js'
-import { makeSubjectController } from './subjects.controller.js'
+import { makeSubjectController, type SubjectControllerDeps } from './subjects.controller.js'
 import {
   SubjectErasureResponse,
   SubjectIdParams,

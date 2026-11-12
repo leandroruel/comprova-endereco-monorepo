@@ -71,7 +71,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
     setError(null)
     setSuccess(null)
     if (!name.trim()) return
-    void createKeyMutation.mutateAsync({
+    createKeyMutation.mutateAsync({
       tenantId,
       name,
       scopes,
@@ -84,7 +84,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
       return
     setError(null)
     setSuccess(null)
-    void revokeMutation.mutateAsync(apiKeyId)
+    revokeMutation.mutateAsync(apiKeyId)
   }
 
   const handleCopy = async (text: string) => {
@@ -171,7 +171,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => void handleCopy(key.keyPrefix)}
+                          onClick={() => handleCopy(key.keyPrefix)}
                           title="Copiar prefixo"
                         >
                           <Copy className="h-3 w-3" />
@@ -333,7 +333,7 @@ export function IntegrationsPage({ tenantId }: IntegrationsPageProps) {
                     {showSecret.secret}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void handleCopy(showSecret.secret)}>
+                    <Button variant="outline" size="sm" onClick={() => handleCopy(showSecret.secret)}>
                       <Copy className="h-3 w-3 mr-1" />
                       Copiar segredo
                     </Button>

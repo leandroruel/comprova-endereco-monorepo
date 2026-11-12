@@ -1,9 +1,7 @@
 import type { FastifyReply } from 'fastify'
-import type { ApiKeyDto, CreateApiKeyRequest } from '@comprova/contracts'
-import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
+import { PROBLEM_CONTENT_TYPE, problem, type ApiKeyDto, type CreateApiKeyRequest } from '@comprova/contracts'
 import type { z } from 'zod'
-import type { ApiKeyCreatedResponse, M2MControllerDeps } from './m2m.schema.js'
-import { sendProblem } from './m2m.schema.js'
+import { sendProblem, type ApiKeyCreatedResponse, type M2MControllerDeps } from './m2m.schema.js'
 import { makeM2MService, AuthorizationError } from './m2m.service.js'
 
 export type ApiKeyCreatedResponseType = z.infer<typeof ApiKeyCreatedResponse>

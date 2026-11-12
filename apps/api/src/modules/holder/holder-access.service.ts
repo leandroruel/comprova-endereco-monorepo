@@ -1,5 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, sql, withTenant } from '@comprova/db'
-import type { Db, DbTx } from '@comprova/db'
+import { and, eq, inArray, isNotNull, isNull, sql, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type {
   HolderAccessItem,
@@ -8,8 +7,7 @@ import type {
   HolderInformationRequestState,
 } from '@comprova/contracts'
 import type { Logger, Metrics } from '@comprova/observability'
-import { sha256Of } from '@comprova/providers'
-import type { ObjectStore } from '@comprova/providers'
+import { sha256Of, type ObjectStore } from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
 import {
   expireIfNeeded,

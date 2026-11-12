@@ -1,5 +1,4 @@
-import { sql } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { sql, type Db } from '@comprova/db'
 import type { EstabelecimentoInsertRow } from './receita.parser.js'
 
 export interface UpsertWithHistoryResult {

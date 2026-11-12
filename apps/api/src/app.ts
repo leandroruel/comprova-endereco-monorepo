@@ -5,27 +5,25 @@ import { systemClock } from '@comprova/core'
 import { type Logger, type Metrics } from '@comprova/observability'
 import {
   EVIDENCE_ARTIFACT_MAX_BYTES,
+  makeApiKeyHasher,
+  makeCachedReaders,
   makeCepReader,
   makeCnaeCategoriaReader,
   makeCnefeReader,
   makeKnownSharedReader,
   makeProfileReader,
+  makeRedisCache,
   makeRegistryReader,
+  QuotaExceededError,
   type Db,
 } from '@comprova/db'
-import { makeS3ObjectStore, makeUnavailableObjectStore, type ObjectStore } from '@comprova/providers'
+import { makeDocumentIntelligenceClient, makeS3ObjectStore, makeUnavailableObjectStore, type ObjectStore } from '@comprova/providers'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import multipart from '@fastify/multipart'
 import swagger from '@fastify/swagger'
-import type { ZodTypeProvider } from '@fastify/type-provider-zod'
-import {
-  jsonSchemaTransform,
-  jsonSchemaTransformObject,
-  serializerCompiler,
-  validatorCompiler,
-} from '@fastify/type-provider-zod'
+import { jsonSchemaTransform, jsonSchemaTransformObject, serializerCompiler, validatorCompiler, type ZodTypeProvider } from '@fastify/type-provider-zod'
 import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import { DEFAULT_EVIDENCE_MAX_CONCURRENCY, type AppConfig } from './config.js'
@@ -38,7 +36,6 @@ import { registerAuthRoutes } from './routes/auth-routes.js'
 import { registerAuthAdminRoutes } from './routes/auth-admin-routes.js'
 import { registerAuthVerifierRoutes } from './routes/auth-verifier-routes.js'
 import { makeSessionMiddleware, type AuthInstance } from './plugins/session.js'
-import { makeRedisCache, makeCachedReaders, makeApiKeyHasher } from '@comprova/db'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
 import { registerBatchRoutes } from './modules/batches/batches.routes.js'
@@ -49,10 +46,8 @@ import { registerMetaRoutes } from './modules/meta/meta.routes.js'
 import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerUsageRoutes } from './modules/usage/usage.routes.js'
-import { QuotaExceededError } from '@comprova/db'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerDocumentRoutes } from './modules/documents/documents.routes.js'
-import { makeDocumentIntelligenceClient } from '@comprova/providers'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'

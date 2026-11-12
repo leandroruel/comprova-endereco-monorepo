@@ -3,12 +3,13 @@ import { z } from 'zod'
 import {
   CreateHolderAccessTokenResponseSchema,
   HolderAccessRequestSchema,
+  PROBLEM_CONTENT_TYPE,
+  problem,
   SaveHolderItemResponseRequestSchema,
 } from '@comprova/contracts'
 import type { Db } from '@comprova/db'
 import type { Logger, Metrics } from '@comprova/observability'
 import type { ObjectStore } from '@comprova/providers'
-import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 
 export const HolderItemIdParams = z.object({
   itemId: z.string().min(1).max(100),

@@ -1,5 +1,4 @@
-import { and, eq, isNotNull, sql } from '@comprova/db'
-import type { DbTx } from '@comprova/db'
+import { and, eq, isNotNull, sql, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { HolderInformationRequestState } from '@comprova/contracts'
 import { randomUUID } from 'node:crypto'

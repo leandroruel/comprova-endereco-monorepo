@@ -243,7 +243,7 @@ export function OnboardingPage({
               <Button
                 onClick={() => {
                   setTermsVersionError(null)
-                  void getTermsVersion()
+                  getTermsVersion()
                     .then(({ version }) => {
                       setTermsVersion(version)
                       setTermsVersionError(null)

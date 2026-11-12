@@ -52,7 +52,7 @@ export const unavailabilityCauseOfSignal = (signal: Signal): ExternalUnavailabil
   // Qualquer outro motivo é resultado legítimo (não indisponibilidade), mas
   // mantemos o conjunto fechado: motivos novos de indisponibilidade precisam
   // ser adicionados aqui explicitamente (UNAVAILABLE_REASONS documenta isso).
-  void UNAVAILABLE_REASONS
+  UNAVAILABLE_REASONS
   return null
 }
 

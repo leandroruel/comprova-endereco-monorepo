@@ -221,7 +221,7 @@ export function MembersPage({ user, activeOrgId }: MembersPageProps) {
                   setError(null)
                   setSuccess(null)
                   if (tenantId && newEmail.trim()) {
-                    void createInvitationMutation.mutateAsync({
+                    createInvitationMutation.mutateAsync({
                       tid: tenantId,
                       email: newEmail,
                       role: newRole,

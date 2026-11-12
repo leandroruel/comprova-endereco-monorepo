@@ -74,6 +74,6 @@ describe('sdk client', () => {
     })
     const result = await client.eraseSubject('s-1')
     expect(result.validations_removed).toBe(2)
-    void SdkError
+    SdkError
   })
 })
