@@ -69,7 +69,6 @@ logger.info(
   {
     port: config.PORT,
     host: config.HOST,
-    temporal_enabled: config.TEMPORAL_ENABLED,
     worker_loops: config.WORKER_LOOPS,
   },
   'api listening',

@@ -10,7 +10,7 @@ spec:
     metadata:
       labels: { app: comprova-worker }
     spec:
-      # workers T2 toleram spot (spec secao 11); KEDA escala pela profundidade da task queue
+      # workers T2 toleram spot (spec secao 11)
       tolerations:
         - { key: spot, operator: Exists, effect: NoSchedule }
       containers:
@@ -19,7 +19,6 @@ spec:
           envFrom:
             - secretRef: { name: comprova-worker-secrets }
           env:
-            - { name: TEMPORAL_TASK_QUEUE, value: comprova-deep-t1 }
             - { name: WORKER_LOOPS, value: 'true' }
           resources:
             requests: { cpu: 250m, memory: 256Mi }

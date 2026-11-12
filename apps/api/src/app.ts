@@ -326,7 +326,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerValidationRoutes(v1, {
         db: deps.db,
         fastPath,
-        vlmEnabled: deps.config.VLM_ENABLED,
         credentialIssuer,
         objectStore,
         evidenceMaxBytes,

@@ -63,17 +63,6 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.string().default('info'),
   LOG_FILE: z.string().min(1).optional(),
   POLICY_VERSION: z.string().default('2026.14.1'),
-  TEMPORAL_ENABLED: z
-    .string()
-    .default('false')
-    .transform((v) => v === 'true'),
-  VLM_ENABLED: z
-    .string()
-    .default('false')
-    .transform((v) => v === 'true'),
-  TEMPORAL_ADDRESS: z.string().default('localhost:7233'),
-  TEMPORAL_NAMESPACE: z.string().default('default'),
-  TEMPORAL_TASK_QUEUE: z.string().default('comprova-deep-t1'),
   WORKER_LOOPS: z
     .string()
     .default('true')

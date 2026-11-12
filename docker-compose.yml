@@ -35,15 +35,6 @@ services:
       timeout: 3s
       retries: 10
 
-  temporal:
-    image: temporalio/admin-tools:1.27.0
-    labels:
-      comprova_logs: 'true'
-    entrypoint: ['temporal', 'server', 'start-dev', '--ip', '0.0.0.0', '--port', '7233', '--ui-port', '8233']
-    ports:
-      - '7233:7233'
-      - '8233:8233'
-
   objectstorage:
     image: zenko/cloudserver:latest
     labels:

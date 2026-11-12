@@ -19,13 +19,16 @@ import {
   type FastPathRequest,
   type FastPathResult,
 } from '../../services/fastpath.js'
-import { CredentialIssuanceError, issueCredential, type CredentialIssuerDeps } from '../../services/credential-issuer.js'
+import {
+  CredentialIssuanceError,
+  issueCredential,
+  type CredentialIssuerDeps,
+} from '../../services/credential-issuer.js'
 import { contestValidation, getValidationDetails } from './validations.service.js'
 
 export interface ValidationControllerDeps {
   readonly db: Db
   readonly fastPath: FastPathDeps
-  readonly vlmEnabled: boolean
   /** Assinatura/identidade do issuer resolvidas no boot (`app.ts`). */
   readonly credentialIssuer: CredentialIssuerDeps
 }
@@ -240,14 +243,6 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     reply: FastifyReply,
   ) => {
     if (tenant === undefined) throw new Error('tenant context missing')
-    if ((body.mode === 'deep' || body.mode === 'auto') && deps.vlmEnabled !== true) {
-      return reply
-        .code(422)
-        .type(PROBLEM_CONTENT_TYPE)
-        .send(
-          problem(422, 'DEEP_PATH_DISABLED', 'Deep path is disabled (VLM_ENABLED=false); use mode: "fast"'),
-        )
-    }
     if (!isValidDocument(body.document.type, body.document.value)) {
       return reply.code(422).type(PROBLEM_CONTENT_TYPE).send(problems.invalidDocument())
     }
