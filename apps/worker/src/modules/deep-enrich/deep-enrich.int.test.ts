@@ -136,6 +136,17 @@ const t1Chaos = makeT1Checkers({
 })
 
 describe('deepEnrich (activity core)', () => {
+  const setQuota = async (quota: number | null) => {
+    await adminPool.db
+      .update(t.tenant)
+      .set({ monthlyQuota: quota === null ? null : quota })
+      .where(eq(t.tenant.tenantId, tenant))
+  }
+
+  beforeEach(async () => {
+    await setQuota(null)
+  })
+
   it('enriquece validacao com sinais T1, atualiza veredito e popula cache de endereco', async () => {
     const created = await runFastPath(
       fastPathDeps,

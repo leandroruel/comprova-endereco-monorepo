@@ -30,7 +30,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { deepEnrich } from './deep-enrich.service.js'
 import { makeEvidenceWriter } from '../evidence/evidence.service.js'
 import { retentionTick } from '../evidence/evidence-retention.service.js'
@@ -60,6 +60,17 @@ const t1Checkers = makeT1Checkers({
     coordFor: async () => ({ lat: -23.56, lon: -46.65 }),
   },
   places: { id: 'fake_places', findNearbyPois: async () => [] },
+})
+
+const setQuota = async (quota: number | null) => {
+  await adminPool.db
+    .update(t.tenant)
+    .set({ monthlyQuota: quota === null ? null : quota })
+    .where(eq(t.tenant.tenantId, tenant))
+}
+
+beforeEach(async () => {
+  await setQuota(null)
 })
 
 const fakeStore = makeFakeObjectStore()

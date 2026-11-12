@@ -17,7 +17,7 @@ import { makeT0Checkers, makeT1Checkers } from '@comprova/checkers'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { deepEnrich } from './deep-enrich.service.js'
 import { runFastPath } from '../../../../api/src/services/fastpath.js'
 
@@ -52,6 +52,17 @@ const partnerGraph = makePartnerGraphReader(adminPool.db)
 afterAll(async () => {
   await adminPool.end()
   await db.stop()
+})
+
+const setQuota = async (quota: number | null) => {
+  await adminPool.db
+    .update(t.tenant)
+    .set({ monthlyQuota: quota === null ? null : quota })
+    .where(eq(t.tenant.tenantId, tenant))
+}
+
+beforeEach(async () => {
+  await setQuota(null)
 })
 
 describe('partner_graph (F4)', () => {
