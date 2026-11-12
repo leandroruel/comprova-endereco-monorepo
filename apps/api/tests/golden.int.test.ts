@@ -176,7 +176,7 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
       },
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json().code).toBe("VALIDATED")
+    expect(res.json().code).toBe('VALIDATED')
   })
 })
 
