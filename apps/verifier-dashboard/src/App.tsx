@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { authClient } from '@/api/auth'
-import { getMe } from '@/api/client'
+import { getMe, listOrganizations } from '@/api/client'
 import { Layout } from '@/components/layout'
 import { Button, Card, CardContent } from '@/components/ui'
 import { LoginPage } from '@/pages/login'
@@ -51,14 +51,7 @@ export default function App() {
       const me = await getMe()
       if (me) {
         setUser(me)
-        const orgs = await (async () => {
-          // lista organizações do usuário para decidir a rota inicial
-          const res = await fetch('http://localhost:3000/v1/organizations', {
-            credentials: 'include',
-          })
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          return res.json()
-        })()
+        const orgs = await listOrganizations()
         const list: Array<{
           tenantId: string
           name: string
