@@ -2,7 +2,22 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { makeHolderController } from './holder.controller.js'
-import { HolderIdParams, HolderListQuery, KycProcessListQuery, HolderCreatedResponse, HolderResponse, HoldersListResponse, KycProcessCreatedResponse, KycProcessResponse, KycProcessListResponse, KycProcessTransitionResponse, KycEventResponse, ProblemResponse, KycProcessNotFoundResponse, type HolderRoutesDeps } from './holder.schema.js'
+import {
+  HolderIdParams,
+  HolderListQuery,
+  KycProcessListQuery,
+  HolderCreatedResponse,
+  HolderResponse,
+  HoldersListResponse,
+  KycProcessCreatedResponse,
+  KycProcessResponse,
+  KycProcessListResponse,
+  KycProcessTransitionResponse,
+  KycEventResponse,
+  ProblemResponse,
+  KycProcessNotFoundResponse,
+  type HolderRoutesDeps,
+} from './holder.schema.js'
 import {
   requireSessionOrM2M,
   requireSessionOrM2MVerify,

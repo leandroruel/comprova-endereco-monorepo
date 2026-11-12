@@ -1,5 +1,18 @@
 import { addressProfile, canonicalAddress } from './addresses.js'
-import { authAccount, adminAuthAccount, adminAuthSession, adminAuthUser, adminAuthVerification, authSession, authUser, authVerification, verifierAuthAccount, verifierAuthSession, verifierAuthUser, verifierAuthVerification } from './auth.js'
+import {
+  authAccount,
+  adminAuthAccount,
+  adminAuthSession,
+  adminAuthUser,
+  adminAuthVerification,
+  authSession,
+  authUser,
+  authVerification,
+  verifierAuthAccount,
+  verifierAuthSession,
+  verifierAuthUser,
+  verifierAuthVerification,
+} from './auth.js'
 import { batch, batchItem } from './batches.js'
 import { addressSignalCache, claim, claimEvidence, signal } from './claims.js'
 import { evidence } from './evidence.js'

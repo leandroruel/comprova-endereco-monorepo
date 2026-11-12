@@ -1,7 +1,13 @@
 import { betterAuth } from 'better-auth'
 import { admin } from 'better-auth/plugins/admin'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { adminAuthAccount, adminAuthSession, adminAuthUser, adminAuthVerification, type Db } from '@comprova/db'
+import {
+  adminAuthAccount,
+  adminAuthSession,
+  adminAuthUser,
+  adminAuthVerification,
+  type Db,
+} from '@comprova/db'
 
 /**
  * Instância do Better Auth dedicada ao dashboard administrativo.

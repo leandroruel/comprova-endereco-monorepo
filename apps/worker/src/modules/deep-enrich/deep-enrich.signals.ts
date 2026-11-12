@@ -1,4 +1,12 @@
-import type { CachedSignal, CheckContext, Checker, DocKind, Signal, SignalCacheReader, Stance } from '@comprova/core'
+import type {
+  CachedSignal,
+  CheckContext,
+  Checker,
+  DocKind,
+  Signal,
+  SignalCacheReader,
+  Stance,
+} from '@comprova/core'
 
 /** Linha de `signal` persistida (subconjunto usado no processamento do deep path). */
 export interface PriorSignalRow {

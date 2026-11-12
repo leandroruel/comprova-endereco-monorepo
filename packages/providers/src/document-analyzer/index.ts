@@ -9,7 +9,12 @@ import { makeMarkerAdapter } from './marker.js'
 import { failedResult } from './results.js'
 import { documentAnalysisResultSchema } from './schema.js'
 import { emitDebug } from '../debug-trace.js'
-import { DocumentAnalyzerUnavailableError, type DocumentAnalyzer, type DocumentAnalyzerInput, type DocumentAnalyzerOptions } from './types.js'
+import {
+  DocumentAnalyzerUnavailableError,
+  type DocumentAnalyzer,
+  type DocumentAnalyzerInput,
+  type DocumentAnalyzerOptions,
+} from './types.js'
 
 /**
  * F1.2 — analisador de documento.

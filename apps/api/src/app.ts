@@ -17,13 +17,24 @@ import {
   QuotaExceededError,
   type Db,
 } from '@comprova/db'
-import { makeDocumentIntelligenceClient, makeS3ObjectStore, makeUnavailableObjectStore, type ObjectStore } from '@comprova/providers'
+import {
+  makeDocumentIntelligenceClient,
+  makeS3ObjectStore,
+  makeUnavailableObjectStore,
+  type ObjectStore,
+} from '@comprova/providers'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import multipart from '@fastify/multipart'
 import swagger from '@fastify/swagger'
-import { jsonSchemaTransform, jsonSchemaTransformObject, serializerCompiler, validatorCompiler, type ZodTypeProvider } from '@fastify/type-provider-zod'
+import {
+  jsonSchemaTransform,
+  jsonSchemaTransformObject,
+  serializerCompiler,
+  validatorCompiler,
+  type ZodTypeProvider,
+} from '@fastify/type-provider-zod'
 import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import { DEFAULT_EVIDENCE_MAX_CONCURRENCY, type AppConfig } from './config.js'

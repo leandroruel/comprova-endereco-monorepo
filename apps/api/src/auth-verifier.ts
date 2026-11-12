@@ -1,6 +1,12 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { verifierAuthAccount, verifierAuthSession, verifierAuthUser, verifierAuthVerification, type Db } from '@comprova/db'
+import {
+  verifierAuthAccount,
+  verifierAuthSession,
+  verifierAuthUser,
+  verifierAuthVerification,
+  type Db,
+} from '@comprova/db'
 
 /**
  * Instância do Better Auth dedicada ao dashboard do verifier.

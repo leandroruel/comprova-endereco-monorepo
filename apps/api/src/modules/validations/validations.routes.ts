@@ -1,7 +1,10 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { requireReadScope, requireWriteScope, requireSessionOrM2MVerify } from '../../plugins/scope.js'
-import { makeEvidenceIntakeController, type EvidenceIntakeControllerDeps } from './evidence-intake.controller.js'
+import {
+  makeEvidenceIntakeController,
+  type EvidenceIntakeControllerDeps,
+} from './evidence-intake.controller.js'
 import { EVIDENCE_MULTIPART_OVERHEAD_BYTES } from './evidence-intake.multipart.js'
 import {
   EvidenceIntakeHeaders,

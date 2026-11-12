@@ -1,4 +1,9 @@
-import { toFiscalLookupInput, type FiscalAdapter, type FiscalLookupInput, type FiscalReference } from '@comprova/core'
+import {
+  toFiscalLookupInput,
+  type FiscalAdapter,
+  type FiscalLookupInput,
+  type FiscalReference,
+} from '@comprova/core'
 import { eq, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
