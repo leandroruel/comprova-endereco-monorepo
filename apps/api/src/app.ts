@@ -136,6 +136,18 @@ const resolveObjectStore = (config: AppConfig): ObjectStore =>
     : makeUnavailableObjectStore()
 
 export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
+  // Em produção, o banco de referência é obrigatório. Em desenvolvimento/teste
+  // pode operar em modo single-database (sem REFERENCE_DATABASE_URL).
+  if (
+    deps.config.REFERENCE_DATABASE_URL === undefined &&
+    process.env.NODE_ENV !== 'development' &&
+    process.env.NODE_ENV !== 'test'
+  ) {
+    throw new Error(
+      'REFERENCE_DATABASE_URL é obrigatório em produção. Defina a variável de ambiente antes de iniciar.',
+    )
+  }
+
   const app: FastifyInstance = Fastify({
     logger: false,
     genReqId: () => randomUUID(),

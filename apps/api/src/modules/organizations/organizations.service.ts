@@ -35,9 +35,17 @@ export interface OrganizationsServiceDeps {
 }
 
 /**
- * HMAC-SHA256 do token de convite, usando o mesmo pepper das API keys.
+ * HMAC-SHA256 do token de convite. Usa a variável de ambiente
+ * `INVITE_TOKEN_PEPPER`; em desenvolvimento/teste aceita um valor padrão para
+ * não quebrar fluxos locais. Em produção, é obrigatório e a aplicação falha
+ * fechado se não estiver definida.
  */
-const INVITE_TOKEN_PEPPER = 'invite-token-pepper'
+const INVITE_TOKEN_PEPPER: string =
+  process.env.INVITE_TOKEN_PEPPER ?? (process.env.NODE_ENV === 'production'
+    ? (() => {
+        throw new Error('INVITE_TOKEN_PEPPER é obrigatório em produção')
+      })()
+    : 'invite-token-pepper')
 
 const hashInviteToken = (token: string): string => {
   return createHmac('sha256', INVITE_TOKEN_PEPPER).update(token).digest('hex')
