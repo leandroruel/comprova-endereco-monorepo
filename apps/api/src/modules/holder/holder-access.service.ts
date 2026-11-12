@@ -1065,6 +1065,19 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         details: JSON.stringify({ itemCount: items.length }),
       })
 
+      // Dispara o processamento documental da F4.3 via outbox transacional.
+      // O worker consome esse evento e inicia o processamento dos documentos
+      // (criação de evidence_artifact + evidence_analysis).
+      await tx.insert(t.outbox).values({
+        aggregate: 'holder_information_request',
+        aggregateId: context.requestId,
+        eventType: 'holder_submission.processing_requested',
+        payload: {
+          holder_information_request_id: context.requestId,
+          tenant_id: context.tenantId,
+        },
+      })
+
       return {
         kind: 'ok',
         view: await loadView(tx, context.tenantId, completed, 'completed'),

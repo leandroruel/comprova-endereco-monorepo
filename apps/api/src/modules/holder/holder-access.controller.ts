@@ -2,7 +2,7 @@ import type { FastifyReply } from 'fastify'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import type { HolderAccessResult, HolderDeleteDocumentResult } from './holder-access.service.js'
 import { makeHolderAccessService } from './holder-access.service.js'
-import type { HolderAccessRoutesDeps } from './holder-access.schema.js'
+import type { HolderAccessRoutesDeps, HolderProcessingResponseType } from './holder-access.schema.js'
 
 const mapInvalidItem = (
   result: Extract<HolderAccessResult, { kind: 'invalid_item' }>,
@@ -192,5 +192,24 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
       actor: string,
       reply: FastifyReply,
     ): Promise<FastifyReply> => sendResult(await service.submit(context, actor), reply),
+
+    getProcessing: async (
+      context: { readonly tenantId: string },
+      requestId: string,
+    ): Promise<HolderProcessingResponseType | null> => {
+      const processing = await deps.processingService.getProcessing(requestId, context.tenantId)
+      if (!processing) return null
+      return {
+        processingId: processing.processingId,
+        holderInformationRequestId: processing.holderInformationRequestId,
+        tenantId: processing.tenantId,
+        state: processing.state as HolderProcessingResponseType['state'],
+        attempts: processing.attempts,
+        lastError: processing.lastError,
+        createdAt: processing.createdAt.toISOString(),
+        updatedAt: processing.updatedAt.toISOString(),
+        processedAt: processing.processedAt?.toISOString() ?? null,
+      }
+    },
   }
 }

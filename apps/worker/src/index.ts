@@ -13,6 +13,7 @@ import {
   startEvidenceRetentionLoop,
   startEvidenceVerificationLoop,
   startFiscalVerificationLoop,
+  startHolderSubmissionProcessingLoop,
   startValidationRetentionLoop,
 } from './loops.js'
 import { deepEnrich } from './modules/deep-enrich/deep-enrich.service.js'
@@ -143,6 +144,20 @@ if (stopFiscalVerification === null) {
   )
 }
 
+// O loop de processamento de submissões do Holder consome o outbox e processa
+// os documentos de cada submissão concluída. Roda no pool de manutenção porque
+// atravessa tenants.
+const stopHolderSubmissionProcessing =
+  adminRetentionPool !== null
+    ? startHolderSubmissionProcessingLoop(adminRetentionPool.db, retentionStore, logger)
+    : null
+if (stopHolderSubmissionProcessing === null) {
+  logger.warn(
+    { reason: 'HOLDER_SUBMISSION_PROCESSING_ADMIN_URL_MISSING' },
+    'holder submission processing loop disabled: DATABASE_ADMIN_URL not configured',
+  )
+}
+
 logger.info({ retention: true }, 'worker listening')
 try {
   // Não há Worker.create nem worker.run: o Temporal foi eliminado.
@@ -153,6 +168,7 @@ try {
   stopEvidenceAnalysis?.()
   stopEvidenceVerification?.()
   stopFiscalVerification?.()
+  stopHolderSubmissionProcessing?.()
   if (ctx.referencePool !== null) await ctx.referencePool.end()
   await ctx.pool.end()
 }

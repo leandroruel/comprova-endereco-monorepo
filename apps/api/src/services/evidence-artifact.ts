@@ -12,7 +12,9 @@ import { randomUUID } from 'node:crypto'
  * object storage existente e registra os metadados tenant-scoped. O intake da
  * F1.1 (`evidence-intake.service.ts`) usa `storeEvidenceObject` +
  * `insertEvidenceArtifact`; extração, OCR e a semântica de endereço/titular
- * ficam para F1.2/F1.3.
+ * ficam para F1.2/F1.3. A F4.3 reutiliza a mesma camada para documentos
+ * enviados pelo Holder, vinculando o artefato diretamente à
+ * `holder_information_request` (sem passar por claim/validation).
  *
  * Garantias:
  *   - o objeto é gravado sob `tenants/<tenant>/evidence/<artifact>`;
@@ -20,8 +22,9 @@ import { randomUUID } from 'node:crypto'
  *   - se o INSERT falhar, o objeto recém-gravado é removido (compensação);
  *   - o hash é calculado localmente e conferido contra o retorno do storage;
  *   - nenhuma URL pública/presigned é persistida — só `storage_key`.
+ *   - exatamente um de `claimEvidenceId` ou `holderInformationRequestId` deve
+ *     ser informado.
  */
-
 export const EVIDENCE_ARTIFACT_CONTENT_TYPES = [
   'application/pdf',
   'image/jpeg',
@@ -38,14 +41,6 @@ export interface EvidenceArtifactDeps {
   readonly store: ObjectStore
 }
 
-export interface CreateEvidenceArtifactInput {
-  readonly tenantId: string
-  readonly claimEvidenceId: string
-  readonly data: Uint8Array
-  readonly contentType: string
-  readonly retentionUntil: Date
-}
-
 export interface StoreEvidenceObjectInput {
   readonly tenantId: string
   readonly data: Uint8Array
@@ -60,16 +55,31 @@ export interface StoredEvidenceObject {
   readonly sha256: Buffer
 }
 
+/**
+ * Entrada para criação de artefato. Exatamente um de `claimEvidenceId` ou
+ * `holderInformationRequestId` deve ser informado.
+ */
+export interface CreateEvidenceArtifactInput {
+  readonly tenantId: string
+  readonly claimEvidenceId?: string
+  readonly holderInformationRequestId?: string
+  readonly data: Uint8Array
+  readonly contentType: string
+  readonly retentionUntil: Date
+}
+
 export interface InsertEvidenceArtifactInput {
   readonly tenantId: string
-  readonly claimEvidenceId: string
+  readonly claimEvidenceId?: string
+  readonly holderInformationRequestId?: string
   readonly object: StoredEvidenceObject
   readonly retentionUntil: Date
 }
 
 export interface EvidenceArtifactMetadata extends StoredEvidenceObject {
   readonly tenantId: string
-  readonly claimEvidenceId: string
+  readonly claimEvidenceId: string | null
+  readonly holderInformationRequestId: string | null
   readonly retentionUntil: Date
 }
 
@@ -92,6 +102,17 @@ const assertContentType = (value: string): EvidenceArtifactContentType => {
 const assertRetentionUntil = (retentionUntil: Date): void => {
   if (!(retentionUntil instanceof Date) || Number.isNaN(retentionUntil.getTime())) {
     throw new Error('retentionUntil inválido')
+  }
+}
+
+const assertExactlyOneSource = (
+  claimEvidenceId: string | undefined,
+  holderInformationRequestId: string | undefined,
+): void => {
+  const hasClaim = claimEvidenceId !== undefined && claimEvidenceId.trim() !== ''
+  const hasHolder = holderInformationRequestId !== undefined && holderInformationRequestId.trim() !== ''
+  if (hasClaim === hasHolder) {
+    throw new Error('informe exatamente um de claimEvidenceId ou holderInformationRequestId')
   }
 }
 
@@ -139,21 +160,22 @@ export const storeEvidenceObject = async (
 
 /**
  * Insere a linha do artefato na transação do chamador. Precisa rodar dentro de
- * `withTenant` (RLS WITH CHECK) e depois que `claim_evidence` existir (FK
- * composta).
+ * `withTenant` (RLS WITH CHECK). Exatamente um de claimEvidenceId /
+ * holderInformationRequestId deve ser informado.
  */
 export const insertEvidenceArtifact = async (
   tx: DbTx,
   input: InsertEvidenceArtifactInput,
 ): Promise<EvidenceArtifactMetadata> => {
   if (input.tenantId.trim() === '') throw new Error('tenantId é obrigatório')
-  if (input.claimEvidenceId.trim() === '') throw new Error('claimEvidenceId é obrigatório')
+  assertExactlyOneSource(input.claimEvidenceId, input.holderInformationRequestId)
   assertRetentionUntil(input.retentionUntil)
 
   await tx.insert(t.evidenceArtifact).values({
     artifactId: input.object.artifactId,
     tenantId: input.tenantId,
-    claimEvidenceId: input.claimEvidenceId,
+    claimEvidenceId: input.claimEvidenceId ?? null,
+    holderInformationRequestId: input.holderInformationRequestId ?? null,
     storageKey: input.object.storageKey,
     contentType: input.object.contentType,
     sizeBytes: input.object.sizeBytes,
@@ -164,7 +186,8 @@ export const insertEvidenceArtifact = async (
   return {
     ...input.object,
     tenantId: input.tenantId,
-    claimEvidenceId: input.claimEvidenceId,
+    claimEvidenceId: input.claimEvidenceId ?? null,
+    holderInformationRequestId: input.holderInformationRequestId ?? null,
     retentionUntil: input.retentionUntil,
   }
 }
@@ -179,7 +202,7 @@ export const createEvidenceArtifact = async (
   deps: EvidenceArtifactDeps,
   input: CreateEvidenceArtifactInput,
 ): Promise<EvidenceArtifactMetadata> => {
-  if (input.claimEvidenceId.trim() === '') throw new Error('claimEvidenceId é obrigatório')
+  assertExactlyOneSource(input.claimEvidenceId, input.holderInformationRequestId)
   assertRetentionUntil(input.retentionUntil)
   const object = await storeEvidenceObject(deps, input)
 
@@ -188,6 +211,7 @@ export const createEvidenceArtifact = async (
       insertEvidenceArtifact(tx, {
         tenantId: input.tenantId,
         claimEvidenceId: input.claimEvidenceId,
+        holderInformationRequestId: input.holderInformationRequestId,
         object,
         retentionUntil: input.retentionUntil,
       }),

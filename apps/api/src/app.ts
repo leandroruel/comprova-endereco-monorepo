@@ -61,6 +61,7 @@ import { registerM2MRoutes } from './modules/m2m/m2m.routes.js'
 import { registerHolderRoutes } from './modules/holder/holder.routes.js'
 import { registerHolderInformationRequestRoutes } from './modules/holder/holder-information-request.routes.js'
 import { registerHolderAccessRoutes } from './modules/holder/holder-access.routes.js'
+import { makeHolderSubmissionProcessingService } from './modules/holder/holder-submission-processing.service.js'
 import { registerHolderAccessTokenRoutes } from './modules/holder/holder-access-token.routes.js'
 import { makeHolderRateLimits } from './plugins/holder-rate-limit.js'
 import { AuthorizationError } from './modules/m2m/m2m.service.js'
@@ -376,6 +377,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
           logger: deps.logger,
           metrics: deps.metrics,
           maxDocumentBytes: evidenceMaxBytes,
+          processingService: makeHolderSubmissionProcessingService({
+            db: deps.db,
+            store: objectStore,
+            logger: deps.logger,
+          }),
         },
         holderRateLimits,
       )

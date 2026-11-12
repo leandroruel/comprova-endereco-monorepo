@@ -6,6 +6,7 @@ import { retentionTick } from './modules/evidence/evidence-retention.service.js'
 import { analyzeEvidenceTick } from './modules/evidence-analysis/evidence-analysis.service.js'
 import { verifyEvidenceTick } from './modules/evidence-verification/evidence-verification.service.js'
 import { verifyFiscalTick } from './modules/fiscal-verification/fiscal-verification.tick.js'
+import { holderSubmissionProcessingTick } from './modules/holder-submission-processing/holder-submission-processing.service.js'
 import { validationRetentionTick } from './modules/retention/retention.service.js'
 import { ensurePartitions } from './modules/partitions/partitions.service.js'
 
@@ -126,6 +127,35 @@ export const startFiscalVerificationLoop = (
           logger,
           ...(referenceDb !== undefined ? { referenceDb } : {}),
         })
+      } finally {
+        running = false
+      }
+    },
+    intervalMs,
+    logger,
+  )
+}
+
+/**
+ * F4.3: consome eventos de outbox `holder_submission.processing_requested` e
+ * executa o processamento documental (criação de evidence_artifact +
+ * evidence_analysis) para cada submissão concluída pelo Holder. Atravessa
+ * tenants (fila global no pool de manutenção); o acesso aos documentos é feito
+ * com `withTenant`.
+ */
+export const startHolderSubmissionProcessingLoop = (
+  db: Db,
+  store: ObjectStoreReader,
+  logger: Logger,
+  intervalMs = 2_000,
+): (() => void) => {
+  let running = false
+  return startLoop(
+    async () => {
+      if (running) return
+      running = true
+      try {
+        await holderSubmissionProcessingTick({ db, store, logger })
       } finally {
         running = false
       }
