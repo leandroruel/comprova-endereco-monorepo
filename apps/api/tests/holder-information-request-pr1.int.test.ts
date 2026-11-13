@@ -197,7 +197,7 @@ const createHolder = async (
 const createValidation = async (sessionCookie?: string): Promise<string> => {
   const cookie = sessionCookie ?? ownerSessionCookie
   const body = {
-    document: { type: 'CPF' as const, value: '12345678901' },
+    document: { type: 'CPF' as const, value: '529.982.247-25' },
     address: {
       tipo_logradouro: 'Rua',
       logradouro: 'das Flores',
