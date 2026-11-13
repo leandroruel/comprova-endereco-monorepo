@@ -24,11 +24,12 @@ SET application_name = 'comprova-migrations';
 ALTER TABLE holder_information_request
   ADD COLUMN validation_id uuid;
 
-CREATE INDEX idx_holder_information_request_validation
+-- Índice composto para consultas por tenant + validation (mesmo padrão do Drizzle).
+CREATE INDEX idx_holder_information_request_validation_idx
   ON holder_information_request (tenant_id, validation_id);
 
--- Índice para consulta rápida de solicitações por validation (mesmo tenant).
-CREATE INDEX idx_holder_information_request_validation_request
+-- Índice parcial para consulta rápida de solicitações por validation (mesmo tenant).
+CREATE INDEX holder_information_request_validation_request_idx
   ON holder_information_request (validation_id)
   WHERE validation_id IS NOT NULL;
 

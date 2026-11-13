@@ -68,6 +68,10 @@ export const holderInformationRequest = pgTable(
     index('holder_information_request_tenant_holder_idx').on(t.tenantId, t.holderId),
     // PR 1: consulta de solicitações por validation (mesmo tenant).
     index('holder_information_request_validation_idx').on(t.tenantId, t.validationId),
+    // PR 1: índice parcial para consultas rápidas por validation (mesmo tenant).
+    index('holder_information_request_validation_request_idx')
+      .on(t.validationId)
+      .where(sql`${t.validationId} IS NOT NULL`),
   ],
 )
 

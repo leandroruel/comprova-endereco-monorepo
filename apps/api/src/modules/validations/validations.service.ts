@@ -274,7 +274,7 @@ export const setWorkflowId = async (
 export const contestValidation = async (
   db: Db,
   tenantId: string,
-  apiKeyId: string,
+  apiKeyId: string | null,
   validationId: string,
   reason: string,
   encryptionKey: string,

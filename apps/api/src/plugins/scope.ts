@@ -178,7 +178,7 @@ export const requireSessionOrM2MVerify =
       }
       request.tenant = {
         tenantId: member.tenantId,
-        apiKeyId: '',
+        apiKeyId: null,
         scopes: [],
         rateLimitRps: 0,
         burst: 0,

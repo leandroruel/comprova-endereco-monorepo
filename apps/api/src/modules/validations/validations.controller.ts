@@ -233,7 +233,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     tenant:
       | {
           readonly tenantId: string
-          readonly apiKeyId: string
+          readonly apiKeyId: string | null
           readonly scopes: readonly string[]
         }
       | undefined,
@@ -277,7 +277,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
   },
 
   contest: async (
-    tenant: { readonly tenantId: string; readonly apiKeyId: string } | undefined,
+    tenant: { readonly tenantId: string; readonly apiKeyId: string | null } | undefined,
     validationId: string,
     reason: string,
     encryptionKey: string,
