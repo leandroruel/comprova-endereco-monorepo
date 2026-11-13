@@ -198,7 +198,7 @@ const createM2mApiKeyWithValidationScope = async (sessionCookie: string, tenantI
   const res = await injectWithSession(
     'POST',
     `/v1/m2m/api-keys?tenantId=${tenantId}`,
-    { name, scopes: ['holders:read', 'holders:write', 'validations:write', 'verify:m2m'], keyType: 'm2m' },
+    { name, scopes: ['holders:read', 'holders:write', 'validate:write', 'verify:m2m'], keyType: 'm2m' },
     sessionCookie,
   )
   expect(res.statusCode).toBe(201)
