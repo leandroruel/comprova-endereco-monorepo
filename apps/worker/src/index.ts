@@ -1,6 +1,6 @@
 import { systemClock } from '@comprova/core'
 import { createDbPool, type DbPool } from '@comprova/db'
-import { createLogger } from '@comprova/observability'
+import { createLogger, type Logger } from '@comprova/observability'
 import {
   makeDocumentAnalyzer,
   makeDocumentIntelligenceClient,
@@ -39,6 +39,27 @@ const loadEnv = (): WorkerEnv | null => {
   }
 }
 
+/**
+ * Tenta encerrar todos os pools, sem que a falha de um impeça os demais.
+ * Falhas são registradas no log e propagadas como um erro agregado somente
+ * depois que todas as tentativas foram feitas.
+ */
+export const closePools = async (poolSet: Iterable<DbPool>, logger: Logger): Promise<void> => {
+  const poolList = [...poolSet]
+  const results = await Promise.allSettled(poolList.map((pool) => pool.end()))
+  const failures: string[] = []
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      const message = result.reason instanceof Error ? result.reason.message : String(result.reason)
+      failures.push(`pool #${index}: ${message}`)
+    }
+  })
+  if (failures.length > 0) {
+    logger.error({ failures }, 'worker pool close failures')
+    throw new Error(`failed to close ${failures.length} pool(s): ${failures.join('; ')}`)
+  }
+}
+
 const main = async (): Promise<void> => {
   const env = loadEnv()
   if (env === null) {
@@ -61,15 +82,10 @@ const main = async (): Promise<void> => {
   // param; `Set` evita fechar o mesmo pool duas vezes (admin e retenção podem
   // compartilhar a mesma instância).
   const pools = new Set<DbPool>()
-  const closePools = async (): Promise<void> => {
-    for (const pool of pools) {
-      await pool.end()
-    }
-  }
 
   const result = await runWorkerLifecycle({
     logger,
-    close: closePools,
+    close: () => closePools(pools, logger),
     start: (track) => {
       const ctx = buildWorkerContext(env)
       pools.add(ctx.pool)
