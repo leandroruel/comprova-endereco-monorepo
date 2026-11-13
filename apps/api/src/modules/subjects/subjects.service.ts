@@ -66,6 +66,13 @@ export const eraseSubject = async (
     const validationIds = validations.map((validation) => validation.validationId)
 
     if (validationIds.length > 0) {
+      // Desvincula as solicitações do Holder antes de excluir as validações,
+      // evitando referências órfãs em holder_information_request.validation_id.
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ validationId: null })
+        .where(inArray(t.holderInformationRequest.validationId, validationIds))
+
       const claims = await tx
         .select({ claimId: t.claim.claimId })
         .from(t.claim)
