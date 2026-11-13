@@ -1,5 +1,6 @@
-import { createHmac } from 'node:crypto'
-import { createDbPool, runMigrations } from '@comprova/db'
+import { createHmac, randomUUID } from 'node:crypto'
+import { createDbPool, runMigrations, withTenant } from '@comprova/db'
+import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import Redis from 'ioredis'
@@ -194,27 +195,42 @@ const createHolder = async (
   return res.json().holderId
 }
 
-const createValidation = async (sessionCookie: string, tenantId: string): Promise<string> => {
-  const body = {
-    document: { type: 'CPF' as const, value: '529.982.247-25' },
-    address: {
-      tipo_logradouro: 'Rua',
-      logradouro: 'das Flores',
-      numero: '123',
-      bairro: 'Centro',
-      cep: '01001000',
-      uf: 'SP',
-      municipio: 'São Paulo',
-      country_code: 'BR',
-    },
-    legal_basis: 'CONSENT' as const,
-    consent_ref: 'consent-123',
-  } as any
-  // A criacao de Validation exige tenantId na query string para sessao de
-  // usuario (requireSessionOrM2MVerify le query.tenantId).
-  const res = await injectWithSession('POST', `/v1/validations?tenantId=${tenantId}`, body, sessionCookie)
-  expect(res.statusCode).toBe(201)
-  return res.json().validation_id
+/**
+ * Cria uma validation diretamente no banco via adminPool, evitando o fluxo
+ * completo do fast path (que envolve checkers, scoring, etc.). Isso permite
+ * testar a associacao validation_id na solicitacao do Holder sem depender
+ * de dependencias externas do fast path.
+ */
+const createValidationInDb = async (tenantId: string): Promise<string> => {
+  return withTenant(adminPool.db, tenantId, async (tx) => {
+    // Cria um subject para a validation
+    const subjectId = randomUUID()
+    await tx.insert(t.subject).values({
+      subjectId,
+      tenantId,
+      docType: 'CPF',
+      docHmac: createHmac('sha256', PEPPER).update('test-subject').digest(),
+    })
+
+    // Cria a validation
+    const validationId = randomUUID()
+    await tx.insert(t.validation).values({
+      validationId,
+      tenantId,
+      subjectId,
+      mode: 'fast',
+      status: 'completed',
+      verdict: 'CONFIRMED_COMMERCIAL',
+      score: 0.9,
+      confidence: 0.95,
+      policyVersion: '2026.11.1',
+      legalBasis: 'CONSENT',
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+    })
+
+    return validationId
+  })
 }
 
 beforeAll(async () => {
@@ -244,7 +260,7 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
     ])
 
     const holderId = await createHolder(key, tenantId, 'ext-ref-pr1-001', true)
-    const validationId = await createValidation(ownerSessionCookie, tenantId)
+    const validationId = await createValidationInDb(tenantId)
 
     const res = await injectWithM2M(
       'POST',
@@ -287,8 +303,8 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
     ])
     const holderId = await createHolder(ownerKey, tenantId, 'ext-ref-pr1-002', true)
 
-    // Validation do outro tenant (criada com sessao do outro usuario).
-    const outroValidationId = await createValidation(outroCookie, outroTenantId)
+    // Validation de outro tenant (criada diretamente no banco).
+    const outroValidationId = await createValidationInDb(outroTenantId)
 
     const res = await injectWithM2M(
       'POST',
@@ -391,7 +407,7 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
     ])
 
     const holderId = await createHolder(key, tenantId, 'ext-ref-pr1-005', true)
-    const validationId = await createValidation(ownerSessionCookie, tenantId)
+    const validationId = await createValidationInDb(tenantId)
 
     const createRes = await injectWithM2M(
       'POST',
