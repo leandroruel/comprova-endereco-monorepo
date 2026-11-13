@@ -16,6 +16,16 @@ describe('redactString', () => {
     expect(redactString('cep 01310-100')).toBe('cep 01310-100')
     expect(redactString('erro 404')).toBe('erro 404')
   })
+
+  it('nao mascara identificadores hexadecimais com sequencia de 11 digitos', () => {
+    // UUID real que disparava falso positivo de CPF e corrompia o `claim_id`
+    // nos logs (`...-c25483651880` virava `...-c***REDACTED***`).
+    const uuid = '36951efb-11b8-4263-9c1a-c25483651880'
+    expect(redactString(uuid)).toBe(uuid)
+    expect(redactString('hash 2981dcf99fc26a47a55b800addd16ce3')).toBe(
+      'hash 2981dcf99fc26a47a55b800addd16ce3',
+    )
+  })
 })
 
 describe('redactDeep', () => {
