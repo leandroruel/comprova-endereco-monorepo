@@ -30,7 +30,7 @@ const ensureMembership = async (
   userId: string,
   requireAdmin: boolean,
 ): Promise<void> => {
-  const [member] = await withTenant(db, tenantId, async (tx) => {
+  const [member] = await withTenant(db, tenantId, (tx) => {
     return tx
       .select({ role: t.organizationMember.role })
       .from(t.organizationMember)
@@ -72,7 +72,7 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
     const keyPrefix = keyPrefixOf(secret)
     const keyHash = hasher.hash(secret)
 
-    const [inserted] = await withTenant(db, tenantId, async (tx) => {
+    const [inserted] = await withTenant(db, tenantId, (tx) => {
       return tx
         .insert(t.apiKey)
         .values({
@@ -110,7 +110,7 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
     lastUsedAt: string | null
     createdAt: string
   } | null> => {
-    const [key] = await withTenant(db, tenantId, async (tx) => {
+    const [key] = await withTenant(db, tenantId, (tx) => {
       return tx
         .select()
         .from(t.apiKey)
@@ -152,7 +152,7 @@ export const makeM2MService = (deps: { readonly db: Db; readonly apiKeyPepper: s
     // Somente membros da organização podem listar API keys.
     await ensureMembership(db, tenantId, userId, false)
 
-    const rows = await withTenant(db, tenantId, async (tx) => {
+    const rows = await withTenant(db, tenantId, (tx) => {
       return tx
         .select()
         .from(t.apiKey)

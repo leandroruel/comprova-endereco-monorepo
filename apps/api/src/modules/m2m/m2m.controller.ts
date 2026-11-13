@@ -24,7 +24,7 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       reply: FastifyReply,
     ): Promise<ApiKeyCreatedResponseType | FastifyReply> => {
       try {
-        const expiresInDays = request.expiresInDays
+        const { expiresInDays } = request
         const expiresAt = expiresInDays
           ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
           : undefined

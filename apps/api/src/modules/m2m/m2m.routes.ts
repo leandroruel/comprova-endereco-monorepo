@@ -102,7 +102,10 @@ const resolveTenantId = (
 const resolveTenantPreHandler =
   () =>
   async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
-    const result = resolveTenantId(request, reply)
+    const result = (await Promise.resolve(resolveTenantId(request, reply))) as {
+      error?: FastifyReply
+      tenantId?: string
+    }
     if ('error' in result) {
       return result.error
     }
@@ -114,6 +117,7 @@ const resolveTenantPreHandler =
     ) {
       ;(request.query as { tenantId?: string }).tenantId = result.tenantId
     }
+    return undefined
   }
 
 /**
@@ -126,11 +130,14 @@ const requireUserSession = async (
   reply: FastifyReply,
 ): Promise<FastifyReply | void> => {
   if (request.sessionUser === undefined) {
-    return reply
-      .code(401)
-      .type('application/problem+json')
-      .send({ type: 'about:blank', title: 'Unauthorized', status: 401, code: 'USER_SESSION_REQUIRED' })
+    return (await Promise.resolve(
+      reply
+        .code(401)
+        .type('application/problem+json')
+        .send({ type: 'about:blank', title: 'Unauthorized', status: 401, code: 'USER_SESSION_REQUIRED' }),
+    )) as FastifyReply
   }
+  return undefined
 }
 
 export const registerM2MRoutes = (instance: FastifyInstance, deps: M2MRoutesDeps): void => {
