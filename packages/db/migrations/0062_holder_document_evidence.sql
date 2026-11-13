@@ -23,6 +23,13 @@ SET application_name = 'comprova-migrations';
 ALTER TABLE evidence_artifact
   ADD COLUMN holder_information_request_id uuid;
 
+-- `claim_evidence_id` deixa de ser NOT NULL: um artefato ligado a uma
+-- solicitação do Holder não passa pelo domínio de validação, logo não tem
+-- claim_evidence. A obrigatoriedade de UM dos dois vínculos é garantida pela
+-- check constraint `evidence_artifact_one_source_check` abaixo.
+ALTER TABLE evidence_artifact
+  ALTER COLUMN claim_evidence_id DROP NOT NULL;
+
 ALTER TABLE evidence_artifact
   ADD CONSTRAINT evidence_artifact_holder_request_tenant_fk
     FOREIGN KEY (holder_information_request_id, tenant_id)
