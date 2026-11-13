@@ -47,7 +47,7 @@ export const listSubjectValidations = async (
 export const eraseSubject = async (
   db: Db,
   tenantId: string,
-  apiKeyId: string,
+  apiKeyId: string | null,
   subjectId: string,
 ): Promise<number | null> =>
   withTenant(db, tenantId, async (tx) => {
@@ -92,7 +92,7 @@ export const eraseSubject = async (
 
     await tx.insert(t.auditLog).values({
       tenantId,
-      actor: `api-key:${apiKeyId}`,
+      actor: apiKeyId !== null && apiKeyId !== undefined ? `api-key:${apiKeyId}` : 'session:unknown',
       action: 'subject.erasure',
       targetType: 'subject',
       targetId: subjectId,
