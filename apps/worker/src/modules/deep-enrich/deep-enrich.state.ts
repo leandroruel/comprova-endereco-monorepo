@@ -1,7 +1,5 @@
-import { eq } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { eq, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
-import { withTenant } from '@comprova/db'
 import type { CheckContext, Clock, DocKind, Signal } from '@comprova/core'
 import { registryRecordFromDeepContext } from './deep-enrich.registry.js'
 import type { PriorSignalRow } from './deep-enrich.signals.js'

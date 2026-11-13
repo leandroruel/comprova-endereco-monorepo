@@ -32,7 +32,9 @@ class TestObjectStore implements ObjectStore {
     return { key, uri: `test://${key}`, sha256: sha256Of(data), bytes: data.byteLength }
   }
 
-  async delete(_key: string) {}
+  async delete(_key: string) {
+    return
+  }
 }
 
 const store = new TestObjectStore()
@@ -69,11 +71,6 @@ const app = await buildApp({
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
     EVIDENCE_MAX_BYTES: MAX_BYTES,
     EVIDENCE_MAX_CONCURRENCY: 2,

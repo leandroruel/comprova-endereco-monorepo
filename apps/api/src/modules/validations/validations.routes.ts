@@ -1,16 +1,17 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { requireReadScope, requireWriteScope, requireSessionOrM2MVerify } from '../../plugins/scope.js'
-import type { EvidenceIntakeControllerDeps } from './evidence-intake.controller.js'
-import { makeEvidenceIntakeController } from './evidence-intake.controller.js'
+import {
+  makeEvidenceIntakeController,
+  type EvidenceIntakeControllerDeps,
+} from './evidence-intake.controller.js'
 import { EVIDENCE_MULTIPART_OVERHEAD_BYTES } from './evidence-intake.multipart.js'
 import {
   EvidenceIntakeHeaders,
   EvidenceIntakeParams,
   EvidenceIntakeResponse,
 } from './evidence-intake.schema.js'
-import type { ValidationControllerDeps } from './validations.controller.js'
-import { makeValidationController } from './validations.controller.js'
+import { makeValidationController, type ValidationControllerDeps } from './validations.controller.js'
 import {
   ContestValidationRequest,
   ContestValidationResponse,
@@ -52,7 +53,6 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
         body: CreateValidationRequestSchema,
         response: {
           200: ValidationDtoSchema,
-          202: ValidationDtoSchema,
           422: ProblemSchema,
         },
       },

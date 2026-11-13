@@ -1,5 +1,12 @@
-const CPF_RE = /(?<!\d)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)/g
-const CNPJ_RE = /(?<!\d)\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}(?!\d)/g
+/**
+ * CPF/CNPJ só são mascarados quando o número aparece como um TOKEN isolado:
+ * as bordas exigem que o caractere vizinho não seja alfanumérico. Sem isso,
+ * uma sequência de 11 dígitos no meio de um identificador hexadecimal (UUID,
+ * sha256, hash de documento) seria tratada como CPF e o identificador sairia
+ * corrompido no log (`...-c25483651880` → `...-c***REDACTED***`).
+ */
+const CPF_RE = /(?<![0-9A-Za-z])\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?![0-9A-Za-z])/g
+const CNPJ_RE = /(?<![0-9A-Za-z])\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}(?![0-9A-Za-z])/g
 
 const REDACTED = '***REDACTED***'
 

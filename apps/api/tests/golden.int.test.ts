@@ -45,11 +45,6 @@ const app = await buildApp({
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
   },
   db: appPool.db,
@@ -75,7 +70,6 @@ const postValidation = (cnpj: string, headers: Record<string, string> = {}) =>
     payload: {
       document: { type: 'CNPJ', value: cnpj },
       address: null,
-      mode: 'fast',
       legal_basis: 'FRAUD_PREVENTION',
     },
   })
@@ -162,7 +156,6 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
       payload: {
         document: { type: 'CPF', value: '52998224725' },
         address: null,
-        mode: 'fast',
         legal_basis: 'CONSENT',
       },
     })
@@ -170,7 +163,7 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
     expect(res.json().code).toBe('ADDRESS_REQUIRED_FOR_CPF')
   })
 
-  it('mode deep responde 422 quando VLM desabilitado', async () => {
+  it('campo legado `mode` é ignorado: o fluxo único responde 200', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/validations',
@@ -182,8 +175,10 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
         legal_basis: 'FRAUD_PREVENTION',
       },
     })
-    expect(res.statusCode).toBe(422)
-    expect(res.json().code).toBe('DEEP_PATH_DISABLED')
+    expect(res.statusCode).toBe(200)
+    expect(res.json().validation_id).toBeTypeOf('string')
+    expect(res.json().status).toBe('completed')
+    expect(res.json().code).toBeUndefined()
   })
 })
 

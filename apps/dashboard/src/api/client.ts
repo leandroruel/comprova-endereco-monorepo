@@ -255,7 +255,6 @@ export async function getStats(): Promise<StatsDto> {
  */
 export async function createValidation(
   document: string,
-  mode: string = 'fast',
   address?: AddressInput | null,
 ): Promise<ValidationDto> {
   const isCpf = document.replace(/\D+/g, '').length === 11
@@ -270,7 +269,6 @@ export async function createValidation(
     },
     body: JSON.stringify({
       document: { type: isCpf ? 'CPF' : 'CNPJ', value: document },
-      mode,
       legal_basis: 'FRAUD_PREVENTION',
       ...(addressPayload !== null ? { address: addressPayload } : {}),
     }),

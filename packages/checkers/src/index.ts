@@ -4,11 +4,11 @@ import type {
   CepReader,
   CnefeCoordReader,
   CnefeReader,
+  Checker,
   KnownSharedReader,
   ProfileReader,
   RegistryReader,
 } from '@comprova/core'
-import type { Checker } from '@comprova/core'
 import type { GeocodeProvider, PlacesProvider } from '@comprova/providers'
 import { makeCepConsistency } from './checkers/cep-consistency.js'
 import { makeCnaeVsLocation } from './checkers/cnae-vs-location.js'

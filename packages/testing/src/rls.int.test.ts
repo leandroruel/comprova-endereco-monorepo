@@ -1,6 +1,5 @@
-import { createDbPool, eq, withTenant } from '@comprova/db'
+import { createDbPool, eq, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
-import { runMigrations } from '@comprova/db'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createTenant } from './fixtures.js'

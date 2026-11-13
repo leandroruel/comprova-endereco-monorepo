@@ -8,8 +8,7 @@ import { PROBLEM_CONTENT_TYPE, ProblemSchema, problems } from '@comprova/contrac
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import type { IssuerControllerDeps } from './issuers.controller.js'
-import { makeIssuerController } from './issuers.controller.js'
+import { makeIssuerController, type IssuerControllerDeps } from './issuers.controller.js'
 
 export type IssuerRoutesDeps = IssuerControllerDeps
 

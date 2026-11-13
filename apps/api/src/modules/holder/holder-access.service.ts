@@ -1,5 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, sql, withTenant } from '@comprova/db'
-import type { Db, DbTx } from '@comprova/db'
+import { and, eq, inArray, isNotNull, isNull, sql, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type {
   HolderAccessItem,
@@ -8,8 +7,7 @@ import type {
   HolderInformationRequestState,
 } from '@comprova/contracts'
 import type { Logger, Metrics } from '@comprova/observability'
-import { sha256Of } from '@comprova/providers'
-import type { ObjectStore } from '@comprova/providers'
+import { sha256Of, type ObjectStore } from '@comprova/providers'
 import { randomUUID } from 'node:crypto'
 import {
   expireIfNeeded,
@@ -1063,6 +1061,19 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         toState: 'completed',
         actor,
         details: JSON.stringify({ itemCount: items.length }),
+      })
+
+      // Dispara o processamento documental da F4.3 via outbox transacional.
+      // O worker consome esse evento e inicia o processamento dos documentos
+      // (criação de evidence_artifact + evidence_analysis).
+      await tx.insert(t.outbox).values({
+        aggregate: 'holder_information_request',
+        aggregateId: context.requestId,
+        eventType: 'holder_submission.processing_requested',
+        payload: {
+          holder_information_request_id: context.requestId,
+          tenant_id: context.tenantId,
+        },
       })
 
       return {

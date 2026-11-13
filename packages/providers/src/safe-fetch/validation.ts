@@ -1,8 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import ipaddr from 'ipaddr.js'
-import { SafeFetchError } from './errors.js'
-import type { SafeFetchReason } from './errors.js'
+import { SafeFetchError, type SafeFetchReason } from './errors.js'
 import type { ResolvedAddress, SafeFetchResolver } from './types.js'
 
 const METADATA_IPS = new Set([

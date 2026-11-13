@@ -1,4 +1,3 @@
-import type { DocumentAnalysisResult } from '@comprova/core'
 import {
   CUSTOMER_DOCUMENT_INTAKE_SOURCE,
   DOCUMENT_ANALYSIS_CONTRACT_VERSION,
@@ -10,9 +9,9 @@ import {
   uploadedDocumentCheckerVersion,
   verifyUploadedDocument,
   type UploadedDocumentVerification,
+  type DocumentAnalysisResult,
 } from '@comprova/core'
-import { sql, withTenant } from '@comprova/db'
-import type { Db, DbTx } from '@comprova/db'
+import { sql, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import { randomUUID } from 'node:crypto'

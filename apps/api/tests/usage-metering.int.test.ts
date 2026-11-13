@@ -1,9 +1,15 @@
-import { and, createDbPool, eq, withTenant } from '@comprova/db'
+import {
+  and,
+  createDbPool,
+  eq,
+  runMigrations,
+  validationBillingKey,
+  withTenant,
+  QuotaExceededError,
+} from '@comprova/db'
 import * as t from '@comprova/db'
-import { validationBillingKey, QuotaExceededError } from '@comprova/db'
 import { z } from 'zod'
 import { UsageConsumptionDtoSchema, UsageEventDtoSchema, UsageQuotaDtoSchema } from '@comprova/contracts'
-import { runMigrations } from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import {
   startTestDb,
@@ -43,11 +49,6 @@ const app = await buildApp({
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
   },
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- beforeEach é usado em vários describes abaixo
@@ -398,7 +399,6 @@ describe('usage metering — reconciliação', () => {
         validationId,
         tenantId,
         subjectId,
-        mode: 'fast',
         status,
         verdict: 'INSUFFICIENT_EVIDENCE',
         score: 0.5,
@@ -523,7 +523,6 @@ describe('usage metering — reconciliação', () => {
           validationId: partialId,
           tenantId,
           subjectId: partialSubject,
-          mode: 'fast',
           status: 'partial',
           verdict: 'INSUFFICIENT_EVIDENCE',
           score: 0.5,
@@ -538,7 +537,6 @@ describe('usage metering — reconciliação', () => {
           validationId: queuedId,
           tenantId,
           subjectId: queuedSubject,
-          mode: 'auto',
           status: 'queued',
           verdict: 'INSUFFICIENT_EVIDENCE',
           score: 0.5,
@@ -576,7 +574,6 @@ describe('usage metering — reconciliação', () => {
           validationId: beforeId,
           tenantId,
           subjectId: beforeSubject,
-          mode: 'fast',
           status: 'completed',
           verdict: 'INSUFFICIENT_EVIDENCE',
           score: 0.5,
@@ -591,7 +588,6 @@ describe('usage metering — reconciliação', () => {
           validationId: atEndId,
           tenantId,
           subjectId: atEndSubject,
-          mode: 'fast',
           status: 'completed',
           verdict: 'INSUFFICIENT_EVIDENCE',
           score: 0.5,

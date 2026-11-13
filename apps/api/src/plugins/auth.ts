@@ -1,9 +1,7 @@
 import { PROBLEM_CONTENT_TYPE, problems } from '@comprova/contracts'
-import type { Db } from '@comprova/db'
-import { and, eq, isNull } from '@comprova/db'
+import { and, eq, isNull, keyPrefixOf, type Db, type ApiKeyHasher } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { keyPrefixOf, type ApiKeyHasher } from '@comprova/db'
 import { ALL_API_SCOPES, validateScopesForKeyType } from './scope.js'
 
 export interface TenantContext {

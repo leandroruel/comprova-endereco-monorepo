@@ -1,10 +1,9 @@
 import { createHmac, randomUUID } from 'node:crypto'
 import { createDbPool, eq, runMigrations, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
-import { sha256Of } from '@comprova/providers'
+import { sha256Of, type ObjectStore, type StoredObject } from '@comprova/providers'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
-import type { ObjectStore, StoredObject } from '@comprova/providers'
 import Redis from 'ioredis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
@@ -44,11 +43,6 @@ const appConfig = {
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
   POLICY_VERSION: '2026.11.1',
-  TEMPORAL_ENABLED: false,
-  VLM_ENABLED: false,
-  TEMPORAL_ADDRESS: 'localhost:7233',
-  TEMPORAL_NAMESPACE: 'default',
-  TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
   WORKER_LOOPS: false,
 } as const
 

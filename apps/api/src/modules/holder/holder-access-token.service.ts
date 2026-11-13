@@ -1,5 +1,4 @@
-import { and, count, eq, isNull, sql, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { and, count, eq, isNull, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { HolderInformationRequestState } from '@comprova/contracts'
 import type { Logger } from '@comprova/observability'

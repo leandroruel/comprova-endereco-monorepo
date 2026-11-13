@@ -1,11 +1,8 @@
-import { and, eq, isNull, lte, sql } from '@comprova/db'
-import type { Db } from '@comprova/db'
-import { withTenant } from '@comprova/db'
+import { and, eq, isNull, lte, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
-import { SafeFetchError, safeExternalFetch } from '@comprova/providers'
-import type { SafeFetch } from '@comprova/providers'
+import { SafeFetchError, safeExternalFetch, type SafeFetch } from '@comprova/providers'
 import { decryptSecret } from '../../shared/secretbox.js'
 import { signWebhookPayload } from './webhook-crypto.js'
 
@@ -36,7 +33,8 @@ const createDeliveriesForNewEvents = async (deps: PublisherDeps): Promise<number
     .from(t.outbox)
     .where(isNull(t.outbox.publishedAt))
     .orderBy(t.outbox.outboxId)
-    .limit(deps.batchSize ?? 20)) as readonly {
+    .limit(deps.batchSize ?? 20)
+    .for('update', { skipLocked: true })) as readonly {
     outboxId: number
     aggregate: string
     aggregateId: string
@@ -213,6 +211,6 @@ export const publishTick = async (deps: PublisherDeps): Promise<void> => {
 }
 
 export const startPublisherLoop = (deps: PublisherDeps, intervalMs = 2_000): (() => void) => {
-  const timer = setInterval(() => void publishTick(deps), intervalMs)
+  const timer = setInterval(() => publishTick(deps), intervalMs)
   return () => clearInterval(timer)
 }

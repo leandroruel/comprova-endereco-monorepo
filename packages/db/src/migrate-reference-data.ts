@@ -108,7 +108,7 @@ const quoteAll = (names: readonly string[]): string => names.map((n) => `"${n}"`
 export const migrateReferenceData = async (
   opts: MigrateReferenceDataOptions,
 ): Promise<MigrateReferenceDataResult> => {
-  const log = opts.onProgress ?? (() => {})
+  const log = opts.onProgress ?? (() => undefined)
   const source = postgres(opts.sourceAdminUrl, { max: 1 })
   const target = postgres(opts.targetAdminUrl, { max: 1 })
 

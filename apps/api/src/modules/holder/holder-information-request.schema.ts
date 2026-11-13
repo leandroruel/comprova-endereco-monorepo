@@ -1,7 +1,6 @@
 import type { FastifyReply } from 'fastify'
 import { z } from 'zod'
-import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
-import { HolderInformationRequestStateSchema } from '@comprova/contracts'
+import { HolderInformationRequestStateSchema, PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import type { Db } from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 

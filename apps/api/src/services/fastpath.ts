@@ -1,4 +1,21 @@
-import { and, eq, sql } from '@comprova/db'
+import {
+  and,
+  eq,
+  sql,
+  auditLog,
+  canonicalAddress,
+  claim,
+  claimEvidence,
+  outbox,
+  signal,
+  subject,
+  validation,
+  validationBillingKey,
+  validationIdempotency,
+  withTenant,
+  type Db,
+} from '@comprova/db'
+import { makeUsageService } from '../modules/usage/usage.service.js'
 import { createHash, createHmac, randomUUID } from 'node:crypto'
 import {
   addressKeys,
@@ -26,12 +43,8 @@ import {
   type RegistryReader,
   type Signal,
   type Verdict,
+  hasExternalUnavailability,
 } from '@comprova/core'
-import { withTenant, type Db } from '@comprova/db'
-import * as t from '@comprova/db'
-import { hasExternalUnavailability } from '@comprova/core'
-import { makeUsageService } from '../modules/usage/usage.service.js'
-import { validationBillingKey } from '@comprova/db'
 
 export interface FastPathTenantContext {
   readonly tenantId: string
@@ -50,7 +63,6 @@ export interface FastPathRequest {
   readonly documentValue: string
   readonly addressInput: AddressComponents | null
   readonly legalBasis: string
-  readonly mode: 'fast' | 'deep' | 'auto'
   readonly idempotencyKey: string | null
   readonly consentRef?: string | null
   readonly userId?: string | null
@@ -64,7 +76,6 @@ export const requestHashOf = (req: FastPathRequest): string =>
         d: req.documentValue,
         a: req.addressInput,
         l: req.legalBasis,
-        m: req.mode,
       }),
     )
     .digest('hex')
@@ -162,28 +173,17 @@ export const deepContextOf = (
       }
 
 /**
- * Determina o status técnico da validation a partir do modo, veredito e
+ * Determina o status técnico da validation a partir do veredito e
  * confiança da decisão.
  *
- * - `deep` → `queued` (o deep path conclui de forma assíncrona)
- * - `auto` → `partial` quando veredito é `INSUFFICIENT_EVIDENCE` ou
- *   confiança < 0,55; caso contrário `completed`
- * - `fast` → `completed`
+ * Sempre `completed`: a validação é avaliada de forma determinística e
+ * síncrona no fluxo único do MVP.
  *
- * @param mode modo de execução da validação
  * @param verdict veredito da decisão
  * @param confidence confiança da decisão
- * @returns 'completed' | 'partial' | 'queued'
+ * @returns 'completed'
  */
-const statusFor = (
-  mode: 'fast' | 'deep' | 'auto',
-  verdict: Verdict,
-  confidence: number,
-): 'completed' | 'partial' | 'queued' => {
-  if (mode === 'deep') return 'queued'
-  if (mode === 'auto') {
-    return verdict === 'INSUFFICIENT_EVIDENCE' || confidence < 0.55 ? 'partial' : 'completed'
-  }
+const statusFor = (): 'completed' => {
   return 'completed'
 }
 
@@ -329,22 +329,22 @@ const loadClaimSummary = async (
   withTenant(db, tenantId, async (tx) => {
     const claimRows = await tx
       .select({
-        claimId: t.claim.claimId,
-        type: t.claim.type,
-        subjectType: t.claim.subjectType,
-        subjectId: t.claim.subjectId,
-        addressId: t.claim.addressId,
+        claimId: claim.claimId,
+        type: claim.type,
+        subjectType: claim.subjectType,
+        subjectId: claim.subjectId,
+        addressId: claim.addressId,
       })
-      .from(t.claim)
-      .where(eq(t.claim.validationId, validationId))
+      .from(claim)
+      .where(eq(claim.validationId, validationId))
       .limit(1)
     const claimRow = claimRows[0]
     if (claimRow === undefined) return { claim: undefined, evidenceSummary: undefined }
     const countRows = await tx
-      .select({ stance: t.claimEvidence.stance, count: sql<number>`count(*)::int` })
-      .from(t.claimEvidence)
-      .where(eq(t.claimEvidence.claimId, claimRow.claimId))
-      .groupBy(t.claimEvidence.stance)
+      .select({ stance: claimEvidence.stance, count: sql<number>`count(*)::int` })
+      .from(claimEvidence)
+      .where(eq(claimEvidence.claimId, claimRow.claimId))
+      .groupBy(claimEvidence.stance)
     const byStance = new Map(countRows.map((row) => [row.stance, row.count]))
     return {
       claim: {
@@ -384,26 +384,26 @@ const loadValidationForReplay = async (
   idempotencyKey?: string,
 ): Promise<FastPathResult> => {
   const rows = await withTenant(db, tenantId, (tx) =>
-    tx.select().from(t.validation).where(eq(t.validation.validationId, validationId)).limit(1),
+    tx.select().from(validation).where(eq(validation.validationId, validationId)).limit(1),
   )
   const row = rows[0]
   if (row === undefined) {
     throw new Error(`idempotency points to missing validation ${validationId}`)
   }
   const signalRows = await withTenant(db, tenantId, (tx) =>
-    tx.select().from(t.signal).where(eq(t.signal.validationId, validationId)),
+    tx.select().from(signal).where(eq(signal.validationId, validationId)),
   )
 
   let cachedAddress: FastPathResult['address'] = null
   if (idempotencyKey !== undefined) {
     const idemRows = await withTenant(db, tenantId, (tx) =>
       tx
-        .select({ responseAddress: t.validationIdempotency.responseAddress })
-        .from(t.validationIdempotency)
+        .select({ responseAddress: validationIdempotency.responseAddress })
+        .from(validationIdempotency)
         .where(
           and(
-            eq(t.validationIdempotency.tenantId, tenantId),
-            eq(t.validationIdempotency.idempotencyKey, idempotencyKey),
+            eq(validationIdempotency.tenantId, tenantId),
+            eq(validationIdempotency.idempotencyKey, idempotencyKey),
           ),
         )
         .limit(1),
@@ -462,14 +462,14 @@ const findExistingIdempotency = async (
   const rows = await withTenant(db, tenantId, (tx) =>
     tx
       .select({
-        validationId: t.validationIdempotency.validationId,
-        requestHash: t.validationIdempotency.requestHash,
+        validationId: validationIdempotency.validationId,
+        requestHash: validationIdempotency.requestHash,
       })
-      .from(t.validationIdempotency)
+      .from(validationIdempotency)
       .where(
         and(
-          eq(t.validationIdempotency.tenantId, tenantId),
-          eq(t.validationIdempotency.idempotencyKey, idempotencyKey),
+          eq(validationIdempotency.tenantId, tenantId),
+          eq(validationIdempotency.idempotencyKey, idempotencyKey),
         ),
       )
       .limit(1),
@@ -589,7 +589,7 @@ export const runFastPath = async (
     throw new Error(`invalid claim combination: ${claimType} for ${claimSubjectType}`)
   }
   const claimId = randomUUID()
-  const claim: Claim = {
+  const claimData: Claim = {
     id: claimId,
     type: claimType,
     subject: {
@@ -628,14 +628,14 @@ export const runFastPath = async (
   }
 
   const { score, decision } = evaluateClaim({
-    claim,
+    claim: claimData,
     evidence: evidenceList,
     policy: deps.policy,
     now,
   })
   const explanationDetail = buildAssessmentExplanation(decision, evidenceList)
   const normalizedScore = Math.tanh(score)
-  const status = statusFor(req.mode, decision.verdict, decision.confidence)
+  const status = statusFor()
   const validationId = randomUUID()
   const expiresAt = new Date(now.getTime() + 30 * 86_400_000)
   // `now` é o instante em que a requisição COMEÇOU (`created_at`); a conclusão da
@@ -649,7 +649,7 @@ export const runFastPath = async (
 
   const persisted = await withTenant(deps.db, tenant.tenantId, async (tx) => {
     const subjectRows = await tx
-      .insert(t.subject)
+      .insert(subject)
       .values({
         subjectId: randomUUID(),
         tenantId: tenant.tenantId,
@@ -657,18 +657,18 @@ export const runFastPath = async (
         docHmac,
       })
       .onConflictDoNothing()
-      .returning({ subjectId: t.subject.subjectId })
+      .returning({ subjectId: subject.subjectId })
     const subjectId =
       subjectRows[0]?.subjectId ??
       (
         await tx
-          .select({ subjectId: t.subject.subjectId })
-          .from(t.subject)
+          .select({ subjectId: subject.subjectId })
+          .from(subject)
           .where(
             and(
-              eq(t.subject.tenantId, tenant.tenantId),
-              eq(t.subject.docType, req.documentType),
-              eq(t.subject.docHmac, docHmac),
+              eq(subject.tenantId, tenant.tenantId),
+              eq(subject.docType, req.documentType),
+              eq(subject.docHmac, docHmac),
             ),
           )
           .limit(1)
@@ -678,7 +678,7 @@ export const runFastPath = async (
     let addressId: string | null = null
     if (addressInput !== null) {
       await tx
-        .insert(t.canonicalAddress)
+        .insert(canonicalAddress)
         .values({
           addressId: randomUUID(),
           buildingKey: keys.buildingKey,
@@ -692,16 +692,16 @@ export const runFastPath = async (
         })
         .onConflictDoNothing()
       const addressRows = await tx
-        .select({ addressId: t.canonicalAddress.addressId })
-        .from(t.canonicalAddress)
-        .where(eq(t.canonicalAddress.buildingKey, keys.buildingKey))
+        .select({ addressId: canonicalAddress.addressId })
+        .from(canonicalAddress)
+        .where(eq(canonicalAddress.buildingKey, keys.buildingKey))
         .limit(1)
       addressId = addressRows[0]?.addressId ?? null
     }
 
     if (req.idempotencyKey !== null) {
       const idemRows = await tx
-        .insert(t.validationIdempotency)
+        .insert(validationIdempotency)
         .values({
           tenantId: tenant.tenantId,
           idempotencyKey: req.idempotencyKey,
@@ -718,7 +718,7 @@ export const runFastPath = async (
                 },
         })
         .onConflictDoNothing()
-        .returning({ validationId: t.validationIdempotency.validationId })
+        .returning({ validationId: validationIdempotency.validationId })
       if (idemRows.length === 0) {
         const winner = await findExistingIdempotency(tx as never, tenant.tenantId, req.idempotencyKey)
         if (winner !== null) {
@@ -729,19 +729,19 @@ export const runFastPath = async (
 
     // O claim é sempre criado junto da validation: nunca deve existir uma
     // validation persistida sem o seu claim (ver ADR-0016).
-    await tx.insert(t.claim).values({
+    await tx.insert(claim).values({
       claimId,
       tenantId: tenant.tenantId,
       validationId,
       subjectId,
       addressId,
-      type: claim.type,
-      subjectType: claim.subject.type,
+      type: claimType,
+      subjectType: claimSubjectType,
       targetType: 'address',
     })
 
     if (signals.length > 0) {
-      await tx.insert(t.claimEvidence).values(
+      await tx.insert(claimEvidence).values(
         evidenceList.map((e) => ({
           claimEvidenceId: e.id,
           tenantId: tenant.tenantId,
@@ -763,7 +763,7 @@ export const runFastPath = async (
         })),
       )
 
-      await tx.insert(t.signal).values(
+      await tx.insert(signal).values(
         signals.map((s, index) => ({
           signalId: signalIds[index] ?? randomUUID(),
           validationId,
@@ -788,27 +788,27 @@ export const runFastPath = async (
     // do banco. Usa `evidence_sha256` (durável), nunca `evidence_id` (efêmero).
     const observationRows = await tx
       .select({
-        id: t.claimEvidence.claimEvidenceId,
-        checker: t.claimEvidence.checker,
-        checkerVersion: t.claimEvidence.checkerVersion,
-        stance: t.claimEvidence.stance,
-        strength: t.claimEvidence.strength,
-        confidence: t.claimEvidence.confidence,
-        source: t.claimEvidence.source,
-        observedAt: t.claimEvidence.observedAt,
-        evidenceSha256: t.claimEvidence.evidenceSha256,
-        detail: t.claimEvidence.detail,
+        id: claimEvidence.claimEvidenceId,
+        checker: claimEvidence.checker,
+        checkerVersion: claimEvidence.checkerVersion,
+        stance: claimEvidence.stance,
+        strength: claimEvidence.strength,
+        confidence: claimEvidence.confidence,
+        source: claimEvidence.source,
+        observedAt: claimEvidence.observedAt,
+        evidenceSha256: claimEvidence.evidenceSha256,
+        detail: claimEvidence.detail,
       })
-      .from(t.claimEvidence)
-      .where(eq(t.claimEvidence.claimId, claimId))
+      .from(claimEvidence)
+      .where(eq(claimEvidence.claimId, claimId))
     const evidenceSetHash = evidenceSetHashOfObservations(observationRows)
 
-    await tx.insert(t.validation).values({
+    await tx.insert(validation).values({
       validationId,
       tenantId: tenant.tenantId,
       subjectId,
       addressId,
-      mode: req.mode,
+      mode: 'fast',
       status,
       verdict: decision.verdict,
       score: normalizedScore,
@@ -831,11 +831,11 @@ export const runFastPath = async (
       },
       deepContext: deepContextOf(registryRecord, docDigitsValid),
       createdAt: now,
-      completedAt,
+      completedAt: completedAt,
       expiresAt,
     })
 
-    await tx.insert(t.outbox).values({
+    await tx.insert(outbox).values({
       aggregate: 'validation',
       aggregateId: validationId,
       eventType: status === 'completed' ? 'validation.completed' : 'validation.updated',
@@ -843,7 +843,7 @@ export const runFastPath = async (
         validation_id: validationId,
         tenant_id: tenant.tenantId,
         claim_id: claimId,
-        claim_type: claim.type,
+        claim_type: claimType,
         status,
         verdict: decision.verdict,
       },
@@ -871,32 +871,32 @@ export const runFastPath = async (
       await usage.recordUsageEventInTx(tx, {
         tenantId: tenant.tenantId,
         eventType: 'usage_event',
-        kind: 'fast',
+        kind: 'validation',
         units: 1,
         validationId,
         idempotencyKey: billable ? validationBillingKey(validationId) : null,
         billable,
-        source: 'fast',
+        source: 'validation',
       })
     } else {
       await usage.recordUsageEventInTx(tx, {
         tenantId: tenant.tenantId,
         eventType: 'processing_attempt',
-        kind: 'fast',
+        kind: 'validation',
         units: 1,
         validationId,
         billable: false,
-        source: 'fast',
+        source: 'validation',
       })
     }
 
-    await tx.insert(t.auditLog).values({
+    await tx.insert(auditLog).values({
       tenantId: tenant.tenantId,
       actor: tenant.apiKeyId === null ? 'system:batch' : `api-key:${tenant.apiKeyId}`,
       action: 'validation.create',
       targetType: 'validation',
       targetId: validationId,
-      details: { mode: req.mode, verdict: decision.verdict, status },
+      details: { verdict: decision.verdict, status },
     })
 
     return { replay: null, subjectId, addressId }
@@ -924,9 +924,9 @@ export const runFastPath = async (
     signals,
     claim: {
       id: claimId,
-      type: claim.type,
+      type: claimType,
       subject: {
-        type: claim.subject.type,
+        type: claimSubjectType,
         refId: persisted.subjectId,
       },
       target: {

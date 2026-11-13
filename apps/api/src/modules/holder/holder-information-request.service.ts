@@ -1,4 +1,4 @@
-import { and, count, eq, isNull, sql, withTenant } from '@comprova/db'
+import { and, count, eq, isNull, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
@@ -8,7 +8,6 @@ import {
   type HolderInformationRequestItem,
   type HolderInformationRequestItems,
 } from '@comprova/contracts'
-import type { Db } from '@comprova/db'
 import {
   expireExpiredRequests,
   expireIfNeeded,

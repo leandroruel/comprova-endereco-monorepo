@@ -1,5 +1,4 @@
-import type { DeepEnrichDeps } from './deep-enrich.service.js'
-import { deepEnrich } from './deep-enrich.service.js'
+import { deepEnrich, type DeepEnrichDeps } from './deep-enrich.service.js'
 import { deepEnrichInputSchema, type DeepEnrichResult } from './deep-enrich.schema.js'
 
 export type DeepActivities = {

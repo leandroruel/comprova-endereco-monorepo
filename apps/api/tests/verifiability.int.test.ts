@@ -61,11 +61,6 @@ const config: AppConfig = {
   TERMS_VERSION: '1.0.0',
   TERMS_APPROVED: 'true',
   TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-  TEMPORAL_ENABLED: false,
-  VLM_ENABLED: false,
-  TEMPORAL_ADDRESS: 'localhost:7233',
-  TEMPORAL_NAMESPACE: 'default',
-  TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
   WORKER_LOOPS: false,
 }
 const app = await buildApp({
@@ -95,7 +90,6 @@ const postCnpj = (headers: Record<string, string> = {}) =>
     payload: {
       document: { type: 'CNPJ', value: '12345678000195' },
       address: null,
-      mode: 'fast',
       legal_basis: 'FRAUD_PREVENTION',
     },
   })
@@ -126,7 +120,6 @@ describe('V-1 — issuer e snapshot de autoridade', () => {
         validationId: randomUUID(),
         tenantId,
         subjectId: subject,
-        mode: 'fast',
         status: 'completed',
         policyVersion: POLICY_VERSION,
         legalBasis: 'FRAUD_PREVENTION',
@@ -147,7 +140,6 @@ describe('V-1 — issuer e snapshot de autoridade', () => {
         tenantId,
         // subject de OUTRO tenant:
         subjectId: otherSubject,
-        mode: 'fast',
         status: 'completed',
         policyVersion: POLICY_VERSION,
         legalBasis: 'FRAUD_PREVENTION',
@@ -167,7 +159,6 @@ describe('V-1 — issuer e snapshot de autoridade', () => {
       payload: {
         document: { type: 'CNPJ', value: '12345678000195' },
         address: null,
-        mode: 'fast',
         legal_basis: 'FRAUD_PREVENTION',
       },
     })

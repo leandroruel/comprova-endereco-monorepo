@@ -1,11 +1,14 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { z } from 'zod'
 import { makeHolderAccessController } from './holder-access.controller.js'
 import {
   HolderAccessResponse,
   HolderDocumentParams,
   HolderItemIdParams,
+  HolderProcessingParams,
+  HolderProcessingResponse,
   HolderSaveItemBody,
   type HolderAccessRoutesDeps,
 } from './holder-access.schema.js'
@@ -191,6 +194,38 @@ export const registerHolderAccessRoutes = (
       const context = await resolve(request, reply)
       if (isReply(context)) return context
       return controller.submit(context, `holder-token:${context.tokenId}`, reply)
+    },
+  )
+
+  app.get(
+    '/holder-access/items/:requestId/processing',
+    {
+      preHandler: [rateLimits.ip, rateLimits.token],
+      onSend: [noStore],
+      schema: {
+        params: HolderProcessingParams,
+        response: {
+          200: HolderProcessingResponse,
+          404: z.object({
+            type: z.string(),
+            title: z.string(),
+            status: z.number().int(),
+            code: z.string(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const context = await resolve(request, reply)
+      if (isReply(context)) return context
+      const processing = await controller.getProcessing(context, request.params.requestId)
+      if (!processing) {
+        return reply
+          .code(404)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(problem(404, 'HOLDER_PROCESSING_NOT_FOUND', 'Processamento não encontrado'))
+      }
+      return reply.code(200).send(processing)
     },
   )
 }

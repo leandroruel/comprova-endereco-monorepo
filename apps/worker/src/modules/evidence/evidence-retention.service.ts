@@ -1,5 +1,4 @@
-import { inArray, lte, sql } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { inArray, lte, sql, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { mapSequential } from '@comprova/core'
 import type { ObjectStore } from '@comprova/providers'

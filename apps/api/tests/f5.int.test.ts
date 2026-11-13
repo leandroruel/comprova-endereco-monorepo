@@ -27,7 +27,7 @@ const key = (await createApiKey(adminPool.db, tenant, PEPPER)).plaintext
 const logLines: string[] = []
 const logger = createLogger({
   level: 'info',
-  stream: { write: (line: string) => void logLines.push(line) },
+  stream: { write: (line: string) => logLines.push(line) },
 })
 
 const appPool = createDbPool(db.appUrl)
@@ -46,11 +46,6 @@ const app = await buildApp({
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    TEMPORAL_ENABLED: false,
-    VLM_ENABLED: false,
-    TEMPORAL_ADDRESS: 'localhost:7233',
-    TEMPORAL_NAMESPACE: 'default',
-    TEMPORAL_TASK_QUEUE: 'comprova-deep-t1',
     WORKER_LOOPS: false,
   },
   db: appPool.db,
@@ -69,7 +64,6 @@ const postCpf = (address: Record<string, unknown> | null, consentRef: string | n
     payload: {
       document: { type: 'CPF', value: '529.982.247-25' },
       address,
-      mode: 'fast',
       legal_basis: 'CONSENT',
       consent_ref: consentRef,
     },

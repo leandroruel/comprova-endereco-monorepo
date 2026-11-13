@@ -1,5 +1,4 @@
-import { and, eq, inArray, lte } from '@comprova/db'
-import type { Db, DbTx } from '@comprova/db'
+import { and, eq, inArray, lte, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import type { ObjectStore } from '@comprova/providers'

@@ -56,11 +56,11 @@ const shutdown = async (signal: string): Promise<void> => {
   process.exit(hadError ? 1 : 0)
 }
 
-process.once('SIGTERM', () => void shutdown('SIGTERM'))
-process.once('SIGINT', () => void shutdown('SIGINT'))
+process.once('SIGTERM', () => shutdown('SIGTERM'))
+process.once('SIGINT', () => shutdown('SIGINT'))
 process.on('uncaughtException', (err) => {
   logger.error({ err: err.message }, 'uncaught exception')
-  void shutdown('uncaughtException')
+  shutdown('uncaughtException')
 })
 
 await redis.connect()
@@ -69,7 +69,6 @@ logger.info(
   {
     port: config.PORT,
     host: config.HOST,
-    temporal_enabled: config.TEMPORAL_ENABLED,
     worker_loops: config.WORKER_LOOPS,
   },
   'api listening',

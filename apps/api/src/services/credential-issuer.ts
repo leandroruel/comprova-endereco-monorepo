@@ -1,7 +1,6 @@
 import { DEFAULT_CREDENTIAL_TTL_SECONDS } from '@comprova/core'
+import { and, eq, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
-import { and, eq, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
 import {
   buildAssertion,
   buildCredential,

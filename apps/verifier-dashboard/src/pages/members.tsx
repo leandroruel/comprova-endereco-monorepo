@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createInvitation, listMembers } from '@/api/client'
+import { createInvitation, listMembers, listOrganizations } from '@/api/client'
 import {
   Card,
   CardContent,
@@ -39,13 +39,7 @@ export function MembersPage({ user, activeOrgId }: MembersPageProps) {
 
   const { data: orgs, isLoading: orgsLoading } = useQuery({
     queryKey: ['organizations'],
-    queryFn: async () => {
-      const res = await fetch('http://localhost:3000/v1/organizations', {
-        credentials: 'include',
-      })
-      if (!res.ok) return []
-      return res.json()
-    },
+    queryFn: listOrganizations,
     enabled: !!user,
   })
 
@@ -227,7 +221,7 @@ export function MembersPage({ user, activeOrgId }: MembersPageProps) {
                   setError(null)
                   setSuccess(null)
                   if (tenantId && newEmail.trim()) {
-                    void createInvitationMutation.mutateAsync({
+                    createInvitationMutation.mutateAsync({
                       tid: tenantId,
                       email: newEmail,
                       role: newRole,

@@ -2,7 +2,6 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { makeHolderInformationRequestController } from './holder-information-request.controller.js'
-import type { HolderInformationRequestRoutesDeps } from './holder-information-request.schema.js'
 import {
   HolderInformationRequestIdParams,
   HolderInformationRequestListQuery,
@@ -11,6 +10,7 @@ import {
   HolderInformationRequestCreatedResponse,
   HolderInformationRequestResponse,
   HolderInformationRequestListResponse,
+  type HolderInformationRequestRoutesDeps,
 } from './holder-information-request.schema.js'
 import {
   requireSessionOrM2M,

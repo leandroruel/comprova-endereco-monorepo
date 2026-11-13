@@ -1,4 +1,4 @@
-import { and, count, eq, withTenant } from '@comprova/db'
+import { and, count, eq, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import {
@@ -9,7 +9,6 @@ import {
   type KycEventType,
   type DocumentType,
 } from '@comprova/contracts'
-import type { Db, DbTx } from '@comprova/db'
 
 const KYC_STATE_TRANSITIONS: Record<KycProcessState, readonly KycProcessState[]> = {
   pending: ['in_progress'],

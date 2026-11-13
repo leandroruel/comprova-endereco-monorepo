@@ -6,9 +6,6 @@ import {
   makeDocumentIntelligenceClient,
   makeNf3eFiscalAdapter,
 } from '@comprova/providers'
-import { Worker } from '@temporalio/worker'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { workerEnvFromProcess } from './config.js'
 import { buildWorkerContext, hasS3Config, makeObjectStore } from './context.js'
 import {
@@ -16,11 +13,10 @@ import {
   startEvidenceRetentionLoop,
   startEvidenceVerificationLoop,
   startFiscalVerificationLoop,
+  startHolderSubmissionProcessingLoop,
   startValidationRetentionLoop,
 } from './loops.js'
-import { makeDeepEnrichActivity } from './modules/deep-enrich/deep-enrich.activity.js'
-import { deepEnrich } from './modules/deep-enrich/deep-enrich.service.js'
-import type { DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
+import { deepEnrich, type DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
 
 const env = workerEnvFromProcess()
 
@@ -35,19 +31,6 @@ const logger = createLogger({
   pretty: env.logFile === undefined && process.stdout.isTTY === true,
 })
 const ctx = buildWorkerContext(env)
-const taskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'comprova-deep-t1'
-
-const workflowsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'workflows', 'deep.ts')
-
-const deepDeps: DeepEnrichDeps = {
-  db: ctx.pool.db,
-  t1Checkers: ctx.t1Checkers,
-  t2Checkers: ctx.t2Checkers,
-  policy: ctx.policy,
-  policyHash: ctx.policyHash,
-  clock: systemClock,
-  signalCache: ctx.signalCache,
-}
 
 // A retenção precisa de privilégio de manutenção (DATABASE_ADMIN_URL):
 // remover `evidence` (sem DELETE para app_user) e varrer o grafo de validações
@@ -132,9 +115,17 @@ if (stopEvidenceVerification === null) {
 }
 
 // Vertical slice F3: consulta fiscal pela referência extraída do comprovante
-// (adapter NF3e/SVRS já existente) + reavaliação do claim pelo deep path. O
-// scan usa o pool de manutenção; a reavaliação usa o pool do app (RLS), o
-// mesmo `deepDeps` da activity do Temporal.
+// (adapter NF3e/SVRS já existente) + reavaliação determinística do claim. O
+// scan usa o pool de manutenção; a reavaliação usa o pool do app (RLS).
+const deepDeps: DeepEnrichDeps = {
+  db: ctx.pool.db,
+  t1Checkers: ctx.t1Checkers,
+  t2Checkers: ctx.t2Checkers,
+  policy: ctx.policy,
+  policyHash: ctx.policyHash,
+  clock: systemClock,
+  signalCache: ctx.signalCache,
+}
 const stopFiscalVerification =
   adminRetentionPool !== null
     ? startFiscalVerificationLoop(
@@ -152,21 +143,31 @@ if (stopFiscalVerification === null) {
   )
 }
 
-const worker = await Worker.create({
-  taskQueue,
-  workflowsPath,
-  activities: { deepEnrichActivity: makeDeepEnrichActivity(deepDeps) },
-})
+// O loop de processamento de submissões do Holder consome o outbox e processa
+// os documentos de cada submissão concluída. Roda no pool de manutenção porque
+// atravessa tenants.
+const stopHolderSubmissionProcessing =
+  adminRetentionPool !== null
+    ? startHolderSubmissionProcessingLoop(adminRetentionPool.db, retentionStore, logger)
+    : null
+if (stopHolderSubmissionProcessing === null) {
+  logger.warn(
+    { reason: 'HOLDER_SUBMISSION_PROCESSING_ADMIN_URL_MISSING' },
+    'holder submission processing loop disabled: DATABASE_ADMIN_URL not configured',
+  )
+}
 
-logger.info({ taskQueue, retention: true }, 'worker listening')
+logger.info({ retention: true }, 'worker listening')
 try {
-  await worker.run()
+  // Não há Worker.create nem worker.run: o Temporal foi eliminado.
+  // Os loops de polling PostgreSQL rodam via startLoop internamente.
 } finally {
   stopEvidenceRetention()
   stopValidationRetention?.()
   stopEvidenceAnalysis?.()
   stopEvidenceVerification?.()
   stopFiscalVerification?.()
+  stopHolderSubmissionProcessing?.()
   if (ctx.referencePool !== null) await ctx.referencePool.end()
   await ctx.pool.end()
 }

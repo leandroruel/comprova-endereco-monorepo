@@ -1,7 +1,13 @@
 import { addressProfile, canonicalAddress } from './addresses.js'
-import { authAccount, authSession, authUser, authVerification } from './auth.js'
-import { adminAuthAccount, adminAuthSession, adminAuthUser, adminAuthVerification } from './auth.js'
 import {
+  authAccount,
+  adminAuthAccount,
+  adminAuthSession,
+  adminAuthUser,
+  adminAuthVerification,
+  authSession,
+  authUser,
+  authVerification,
   verifierAuthAccount,
   verifierAuthSession,
   verifierAuthUser,
@@ -37,9 +43,10 @@ import { holderInformationRequestEvent } from './holder-information-request-even
 import { holderAccessToken } from './holder-access-token.js'
 import { holderItemResponse } from './holder-item-response.js'
 import { holderInformationRequestDocument } from './holder-information-request-document.js'
+import { holderSubmissionProcessing } from './holder-submission-processing.js'
 import { kycProcess, kycEvent } from './kyc.js'
-
 export * from './enums.js'
+export * from './holder-submission-processing.js'
 export * from './tenancy.js'
 export * from './organizations.js'
 export * from './issuers.js'
@@ -129,6 +136,7 @@ export const schema = {
   holderAccessToken,
   holderItemResponse,
   holderInformationRequestDocument,
+  holderSubmissionProcessing,
   kycProcess,
   kycEvent,
   batch,

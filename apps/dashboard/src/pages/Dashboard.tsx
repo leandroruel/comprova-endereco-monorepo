@@ -7,10 +7,6 @@ import { E2eRunner } from '@/components/validation/e2e-runner'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
 
-const VLM_ENABLED = false
-
-const MODES: readonly ('fast' | 'auto' | 'deep')[] = VLM_ENABLED ? ['fast', 'auto', 'deep'] : ['fast']
-
 function StatCard({
   icon,
   label,
@@ -52,7 +48,6 @@ export default function Dashboard({
   onNavigate?: (page: string) => void
 }) {
   const [document, setDocument] = useState('')
-  const [mode, setMode] = useState<'fast' | 'auto' | 'deep'>('fast')
   const [history, setHistory] = useState<ValidationDto[]>([])
   const queryClient = useQueryClient()
 
@@ -67,7 +62,7 @@ export default function Dashboard({
   })
 
   const mutation = useMutation({
-    mutationFn: () => createValidation(document, mode),
+    mutationFn: () => createValidation(document),
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
       setDocument('')
@@ -150,20 +145,6 @@ export default function Dashboard({
                 onChange={(e) => setDocument(e.target.value)}
                 className="pl-9 font-mono text-sm"
               />
-            </div>
-            <div className="flex items-center gap-1 rounded-lg border border-input p-0.5">
-              {MODES.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m)}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                    mode === m ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-accent'
-                  }`}
-                >
-                  {m === 'fast' ? '⚡ fast' : m === 'auto' ? '⚡+deep auto' : '🔍 deep'}
-                </button>
-              ))}
             </div>
             <Button type="submit" disabled={mutation.isPending || !document.trim()} className="px-5">
               {mutation.isPending ? <Spinner /> : 'Validar'}

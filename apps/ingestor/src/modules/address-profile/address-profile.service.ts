@@ -1,5 +1,4 @@
-import { sql } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { sql, type Db } from '@comprova/db'
 import { rowCountOf } from '../../lib/db-result.js'
 
 /**

@@ -1,5 +1,4 @@
-import type { CnefeCoordReader, GeoCoord } from '@comprova/core'
-import type { CheckContext, Checker, Signal } from '@comprova/core'
+import type { CnefeCoordReader, GeoCoord, CheckContext, Checker, Signal } from '@comprova/core'
 import type { PlacesProvider } from '@comprova/providers'
 import { findSignalByChecker, makeSignal } from '../utils.js'
 

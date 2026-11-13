@@ -7,31 +7,28 @@ import {
   PROBLEM_CONTENT_TYPE,
   problem,
   problems,
+  type CreateValidationRequest,
   type ValidationDto,
 } from '@comprova/contracts'
 import { isValidDocument, type AddressComponents } from '@comprova/core'
 import type { Db } from '@comprova/db'
 import type { FastifyReply } from 'fastify'
-import type { CreateValidationRequest } from '@comprova/contracts'
 import {
   runFastPath,
   type FastPathDeps,
   type FastPathRequest,
   type FastPathResult,
 } from '../../services/fastpath.js'
-import { startDeepWorkflow, type DeepTriggerDeps } from '../../services/deep-trigger.js'
 import {
   CredentialIssuanceError,
   issueCredential,
   type CredentialIssuerDeps,
 } from '../../services/credential-issuer.js'
-import { contestValidation, getValidationDetails, setWorkflowId } from './validations.service.js'
+import { contestValidation, getValidationDetails } from './validations.service.js'
 
 export interface ValidationControllerDeps {
   readonly db: Db
   readonly fastPath: FastPathDeps
-  readonly deepTrigger: DeepTriggerDeps
-  readonly vlmEnabled: boolean
   /** Assinatura/identidade do issuer resolvidas no boot (`app.ts`). */
   readonly credentialIssuer: CredentialIssuerDeps
 }
@@ -246,14 +243,6 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     reply: FastifyReply,
   ) => {
     if (tenant === undefined) throw new Error('tenant context missing')
-    if ((body.mode === 'deep' || body.mode === 'auto') && deps.vlmEnabled !== true) {
-      return reply
-        .code(422)
-        .type(PROBLEM_CONTENT_TYPE)
-        .send(
-          problem(422, 'DEEP_PATH_DISABLED', 'Deep path is disabled (VLM_ENABLED=false); use mode: "fast"'),
-        )
-    }
     if (!isValidDocument(body.document.type, body.document.value)) {
       return reply.code(422).type(PROBLEM_CONTENT_TYPE).send(problems.invalidDocument())
     }
@@ -267,7 +256,6 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       addressInput:
         body.document.type === 'CPF' && body.address !== null ? addressComponentsFromDto(body.address) : null,
       legalBasis: body.legal_basis,
-      mode: body.mode,
       idempotencyKey: idempotencyKey ?? null,
       consentRef: body.consent_ref,
       userId: userId ?? null,
@@ -285,28 +273,6 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
     }
 
     reply.header('Location', `/v1/validations/${result.validationId}`)
-    if (body.mode === 'deep') reply.code(202)
-    if (body.mode === 'deep' || (body.mode === 'auto' && result.status === 'partial')) {
-      void startDeepWorkflow(deps.deepTrigger, {
-        tenantId: tenant.tenantId,
-        validationId: result.validationId,
-        maxTier: body.options.max_tier,
-      })
-        .then(async (workflowId) => {
-          if (workflowId !== null) {
-            await setWorkflowId(deps.db, tenant.tenantId, result.validationId, workflowId)
-          }
-        })
-        .catch((error: unknown) => {
-          deps.deepTrigger.logger.error(
-            {
-              err: error instanceof Error ? error.message : String(error),
-              validation_id: result.validationId,
-            },
-            'failed to persist deep workflow id',
-          )
-        })
-    }
     return reply.send(dtoFromResult(result))
   },
 

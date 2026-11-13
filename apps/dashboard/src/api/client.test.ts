@@ -39,7 +39,7 @@ describe('createValidation — payload', () => {
     const fetchSpy = vi.fn(async () => ok())
     vi.stubGlobal('fetch', fetchSpy)
 
-    await createValidation('529.982.247-25', 'fast', address)
+    await createValidation('529.982.247-25', address)
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     const body = bodyOf(fetchSpy.mock.calls[0])
@@ -51,7 +51,7 @@ describe('createValidation — payload', () => {
     const fetchSpy = vi.fn(async () => ok())
     vi.stubGlobal('fetch', fetchSpy)
 
-    await createValidation('529.982.247-25', 'fast')
+    await createValidation('529.982.247-25')
 
     const body = bodyOf(fetchSpy.mock.calls[0])
     expect(body.document).toEqual({ type: 'CPF', value: '529.982.247-25' })
@@ -62,7 +62,7 @@ describe('createValidation — payload', () => {
     const fetchSpy = vi.fn(async () => ok())
     vi.stubGlobal('fetch', fetchSpy)
 
-    await createValidation('12.345.678/0001-95', 'fast', address)
+    await createValidation('12.345.678/0001-95', address)
 
     const body = bodyOf(fetchSpy.mock.calls[0])
     expect(body.document).toEqual({ type: 'CNPJ', value: '12.345.678/0001-95' })

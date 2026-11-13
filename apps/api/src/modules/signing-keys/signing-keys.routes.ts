@@ -4,8 +4,7 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireKeysWriteScope } from '../../plugins/scope.js'
-import type { SigningKeysControllerDeps } from './signing-keys.controller.js'
-import { makeSigningKeysController } from './signing-keys.controller.js'
+import { makeSigningKeysController, type SigningKeysControllerDeps } from './signing-keys.controller.js'
 
 export type SigningKeyRoutesDeps = SigningKeysControllerDeps
 

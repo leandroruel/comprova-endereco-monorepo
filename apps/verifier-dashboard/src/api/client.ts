@@ -1,7 +1,7 @@
 const API_BASE = '/v1'
 
 /** Headers comuns para requisições autenticadas por sessão (cookie). */
-function authHeaders(): HeadersInit {
+function authHeaders(): Record<string, string> {
   return {
     'Content-Type': 'application/json',
   }
@@ -9,9 +9,9 @@ function authHeaders(): HeadersInit {
 
 /** Faz uma requisição à API e lança em caso de erro HTTP. */
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     ...authHeaders(),
-    ...init.headers,
+    ...(init.headers ? { ...(init.headers as Record<string, string>) } : {}),
   }
   // Somente envia Content-Type quando há corpo na requisição.
   if (init.body === undefined) {
@@ -89,6 +89,7 @@ export async function createOrganization(body: {
   burst: number
   monthlyQuota: number | null
   createdAt: string
+  role: string | null
 }> {
   return apiRequest('/organizations', {
     method: 'POST',
@@ -112,6 +113,7 @@ export async function listOrganizations(): Promise<
     burst: number
     monthlyQuota: number | null
     createdAt: string
+    role: string | null
   }>
 > {
   return apiRequest('/organizations', { method: 'GET' })

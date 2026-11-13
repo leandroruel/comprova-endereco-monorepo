@@ -71,6 +71,11 @@ const adminPool = createDbPool(db.adminUrl)
 await seedGoldenDataset(adminPool.db)
 const tenant = await createTenant(adminPool.db, { name: 'deep-tenant' })
 
+// Resetar quota antes de cada teste para evitar esgotamento entre testes
+beforeEach(async () => {
+  await adminPool.db.update(t.tenant).set({ monthlyQuota: null }).where(eq(t.tenant.tenantId, tenant))
+})
+
 // Chave de assinatura do tenant (FASE 14): o material privado vive no resolver
 // em memória; só a chave pública é registrada em `issuer_signing_key`.
 const signing = createTestCredentialSigningKey('key-1')
@@ -136,6 +141,17 @@ const t1Chaos = makeT1Checkers({
 })
 
 describe('deepEnrich (activity core)', () => {
+  const setQuota = async (quota: number | null) => {
+    await adminPool.db
+      .update(t.tenant)
+      .set({ monthlyQuota: quota === null ? null : quota })
+      .where(eq(t.tenant.tenantId, tenant))
+  }
+
+  beforeEach(async () => {
+    await setQuota(null)
+  })
+
   it('enriquece validacao com sinais T1, atualiza veredito e popula cache de endereco', async () => {
     const created = await runFastPath(
       fastPathDeps,
@@ -145,7 +161,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'deep-test-1',
       },
     )
@@ -183,7 +198,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '90123456000131',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'deep-test-2',
       },
     )
@@ -227,7 +241,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'fast',
         idempotencyKey: 'deep-billability-timeout',
       },
     )
@@ -272,7 +285,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'fase14-immutability',
       },
     )
@@ -357,7 +369,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'fiscal-assessment-integration',
       },
     )
@@ -460,7 +471,6 @@ describe('deepEnrich (activity core)', () => {
           documentValue: '12345678000195',
           addressInput: null,
           legalBasis: 'FRAUD_PREVENTION',
-          mode: 'auto',
           idempotencyKey: `f3-1-${randomUUID()}`,
         },
       )
@@ -631,7 +641,6 @@ describe('deepEnrich (activity core)', () => {
           documentValue: '12345678000195',
           addressInput: null,
           legalBasis: 'FRAUD_PREVENTION',
-          mode: 'auto',
           idempotencyKey: `f3-1-dedup-${randomUUID()}`,
         },
       )
@@ -796,7 +805,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'auto',
         idempotencyKey: 'fase7-legacy',
       },
     )
@@ -864,7 +872,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'fast',
         idempotencyKey: 'fase19-material',
       },
     )
@@ -950,7 +957,6 @@ describe('deepEnrich (activity core)', () => {
         documentValue: '12345678000195',
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'fast',
         idempotencyKey: 'baixo8-legacy',
       },
     )
@@ -1052,11 +1058,10 @@ describe('deepEnrich (activity core)', () => {
           documentValue,
           addressInput: null,
           legalBasis: 'FRAUD_PREVENTION',
-          mode: 'deep',
           idempotencyKey,
         },
       )
-      expect(created.status).toBe('queued')
+      expect(created.status).toBe('completed')
       return created.validationId
     }
 
@@ -1065,9 +1070,10 @@ describe('deepEnrich (activity core)', () => {
 
       const before = await validationRow(validationId)
       expect(before?.createdAt?.toISOString()).toBe(T0.toISOString())
-      // Nada de `completed_at` antecipado: a validação ainda não concluiu.
-      expect(before?.status).toBe('queued')
-      expect(before?.completedAt).toBeNull()
+      // A validação já concluiu no fast path (fluxo determinístico único), com
+      // `completed_at` ancorado no instante do pedido.
+      expect(before?.status).toBe('completed')
+      expect(before?.completedAt?.toISOString()).toBe(T0.toISOString())
 
       const result = await deepEnrich(
         { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: advancingClock() },
@@ -1406,6 +1412,10 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
   }
 
   const createQueuedValidation = async (idempotencyKey: string, documentValue: string): Promise<string> => {
+    // O fluxo determinístico único conclui (e fatura) a validação já na
+    // criação. Para exercitar o tratamento de quota no WORKER, criamos a
+    // validação e revertemos o estado COMERCIAL, emulando uma validação legada
+    // que permaneceu `queued` antes de o deep path concluir e faturar.
     const created = await runFastPath(
       { ...fastPathDeps, clock: systemClock },
       { tenantId: tenant, apiKeyId: null },
@@ -1414,12 +1424,33 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
         documentValue,
         addressInput: null,
         legalBasis: 'FRAUD_PREVENTION',
-        mode: 'deep',
         idempotencyKey,
       },
     )
-    expect(created.status).toBe('queued')
-    return created.validationId
+    expect(created.status).toBe('completed')
+
+    const validationId = created.validationId
+    await adminPool.db.delete(t.usageEvent).where(eq(t.usageEvent.validationId, validationId))
+    await adminPool.db
+      .delete(t.usageEventIdempotency)
+      .where(
+        and(
+          eq(t.usageEventIdempotency.tenantId, tenant),
+          eq(t.usageEventIdempotency.idempotencyKey, validationBillingKey(validationId)),
+        ),
+      )
+    await adminPool.db
+      .delete(t.usageBillingUnit)
+      .where(and(eq(t.usageBillingUnit.tenantId, tenant), eq(t.usageBillingUnit.validationId, validationId)))
+    await adminPool.db
+      .delete(t.outbox)
+      .where(and(eq(t.outbox.aggregate, 'validation'), eq(t.outbox.aggregateId, validationId)))
+    await adminPool.db
+      .update(t.validation)
+      .set({ status: 'queued', completedAt: null, quotaBlockedReason: null })
+      .where(eq(t.validation.validationId, validationId))
+
+    return validationId
   }
 
   const countBillableEvents = async (validationId: string): Promise<number> => {
@@ -1460,7 +1491,7 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
   })
 
   it('quota hard excedida: nenhum evento faturável novo, status blocked_quota', async () => {
-    // Cria validação em estado queued (não consome cota pois modo deep)
+    // Cria a validação e a deixa em estado `queued` (sem faturamento prévio)
     const validationId = await createQueuedValidation('quota-exceeded-1', '12345678000195')
     // Pré-carrega 1 unidade faturável para esgotar quota = 1
     await adminPool.db.insert(t.usageEvent).values({
@@ -1506,8 +1537,8 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
   })
 
   it('validação previamente queued encontra quota excedida durante o processamento', async () => {
-    await setQuota(0) // quota zero: qualquer evento faturável é bloqueado
     const validationId = await createQueuedValidation('quota-zero-1', '12345678000195')
+    await setQuota(0) // quota zero: qualquer evento faturável é bloqueado
 
     const result = await deepEnrich(
       { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
@@ -1523,8 +1554,8 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
 
   it('retry após aumento da quota: validação bloqueada pode ser reprocessada', async () => {
     // 1. Quota esgotada → blocked_quota
-    await setQuota(0)
     const validationId = await createQueuedValidation('quota-retry-1', '12345678000195')
+    await setQuota(0)
     const result1 = await deepEnrich(
       { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },
       { tenantId: tenant, validationId },
@@ -1565,8 +1596,8 @@ describe('deepEnrich — quota excedida (blocked_quota)', () => {
   it('rollback da transação não deixa alterações parciais', async () => {
     // Garante que, quando a quota é excedida, nenhum sinal, claim ou
     // claim_evidence fica parcialmente persistido.
-    await setQuota(0)
     const validationId = await createQueuedValidation('quota-rollback-1', '12345678000195')
+    await setQuota(0)
 
     const result = await deepEnrich(
       { db: adminPool.db, t1Checkers: t1WithFakes, policy, policyHash, clock: systemClock },

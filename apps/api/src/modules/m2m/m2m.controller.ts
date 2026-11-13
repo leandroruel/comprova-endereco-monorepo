@@ -1,9 +1,7 @@
 import type { FastifyReply } from 'fastify'
-import type { ApiKeyDto, CreateApiKeyRequest } from '@comprova/contracts'
-import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
+import { PROBLEM_CONTENT_TYPE, problem, type ApiKeyDto, type CreateApiKeyRequest } from '@comprova/contracts'
 import type { z } from 'zod'
-import type { ApiKeyCreatedResponse, M2MControllerDeps } from './m2m.schema.js'
-import { sendProblem } from './m2m.schema.js'
+import { sendProblem, type ApiKeyCreatedResponse, type M2MControllerDeps } from './m2m.schema.js'
 import { makeM2MService, AuthorizationError } from './m2m.service.js'
 
 export type ApiKeyCreatedResponseType = z.infer<typeof ApiKeyCreatedResponse>
@@ -26,7 +24,7 @@ export const makeM2MController = (deps: M2MControllerDeps) => {
       reply: FastifyReply,
     ): Promise<ApiKeyCreatedResponseType | FastifyReply> => {
       try {
-        const expiresInDays = request.expiresInDays
+        const { expiresInDays } = request
         const expiresAt = expiresInDays
           ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
           : undefined

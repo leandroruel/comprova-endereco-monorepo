@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import type { DocumentAnalysisResult } from '@comprova/core'
 import { evidenceArtifact } from './evidence-artifact.js'
+import { holderInformationRequest } from './holder-information-request.js'
 import { tenant } from './tenancy.js'
 
 /**
@@ -28,6 +29,10 @@ import { tenant } from './tenancy.js'
  * A linha é tenant-scoped e participa da retenção do artefato: a FK composta
  * com `ON DELETE CASCADE` remove a análise (que contém PII extraída) junto do
  * artefato bruto.
+ *
+ * `holder_information_request_id` é opcional: permite rastrear análises de
+ * documentos enviados pelo Holder (F4.2/F4.3) diretamente pela solicitação, sem
+ * passar pelo domínio de validação (validation → claim → claim_evidence).
  */
 export const evidenceAnalysis = pgTable(
   'evidence_analysis',
@@ -37,6 +42,7 @@ export const evidenceAnalysis = pgTable(
       .notNull()
       .references(() => tenant.tenantId),
     artifactId: uuid('artifact_id').notNull(),
+    holderInformationRequestId: uuid('holder_information_request_id'),
     analyzer: text('analyzer').notNull(),
     analyzerVersion: text('analyzer_version').notNull(),
     contractVersion: text('contract_version').notNull(),
@@ -55,6 +61,11 @@ export const evidenceAnalysis = pgTable(
       foreignColumns: [evidenceArtifact.artifactId, evidenceArtifact.tenantId],
       name: 'evidence_analysis_artifact_tenant_fk',
     }).onDelete('cascade'),
+    foreignKey({
+      columns: [t.holderInformationRequestId, t.tenantId],
+      foreignColumns: [holderInformationRequest.id, holderInformationRequest.tenantId],
+      name: 'evidence_analysis_holder_request_tenant_fk',
+    }).onDelete('restrict'),
     unique('evidence_analysis_artifact_analyzer_uq').on(
       t.artifactId,
       t.analyzer,
@@ -65,6 +76,7 @@ export const evidenceAnalysis = pgTable(
     uniqueIndex('evidence_analysis_id_tenant_uq').on(t.analysisId, t.tenantId),
     index('evidence_analysis_status_idx').on(t.status, t.updatedAt),
     index('evidence_analysis_tenant_artifact_idx').on(t.tenantId, t.artifactId),
+    index('evidence_analysis_tenant_holder_request_idx').on(t.tenantId, t.holderInformationRequestId),
     check(
       'evidence_analysis_status_ck',
       sql`${t.status} IN ('pending','analyzing','completed','inconclusive','unsupported','unavailable','failed')`,

@@ -1,5 +1,4 @@
-import { sql, withTenant } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { sql, withTenant, type Db } from '@comprova/db'
 
 export const getStats = async (db: Db, tenantId: string, userId: string | null) => {
   const rows = (await withTenant(db, tenantId, async (tx) => {

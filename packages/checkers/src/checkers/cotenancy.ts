@@ -1,5 +1,4 @@
-import type { KnownSharedReader, ProfileReader } from '@comprova/core'
-import type { CheckContext, Checker, Signal } from '@comprova/core'
+import type { KnownSharedReader, ProfileReader, CheckContext, Checker, Signal } from '@comprova/core'
 import { makeSignal } from '../utils.js'
 
 const ID = 'cotenancy'

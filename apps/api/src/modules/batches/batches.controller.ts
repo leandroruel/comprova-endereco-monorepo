@@ -16,9 +16,6 @@ export const makeBatchController = (deps: BatchControllerDeps) => ({
     reply: FastifyReply,
   ) => {
     if (tenantId === undefined) throw new Error('tenant context missing')
-    if (body.mode !== 'fast') {
-      return reply.code(422).type(PROBLEM_CONTENT_TYPE).send(problems.unprocessableAddress())
-    }
     const result = await createBatch(deps.db, tenantId, userId ?? null, body)
     reply.header('Location', `/v1/batches/${result.batchId}`)
     return reply.code(202).send({

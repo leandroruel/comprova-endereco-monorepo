@@ -7,8 +7,7 @@ import {
   type Signal,
   type Verdict,
 } from '@comprova/core'
-import { eq } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { eq, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'

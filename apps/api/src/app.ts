@@ -5,26 +5,35 @@ import { systemClock } from '@comprova/core'
 import { type Logger, type Metrics } from '@comprova/observability'
 import {
   EVIDENCE_ARTIFACT_MAX_BYTES,
+  makeApiKeyHasher,
+  makeCachedReaders,
   makeCepReader,
   makeCnaeCategoriaReader,
   makeCnefeReader,
   makeKnownSharedReader,
   makeProfileReader,
+  makeRedisCache,
   makeRegistryReader,
+  QuotaExceededError,
   type Db,
 } from '@comprova/db'
-import { makeS3ObjectStore, makeUnavailableObjectStore, type ObjectStore } from '@comprova/providers'
+import {
+  makeDocumentIntelligenceClient,
+  makeS3ObjectStore,
+  makeUnavailableObjectStore,
+  type ObjectStore,
+} from '@comprova/providers'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import multipart from '@fastify/multipart'
 import swagger from '@fastify/swagger'
-import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import {
   jsonSchemaTransform,
   jsonSchemaTransformObject,
   serializerCompiler,
   validatorCompiler,
+  type ZodTypeProvider,
 } from '@fastify/type-provider-zod'
 import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
@@ -38,7 +47,6 @@ import { registerAuthRoutes } from './routes/auth-routes.js'
 import { registerAuthAdminRoutes } from './routes/auth-admin-routes.js'
 import { registerAuthVerifierRoutes } from './routes/auth-verifier-routes.js'
 import { makeSessionMiddleware, type AuthInstance } from './plugins/session.js'
-import { makeRedisCache, makeCachedReaders, makeApiKeyHasher } from '@comprova/db'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMetricsRoute } from './routes/metrics.js'
 import { registerBatchRoutes } from './modules/batches/batches.routes.js'
@@ -49,10 +57,8 @@ import { registerMetaRoutes } from './modules/meta/meta.routes.js'
 import { registerStatsRoutes } from './modules/stats/stats.routes.js'
 import { registerSubjectRoutes } from './modules/subjects/subjects.routes.js'
 import { registerUsageRoutes } from './modules/usage/usage.routes.js'
-import { QuotaExceededError } from '@comprova/db'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerDocumentRoutes } from './modules/documents/documents.routes.js'
-import { makeDocumentIntelligenceClient } from '@comprova/providers'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
 import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'
@@ -61,6 +67,7 @@ import { registerM2MRoutes } from './modules/m2m/m2m.routes.js'
 import { registerHolderRoutes } from './modules/holder/holder.routes.js'
 import { registerHolderInformationRequestRoutes } from './modules/holder/holder-information-request.routes.js'
 import { registerHolderAccessRoutes } from './modules/holder/holder-access.routes.js'
+import { makeHolderSubmissionProcessingService } from './modules/holder/holder-submission-processing.service.js'
 import { registerHolderAccessTokenRoutes } from './modules/holder/holder-access-token.routes.js'
 import { makeHolderRateLimits } from './plugins/holder-rate-limit.js'
 import { AuthorizationError } from './modules/m2m/m2m.service.js'
@@ -135,6 +142,18 @@ const resolveObjectStore = (config: AppConfig): ObjectStore =>
     : makeUnavailableObjectStore()
 
 export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
+  // Em produção, o banco de referência é obrigatório. Em desenvolvimento/teste
+  // pode operar em modo single-database (sem REFERENCE_DATABASE_URL).
+  if (
+    deps.config.REFERENCE_DATABASE_URL === undefined &&
+    process.env.NODE_ENV !== 'development' &&
+    process.env.NODE_ENV !== 'test'
+  ) {
+    throw new Error(
+      'REFERENCE_DATABASE_URL é obrigatório em produção. Defina a variável de ambiente antes de iniciar.',
+    )
+  }
+
   const app: FastifyInstance = Fastify({
     logger: false,
     genReqId: () => randomUUID(),
@@ -319,15 +338,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   )
   app.addHook('preHandler', authenticate)
   registerAuthRoutes(app, auth)
-  const deepTrigger = {
-    config: {
-      enabled: deps.config.TEMPORAL_ENABLED,
-      address: deps.config.TEMPORAL_ADDRESS,
-      namespace: deps.config.TEMPORAL_NAMESPACE,
-      taskQueue: deps.config.TEMPORAL_TASK_QUEUE,
-    },
-    logger: deps.logger,
-  }
 
   await app.register(
     async (v1) => {
@@ -335,8 +345,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerValidationRoutes(v1, {
         db: deps.db,
         fastPath,
-        deepTrigger,
-        vlmEnabled: deps.config.VLM_ENABLED,
         credentialIssuer,
         objectStore,
         evidenceMaxBytes,
@@ -387,6 +395,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
           logger: deps.logger,
           metrics: deps.metrics,
           maxDocumentBytes: evidenceMaxBytes,
+          processingService: makeHolderSubmissionProcessingService({
+            db: deps.db,
+            store: objectStore,
+            logger: deps.logger,
+          }),
         },
         holderRateLimits,
       )

@@ -1,5 +1,4 @@
-import { and, sql } from '@comprova/db'
-import type { Db } from '@comprova/db'
+import { and, sql, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { mapSequential } from '@comprova/core'
 import { makeBrasilApiCep } from '@comprova/providers'

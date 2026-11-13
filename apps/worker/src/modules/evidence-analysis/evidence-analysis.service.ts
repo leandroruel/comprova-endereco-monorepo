@@ -1,7 +1,6 @@
-import type { Db } from '@comprova/db'
-import type { DocumentAnalysisResult } from '@comprova/core'
-import { and, eq, sql, withTenant } from '@comprova/db'
+import { and, eq, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
+import type { DocumentAnalysisResult } from '@comprova/core'
 import type { Logger } from '@comprova/observability'
 import {
   documentAnalysisFailedResult,

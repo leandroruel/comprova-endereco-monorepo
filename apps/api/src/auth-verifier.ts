@@ -1,11 +1,11 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import type { Db } from '@comprova/db'
 import {
   verifierAuthAccount,
   verifierAuthSession,
   verifierAuthUser,
   verifierAuthVerification,
+  type Db,
 } from '@comprova/db'
 
 /**

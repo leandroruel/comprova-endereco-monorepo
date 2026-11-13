@@ -1,7 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { useCallback } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { getOrganization, listMembers, listApiKeys } from '@/api/client'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getOrganization, listMembers, listApiKeys, listOrganizations } from '@/api/client'
 import {
   Card,
   CardContent,
@@ -35,13 +33,7 @@ export function DashboardPage({ user, setRoute, activeOrgId }: DashboardPageProp
     isError: orgsError,
   } = useQuery({
     queryKey: ['organizations'],
-    queryFn: async () => {
-      const res = await fetch('http://localhost:3000/v1/organizations', {
-        credentials: 'include',
-      })
-      if (!res.ok) throw new Error('Erro ao carregar organizações')
-      return res.json()
-    },
+    queryFn: listOrganizations,
     enabled: !!user,
   })
 
@@ -74,7 +66,7 @@ export function DashboardPage({ user, setRoute, activeOrgId }: DashboardPageProp
   })
 
   const handleRefresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+    queryClient.invalidateQueries({ queryKey: ['api-keys'] })
     refetchKeys()
   }, [queryClient, refetchKeys])
 

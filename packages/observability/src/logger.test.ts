@@ -6,7 +6,7 @@ import { createLogger } from './logger.js'
 
 function capture() {
   const lines: string[] = []
-  return { lines, stream: { write: (line: string) => void lines.push(line) } }
+  return { lines, stream: { write: (line: string) => lines.push(line) } }
 }
 
 describe('logger', () => {
