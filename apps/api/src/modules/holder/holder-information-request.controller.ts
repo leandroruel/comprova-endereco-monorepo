@@ -45,6 +45,7 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
         readonly purpose: string
         readonly items: unknown
         readonly expiresAt?: string
+        readonly validationId?: string
       },
       reply: FastifyReply,
     ): Promise<HolderInformationRequestCreatedResponseType | FastifyReply> => {
@@ -57,6 +58,8 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
             purpose: input.purpose,
             items: input.items as never,
             expiresAt: input.expiresAt,
+            // PR 1: vinculação opcional à validation.
+            validationId: input.validationId,
           },
           input.holderId,
         )
@@ -67,6 +70,12 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
             .code(404)
             .type(PROBLEM_CONTENT_TYPE)
             .send(problem(404, 'HOLDER_NOT_FOUND', 'Holder não encontrado'))
+        }
+        if (error instanceof Error && error.message === 'validation not found') {
+          return reply
+            .code(404)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(404, 'VALIDATION_NOT_FOUND', 'Validation não encontrada'))
         }
         if (error instanceof Error && error.message.includes('prazo inválido')) {
           return reply

@@ -51,6 +51,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
     items: unknown
     state: string
     expiresAt: Date | null
+    validationId: string | null
     createdBy: string
     createdAt: Date
     updatedAt: Date
@@ -66,6 +67,8 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
     items: (row.items as unknown as HolderInformationRequestItem[]) ?? [],
     state: row.state as unknown as HolderInformationRequestState,
     expiresAt: row.expiresAt?.toISOString() ?? null,
+    // PR 1: validation que originou esta solicitação, quando aplicável.
+    validationId: row.validationId ?? null,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -82,6 +85,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
       readonly purpose: string
       readonly items: HolderInformationRequestItems
       readonly expiresAt?: string
+      readonly validationId?: string
     },
     holderId: string,
   ): Promise<HolderInformationRequestDto> => {
@@ -106,6 +110,24 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
       }
     }
 
+    // PR 1: se uma validation for informada, deve pertencer ao mesmo tenant.
+    let validationExists = true
+    if (create.validationId !== undefined && create.validationId !== null) {
+      const validationId = create.validationId
+      const [validationRow] = await withTenant(db, tenantId, async (tx) => {
+        return tx
+          .select({ validationId: t.validation.validationId })
+          .from(t.validation)
+          .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
+          .limit(1)
+      })
+      validationExists = validationRow !== undefined
+    }
+
+    if (!validationExists) {
+      throw new Error('validation not found')
+    }
+
     const requestId = randomUUID()
     const createdAt = new Date()
 
@@ -121,6 +143,8 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
           items: create.items,
           state: 'pending' as HolderInformationRequestState,
           expiresAt: create.expiresAt ? new Date(create.expiresAt) : null,
+          // PR 1: vinculação opcional à validation do Verifier.
+          validationId: create.validationId ?? null,
           createdBy: actor,
           createdAt,
           updatedAt: createdAt,

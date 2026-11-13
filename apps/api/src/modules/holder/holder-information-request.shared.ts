@@ -22,6 +22,7 @@ export interface HolderInformationRequestRow {
   readonly items: unknown
   readonly state: string
   readonly expiresAt: Date | null
+  readonly validationId: string | null
   readonly createdBy: string
   readonly createdAt: Date
   readonly updatedAt: Date

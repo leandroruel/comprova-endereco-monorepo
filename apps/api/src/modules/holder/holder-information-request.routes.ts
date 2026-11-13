@@ -70,6 +70,8 @@ export const registerHolderInformationRequestRoutes = (
           purpose: request.body.purpose,
           items: request.body.items,
           expiresAt: request.body.expiresAt,
+          // PR 1: vinculação opcional à validation.
+          validationId: request.body.validationId,
         },
         reply,
       )

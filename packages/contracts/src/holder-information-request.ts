@@ -59,6 +59,9 @@ export const CreateHolderInformationRequestRequestSchema = z.object({
   purpose: z.string().min(1).max(1000),
   items: HolderInformationRequestItemsSchema,
   expiresAt: z.string().datetime().optional(),
+  // PR 1: validation opcional que originou esta solicitação. Deve pertencer ao
+  // mesmo tenant da solicitação.
+  validationId: z.string().uuid().optional(),
 })
 
 export type CreateHolderInformationRequestRequest = z.infer<
@@ -74,6 +77,8 @@ export const HolderInformationRequestDtoSchema = z.object({
   items: z.array(HolderInformationRequestItemSchema),
   state: HolderInformationRequestStateSchema,
   expiresAt: z.string().nullable(),
+  // PR 1: validation que originou esta solicitação, quando aplicável.
+  validationId: z.string().uuid().nullable(),
   createdBy: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
