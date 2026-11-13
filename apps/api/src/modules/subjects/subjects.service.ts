@@ -63,6 +63,7 @@ export const eraseSubject = async (
       .select({ validationId: t.validation.validationId })
       .from(t.validation)
       .where(eq(t.validation.subjectId, subjectId))
+      .for('update') // bloqueia as validações para impedir associação concorrente durante a exclusão
     const validationIds = validations.map((validation) => validation.validationId)
 
     if (validationIds.length > 0) {
