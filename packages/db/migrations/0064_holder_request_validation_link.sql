@@ -20,6 +20,18 @@ SET application_name = 'comprova-migrations';
 -- O relacionamento é um-para-muitos do lado da validation: uma validation pode
 -- ter várias solicitações de documentos, mas cada solicitação pertence a no
 -- máximo uma validation.
+--
+-- Estratégia de execução:
+--   - O `ALTER TABLE ... ADD COLUMN` é rápido e seguro (não bloqueia leituras
+--     em tabelas pequenas/médias).
+--   - Os `CREATE INDEX` seguram um ACCESS EXCLUSIVE lock na tabela durante
+--     toda a transação. Para tabelas com volume significativo, considere
+--     executar os índices fora da transação principal (ex.: dividir a migration
+--     ou usar CREATE INDEX CONCURRENTLY com runner adequado). Para o volume
+--     atual de `holder_information_request`, o risco de bloqueio é aceitável.
+--   - A migration roda dentro de uma transação no runner atual; dividir em dois
+--     arquivos NÃO resolve automaticamente, pois o runner pode executar ambos
+--     na mesma transação.
 
 ALTER TABLE holder_information_request
   ADD COLUMN validation_id uuid;

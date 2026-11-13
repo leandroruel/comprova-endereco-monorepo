@@ -289,7 +289,7 @@ export const contestValidation = async (
 
     await tx.insert(t.auditLog).values({
       tenantId,
-      actor: `api-key:${apiKeyId}`,
+      actor: apiKeyId !== null ? `api-key:${apiKeyId}` : 'session:unknown',
       action: 'validation.contested',
       targetType: 'validation',
       targetId: validationId,
