@@ -75,7 +75,9 @@ export const evidenceArtifact = pgTable(
     check('evidence_artifact_storage_key_ck', sql`length(${t.storageKey}) BETWEEN 1 AND 512`),
     check(
       'evidence_artifact_storage_key_tenant_ck',
-      sql`${t.storageKey} LIKE 'tenants/' || ${t.tenantId}::text || '/evidence/%'`,
+      sql`${t.storageKey} LIKE 'tenants/' || ${t.tenantId}::text || '/evidence/%'
+        OR (${t.holderInformationRequestId} IS NOT NULL
+          AND ${t.storageKey} LIKE 'tenants/' || ${t.tenantId}::text || '/holder-requests/%')`,
     ),
     // Exatamente um dos dois (claim_evidence_id ou holder_information_request_id)
     // deve estar preenchido.

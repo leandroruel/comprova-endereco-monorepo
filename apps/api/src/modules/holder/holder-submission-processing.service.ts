@@ -38,6 +38,10 @@ interface DocumentToProcess {
   readonly documentId: string
   readonly storageKey: string
   readonly itemId: string
+  /** Metadados reais do objeto já gravado pelo intake do Holder (F4.2). */
+  readonly contentType: string
+  readonly sizeBytes: number
+  readonly sha256: Buffer
 }
 
 type ProcessingState = 'awaiting' | 'processing' | 'processed' | 'partial' | 'failed'
@@ -263,6 +267,9 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
         documentId: t.holderInformationRequestDocument.documentId,
         storageKey: t.holderInformationRequestDocument.storageKey,
         itemId: t.holderInformationRequestDocument.itemId,
+        contentType: t.holderInformationRequestDocument.contentType,
+        sizeBytes: t.holderInformationRequestDocument.sizeBytes,
+        sha256: t.holderInformationRequestDocument.sha256,
       })
       .from(t.holderInformationRequestDocument)
       .where(
@@ -273,11 +280,22 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
           isNull(t.holderInformationRequestDocument.deletedAt),
         ),
       )
-    return rows.map((r) => ({
-      documentId: r.documentId,
-      storageKey: r.storageKey,
-      itemId: r.itemId,
-    }))
+    // `upload_state = 'stored'` garante (check constraint) os metadados abaixo;
+    // o filtro explícito evita que um registro inconsistente vire artefato.
+    return rows.flatMap((r) =>
+      r.contentType === null || r.sizeBytes === null || r.sha256 === null
+        ? []
+        : [
+            {
+              documentId: r.documentId,
+              storageKey: r.storageKey,
+              itemId: r.itemId,
+              contentType: r.contentType,
+              sizeBytes: r.sizeBytes,
+              sha256: r.sha256,
+            },
+          ],
+    )
   }
 
   /**
@@ -324,6 +342,8 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
         } else {
           // Cria o artefato vinculado diretamente à solicitação do Holder.
           // claim_evidenceId é NULL: usa holder_information_request_id.
+          // Os metadados vêm do documento já gravado (F4.2) — nunca de
+          // placeholders — e o objeto é o MESMO (`storage_key` do intake).
           artifactId = randomUUID()
           await tx.insert(t.evidenceArtifact).values({
             artifactId,
@@ -331,10 +351,12 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
             claimEvidenceId: null,
             holderInformationRequestId,
             storageKey: doc.storageKey,
-            contentType: 'application/pdf',
-            sizeBytes: 0,
-            sha256: Buffer.from(new Uint8Array(32)),
-            retentionUntil: new Date(),
+            contentType: doc.contentType,
+            sizeBytes: doc.sizeBytes,
+            sha256: doc.sha256,
+            // Política de retenção de `evidence_artifact` (30d) — ver
+            // docs/lgpd/retencao.md.
+            retentionUntil: new Date(Date.now() + 30 * 86_400_000),
           })
         }
 

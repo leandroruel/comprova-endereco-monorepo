@@ -843,7 +843,7 @@ export const runFastPath = async (
         validation_id: validationId,
         tenant_id: tenant.tenantId,
         claim_id: claimId,
-        claim_type: claim.type,
+        claim_type: claimType,
         status,
         verdict: decision.verdict,
       },

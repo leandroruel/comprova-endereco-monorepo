@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql, withTenant, type Db } from '@comprova/db'
+import { and, eq, insertPendingEvidenceAnalysis, isNull, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
@@ -94,6 +94,9 @@ export const holderSubmissionProcessingTick = async (
             documentId: t.holderInformationRequestDocument.documentId,
             storageKey: t.holderInformationRequestDocument.storageKey,
             itemId: t.holderInformationRequestDocument.itemId,
+            contentType: t.holderInformationRequestDocument.contentType,
+            sizeBytes: t.holderInformationRequestDocument.sizeBytes,
+            sha256: t.holderInformationRequestDocument.sha256,
           })
           .from(t.holderInformationRequestDocument)
           .where(
@@ -147,6 +150,11 @@ export const holderSubmissionProcessingTick = async (
             if (existingArtifact) {
               artifactId = existingArtifact.artifactId
             } else {
+              // Metadados reais do objeto gravado no intake do Holder (F4.2) —
+              // o artefato aponta para o MESMO `storage_key`, sem copiar bytes.
+              if (doc.contentType === null || doc.sizeBytes === null || doc.sha256 === null) {
+                throw new Error('holder document without stored metadata')
+              }
               artifactId = randomUUID()
               await tx.insert(t.evidenceArtifact).values({
                 artifactId,
@@ -154,26 +162,15 @@ export const holderSubmissionProcessingTick = async (
                 claimEvidenceId: null,
                 holderInformationRequestId: requestId,
                 storageKey: doc.storageKey,
-                contentType: 'application/pdf',
-                sizeBytes: 0,
-                sha256: Buffer.from(new Uint8Array(32)),
+                contentType: doc.contentType,
+                sizeBytes: doc.sizeBytes,
+                sha256: doc.sha256,
                 retentionUntil: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
               })
             }
 
-            // Insere análise pendente (idempotente).
-            await tx.execute(sql`
-              INSERT INTO evidence_analysis (
-                analysis_id, tenant_id, artifact_id, analyzer, analyzer_version,
-                contract_version, status, attempts, created_at, updated_at
-              )
-              VALUES (
-                gen_random_uuid(), ${tenantId}, ${artifactId},
-                'text_document', '1.3.0', '4',
-                'pending', 0, clock_timestamp(), clock_timestamp()
-              )
-              ON CONFLICT (artifact_id, analyzer, analyzer_version, contract_version) DO NOTHING
-            `)
+            // Insere análise pendente (idempotente por artifact+analyzer+versão+contrato).
+            await insertPendingEvidenceAnalysis(tx, { tenantId, artifactId, now })
           } catch (error) {
             failedCount += 1
             deps.logger.warn(

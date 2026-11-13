@@ -144,7 +144,7 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
 
   it('CNPJ com digitos invalidos retorna 422 INVALID_DOCUMENT', async () => {
     const res = await postValidation('11111111111111')
-    expect(res.statusCode).toBe(200)
+    expect(res.statusCode).toBe(422)
     expect(res.json().code).toBe('INVALID_DOCUMENT')
   })
 
@@ -159,11 +159,11 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
         legal_basis: 'CONSENT',
       },
     })
-    expect(res.statusCode).toBe(200)
+    expect(res.statusCode).toBe(422)
     expect(res.json().code).toBe('ADDRESS_REQUIRED_FOR_CPF')
   })
 
-  it('mode deep responde 422 quando VLM desabilitado', async () => {
+  it('campo legado `mode` é ignorado: o fluxo único responde 200', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/validations',
@@ -176,7 +176,9 @@ describe('dataset dourado T0 (gate >= 85% por classe)', () => {
       },
     })
     expect(res.statusCode).toBe(200)
-    expect(res.json().code).toBe('VALIDATED')
+    expect(res.json().validation_id).toBeTypeOf('string')
+    expect(res.json().status).toBe('completed')
+    expect(res.json().code).toBeUndefined()
   })
 })
 

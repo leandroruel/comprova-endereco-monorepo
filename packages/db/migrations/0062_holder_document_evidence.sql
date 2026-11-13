@@ -53,5 +53,26 @@ ALTER TABLE evidence_artifact
       OR (claim_evidence_id IS NULL AND holder_information_request_id IS NOT NULL)
     );
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON evidence_artifact TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON evidence_analysis TO app_user;
+-- O documento enviado pelo Holder já vive no object storage sob o prefixo
+-- `tenants/<tenant>/holder-requests/...` (F4.2). Um artefato vinculado à
+-- solicitação referencia esse mesmo objeto, sem copiar bytes: não existe
+-- duplicação de material. A garantia de isolamento continua idêntica — a chave
+-- precisa estar no namespace do PRÓPRIO tenant — e o prefixo alternativo só é
+-- aceito quando o artefato está ligado a uma solicitação do Holder.
+ALTER TABLE evidence_artifact
+  DROP CONSTRAINT evidence_artifact_storage_key_tenant_ck;
+
+ALTER TABLE evidence_artifact
+  ADD CONSTRAINT evidence_artifact_storage_key_tenant_ck
+    CHECK (
+      storage_key LIKE 'tenants/' || tenant_id::text || '/evidence/%'
+      OR (
+        holder_information_request_id IS NOT NULL
+        AND storage_key LIKE 'tenants/' || tenant_id::text || '/holder-requests/%'
+      )
+    );
+
+-- Os grants existentes são preservados: `evidence_artifact` continua SEM UPDATE
+-- (write-once, garantido também pelo trigger de imutabilidade do 0039) e
+-- `evidence_analysis` mantém o grant de UPDATE do 0041. Nenhum grant novo é
+-- necessário para as colunas adicionadas acima.
