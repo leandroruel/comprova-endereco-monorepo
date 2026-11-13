@@ -6,6 +6,7 @@ import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/tes
 import Redis from 'ioredis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
+import { eraseSubject } from '../src/modules/subjects/subjects.service.js'
 
 const PEPPER = 'test-pepper-123'
 
@@ -236,6 +237,47 @@ const createValidationInDb = async (tenantId: string): Promise<string> => {
     })
 
     return validationId
+  })
+}
+
+/**
+ * Cria uma validation e o respectivo subject diretamente no banco, retornando
+ * ambos os ids para permitir chamar eraseSubject (que precisa do subjectId).
+ */
+const createValidationWithSubjectInDb = async (
+  tenantId: string,
+): Promise<{ readonly validationId: string; readonly subjectId: string }> => {
+  return withTenant(adminPool.db, tenantId, async (tx) => {
+    await tx
+      .insert(t.legalBasis)
+      .values({ code: 'CONSENT', description: 'Consentimento' })
+      .onConflictDoNothing()
+
+    const subjectId = randomUUID()
+    await tx.insert(t.subject).values({
+      subjectId,
+      tenantId,
+      docType: 'CPF',
+      docHmac: createHmac('sha256', PEPPER).update('test-subject').digest(),
+    })
+
+    const validationId = randomUUID()
+    await tx.insert(t.validation).values({
+      validationId,
+      tenantId,
+      subjectId,
+      mode: 'fast',
+      status: 'completed',
+      verdict: 'CONFIRMED_COMMERCIAL',
+      score: 0.9,
+      confidence: 0.95,
+      policyVersion: '2026.11.1',
+      legalBasis: 'CONSENT',
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+    })
+
+    return { validationId, subjectId }
   })
 }
 
@@ -482,7 +524,6 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
 
     // Chamada direta ao serviço eraseSubject via adminPool (simula exclusão de Subject)
     await adminPool.db.transaction(async (tx) => {
-      await tx.update(t.subject).set({}).where(eq(t.subject.subjectId, validationId)) // não existe, mas testa o caminho
       // Na prática, eraseSubject é chamado pelo serviço, não diretamente via SQL
       // Aqui apenas verificamos que a solicitação continua com validation_id
       const rows = await tx
@@ -534,9 +575,6 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
         .update(t.holderInformationRequest)
         .set({ validationId: null })
         .where(inArray(t.holderInformationRequest.validationId, [validationId]))
-
-      // Depois exclui as validações do Subject
-      await tx.delete(t.validation).where(eq(t.validation.subjectId, 'qualquer-subject-id'))
 
       // Verifica que a solicitação continua com validation_id = NULL
       const rows = await tx
@@ -590,15 +628,301 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
         .set({ validationId: null })
         .where(eq(t.holderInformationRequest.id, requestId))
 
-      // Exclui as validações
-      await tx.delete(t.validation).where(eq(t.validation.subjectId, 'qualquer-subject-id'))
-
       // Verifica que a solicitação continua com validation_id = NULL
       const rows = await tx
         .select({ validationId: t.holderInformationRequest.validationId })
         .from(t.holderInformationRequest)
         .where(eq(t.holderInformationRequest.id, requestId))
       expect(rows[0]?.validationId).toBeNull()
+    })
+  })
+
+  it('associação conclui primeiro: exclusão posterior desvincula a solicitação antes de remover a Validation', async () => {
+    const tenantId = await createOrganization(ownerSessionCookie, 'Org Assoc Primeiro', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Assoc Primeiro', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-pr1-assoc-primeiro', true)
+    const { validationId, subjectId } = await createValidationWithSubjectInDb(tenantId)
+
+    // Associação vence: cria a solicitação vinculada à validation.
+    const createRes = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Assoc primeiro',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante de residência',
+            required: true,
+            documentType: 'proof_of_address',
+          },
+        ],
+        validationId,
+      },
+      key.secret,
+    )
+    expect(createRes.statusCode).toBe(201)
+    const requestId = createRes.json().id
+
+    // Exclusão posterior: desvincula a solicitação antes de remover a Validation.
+    const erased = await eraseSubject(adminPool.db, tenantId, 'test-api-key', null, subjectId)
+    expect(erased).toBe(1)
+
+    // A solicitação do Holder é preservada com validation_id = NULL.
+    await withTenant(adminPool.db, tenantId, async (tx) => {
+      const rows = await tx
+        .select({ validationId: t.holderInformationRequest.validationId })
+        .from(t.holderInformationRequest)
+        .where(eq(t.holderInformationRequest.id, requestId))
+      expect(rows[0]?.validationId).toBeNull()
+    })
+
+    // A Validation foi removida: não há referência órfã.
+    await withTenant(adminPool.db, tenantId, async (tx) => {
+      const validations = await tx
+        .select({ validationId: t.validation.validationId })
+        .from(t.validation)
+        .where(eq(t.validation.validationId, validationId))
+      expect(validations).toHaveLength(0)
+    })
+  })
+
+  it('exclusão conclui primeiro: associação falha informando Validation inexistente', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Exclusao Primeiro',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Exclusao Primeiro', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-pr1-exclusao-primeiro', true)
+    const { validationId, subjectId } = await createValidationWithSubjectInDb(tenantId)
+
+    // Exclusão vence: remove o Subject e suas Validações.
+    const erased = await eraseSubject(adminPool.db, tenantId, 'test-api-key', null, subjectId)
+    expect(erased).toBe(1)
+
+    // Associação posterior deve falhar porque a Validation não existe mais.
+    const res = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Exclusao primeiro',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante de residência',
+            required: true,
+            documentType: 'proof_of_address',
+          },
+        ],
+        validationId,
+      },
+      key.secret,
+    )
+    expect(res.statusCode).toBe(404)
+    expect(res.json().code).toBe('VALIDATION_NOT_FOUND')
+
+    // Não deve existir solicitação com validation_id órfão.
+    await withTenant(adminPool.db, tenantId, async (tx) => {
+      const rows = await tx
+        .select({ id: t.holderInformationRequest.id, validationId: t.holderInformationRequest.validationId })
+        .from(t.holderInformationRequest)
+        .where(eq(t.holderInformationRequest.holderId, holderId))
+      expect(rows).toHaveLength(0)
+    })
+  })
+
+  it('concorrência real: não há validation_id órfão após exclusão (associação e exclusão concorrentes)', async () => {
+    const tenantId = await createOrganization(
+      ownerSessionCookie,
+      'Org Concorrencia Real',
+      'owner@exemplo.com',
+    )
+    await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+    const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Concorrencia Real', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+
+    const holderId = await createHolder(key, tenantId, 'ext-ref-pr1-concorrencia-real', true)
+    const { validationId, subjectId } = await createValidationWithSubjectInDb(tenantId)
+
+    // Dispara associação (HTTP) e exclusão (direto no banco) concorrentemente
+    // contra o mesmo PostgreSQL. O protocolo de locking (subject, depois
+    // validation) serializa as duas transações sem deadlock.
+    const createPromise = injectWithM2M(
+      'POST',
+      `/v1/holders/${holderId}/information-requests?tenantId=${tenantId}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Concorrencia real',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante de residência',
+            required: true,
+            documentType: 'proof_of_address',
+          },
+        ],
+        validationId,
+      },
+      key.secret,
+    )
+    const erasePromise = eraseSubject(adminPool.db, tenantId, 'test-api-key', null, subjectId)
+
+    const [createRes, erased] = await Promise.all([createPromise, erasePromise])
+    expect(erased).toBe(1)
+
+    // Independentemente de qual operação venceu, nenhuma referência órfã pode
+    // ficar para trás: a Validation foi removida e qualquer solicitação do
+    // Holder restante deve ter validation_id = NULL.
+    await withTenant(adminPool.db, tenantId, async (tx) => {
+      const validations = await tx
+        .select({ validationId: t.validation.validationId })
+        .from(t.validation)
+        .where(eq(t.validation.validationId, validationId))
+      expect(validations).toHaveLength(0)
+
+      const requests = await tx
+        .select({ id: t.holderInformationRequest.id, validationId: t.holderInformationRequest.validationId })
+        .from(t.holderInformationRequest)
+        .where(eq(t.holderInformationRequest.holderId, holderId))
+      for (const request of requests) {
+        expect(request.validationId).toBeNull()
+      }
+    })
+
+    // Se a associação venceu, a solicitação deve existir (com validation_id
+    // NULL após a exclusão). Se a exclusão venceu, a associação deve ter
+    // falhado com 404.
+    if (createRes.statusCode === 201) {
+      const requestId = createRes.json().id
+      await withTenant(adminPool.db, tenantId, async (tx) => {
+        const rows = await tx
+          .select({ validationId: t.holderInformationRequest.validationId })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.id, requestId))
+        expect(rows[0]?.validationId).toBeNull()
+      })
+    } else {
+      expect(createRes.statusCode).toBe(404)
+      expect(createRes.json().code).toBe('VALIDATION_NOT_FOUND')
+    }
+  })
+
+  it('isolação entre tenants: exclusão de Subject em um tenant não afeta solicitação de outro tenant', async () => {
+    // Tenant A.
+    const tenantA = await createOrganization(ownerSessionCookie, 'Org Tenant A', 'owner@exemplo.com')
+    await addMember(ownerSessionCookie, tenantA, 'owner@exemplo.com', 'admin')
+    const keyA = await createM2mApiKey(ownerSessionCookie, tenantA, 'Chave A', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+    const holderA = await createHolder(keyA, tenantA, 'ext-ref-pr1-tenant-a', true)
+    const { validationId: validationIdA, subjectId: subjectIdA } =
+      await createValidationWithSubjectInDb(tenantA)
+
+    const createResA = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderA}/information-requests?tenantId=${tenantA}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Tenant A',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante de residência',
+            required: true,
+            documentType: 'proof_of_address',
+          },
+        ],
+        validationId: validationIdA,
+      },
+      keyA.secret,
+    )
+    expect(createResA.statusCode).toBe(201)
+    const requestIdA = createResA.json().id
+
+    // Tenant B (outro usuário/organização).
+    const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+    const tenantB = await createOrganization(outroCookie, 'Org Tenant B', 'outro@exemplo.com')
+    await addMember(outroCookie, tenantB, 'outro@exemplo.com', 'admin')
+    const keyB = await createM2mApiKey(outroCookie, tenantB, 'Chave B', [
+      'holders:read',
+      'holders:write',
+      'verify:m2m',
+    ])
+    const holderB = await createHolder(keyB, tenantB, 'ext-ref-pr1-tenant-b', true)
+    const { validationId: validationIdB } = await createValidationWithSubjectInDb(tenantB)
+
+    const createResB = await injectWithM2M(
+      'POST',
+      `/v1/holders/${holderB}/information-requests?tenantId=${tenantB}`,
+      {
+        type: 'documento_complementar',
+        purpose: 'Tenant B',
+        items: [
+          {
+            itemId: 'address-proof',
+            description: 'Comprovante de residência',
+            required: true,
+            documentType: 'proof_of_address',
+          },
+        ],
+        validationId: validationIdB,
+      },
+      keyB.secret,
+    )
+    expect(createResB.statusCode).toBe(201)
+    const requestIdB = createResB.json().id
+
+    // Exclusão do Subject do tenant A.
+    await eraseSubject(adminPool.db, tenantA, 'test-api-key', null, subjectIdA)
+
+    // Solicitação do tenant A desvinculada (validation_id = NULL), preservada.
+    await withTenant(adminPool.db, tenantA, async (tx) => {
+      const rows = await tx
+        .select({ validationId: t.holderInformationRequest.validationId })
+        .from(t.holderInformationRequest)
+        .where(eq(t.holderInformationRequest.id, requestIdA))
+      expect(rows[0]?.validationId).toBeNull()
+    })
+
+    // Solicitação do tenant B preservada intacta, com validation_id ainda setado.
+    await withTenant(adminPool.db, tenantB, async (tx) => {
+      const rows = await tx
+        .select({ validationId: t.holderInformationRequest.validationId })
+        .from(t.holderInformationRequest)
+        .where(eq(t.holderInformationRequest.id, requestIdB))
+      expect(rows[0]?.validationId).toBe(validationIdB)
+    })
+
+    // Validação do tenant B continua existindo.
+    await withTenant(adminPool.db, tenantB, async (tx) => {
+      const validations = await tx
+        .select({ validationId: t.validation.validationId })
+        .from(t.validation)
+        .where(eq(t.validation.validationId, validationIdB))
+      expect(validations).toHaveLength(1)
     })
   })
 })

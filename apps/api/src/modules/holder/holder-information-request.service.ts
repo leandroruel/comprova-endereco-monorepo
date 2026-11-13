@@ -116,20 +116,41 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
     // PR 1: verificação e inserção em uma única transação com lock na validation
     // para impedir exclusão concorrente durante a associação.
     const [inserted] = await withTenant(db, tenantId, async (tx) => {
-      let validationExists = true
       if (create.validationId !== undefined && create.validationId !== null) {
         const validationId = create.validationId
+
+        // Descobre o subject da validation para lockar o ponto comum de
+        // sincronização com eraseSubject. A leitura é apenas para localizar o
+        // subject; a existência é revalidada com lock abaixo.
         const [validationRow] = await tx
+          .select({ validationId: t.validation.validationId, subjectId: t.validation.subjectId })
+          .from(t.validation)
+          .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
+          .limit(1)
+        if (!validationRow) {
+          throw new Error('validation not found')
+        }
+
+        // Locka o subject primeiro (mesma ordem que eraseSubject: subject,
+        // depois validation), serializando associação e exclusão neste registro
+        // estável e evitando deadlocks.
+        await tx
+          .select({ subjectId: t.subject.subjectId })
+          .from(t.subject)
+          .where(and(eq(t.subject.subjectId, validationRow.subjectId), eq(t.subject.tenantId, tenantId)))
+          .for('update')
+          .limit(1)
+
+        // Re-valida a validation com lock agora que o subject está protegido.
+        const [validationLocked] = await tx
           .select({ validationId: t.validation.validationId })
           .from(t.validation)
           .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
-          .for('update') // bloqueia a linha da validation para impedir exclusão concorrente
+          .for('update')
           .limit(1)
-        validationExists = validationRow !== undefined
-      }
-
-      if (!validationExists) {
-        throw new Error('validation not found')
+        if (!validationLocked) {
+          throw new Error('validation not found')
+        }
       }
 
       const [row] = await tx

@@ -52,10 +52,14 @@ export const eraseSubject = async (
   subjectId: string,
 ): Promise<number | null> =>
   withTenant(db, tenantId, async (tx) => {
+    // Ponto comum de sincronização com createHolderInformationRequest: o
+    // subject é lockado primeiro (mesma ordem em ambos os fluxos), serializando
+    // associação e exclusão neste registro estável e evitando deadlocks.
     const subject = await tx
       .select({ subjectId: t.subject.subjectId })
       .from(t.subject)
       .where(eq(t.subject.subjectId, subjectId))
+      .for('update') // bloqueia o subject para impedir associação concorrente durante a exclusão
       .limit(1)
     if (subject.length === 0) return null
 
