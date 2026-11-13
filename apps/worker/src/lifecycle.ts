@@ -58,14 +58,18 @@ export const runWorkerLifecycle = async (deps: WorkerLifecycleDeps): Promise<Wor
     if (shutdownPromise !== null) return shutdownPromise
     shutdownPromise = (async () => {
       deps.logger.info({ reason }, 'worker shutdown started')
-      // Ordem inversa da inicialização; cada stop aguarda o tick em voo.
+      // Fase 1: impedir novos ticks em todos os loops (limpa os timers) antes
+      // de aguardar qualquer tick em voo, de forma que um loop não inicie
+      // novo trabalho enquanto outro aguarda seu tick encerrar.
+      const stopPromises: Promise<void>[] = []
       for (const stop of [...stops].reverse()) {
-        try {
-          await stop()
-        } catch (error) {
-          deps.logger.error({ reason, ...errorFields(error) }, 'worker loop stop failed')
-        }
+        // Chamar stop() sem await executa a parte síncrona (stopped = true +
+        // clearInterval) imediatamente; o promise é resolvido quando o tick em
+        // voo termina.
+        stopPromises.push(stop())
       }
+      // Fase 2: aguardar todos os ticks em voo.
+      await Promise.all(stopPromises)
       try {
         await deps.close()
       } catch (error) {
