@@ -12,20 +12,47 @@ import { ensurePartitions } from './modules/partitions/partitions.service.js'
 
 const DAY_MS = 86_400_000
 
-const startLoop = (tick: () => Promise<unknown>, intervalMs: number, logger?: Logger): (() => void) => {
+/**
+ * Para um loop: impede novos ticks e aguarda o tick em andamento terminar.
+ * O shutdown gracioso do worker usa esse await antes de fechar os pools.
+ */
+export type StopLoop = () => Promise<void>
+
+/**
+ * Agenda `tick` a cada `intervalMs`.
+ *
+ * Um tick lento não sobrepõe o anterior (o intervalo seguinte é ignorado) e o
+ * stop aguarda a execução em voo — sem isso, o pool poderia fechar no meio de
+ * um tick. Exportado para os testes do ciclo de vida.
+ */
+export const startLoop = (tick: () => Promise<unknown>, intervalMs: number, logger?: Logger): StopLoop => {
+  let inFlight: Promise<void> | null = null
+  let stopped = false
   const timer = setInterval(() => {
-    tick().catch((error: unknown) => {
-      logger?.error(
-        {
-          reason: 'WORKER_LOOP_TICK_FAILED',
-          error_name: error instanceof Error ? error.name : 'unknown',
-          error_message: error instanceof Error ? error.message : String(error),
+    if (stopped || inFlight !== null) return
+    inFlight = tick()
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          logger?.error(
+            {
+              reason: 'WORKER_LOOP_TICK_FAILED',
+              error_name: error instanceof Error ? error.name : 'unknown',
+              error_message: error instanceof Error ? error.message : String(error),
+            },
+            'worker loop tick failed',
+          )
         },
-        'worker loop tick failed',
       )
-    })
+      .finally(() => {
+        inFlight = null
+      })
   }, intervalMs)
-  return () => clearInterval(timer)
+  return async () => {
+    stopped = true
+    clearInterval(timer)
+    await inFlight
+  }
 }
 
 export const startEvidenceRetentionLoop = (
@@ -33,14 +60,14 @@ export const startEvidenceRetentionLoop = (
   store: ObjectStore,
   logger?: Logger,
   intervalMs = DAY_MS,
-): (() => void) => startLoop(() => retentionTick(db, store), intervalMs, logger)
+): StopLoop => startLoop(() => retentionTick(db, store), intervalMs, logger)
 
 export const startValidationRetentionLoop = (
   db: Db,
   store: ObjectStore,
   logger?: Logger,
   intervalMs = DAY_MS,
-): (() => void) => startLoop(() => validationRetentionTick(db, store, 200, logger), intervalMs, logger)
+): StopLoop => startLoop(() => validationRetentionTick(db, store, 200, logger), intervalMs, logger)
 
 /**
  * F1.2: consome as linhas `pending` de `evidence_analysis` criadas pelo intake.
@@ -55,7 +82,7 @@ export const startEvidenceAnalysisLoop = (
   maxBytes: number,
   logger: Logger,
   intervalMs = 2_000,
-): (() => void) => {
+): StopLoop => {
   let running = false
   return startLoop(
     async () => {
@@ -83,7 +110,7 @@ export const startEvidenceVerificationLoop = (
   logger: Logger,
   referenceDb?: Db,
   intervalMs = 2_000,
-): (() => void) => {
+): StopLoop => {
   let running = false
   return startLoop(
     async () => {
@@ -113,7 +140,7 @@ export const startFiscalVerificationLoop = (
   logger: Logger,
   referenceDb?: Db,
   intervalMs = 2_000,
-): (() => void) => {
+): StopLoop => {
   let running = false
   return startLoop(
     async () => {
@@ -148,7 +175,7 @@ export const startHolderSubmissionProcessingLoop = (
   store: ObjectStoreReader,
   logger: Logger,
   intervalMs = 2_000,
-): (() => void) => {
+): StopLoop => {
   let running = false
   return startLoop(
     async () => {
@@ -165,5 +192,5 @@ export const startHolderSubmissionProcessingLoop = (
   )
 }
 
-export const startPartitionLoop = (db: Db, intervalMs = DAY_MS): (() => void) =>
+export const startPartitionLoop = (db: Db, intervalMs = DAY_MS): StopLoop =>
   startLoop(() => ensurePartitions(db), intervalMs)

@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, sql, withTenant, type Db } from '@comprova/db'
+import { and, eq, inArray, isNull, lte, sql, withTenant, type Db } from '@comprova/db'
 import * as t from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from '@comprova/observability'
@@ -8,6 +8,24 @@ import { signWebhookPayload } from './webhook-crypto.js'
 
 /** Tipos de resposta aceitos no acknowledgement do webhook. */
 export const WEBHOOK_RESPONSE_CONTENT_TYPES = ['application/json', 'text/plain'] as const
+
+/**
+ * Eventos do outbox destinados à publicação externa (webhooks).
+ *
+ * Allowlist explícita: o outbox também carrega eventos internos consumidos
+ * pelo worker — hoje `holder_submission.processing_requested` — que não podem
+ * ser selecionados nem marcados como publicados aqui, sob pena de o consumidor
+ * interno nunca encontrá-los. Ao criar um evento externo novo, inclua-o nesta
+ * lista.
+ */
+export const WEBHOOK_EVENT_TYPES = [
+  'batch.completed',
+  'subject.erased',
+  'validation.blocked_quota',
+  'validation.completed',
+  'validation.contested',
+  'validation.updated',
+] as const
 
 export interface PublisherDeps {
   readonly db: Db
@@ -31,7 +49,9 @@ const createDeliveriesForNewEvents = async (deps: PublisherDeps): Promise<number
       payload: t.outbox.payload,
     })
     .from(t.outbox)
-    .where(isNull(t.outbox.publishedAt))
+    // A restrição por tipo precisa estar na seleção: eventos internos nunca
+    // devem ser reivindicados nem marcados como publicados pelo publisher.
+    .where(and(isNull(t.outbox.publishedAt), inArray(t.outbox.eventType, [...WEBHOOK_EVENT_TYPES])))
     .orderBy(t.outbox.outboxId)
     .limit(deps.batchSize ?? 20)
     .for('update', { skipLocked: true })) as readonly {
