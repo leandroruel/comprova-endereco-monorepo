@@ -203,6 +203,12 @@ const createHolder = async (
  */
 const createValidationInDb = async (tenantId: string): Promise<string> => {
   return withTenant(adminPool.db, tenantId, async (tx) => {
+    // Garante que o legal_basis existe (FK para validation).
+    await tx
+      .insert(t.legalBasis)
+      .values({ code: 'CONSENT', description: 'Consentimento' })
+      .onConflictDoNothing()
+
     // Cria um subject para a validation
     const subjectId = randomUUID()
     await tx.insert(t.subject).values({
