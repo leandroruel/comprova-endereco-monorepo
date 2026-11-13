@@ -194,11 +194,8 @@ const createHolder = async (
   return res.json().holderId
 }
 
-const createValidation = async (
-  sessionCookieOrKey: string | { secret: string },
-  tenantId: string,
-  useM2M = false,
-): Promise<string> => {
+const createValidation = async (sessionCookie?: string): Promise<string> => {
+  const cookie = sessionCookie ?? ownerSessionCookie
   const body = {
     document: { type: 'CPF' as const, value: '12345678901' },
     address: {
@@ -214,13 +211,9 @@ const createValidation = async (
     legal_basis: 'CONSENT' as const,
     consent_ref: 'consent-123',
   } as any
-  if (useM2M) {
-    const key = sessionCookieOrKey as { secret: string }
-    const res = await injectWithM2M('POST', '/v1/validations', body, key.secret)
-    expect(res.statusCode).toBe(201)
-    return res.json().validation_id
-  }
-  const cookie = sessionCookieOrKey as string
+  // A criação de Validation exige escopo de escrita (`validations:write`),
+  // que não está disponível em uma M2M key restrita apenas a holders.
+  // Usamos a sessão de usuário autenticado, que detém os escopos necessários.
   const res = await injectWithSession('POST', '/v1/validations', body, cookie)
   expect(res.statusCode).toBe(201)
   return res.json().validation_id
@@ -253,7 +246,7 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
     ])
 
     const holderId = await createHolder(key, tenantId, 'ext-ref-pr1-001', true)
-    const validationId = await createValidation(key, tenantId, true)
+    const validationId = await createValidation()
 
     const res = await injectWithM2M(
       'POST',
@@ -286,12 +279,6 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
     const outroTenantId = await createOrganization(outroCookie, 'Org Outro PR1', 'outro@exemplo.com')
     await addMember(outroCookie, outroTenantId, 'outro@exemplo.com', 'admin')
 
-    const outroKey = await createM2mApiKey(outroCookie, outroTenantId, 'Chave Outro PR1', [
-      'holders:read',
-      'holders:write',
-      'verify:m2m',
-    ])
-
     // Holder do tenant do owner
     const tenantId = await createOrganization(ownerSessionCookie, 'Org Owner PR1', 'owner@exemplo.com')
     await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
@@ -302,8 +289,8 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
     ])
     const holderId = await createHolder(ownerKey, tenantId, 'ext-ref-pr1-002', true)
 
-    // Validation do outro tenant
-    const outroValidationId = await createValidation(outroKey, outroTenantId, true)
+    // Validation do outro tenant (criada com a sessão do outro usuário).
+    const outroValidationId = await createValidation(outroCookie)
 
     const res = await injectWithM2M(
       'POST',
@@ -406,7 +393,7 @@ describe('HolderInformationRequest — vinculação a Validation (PR 1)', () => 
     ])
 
     const holderId = await createHolder(key, tenantId, 'ext-ref-pr1-005', true)
-    const validationId = await createValidation(key, tenantId, true)
+    const validationId = await createValidation()
 
     const createRes = await injectWithM2M(
       'POST',
