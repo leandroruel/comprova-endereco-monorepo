@@ -892,10 +892,13 @@ export const runFastPath = async (
       })
     }
 
+    if (tenant.apiKeyId === null && (tenant.userId === null || tenant.userId === undefined)) {
+      throw new Error('validation.create without authenticated userId')
+    }
+
     await tx.insert(auditLog).values({
       tenantId: tenant.tenantId,
-      actor:
-        tenant.apiKeyId !== null ? `api-key:${tenant.apiKeyId}` : `session:${tenant.userId ?? 'unknown'}`,
+      actor: tenant.apiKeyId !== null ? `api-key:${tenant.apiKeyId}` : `session:${tenant.userId}`,
       action: 'validation.create',
       targetType: 'validation',
       targetId: validationId,

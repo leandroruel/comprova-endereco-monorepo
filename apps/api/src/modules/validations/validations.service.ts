@@ -275,6 +275,7 @@ export const contestValidation = async (
   db: Db,
   tenantId: string,
   apiKeyId: string | null,
+  userId: string | null | undefined,
   validationId: string,
   reason: string,
   encryptionKey: string,
@@ -287,9 +288,13 @@ export const contestValidation = async (
       .limit(1)
     if (exists.length === 0) return false
 
+    if (apiKeyId === null && (userId === null || userId === undefined)) {
+      throw new Error('validation.contested without authenticated userId')
+    }
+
     await tx.insert(t.auditLog).values({
       tenantId,
-      actor: apiKeyId !== null ? `api-key:${apiKeyId}` : 'session:unknown',
+      actor: apiKeyId !== null ? `api-key:${apiKeyId}` : `session:${userId}`,
       action: 'validation.contested',
       targetType: 'validation',
       targetId: validationId,

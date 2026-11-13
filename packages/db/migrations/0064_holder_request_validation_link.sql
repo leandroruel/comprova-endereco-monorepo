@@ -22,13 +22,20 @@ SET application_name = 'comprova-migrations';
 -- máximo uma validation.
 --
 -- Estratégia de execução:
---   - O `ALTER TABLE ... ADD COLUMN` é rápido e seguro (não bloqueia leituras
---     em tabelas pequenas/médias).
---   - Os `CREATE INDEX` seguram um ACCESS EXCLUSIVE lock na tabela durante
---     toda a transação. Para tabelas com volume significativo, considere
---     executar os índices fora da transação principal (ex.: dividir a migration
---     ou usar CREATE INDEX CONCURRENTLY com runner adequado). Para o volume
---     atual de `holder_information_request`, o risco de bloqueio é aceitável.
+--   - O `ALTER TABLE ... ADD COLUMN` adquire um lock ACCESS EXCLUSIVE na
+--     tabela, que bloqueia leituras e escritas até o encerramento da
+--     transação. Como o runner executa toda a migration dentro de uma única
+--     transação (client.begin/COMMIT), esse lock permanece durante toda a
+--     execução, incluindo durante a criação dos índices abaixo.
+--   - O `CREATE INDEX` convencional (não CONCURRENTLY) adquire um lock SHARE,
+--     que bloqueia escritas mas permite leituras. Como o ALTER TABLE já mantém
+--     o ACCESS EXCLUSIVE, o CREATE INDEX não adiciona restrição adicional
+--     durante a execução desta migration.
+--   - Para tabelas com volume significativo, considere executar os índices
+--     fora da transação principal (ex.: dividir a migration em arquivos
+--     separados ou usar CREATE INDEX CONCURRENTLY com um runner que suporte
+--     não-transação). Para o volume atual de `holder_information_request`,
+--     o risco de bloqueio é aceitável.
 --   - A migration roda dentro de uma transação no runner atual; dividir em dois
 --     arquivos NÃO resolve automaticamente, pois o runner pode executar ambos
 --     na mesma transação.

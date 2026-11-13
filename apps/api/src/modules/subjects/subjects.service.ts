@@ -48,6 +48,7 @@ export const eraseSubject = async (
   db: Db,
   tenantId: string,
   apiKeyId: string | null,
+  userId: string | null | undefined,
   subjectId: string,
 ): Promise<number | null> =>
   withTenant(db, tenantId, async (tx) => {
@@ -90,9 +91,13 @@ export const eraseSubject = async (
     await tx.delete(t.validation).where(eq(t.validation.subjectId, subjectId))
     await tx.delete(t.subject).where(eq(t.subject.subjectId, subjectId))
 
+    if (apiKeyId === null && (userId === null || userId === undefined)) {
+      throw new Error('subject.erasure without authenticated userId')
+    }
+
     await tx.insert(t.auditLog).values({
       tenantId,
-      actor: apiKeyId !== null && apiKeyId !== undefined ? `api-key:${apiKeyId}` : 'session:unknown',
+      actor: apiKeyId !== null ? `api-key:${apiKeyId}` : `session:${userId}`,
       action: 'subject.erasure',
       targetType: 'subject',
       targetId: subjectId,
