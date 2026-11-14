@@ -18,6 +18,14 @@ cardinalidade), o [ADR-0038](0038-analise-de-documento-do-cliente.md) (análise
 F1.2) e o [ADR-0040](0040-verificacao-do-documento-enviado.md) (verificação
 F1.3).
 
+> **Emenda (revisão da PR #73, 2026-11-14):** a seleção da Claim de endereço
+> passou a ser derivada do `subject.docType` (nunca `.limit(1)` sem condição de
+> domínio), a cardinalidade 1:1 Validation ↔ documento ganhou uma relação
+> explícita no banco (`validation_customer_document`, migration `0067`) e a
+> retenção do artefato do Holder passou a acompanhar o ciclo da Validation.
+> Detalhes na seção [Emenda](#emenda--revisão-da-pr-73-2026-11-14) ao final.
+> As decisões originais abaixo continuam válidas.
+
 ## Contexto
 
 O PR #72 adicionou `holder_information_request.validation_id`, permitindo que
@@ -220,3 +228,108 @@ evidência da Validation. A ausência é logada apenas com ids e razão técnica
 - solicitação sem vínculo e Validation inexistente sem materialização;
 - evento com tenant divergente sem processamento;
 - RLS por tenant e rejeição de um segundo vínculo pelo UNIQUE do banco.
+
+## Emenda — revisão da PR #73 (2026-11-14)
+
+A revisão identificou três falhas na primeira implementação. Esta emenda corrige
+as três sem reescrever as decisões acima; onde uma decisão original foi
+refinada, o texto da emenda prevalece.
+
+### E1. Claim de endereço resolvida pelo domínio
+
+A implementação inicial localizava "a" Claim da Validation com `.limit(1)` sem
+condição de finalidade — uma Validation pode ter mais de uma Claim, e a escolha
+arbitrária podia associar o comprovante à finalidade errada, inclusive
+reutilizar um recibo de outra Claim em `loadExistingReceipt`.
+
+A regra agora é a mesma do F1.1/ADR-0037, centralizada em
+`addressClaimForSubjectDocType` (`@comprova/core`): `subject.docType = 'CNPJ'` →
+`business_registered_address`/`organization`; qualquer outro documento →
+`address_exists`/`person`. Worker (F4.3) e F1.1 resolvem a Claim apenas por
+essa especificação (`type` + `subject_type` + `validation_id`):
+
+- outras Claims da Validation pertencem a outras finalidades e nunca são
+  candidatas;
+- **duas Claims da mesma finalidade são inconsistência**, não empate: o F1.1
+  falha fechado (`500 EVIDENCE_PERSISTENCE_FAILED`) e o worker loga
+  `HOLDER_CLAIM_INCONSISTENCY` e pula a materialização do recibo (o documento
+  continua no domínio do Holder, sem retry infinito);
+- um recibo `customer_submitted_document` existente em Claim de outra
+  finalidade nunca é reutilizado nem adotado; é tratado como inconsistência e
+  bloqueia novo recibo para a mesma Validation.
+
+### E2. Cardinalidade 1:1 Validation ↔ documento no banco
+
+`idx_claim_evidence_customer_document_uq` garante um recibo por **Claim**, não
+por **Validation**. Nasce a relação explícita recibo ↔ Validation
+(migration `0067`):
+
+```text
+validation_customer_document
+  validation_id     uuid PRIMARY KEY   -- no máximo um documento por Validation
+  claim_evidence_id uuid NOT NULL UNIQUE -- um recibo pertence a no máximo uma Validation
+  tenant_id         uuid NOT NULL
+  created_at        timestamptz NOT NULL DEFAULT now()
+```
+
+- FK composta `(claim_evidence_id, tenant_id)` → `claim_evidence` com
+  `ON DELETE CASCADE` garante que recibo e vínculo são do mesmo tenant;
+- sem FK para `validation`: a PK é composta `(validation_id, created_at)` e a
+  tabela é particionada por `created_at`; existência e tenant são garantidos
+  pelo `FOR UPDATE` da Validation antes da escrita (mesma ordem do F1.1);
+- RLS FORCE com `tenant_isolation`; sem UPDATE — o vínculo é imutável e o
+  DELETE existe para a cascata de retenção/erasure;
+- **backfill determinístico** com `DISTINCT ON`: prefere o recibo da Claim
+  canônica derivada do subject e, em empate, o mais antigo. Recibos excedentes
+  permanecem como histórico e passam a ser tratados como inconsistência
+  (E1), não reutilizados;
+- todos os caminhos de escrita gravam o vínculo na MESMA transação do recibo:
+  F1.1 (upload direto) e worker F4.3. O worker o faz dentro de um savepoint:
+  se o vínculo conflitar, o recibo recém-criado é desfeito junto — não sobra
+  recibo órfão;
+- conflito de unicidade em qualquer caminho vira `409 EVIDENCE_ALREADY_EXISTS`
+  no F1.1 e inconsistência logada no worker. A constraint do banco é a barreira
+  final, independente do caminho de escrita;
+- `idx_claim_evidence_customer_document_uq` é preservado (camada por Claim).
+
+### E3. Retenção coerente com o ciclo da Validation
+
+O artefato do Holder nascia com 30 dias fixos enquanto a evidência vive até
+`validation.expires_at` — a evidência podia ficar sem o documento que a
+lastreia.
+
+- **Com Validation**, `evidence_artifact.retention_until` passa a ser
+  `validation.expires_at` nos dois caminhos de escrita (worker F4.3 e
+  processamento da API);
+- `validationRetentionTick` passa a remover o artefato do Holder junto com o
+  grafo: hoje ele descobre artefatos por `evidence_artifact.claim_evidence_id`
+  **e** por `evidence_artifact_claim_evidence` **e** por
+  `validation_customer_document`, apagando objeto antes da linha;
+- **artefatos de solicitações sem Validation** continuam com 30 dias e não têm
+  job dedicado que remova por `retention_until` — limitação documentada em
+  `docs/lgpd/retencao.md`. Recomendação futura: estender o tick existente de
+  `evidence` para cobrir `evidence_artifact` por `retention_until`, em decisão
+  própria (não foi criado mecanismo novo nesta correção).
+
+### Testes da emenda
+
+`apps/api/tests/holder-evidence-integration.int.test.ts` e
+`apps/worker/src/modules/retention/retention.int.test.ts` passam a cobrir:
+
+- múltiplas Claims na mesma Validation: recibo exclusivamente na Claim de
+  endereço, outra finalidade intocada;
+- recibo em Claim de outra finalidade: não reutilizado, nenhum segundo recibo,
+  nenhum vínculo, documento do Holder permanece processado;
+- adoção de recibo legado da Claim de endereço criado antes da relação
+  explícita;
+- cardinalidade no banco: segundo recibo + vínculo para a mesma Validation
+  rejeitados pela PK, sem registros parciais (rollback);
+- F1.1 grava o vínculo e resolve a Claim canônica mesmo com outra finalidade
+  presente;
+- upload F1.1 após recibo do Holder → `409 EVIDENCE_ALREADY_EXISTS` sem criar
+  segunda evidência;
+- worker não cria segundo vínculo quando o recibo já tem artefato direto do
+  F1.1;
+- retenção remove artefato do Holder, associação e vínculo ao expirar a
+  Validation;
+- teste unitário de `addressClaimForSubjectDocType` (`packages/core`).

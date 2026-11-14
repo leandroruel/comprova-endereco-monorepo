@@ -21,6 +21,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { analyzeEvidenceTick } from '../../worker/src/modules/evidence-analysis/evidence-analysis.service.js'
 import { holderSubmissionProcessingTick } from '../../worker/src/modules/holder-submission-processing/holder-submission-processing.service.js'
 import { verifyEvidenceTick } from '../../worker/src/modules/evidence-verification/evidence-verification.service.js'
+import { EvidenceIntakeError, uploadEvidence } from '../src/modules/validations/evidence-intake.service.js'
 
 const FIXED_NOW = () => new Date('2026-10-22T12:00:00.000Z')
 const MAX_BYTES = 64 * 1024
@@ -93,6 +94,72 @@ const tenantOf = (name: string) => createTenant(adminPool.db, { name })
 const validationOf = async (tenantId: string): Promise<string> => {
   const subjectId = await createSubject(adminPool.db, tenantId, 'CNPJ')
   return createValidation(adminPool.db, tenantId, subjectId)
+}
+
+const validationWithSubjectOf = async (
+  tenantId: string,
+): Promise<{ subjectId: string; validationId: string }> => {
+  const subjectId = await createSubject(adminPool.db, tenantId, 'CNPJ')
+  const validationId = await createValidation(adminPool.db, tenantId, subjectId)
+  return { subjectId, validationId }
+}
+
+type ClaimTypeForTest = 'business_registered_address' | 'address_exists'
+
+const seedClaim = async (
+  tenantId: string,
+  validationId: string,
+  subjectId: string,
+  type: ClaimTypeForTest,
+  subjectType: 'organization' | 'person' = 'organization',
+): Promise<string> => {
+  const claimId = randomUUID()
+  await adminPool.db.insert(t.claim).values({
+    claimId,
+    tenantId,
+    validationId,
+    subjectId,
+    type,
+    subjectType,
+    targetType: 'address',
+  })
+  return claimId
+}
+
+const seedCustomerReceipt = async (tenantId: string, claimId: string): Promise<string> => {
+  const claimEvidenceId = randomUUID()
+  await adminPool.db.insert(t.claimEvidence).values({
+    claimEvidenceId,
+    tenantId,
+    claimId,
+    checker: CUSTOMER_DOCUMENT_INTAKE_CHECKER,
+    checkerVersion: CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION,
+    stance: 'unknown',
+    strength: 0,
+    confidence: 0,
+    source: CUSTOMER_DOCUMENT_INTAKE_SOURCE,
+    observedAt: FIXED_NOW(),
+    ttlSeconds: 3600,
+    expiresAt: new Date(FIXED_NOW().getTime() + 3_600_000),
+    detail: {},
+  })
+  return claimEvidenceId
+}
+
+const validationDocumentLinksOf = async (validationId: string) =>
+  adminPool.db
+    .select()
+    .from(t.validationCustomerDocument)
+    .where(eq(t.validationCustomerDocument.validationId, validationId))
+
+const errorMessagesOf = (error: unknown): string => {
+  const parts: string[] = []
+  let current: unknown = error
+  for (let depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    parts.push(current.message)
+    current = (current as { cause?: unknown }).cause
+  }
+  return parts.join(' | ')
 }
 
 interface SeedRequestInput {
@@ -553,5 +620,309 @@ describe('PR #73 — documento do Holder no pipeline de evidências', () => {
         tenantId: tenantA,
       }),
     ).rejects.toThrow()
+  })
+})
+
+// Revisão da PR #73: a Claim de endereço é identificada pelo domínio
+// (subject.docType), o recibo nunca é reutilizado de outra finalidade e a
+// cardinalidade 1:1 Validation ↔ documento é imposta pelo banco.
+describe('PR #73 (revisão) — Claim de endereço, cardinalidade por Validation e retenção', () => {
+  it('associa o recibo exclusivamente à Claim de endereço quando a Validation tem outras Claims', async () => {
+    const tenantId = await tenantOf('holder-evidence-multi-claim')
+    const { subjectId, validationId } = await validationWithSubjectOf(tenantId)
+    const addressClaimId = await seedClaim(
+      tenantId,
+      validationId,
+      subjectId,
+      'business_registered_address',
+      'organization',
+    )
+    const otherClaimId = await seedClaim(tenantId, validationId, subjectId, 'address_exists', 'organization')
+
+    const { requestId } = await seedRequest({
+      tenantId,
+      validationId,
+      documents: [{ bytes: proof() }],
+    })
+    await enqueue(tenantId, requestId)
+    await runHolderTick()
+
+    const graph = await graphOf(validationId)
+    const receipt = graph.receipt
+    if (receipt === undefined) throw new Error('customer document receipt missing')
+    // A Claim canônica de endereço (CNPJ) recebe o recibo.
+    expect(receipt.claimId).toBe(addressClaimId)
+
+    // A outra finalidade não recebe evidência nenhuma.
+    const otherEvidence = await adminPool.db
+      .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, otherClaimId))
+    expect(otherEvidence).toHaveLength(0)
+
+    // Relação 1:1 recibo ↔ Validation registrada no banco.
+    const links = await validationDocumentLinksOf(validationId)
+    expect(links).toHaveLength(1)
+    expect(links[0]!.claimEvidenceId).toBe(receipt.claimEvidenceId)
+  })
+
+  it('não reutiliza recibo de Claim de outra finalidade nem cria segundo recibo', async () => {
+    const tenantId = await tenantOf('holder-evidence-wrong-claim')
+    const { subjectId, validationId } = await validationWithSubjectOf(tenantId)
+    const addressClaimId = await seedClaim(
+      tenantId,
+      validationId,
+      subjectId,
+      'business_registered_address',
+      'organization',
+    )
+    const otherClaimId = await seedClaim(tenantId, validationId, subjectId, 'address_exists', 'organization')
+    const legacyReceiptId = await seedCustomerReceipt(tenantId, otherClaimId)
+
+    const { requestId } = await seedRequest({
+      tenantId,
+      validationId,
+      documents: [{ bytes: proof() }],
+    })
+    await enqueue(tenantId, requestId)
+    await runHolderTick()
+
+    // O recibo da finalidade errada permanece o único e não é adotado.
+    expect(await countReceipts(validationId)).toBe(1)
+    expect(await validationDocumentLinksOf(validationId)).toHaveLength(0)
+
+    // Nenhum recibo novo na Claim de endereço.
+    const addressReceipts = await adminPool.db
+      .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+      .from(t.claimEvidence)
+      .where(eq(t.claimEvidence.claimId, addressClaimId))
+    expect(addressReceipts).toHaveLength(0)
+
+    // O recibo da outra finalidade não ganhou associação de artefato.
+    const associations = await adminPool.db
+      .select({ artifactId: t.evidenceArtifactClaimEvidence.artifactId })
+      .from(t.evidenceArtifactClaimEvidence)
+      .where(eq(t.evidenceArtifactClaimEvidence.claimEvidenceId, legacyReceiptId))
+    expect(associations).toHaveLength(0)
+
+    // O documento continua processado no domínio do Holder (artefato + análise).
+    const artifacts = await adminPool.db
+      .select({ artifactId: t.evidenceArtifact.artifactId })
+      .from(t.evidenceArtifact)
+      .where(eq(t.evidenceArtifact.holderInformationRequestId, requestId))
+    expect(artifacts).toHaveLength(1)
+    const processing = await adminPool.db
+      .select({ state: t.holderSubmissionProcessing.state })
+      .from(t.holderSubmissionProcessing)
+      .where(eq(t.holderSubmissionProcessing.holderInformationRequestId, requestId))
+    expect(processing[0]?.state).toBe('processed')
+  })
+
+  it('adota recibo legado da Claim de endereço criado antes da relação explícita', async () => {
+    const tenantId = await tenantOf('holder-evidence-legacy-adopt')
+    const { subjectId, validationId } = await validationWithSubjectOf(tenantId)
+    const addressClaimId = await seedClaim(
+      tenantId,
+      validationId,
+      subjectId,
+      'business_registered_address',
+      'organization',
+    )
+    const legacyReceiptId = await seedCustomerReceipt(tenantId, addressClaimId)
+
+    const { requestId } = await seedRequest({
+      tenantId,
+      validationId,
+      documents: [{ bytes: proof() }],
+    })
+    await enqueue(tenantId, requestId)
+    await runHolderTick()
+
+    // O recibo legado é adotado (vínculo criado), sem criar um segundo recibo.
+    expect(await countReceipts(validationId)).toBe(1)
+    const links = await validationDocumentLinksOf(validationId)
+    expect(links).toHaveLength(1)
+    expect(links[0]!.claimEvidenceId).toBe(legacyReceiptId)
+
+    const graph = await graphOf(validationId)
+    expect(graph.links).toHaveLength(1)
+    expect(graph.links[0]!.claimEvidenceId).toBe(legacyReceiptId)
+  })
+
+  it('banco rejeita segundo recibo para a mesma Validation sem deixar registros parciais', async () => {
+    const tenantId = await tenantOf('holder-evidence-db-cardinality')
+    const { subjectId, validationId } = await validationWithSubjectOf(tenantId)
+    await seedClaim(tenantId, validationId, subjectId, 'business_registered_address', 'organization')
+    const otherClaimId = await seedClaim(tenantId, validationId, subjectId, 'address_exists', 'organization')
+
+    const { requestId } = await seedRequest({
+      tenantId,
+      validationId,
+      documents: [{ bytes: proof() }],
+    })
+    await enqueue(tenantId, requestId)
+    await runHolderTick()
+
+    expect(await countReceipts(validationId)).toBe(1)
+    const before = await validationDocumentLinksOf(validationId)
+    expect(before).toHaveLength(1)
+
+    // Escrita bruta fora do fluxo: recibo em outra Claim + vínculo na mesma
+    // Validation. A PK de `validation_customer_document` é a barreira.
+    const error = await adminPool.db
+      .transaction(async (tx) => {
+        const receiptId = randomUUID()
+        await tx.insert(t.claimEvidence).values({
+          claimEvidenceId: receiptId,
+          tenantId,
+          claimId: otherClaimId,
+          checker: CUSTOMER_DOCUMENT_INTAKE_CHECKER,
+          checkerVersion: CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION,
+          stance: 'unknown',
+          strength: 0,
+          confidence: 0,
+          source: CUSTOMER_DOCUMENT_INTAKE_SOURCE,
+          observedAt: FIXED_NOW(),
+          ttlSeconds: 3600,
+          expiresAt: new Date(FIXED_NOW().getTime() + 3_600_000),
+          detail: {},
+        })
+        await tx.insert(t.validationCustomerDocument).values({
+          validationId,
+          claimEvidenceId: receiptId,
+          tenantId,
+        })
+      })
+      .then(() => null)
+      .catch((caught: unknown) => caught)
+    expect(error).not.toBeNull()
+    expect(errorMessagesOf(error)).toContain('validation_customer_document_pkey')
+
+    // Rollback: nenhum recibo parcial e o vínculo original permanece.
+    expect(await countReceipts(validationId)).toBe(1)
+    expect(await validationDocumentLinksOf(validationId)).toEqual(before)
+  })
+
+  it('upload direto F1.1 grava o vínculo recibo ↔ Validation', async () => {
+    const tenantId = await tenantOf('holder-evidence-f11-link')
+    const { subjectId, validationId } = await validationWithSubjectOf(tenantId)
+    // Outra finalidade presente: o upload não pode escolher arbitrariamente.
+    const otherClaimId = await seedClaim(tenantId, validationId, subjectId, 'address_exists', 'organization')
+
+    const result = await uploadEvidence(
+      { db: adminPool.db, store, logger, maxBytes: MAX_BYTES },
+      {
+        tenantId,
+        validationId,
+        data: new Uint8Array(proof()),
+        declaredContentType: 'application/pdf',
+        idempotencyKey: undefined,
+      },
+    )
+
+    const receipt = (
+      await adminPool.db
+        .select()
+        .from(t.claimEvidence)
+        .where(eq(t.claimEvidence.claimEvidenceId, result.evidenceId))
+    )[0]!
+    expect(receipt.source).toBe(CUSTOMER_DOCUMENT_INTAKE_SOURCE)
+    expect(receipt.claimId).not.toBe(otherClaimId)
+
+    // O recibo caiu na Claim canônica de endereço (CNPJ), não na outra finalidade.
+    const receiptClaim = (
+      await adminPool.db.select().from(t.claim).where(eq(t.claim.claimId, receipt.claimId))
+    )[0]!
+    expect(receiptClaim.type).toBe('business_registered_address')
+    expect(receiptClaim.subjectType).toBe('organization')
+
+    const links = await validationDocumentLinksOf(validationId)
+    expect(links).toHaveLength(1)
+    expect(links[0]!.claimEvidenceId).toBe(result.evidenceId)
+  })
+
+  it('upload F1.1 após recibo do Holder responde 409 sem criar segunda evidência', async () => {
+    const tenantId = await tenantOf('holder-evidence-holder-first')
+    const { validationId } = await validationWithSubjectOf(tenantId)
+    const { requestId } = await seedRequest({
+      tenantId,
+      validationId,
+      documents: [{ bytes: proof() }],
+    })
+    await enqueue(tenantId, requestId)
+    await runHolderTick()
+
+    const graph = await graphOf(validationId)
+    const holderReceiptId = graph.receipt!.claimEvidenceId
+
+    let caught: unknown = null
+    try {
+      await uploadEvidence(
+        { db: adminPool.db, store, logger, maxBytes: MAX_BYTES },
+        {
+          tenantId,
+          validationId,
+          data: new Uint8Array(proof()),
+          declaredContentType: 'application/pdf',
+          idempotencyKey: undefined,
+        },
+      )
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(EvidenceIntakeError)
+    expect((caught as EvidenceIntakeError).problem.status).toBe(409)
+    expect((caught as EvidenceIntakeError).problem.code).toBe('EVIDENCE_ALREADY_EXISTS')
+
+    // Nada mudou: mesmo recibo, mesmo vínculo, um único documento.
+    expect(await countReceipts(validationId)).toBe(1)
+    const links = await validationDocumentLinksOf(validationId)
+    expect(links).toHaveLength(1)
+    expect(links[0]!.claimEvidenceId).toBe(holderReceiptId)
+    const artifacts = await adminPool.db
+      .select({ artifactId: t.evidenceArtifact.artifactId })
+      .from(t.evidenceArtifact)
+      .where(eq(t.evidenceArtifact.holderInformationRequestId, requestId))
+    expect(artifacts).toHaveLength(1)
+  })
+
+  it('worker não cria segundo vínculo quando o recibo já tem artefato direto do F1.1', async () => {
+    const tenantId = await tenantOf('holder-evidence-f11-first')
+    const { validationId } = await validationWithSubjectOf(tenantId)
+
+    await uploadEvidence(
+      { db: adminPool.db, store, logger, maxBytes: MAX_BYTES },
+      {
+        tenantId,
+        validationId,
+        data: new Uint8Array(proof()),
+        declaredContentType: 'application/pdf',
+        idempotencyKey: undefined,
+      },
+    )
+    const linksBefore = await validationDocumentLinksOf(validationId)
+    expect(linksBefore).toHaveLength(1)
+
+    const { requestId } = await seedRequest({
+      tenantId,
+      validationId,
+      documents: [{ bytes: proof('Outro Titular') }],
+    })
+    await enqueue(tenantId, requestId)
+    await runHolderTick()
+
+    // Um único recibo e um único vínculo recibo ↔ Validation.
+    expect(await countReceipts(validationId)).toBe(1)
+    expect(await validationDocumentLinksOf(validationId)).toEqual(linksBefore)
+
+    // O documento do Holder não ganhou associação ao recibo (ele já tem
+    // artefato direto) e continua no domínio do Holder.
+    const graph = await graphOf(validationId)
+    expect(graph.links).toHaveLength(0)
+    const holderArtifacts = await adminPool.db
+      .select({ artifactId: t.evidenceArtifact.artifactId })
+      .from(t.evidenceArtifact)
+      .where(eq(t.evidenceArtifact.holderInformationRequestId, requestId))
+    expect(holderArtifacts).toHaveLength(1)
   })
 })

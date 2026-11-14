@@ -3,6 +3,8 @@ import {
   CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION,
   CUSTOMER_DOCUMENT_INTAKE_SOURCE,
   CUSTOMER_DOCUMENT_INTAKE_STATUS,
+  addressClaimForSubjectDocType,
+  type AddressClaimSpec,
 } from '@comprova/core'
 import {
   and,
@@ -63,6 +65,19 @@ interface ClaimTarget {
 }
 
 /**
+ * Inconsistência de dados que impede materializar o recibo sem violar a regra
+ * "um documento por Validation". Não é transitória: repetir o evento não muda
+ * o resultado. O worker loga e segue com artefato/análise do Holder, sem
+ * reaproveitar Claim/recibo de outra finalidade nem criar um segundo recibo.
+ */
+export class HolderClaimInconsistencyError extends Error {
+  constructor(readonly reason: string) {
+    super(reason)
+    this.name = 'HolderClaimInconsistencyError'
+  }
+}
+
+/**
  * Carrega (e trava) a validation vinculada à solicitação. O `FOR UPDATE` usa a
  * mesma ordem do intake F1.1: upload direto e submissão do Holder serializam na
  * linha da validation antes de criar claim/recibo. `validation` é particionada
@@ -88,20 +103,51 @@ const loadValidationForClaim = async (
   return rows[0]
 }
 
+const loadSubjectDocType = async (tx: DbTx, tenantId: string, subjectId: string): Promise<string> => {
+  const rows = await tx
+    .select({ docType: t.subject.docType })
+    .from(t.subject)
+    .where(and(eq(t.subject.subjectId, subjectId), eq(t.subject.tenantId, tenantId)))
+    .limit(1)
+  const docType = rows[0]?.docType
+  if (docType === undefined) throw new Error('validation subject missing')
+  return docType
+}
+
 /**
- * Procura o recibo de intake já existente para QUALQUER claim da validation.
- *
- * A busca é por validation (e não só pelo claim) porque uma validation pode ter
- * mais de um `claim` de tipos diferentes. O recibo é único por claim no banco;
- * localizá-lo antes de escolher o claim garante que o fluxo do Holder reutilize
- * o mesmo recibo que o F1.1 eventualmente criou.
+ * Claims da Validation que representam a MESMA finalidade de endereço derivada
+ * do subject. Outras Claims da Validation (ex.: finalidade diferente) nunca são
+ * candidatas. Duas candidatas iguais são inconsistência, não empate.
  */
-const loadExistingReceipt = async (
+const loadAddressClaimCandidates = async (
+  tx: DbTx,
+  validation: ValidationForClaim,
+  spec: AddressClaimSpec,
+): Promise<readonly { readonly claimId: string }[]> =>
+  tx
+    .select({ claimId: t.claim.claimId })
+    .from(t.claim)
+    .where(
+      and(
+        eq(t.claim.tenantId, validation.tenantId),
+        eq(t.claim.validationId, validation.validationId),
+        eq(t.claim.type, spec.type),
+        eq(t.claim.subjectType, spec.subjectType),
+      ),
+    )
+
+/**
+ * Recibos `customer_submitted_document` de QUALQUER Claim da Validation.
+ * Usado apenas para detectar dados legados/inconsistentes: o fluxo do Holder só
+ * adota o recibo se ele estiver na Claim de endereço. Não é `.limit(1)` porque
+ * duas linhas significam violação da regra "um documento por Validation".
+ */
+const loadReceiptsForValidation = async (
   tx: DbTx,
   tenantId: string,
   validationId: string,
-): Promise<{ readonly claimId: string; readonly claimEvidenceId: string } | undefined> => {
-  const rows = await tx
+): Promise<readonly { readonly claimId: string; readonly claimEvidenceId: string }[]> =>
+  tx
     .select({
       claimId: t.claimEvidence.claimId,
       claimEvidenceId: t.claimEvidence.claimEvidenceId,
@@ -118,60 +164,132 @@ const loadExistingReceipt = async (
         eq(t.claimEvidence.source, CUSTOMER_DOCUMENT_INTAKE_SOURCE),
       ),
     )
+    .orderBy(t.claimEvidence.createdAt, t.claimEvidence.claimEvidenceId)
+
+const loadValidationCustomerDocument = async (
+  tx: DbTx,
+  tenantId: string,
+  validationId: string,
+): Promise<{ readonly claimId: string; readonly claimEvidenceId: string } | undefined> => {
+  const [row] = await tx
+    .select({
+      claimEvidenceId: t.validationCustomerDocument.claimEvidenceId,
+      claimId: t.claimEvidence.claimId,
+    })
+    .from(t.validationCustomerDocument)
+    .innerJoin(
+      t.claimEvidence,
+      and(
+        eq(t.claimEvidence.claimEvidenceId, t.validationCustomerDocument.claimEvidenceId),
+        eq(t.claimEvidence.tenantId, t.validationCustomerDocument.tenantId),
+      ),
+    )
+    .where(
+      and(
+        eq(t.validationCustomerDocument.tenantId, tenantId),
+        eq(t.validationCustomerDocument.validationId, validationId),
+      ),
+    )
     .limit(1)
-  return rows[0]
+  return row
 }
 
 /**
- * Localiza ou cria o claim da validation seguindo as mesmas regras do F1.1
- * (`ensureClaim`): reutiliza o claim existente; senão deriva tipo/subjectType do
- * `subject.docType` e insere com `ON CONFLICT DO NOTHING`. Nenhuma comparação
- * de identidade é feita aqui.
+ * Garante a relação 1:1 recibo ↔ Validation. `validation_id` é PK no banco:
+ * se já houver outro recibo vinculado, a leitura detecta o conflito e o fluxo
+ * não o reutiliza nem cria um segundo documento.
  */
-const ensureClaimForValidation = async (tx: DbTx, validation: ValidationForClaim): Promise<ClaimTarget> => {
-  const receipt = await loadExistingReceipt(tx, validation.tenantId, validation.validationId)
-  if (receipt !== undefined) {
-    return { validation, claimId: receipt.claimId, existingReceiptId: receipt.claimEvidenceId }
-  }
-
-  const existingClaim = await tx
-    .select({ claimId: t.claim.claimId })
-    .from(t.claim)
-    .where(and(eq(t.claim.tenantId, validation.tenantId), eq(t.claim.validationId, validation.validationId)))
-    .limit(1)
-  if (existingClaim[0] !== undefined) {
-    return { validation, claimId: existingClaim[0].claimId, existingReceiptId: null }
-  }
-
-  const subjectRows = await tx
-    .select({ docType: t.subject.docType })
-    .from(t.subject)
-    .where(and(eq(t.subject.subjectId, validation.subjectId), eq(t.subject.tenantId, validation.tenantId)))
-    .limit(1)
-  const docType = subjectRows[0]?.docType
-  if (docType === undefined) throw new Error('validation subject missing')
-
+const ensureValidationCustomerDocument = async (
+  tx: DbTx,
+  input: { readonly tenantId: string; readonly validationId: string; readonly claimEvidenceId: string },
+): Promise<void> => {
   await tx
-    .insert(t.claim)
+    .insert(t.validationCustomerDocument)
     .values({
-      claimId: randomUUID(),
-      tenantId: validation.tenantId,
-      validationId: validation.validationId,
-      subjectId: validation.subjectId,
-      addressId: validation.addressId,
-      type: docType === 'CNPJ' ? 'business_registered_address' : 'address_exists',
-      subjectType: docType === 'CNPJ' ? 'organization' : 'person',
-      targetType: 'address',
+      validationId: input.validationId,
+      claimEvidenceId: input.claimEvidenceId,
+      tenantId: input.tenantId,
+      createdAt: sql`clock_timestamp()`,
     })
     .onConflictDoNothing()
 
-  const created = await tx
-    .select({ claimId: t.claim.claimId })
-    .from(t.claim)
-    .where(and(eq(t.claim.tenantId, validation.tenantId), eq(t.claim.validationId, validation.validationId)))
+  const [link] = await tx
+    .select({ claimEvidenceId: t.validationCustomerDocument.claimEvidenceId })
+    .from(t.validationCustomerDocument)
+    .where(
+      and(
+        eq(t.validationCustomerDocument.tenantId, input.tenantId),
+        eq(t.validationCustomerDocument.validationId, input.validationId),
+      ),
+    )
     .limit(1)
-  if (created[0] === undefined) throw new Error('claim insert failed')
-  return { validation, claimId: created[0].claimId, existingReceiptId: null }
+
+  if (link === undefined) throw new Error('validation customer document link insert failed')
+  if (link.claimEvidenceId !== input.claimEvidenceId) {
+    throw new HolderClaimInconsistencyError('validation_receipt_conflict')
+  }
+}
+
+/**
+ * Resolve a Claim de endereço da Validation e o recibo já existente.
+ *
+ * A finalidade vem do `subject.docType`, com a mesma regra do F1.1/ADR-0037
+ * (`CNPJ` → `business_registered_address`/`organization`; demais →
+ * `address_exists`/`person`). Uma Validation pode ter outras Claims; elas são
+ * ignoradas na seleção, mas provocam inconsistência se houverem capturado o
+ * recibo de documento do cliente.
+ */
+const ensureClaimForValidation = async (tx: DbTx, validation: ValidationForClaim): Promise<ClaimTarget> => {
+  const spec = addressClaimForSubjectDocType(
+    await loadSubjectDocType(tx, validation.tenantId, validation.subjectId),
+  )
+
+  let candidates = await loadAddressClaimCandidates(tx, validation, spec)
+  if (candidates.length > 1) throw new HolderClaimInconsistencyError('multiple_address_claims')
+  if (candidates.length === 0) {
+    await tx
+      .insert(t.claim)
+      .values({
+        claimId: randomUUID(),
+        tenantId: validation.tenantId,
+        validationId: validation.validationId,
+        subjectId: validation.subjectId,
+        addressId: validation.addressId,
+        type: spec.type,
+        subjectType: spec.subjectType,
+        targetType: 'address',
+      })
+      .onConflictDoNothing()
+    candidates = await loadAddressClaimCandidates(tx, validation, spec)
+    if (candidates.length > 1) throw new HolderClaimInconsistencyError('multiple_address_claims')
+  }
+
+  const claimId = candidates[0]?.claimId
+  if (claimId === undefined) throw new Error('claim insert failed')
+
+  const linked = await loadValidationCustomerDocument(tx, validation.tenantId, validation.validationId)
+  if (linked !== undefined) {
+    if (linked.claimId !== claimId) {
+      throw new HolderClaimInconsistencyError('linked_receipt_on_other_claim')
+    }
+    return { validation, claimId, existingReceiptId: linked.claimEvidenceId }
+  }
+
+  const receipts = await loadReceiptsForValidation(tx, validation.tenantId, validation.validationId)
+  if (receipts.length === 0) return { validation, claimId, existingReceiptId: null }
+  if (receipts.length > 1) throw new HolderClaimInconsistencyError('multiple_receipts_for_validation')
+
+  const receipt = receipts[0]!
+  if (receipt.claimId !== claimId) throw new HolderClaimInconsistencyError('receipt_on_other_claim')
+
+  // Recibo criado antes da relação explícita (F1.1/F4.3 anteriores): adota o
+  // vínculo sem recriar a evidência existente.
+  await ensureValidationCustomerDocument(tx, {
+    tenantId: validation.tenantId,
+    validationId: validation.validationId,
+    claimEvidenceId: receipt.claimEvidenceId,
+  })
+  return { validation, claimId, existingReceiptId: receipt.claimEvidenceId }
 }
 
 /**
@@ -558,10 +676,11 @@ export const holderSubmissionProcessingTick = async (
           .limit(1)
 
         let claimTarget: ClaimTarget | null = null
+        let linkedValidation: ValidationForClaim | undefined
         const validationId = requestRow[0]?.validationId
         if (validationId !== null && validationId !== undefined) {
-          const validation = await loadValidationForClaim(tx, tenantId, validationId)
-          if (validation === undefined) {
+          linkedValidation = await loadValidationForClaim(tx, tenantId, validationId)
+          if (linkedValidation === undefined) {
             // Validation removida por erasure ou vínculo inconsistente: não
             // ressuscita evidência. O artefato do Holder segue o ciclo F4.3.
             deps.logger.warn(
@@ -574,7 +693,28 @@ export const holderSubmissionProcessingTick = async (
               'holder request validation not found; skipping claim materialization',
             )
           } else {
-            claimTarget = await ensureClaimForValidation(tx, validation)
+            try {
+              claimTarget = await ensureClaimForValidation(tx, linkedValidation)
+            } catch (error) {
+              if (error instanceof HolderClaimInconsistencyError) {
+                // Dado inconsistente não vira retry infinito. O documento
+                // continua no domínio do Holder (artefato + análise), mas
+                // nenhum recibo é criado/reutilizado em Claim de outra
+                // finalidade.
+                deps.logger.error(
+                  {
+                    request_id: requestId,
+                    tenant_id: tenantId,
+                    validation_id: validationId,
+                    reason: 'HOLDER_CLAIM_INCONSISTENCY',
+                    detail: error.reason,
+                  },
+                  'holder submission claim inconsistency; skipping claim materialization',
+                )
+              } else {
+                throw error
+              }
+            }
           }
         }
 
@@ -590,7 +730,10 @@ export const holderSubmissionProcessingTick = async (
               tenantId,
               requestId,
               document: doc,
-              retentionUntil: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+              // Com Validation, o artefato acompanha o ciclo da evidência; sem
+              // vínculo, mantém a política F4.3 de 30 dias.
+              retentionUntil:
+                linkedValidation?.expiresAt ?? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
             })
 
             // Insere análise pendente (idempotente por artifact+analyzer+versão+contrato).
@@ -615,23 +758,53 @@ export const holderSubmissionProcessingTick = async (
         }
 
         if (claimTarget !== null && primaryArtifact !== null) {
-          const receiptId =
-            claimTarget.existingReceiptId ??
-            (await ensureCustomerDocumentReceipt(tx, {
-              tenantId,
-              claimId: claimTarget.claimId,
-              validation: claimTarget.validation,
-              requestId,
-              documentId: primaryArtifact.document.documentId,
-              artifact: primaryArtifact.artifact,
-              now,
-            }))
+          const target = claimTarget
+          const primary = primaryArtifact
+          try {
+            // Savepoint: se o vínculo recibo ↔ Validation conflitar com uma
+            // linha existente, o recibo recém-criado também é desfeito. Assim
+            // não sobra recibo órfão nem se cria um segundo documento.
+            await tx.transaction(async (savepoint) => {
+              const receiptId =
+                target.existingReceiptId ??
+                (await ensureCustomerDocumentReceipt(savepoint, {
+                  tenantId,
+                  claimId: target.claimId,
+                  validation: target.validation,
+                  requestId,
+                  documentId: primary.document.documentId,
+                  artifact: primary.artifact,
+                  now,
+                }))
 
-          await linkArtifactToReceipt(tx, {
-            tenantId,
-            artifactId: primaryArtifact.artifact.artifactId,
-            claimEvidenceId: receiptId,
-          })
+              await ensureValidationCustomerDocument(savepoint, {
+                tenantId,
+                validationId: target.validation.validationId,
+                claimEvidenceId: receiptId,
+              })
+
+              await linkArtifactToReceipt(savepoint, {
+                tenantId,
+                artifactId: primary.artifact.artifactId,
+                claimEvidenceId: receiptId,
+              })
+            })
+          } catch (error) {
+            if (error instanceof HolderClaimInconsistencyError) {
+              deps.logger.error(
+                {
+                  request_id: requestId,
+                  tenant_id: tenantId,
+                  validation_id: target.validation.validationId,
+                  reason: 'HOLDER_RECEIPT_INCONSISTENCY',
+                  detail: error.reason,
+                },
+                'holder submission receipt inconsistency; skipping artifact link',
+              )
+            } else {
+              throw error
+            }
+          }
         }
 
         const state = failedCount === documents.length ? 'failed' : failedCount > 0 ? 'partial' : 'processed'

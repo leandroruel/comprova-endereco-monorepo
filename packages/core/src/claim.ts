@@ -41,6 +41,27 @@ export function isValidClaimCombination(claimType: ClaimType, subjectType: Subje
   return allowed?.includes(subjectType) ?? false
 }
 
+export interface AddressClaimSpec {
+  readonly type: ClaimType
+  readonly subjectType: SubjectType
+}
+
+/**
+ * Claim canônica de verificação de endereço de uma Validation.
+ *
+ * A regra é a mesma usada pelo intake F1.1 desde o ADR-0037: o tipo é derivado
+ * do documento do subject. CNPJ → `business_registered_address`/`organization`;
+ * qualquer outro documento (CPF) → `address_exists`/`person`.
+ *
+ * As duas variantes têm `target_type = 'address'`, mas são finalidades
+ * distintas: uma Validation pode conter mais de uma Claim. O fluxo de
+ * comprovante de residência só pode usar a Claim derivada do subject.
+ */
+export const addressClaimForSubjectDocType = (docType: string): AddressClaimSpec =>
+  docType === 'CNPJ'
+    ? { type: 'business_registered_address', subjectType: 'organization' }
+    : { type: 'address_exists', subjectType: 'person' }
+
 export type EvidenceStance = 'supports' | 'contradicts' | 'unknown'
 
 export interface Evidence {

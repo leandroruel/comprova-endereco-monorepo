@@ -49,8 +49,44 @@ const deleteValidationGraph = async (
     .from(t.claim)
     .where(eq(t.claim.validationId, validationId))
 
-  const artifacts =
-    claims.length === 0
+  const claimIds = claims.map((claim) => claim.claimId)
+  const claimEvidences =
+    claimIds.length === 0
+      ? []
+      : await db
+          .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+          .from(t.claimEvidence)
+          .where(inArray(t.claimEvidence.claimId, claimIds))
+
+  // A relação explícita recibo ↔ Validation também identifica o documento do
+  // Holder. Mantém a remoção correta mesmo se o recibo estiver órfão de claim.
+  const linkedReceipts = await db
+    .select({ claimEvidenceId: t.validationCustomerDocument.claimEvidenceId })
+    .from(t.validationCustomerDocument)
+    .where(eq(t.validationCustomerDocument.validationId, validationId))
+
+  const receiptIds = [
+    ...new Set([
+      ...claimEvidences.map((row) => row.claimEvidenceId),
+      ...linkedReceipts.map((row) => row.claimEvidenceId),
+    ]),
+  ]
+
+  // Dois caminhos de artefato: upload direto F1.1 (`claim_evidence_id`) e
+  // documento do Holder associado por `evidence_artifact_claim_evidence`.
+  const directArtifacts =
+    receiptIds.length === 0
+      ? []
+      : await db
+          .select({
+            artifactId: t.evidenceArtifact.artifactId,
+            storageKey: t.evidenceArtifact.storageKey,
+          })
+          .from(t.evidenceArtifact)
+          .where(inArray(t.evidenceArtifact.claimEvidenceId, receiptIds))
+
+  const linkedArtifacts =
+    receiptIds.length === 0
       ? []
       : await db
           .select({
@@ -59,14 +95,17 @@ const deleteValidationGraph = async (
           })
           .from(t.evidenceArtifact)
           .innerJoin(
-            t.claimEvidence,
+            t.evidenceArtifactClaimEvidence,
             and(
-              eq(t.evidenceArtifact.claimEvidenceId, t.claimEvidence.claimEvidenceId),
-              eq(t.evidenceArtifact.tenantId, t.claimEvidence.tenantId),
+              eq(t.evidenceArtifactClaimEvidence.artifactId, t.evidenceArtifact.artifactId),
+              eq(t.evidenceArtifactClaimEvidence.tenantId, t.evidenceArtifact.tenantId),
             ),
           )
-          .innerJoin(t.claim, eq(t.claimEvidence.claimId, t.claim.claimId))
-          .where(eq(t.claim.validationId, validationId))
+          .where(inArray(t.evidenceArtifactClaimEvidence.claimEvidenceId, receiptIds))
+
+  const artifacts = [...directArtifacts, ...linkedArtifacts].filter(
+    (artifact, index, all) => all.findIndex((other) => other.artifactId === artifact.artifactId) === index,
+  )
 
   // O objeto sai antes da linha. Se um delete falhar, a transação de banco
   // abaixo nem começa e a validation continua elegível para o próximo tick.
@@ -84,15 +123,14 @@ const deleteValidationGraph = async (
       )
     }
 
-    if (claims.length > 0) {
-      await tx.delete(t.claimEvidence).where(
-        inArray(
-          t.claimEvidence.claimId,
-          claims.map((claim) => claim.claimId),
-        ),
-      )
-      await tx.delete(t.claim).where(eq(t.claim.validationId, validationId))
+    await tx
+      .delete(t.validationCustomerDocument)
+      .where(eq(t.validationCustomerDocument.validationId, validationId))
+
+    if (receiptIds.length > 0) {
+      await tx.delete(t.claimEvidence).where(inArray(t.claimEvidence.claimEvidenceId, receiptIds))
     }
+    await tx.delete(t.claim).where(eq(t.claim.validationId, validationId))
 
     await tx.delete(t.signal).where(eq(t.signal.validationId, validationId))
     await tx.delete(t.validationIdempotency).where(eq(t.validationIdempotency.validationId, validationId))

@@ -21,11 +21,24 @@ customer_submitted_document`, `checker = customer_document_intake`,
   `detail.verification.status = pending`. `detail.origin` guarda apenas ids
   técnicos. A identidade do Holder não é comparada com `subject.docHmac` e não
   há aprovação automática de identidade/residência.
-- Cardinalidade 1:1 Validation ↔ documento complementar preservada pelo índice
-  existente `(claim_id) WHERE source = 'customer_submitted_document'` e pelo
-  vínculo 1:1. Somente o primeiro documento ativo da solicitação é associado;
-  documentos adicionais continuam apenas no domínio do Holder. Uma segunda
-  solicitação reutiliza o recibo e não cria segundo vínculo.
+- Revisão: a Claim de endereço é resolvida pelo domínio — `subject.docType`
+  (CNPJ → `business_registered_address`/`organization`; demais →
+  `address_exists`/`person`) via `addressClaimForSubjectDocType`, no worker e
+  no F1.1. Outras Claims da Validation nunca são candidatas; duas Claims da
+  mesma finalidade são inconsistência (worker loga e pula o recibo; F1.1 falha
+  fechado) e recibo em finalidade errada nunca é reutilizado.
+- Revisão: cardinalidade 1:1 Validation ↔ documento imposta no banco pela nova
+  tabela `validation_customer_document` (migration `0067`): `validation_id` é
+  PK, `claim_evidence_id` é UNIQUE, FK composta com `claim_evidence`
+  (mesmo tenant), RLS FORCE, sem UPDATE e `ON DELETE CASCADE`; backfill
+  determinístico prefere o recibo da Claim canônica. F1.1 e worker gravam o
+  vínculo na mesma transação do recibo; conflito vira `409
+EVIDENCE_ALREADY_EXISTS` (F1.1) ou inconsistência logada com rollback em
+  savepoint (worker). O índice por Claim
+  `idx_claim_evidence_customer_document_uq` é preservado. Somente o primeiro
+  documento ativo da solicitação é associado; documentos adicionais continuam
+  apenas no domínio do Holder. Uma segunda solicitação reutiliza o recibo e
+  não cria segundo vínculo.
 - F1.3 passou a resolver o candidato por `COALESCE(art.claim_evidence_id,
 art_link.claim_evidence_id)`, unificando upload direto e documento do Holder
   sem alterar a materialização `uploaded_document`, o índice de idempotência ou
@@ -43,18 +56,31 @@ art_link.claim_evidence_id)`, unificando upload direto e documento do Holder
   [ADR-0045](docs/adr/0045-documento-do-holder-no-pipeline-de-evidencias.md) e
   em
   [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#541-documento-do-holder-no-pipeline-de-evidências-f43--f12f13-implementado).
+- Revisão: retenção coerente — com Validation, o artefato do Holder nasce com
+  `retention_until = validation.expires_at` e é removido por
+  `validationRetentionTick` junto com o grafo (objeto antes da linha),
+  inclusive os vinculados apenas por associação/vínculo explícito. Artefatos de
+  solicitações sem Validation ficam com 30 dias e não têm job dedicado por
+  `retention_until` — limitação documentada em `docs/lgpd/retencao.md` com
+  recomendação de estender o tick existente de `evidence` (decisão futura
+  própria).
 - Testes: `apps/api/tests/holder-evidence-integration.int.test.ts` cobre fluxo
   principal com F1.2/F1.3, cardinalidade, replay/retry, concorrência, separação
   Holder × Subject, solicitação sem vínculo, Validation inexistente, tenant
-  divergente, RLS e unicidade no banco. Migração `0066` validada em PostgreSQL
-  16 (duplicate/cross-tenant rejeitados, cascade na retenção).
+  divergente, RLS e unicidade no banco; a revisão agregou múltiplas Claims
+  (recibo só na canônica), recibo em finalidade errada (não reutilizado, sem
+  segundo recibo/vínculo), adoção de recibo legado, rejeição no banco sem
+  registros parciais, F1.1 gravando o vínculo, `409` após recibo do Holder,
+  worker sem segundo vínculo com artefato direto e retenção do artefato
+  Holder-linked. `packages/core/src/claim.test.ts` cobre o helper de Claim.
+  Migrações `0066`/`0067` validadas em PostgreSQL 16 (duplicidade, cross-tenant,
+  cascade e backfill determinístico).
 - Limitações: sem OCR, sem autenticação oficial do documento e sem expansão
-  multi-documento. A retenção do artefato do Holder continua sendo 30 dias
-  (F4.3), diferente do `validation.expires_at` da F1.1.
-- Gates locais: `pnpm typecheck` (api/worker/db), `pnpm lint`, `pnpm format` e
-  `pnpm db:fence`. A suíte de integração com testcontainers não roda neste
-  ambiente (Docker indisponível); o fluxo foi exercitado contra PostgreSQL 16
-  local com o conjunto completo de migrations.
+  multi-documento. Artefato do Holder sem Validation não tem job de remoção por
+  `retention_until` (ver retenção acima).
+- Gates locais: `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm db:fence` e
+  suíte completa `vitest run --project node` (122 arquivos, 1467 testes,
+  incluindo toda a integração com testcontainers).
 
 ## F3.3 — medição de uso, idempotência, cotas e reconciliação (2026-11-06)
 

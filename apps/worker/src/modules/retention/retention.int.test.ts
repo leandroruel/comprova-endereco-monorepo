@@ -488,3 +488,150 @@ describe('retention isolada por validation', () => {
     ).toBe(0)
   })
 })
+
+// PR #73 (revisão): o documento do Holder vinculado à Validation (via
+// `evidence_artifact_claim_evidence` + `validation_customer_document`) precisa
+// sair junto com o grafo da validation. Sem isso o artefato ficava órfão.
+describe('retention do documento do Holder vinculado à Validation (PR #73)', () => {
+  it('remove artefato do Holder, associação e vínculo ao expirar a validation', async () => {
+    const holderTenant = await createTenant(adminPool.db, { name: 'ret-holder-tenant' })
+    const subject = await createSubject(adminPool.db, holderTenant)
+    const validationId = await createValidation(adminPool.db, holderTenant, subject)
+    await adminPool.db
+      .update(t.validation)
+      .set({ expiresAt: new Date(Date.now() - 86_400_000) })
+      .where(eq(t.validation.validationId, validationId))
+
+    const claimId = randomUUID()
+    await adminPool.db.insert(t.claim).values({
+      claimId,
+      tenantId: holderTenant,
+      validationId,
+      subjectId: subject,
+      type: 'business_registered_address',
+      subjectType: 'organization',
+      targetType: 'address',
+    })
+
+    const receiptId = randomUUID()
+    await adminPool.db.insert(t.claimEvidence).values({
+      claimEvidenceId: receiptId,
+      tenantId: holderTenant,
+      claimId,
+      checker: 'customer_document_intake',
+      checkerVersion: '1.0.0',
+      stance: 'unknown',
+      strength: 0,
+      confidence: 0,
+      source: 'customer_submitted_document',
+      observedAt: new Date(),
+      ttlSeconds: 3600,
+      expiresAt: new Date(Date.now() + 3_600_000),
+      detail: {},
+    })
+
+    await adminPool.db.insert(t.validationCustomerDocument).values({
+      validationId,
+      claimEvidenceId: receiptId,
+      tenantId: holderTenant,
+    })
+
+    const holderId = randomUUID()
+    await adminPool.db.insert(t.holder).values({
+      holderId,
+      tenantId: holderTenant,
+      externalReference: `holder-${holderId}`,
+      name: 'Holder Retencao',
+      documentHash: `hash-${holderId}`,
+      documentType: 'CPF',
+    })
+    const requestId = randomUUID()
+    await adminPool.db.insert(t.holderInformationRequest).values({
+      id: requestId,
+      tenantId: holderTenant,
+      holderId,
+      type: 'documento_complementar',
+      purpose: 'Comprovante de residência',
+      items: [],
+      state: 'completed',
+      createdBy: 'retention-test',
+      validationId,
+    })
+
+    const artifactId = randomUUID()
+    const storageKey = `tenants/${holderTenant}/holder-requests/${requestId}/${artifactId}`
+    await adminPool.db.insert(t.evidenceArtifact).values({
+      artifactId,
+      tenantId: holderTenant,
+      claimEvidenceId: null,
+      holderInformationRequestId: requestId,
+      storageKey,
+      contentType: 'application/pdf',
+      sizeBytes: 3,
+      sha256: randomBytes(32),
+      retentionUntil: new Date(Date.now() + 86_400_000),
+    })
+    await adminPool.db.insert(t.evidenceArtifactClaimEvidence).values({
+      artifactId,
+      claimEvidenceId: receiptId,
+      tenantId: holderTenant,
+    })
+
+    const deletedKeys: string[] = []
+    const base = makeFakeObjectStore()
+    await base.put(storageKey, new Uint8Array([1, 2, 3]), 'application/pdf')
+    const store: ObjectStore = {
+      put: base.put,
+      delete: async (key) => {
+        deletedKeys.push(key)
+        await base.delete(key)
+      },
+    }
+
+    const removed = await validationRetentionTick(adminPool.db, store)
+    expect(removed).toBeGreaterThanOrEqual(1)
+
+    // O objeto do Holder sai antes da linha.
+    expect(deletedKeys).toContain(storageKey)
+
+    expect(
+      (
+        await adminPool.db
+          .select({ artifactId: t.evidenceArtifact.artifactId })
+          .from(t.evidenceArtifact)
+          .where(eq(t.evidenceArtifact.artifactId, artifactId))
+      ).length,
+    ).toBe(0)
+    expect(
+      (
+        await adminPool.db
+          .select({ artifactId: t.evidenceArtifactClaimEvidence.artifactId })
+          .from(t.evidenceArtifactClaimEvidence)
+          .where(eq(t.evidenceArtifactClaimEvidence.artifactId, artifactId))
+      ).length,
+    ).toBe(0)
+    expect(
+      (
+        await adminPool.db
+          .select({ validationId: t.validationCustomerDocument.validationId })
+          .from(t.validationCustomerDocument)
+          .where(eq(t.validationCustomerDocument.validationId, validationId))
+      ).length,
+    ).toBe(0)
+    expect(
+      (
+        await adminPool.db
+          .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+          .from(t.claimEvidence)
+          .where(eq(t.claimEvidence.claimEvidenceId, receiptId))
+      ).length,
+    ).toBe(0)
+
+    // Auditoria contabiliza o artefato do Holder junto com os demais.
+    const audits = await adminPool.db
+      .select({ details: t.auditLog.details })
+      .from(t.auditLog)
+      .where(eq(t.auditLog.action, 'validation.expired'))
+    expect(audits.some((row) => row.details.artifacts_removed === 1)).toBe(true)
+  })
+})

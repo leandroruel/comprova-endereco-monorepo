@@ -480,6 +480,14 @@ mesmo pipeline F1.1/F1.2/F1.3. Decisão completa no
   `holder_information_request.validation_id` existe, ele resolve a Validation e
   garante `claim` e recibo `customer_submitted_document` com as mesmas regras da
   F1.1. Nenhuma fila, broker ou workflow novo é criado.
+- **Claim de endereço pelo domínio:** a Claim é resolvida exclusivamente por
+  `subject.docType` com a regra do ADR-0037 (CNPJ →
+  `business_registered_address`/`organization`; demais →
+  `address_exists`/`person`), centralizada em `addressClaimForSubjectDocType`.
+  Outras Claims da Validation nunca são candidatas; duas Claims da mesma
+  finalidade são inconsistência — o worker loga e pula a materialização do
+  recibo, e o F1.1 falha fechado. Nenhum `.limit(1)` substitui a condição de
+  domínio.
 - **Artefato preservado:** o `evidence_artifact` do Holder continua com
   `claim_evidence_id = NULL` e `holder_information_request_id` preenchido. A
   regra de fonte exclusiva (`evidence_artifact_one_source_check`) e o
@@ -495,11 +503,17 @@ mesmo pipeline F1.1/F1.2/F1.3. Decisão completa no
   `detail.origin` registra apenas ids da solicitação, do documento e do
   artefato. Nenhuma aprovação de identidade ou residência é antecipada.
 - **Cardinalidade:** somente o primeiro documento ativo da solicitação é
-  associado ao recibo. O índice parcial existente
-  `(claim_id) WHERE source = 'customer_submitted_document'` continua sendo a
-  barreira da cardinalidade 1:1 Validation ↔ documento. Uma segunda
-  solicitação para a mesma Validation reutiliza o recibo e não cria segundo
-  vínculo; documentos adicionais seguem apenas como documentos do Holder.
+  associado ao recibo. A barreira da cardinalidade 1:1 Validation ↔ documento
+  é a tabela `validation_customer_document` (migration `0067`): `validation_id`
+  é PK (no máximo um documento por Validation) e `claim_evidence_id` é UNIQUE
+  (um recibo pertence a no máximo uma Validation), com FK composta ao recibo,
+  RLS FORCE, sem UPDATE e `ON DELETE CASCADE`. O índice parcial
+  `(claim_id) WHERE source = 'customer_submitted_document'` continua como
+  camada por Claim. F1.1 e worker gravam o vínculo na mesma transação do
+  recibo; conflito vira `409 EVIDENCE_ALREADY_EXISTS` (F1.1) ou inconsistência
+  logada (worker). Uma segunda solicitação para a mesma Validation reutiliza o
+  recibo e não cria segundo vínculo; documentos adicionais seguem apenas como
+  documentos do Holder.
 - **F1.3 sem bifurcação:** `findNext` resolve o `claim_evidence` por
   `COALESCE(evidence_artifact.claim_evidence_id,
 evidence_artifact_claim_evidence.claim_evidence_id)`. Upload direto e
@@ -514,10 +528,18 @@ evidence_artifact_claim_evidence.claim_evidence_id)`. Upload direto e
   ressuscitada. O evento é marcado como publicado após o processamento.
 - **Sem mudança de score:** a linha F1.3 continua sem `signal`; `score`,
   `confidence`, `weightedScore` e veredito permanecem inalterados.
+- **Retenção coerente:** com Validation, o artefato do Holder usa
+  `validation.expires_at` como `retention_until` (mesmo ciclo da evidência);
+  `validationRetentionTick` remove objeto, artefato, associação e vínculo junto
+  com o grafo da Validation. Artefatos de solicitações sem Validation ficam com
+  30 dias e não têm job dedicado por `retention_until` — limitação documentada
+  em `docs/lgpd/retencao.md`.
 - **Teste:** `apps/api/tests/holder-evidence-integration.int.test.ts` cobre
   fluxo principal, F1.2/F1.3, cardinalidade, replay/retry, concorrência,
   separação Holder × Subject, solicitação sem vínculo, Validation inexistente,
-  tenant divergente, RLS e unicidade no banco.
+  tenant divergente, RLS e unicidade no banco, além dos cenários da revisão
+  (múltiplas Claims, recibo em finalidade errada, adoção de recibo legado,
+  rejeição no banco sem registros parciais e cross-path F1.1/worker).
 
 ### 5.5 Contrato fiscal e materialização (F2.1, implementado)
 

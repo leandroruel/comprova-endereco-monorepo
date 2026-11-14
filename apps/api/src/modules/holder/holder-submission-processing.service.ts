@@ -321,6 +321,29 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
     let failed = 0
     const errors: string[] = []
 
+    // O artefato acompanha o ciclo da Validation quando a solicitação está
+    // vinculada; sem vínculo, mantém a política F4.3 de 30 dias.
+    const [requestRow] = await tx
+      .select({ validationId: t.holderInformationRequest.validationId })
+      .from(t.holderInformationRequest)
+      .where(
+        and(
+          eq(t.holderInformationRequest.id, holderInformationRequestId),
+          eq(t.holderInformationRequest.tenantId, tenantId),
+        ),
+      )
+      .limit(1)
+    const validationId = requestRow?.validationId
+    const [validationRow] =
+      validationId === null || validationId === undefined
+        ? []
+        : await tx
+            .select({ expiresAt: t.validation.expiresAt })
+            .from(t.validation)
+            .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
+            .limit(1)
+    const retentionUntil = validationRow?.expiresAt ?? new Date(Date.now() + 30 * 86_400_000)
+
     for (const doc of documents) {
       try {
         // Verifica se já existe um artefato para este documento nesta solicitação.
@@ -354,9 +377,7 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
             contentType: doc.contentType,
             sizeBytes: doc.sizeBytes,
             sha256: doc.sha256,
-            // Política de retenção de `evidence_artifact` (30d) — ver
-            // docs/lgpd/retencao.md.
-            retentionUntil: new Date(Date.now() + 30 * 86_400_000),
+            retentionUntil,
           })
         }
 
