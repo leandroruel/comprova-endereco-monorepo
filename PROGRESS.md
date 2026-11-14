@@ -1,6 +1,60 @@
 # PROGRESS.md
 
-Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-06)
+Estado: **Documento do Holder no pipeline de evidências (PR #73) em revisão + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-14)
+
+## Documento do Holder no pipeline de evidências (PR #73) (2026-11-14)
+
+- Um documento enviado pelo Holder em uma `holder_information_request` vinculada
+  a uma Validation passa a participar do pipeline F1.1/F1.2/F1.3 existente. Não
+  há fila, worker ou pipeline paralelo; o worker F4.3 continua consumindo o
+  outbox `holder_submission.processing_requested`.
+- O `evidence_artifact` do Holder permanece pertencendo à solicitação
+  (`holder_information_request_id`, `claim_evidence_id = NULL`). A regra de
+  fonte exclusiva e o write-once do ADR-0035 não mudam e nenhum byte é copiado.
+- Nova tabela aditiva `evidence_artifact_claim_evidence` (migration `0066`)
+  associa o artefato ao recibo `customer_submitted_document` com cardinalidade
+  1:1 garantida no banco: PK em `artifact_id` e `UNIQUE (claim_evidence_id)`.
+  FKs compostas com `tenant_id`, RLS FORCE e `ON DELETE CASCADE`.
+- O recibo reutiliza as mesmas regras da F1.1: `source =
+customer_submitted_document`, `checker = customer_document_intake`,
+  `stance = unknown`, `strength = 0`, `confidence = 0`,
+  `detail.verification.status = pending`. `detail.origin` guarda apenas ids
+  técnicos. A identidade do Holder não é comparada com `subject.docHmac` e não
+  há aprovação automática de identidade/residência.
+- Cardinalidade 1:1 Validation ↔ documento complementar preservada pelo índice
+  existente `(claim_id) WHERE source = 'customer_submitted_document'` e pelo
+  vínculo 1:1. Somente o primeiro documento ativo da solicitação é associado;
+  documentos adicionais continuam apenas no domínio do Holder. Uma segunda
+  solicitação reutiliza o recibo e não cria segundo vínculo.
+- F1.3 passou a resolver o candidato por `COALESCE(art.claim_evidence_id,
+art_link.claim_evidence_id)`, unificando upload direto e documento do Holder
+  sem alterar a materialização `uploaded_document`, o índice de idempotência ou
+  o backoff.
+- Concorrência: a Validation é travada com `FOR UPDATE` antes de criar
+  claim/recibo, serializando com a F1.1. Claim, recibo, artefato e vínculo usam
+  `ON CONFLICT DO NOTHING` + releitura; replay de outbox, retry e execuções
+  concorrentes não duplicam nada. A unicidade é imposta pelo banco.
+- Solicitação sem `validation_id`, Validation inexistente ou evento com tenant
+  divergente não materializa claim/recibo/vínculo; o documento segue apenas como
+  documento do Holder.
+- Sem mudança de score: a linha F1.3 continua sem `signal`; `score`,
+  `confidence`, `weightedScore` e veredito permanecem inalterados.
+- Decisão em
+  [ADR-0045](docs/adr/0045-documento-do-holder-no-pipeline-de-evidencias.md) e
+  em
+  [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#541-documento-do-holder-no-pipeline-de-evidências-f43--f12f13-implementado).
+- Testes: `apps/api/tests/holder-evidence-integration.int.test.ts` cobre fluxo
+  principal com F1.2/F1.3, cardinalidade, replay/retry, concorrência, separação
+  Holder × Subject, solicitação sem vínculo, Validation inexistente, tenant
+  divergente, RLS e unicidade no banco. Migração `0066` validada em PostgreSQL
+  16 (duplicate/cross-tenant rejeitados, cascade na retenção).
+- Limitações: sem OCR, sem autenticação oficial do documento e sem expansão
+  multi-documento. A retenção do artefato do Holder continua sendo 30 dias
+  (F4.3), diferente do `validation.expires_at` da F1.1.
+- Gates locais: `pnpm typecheck` (api/worker/db), `pnpm lint`, `pnpm format` e
+  `pnpm db:fence`. A suíte de integração com testcontainers não roda neste
+  ambiente (Docker indisponível); o fluxo foi exercitado contra PostgreSQL 16
+  local com o conjunto completo de migrations.
 
 ## F3.3 — medição de uso, idempotência, cotas e reconciliação (2026-11-06)
 

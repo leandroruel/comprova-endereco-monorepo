@@ -17,6 +17,7 @@ import { batch, batchItem } from './batches.js'
 import { addressSignalCache, claim, claimEvidence, signal } from './claims.js'
 import { evidence } from './evidence.js'
 import { evidenceArtifact } from './evidence-artifact.js'
+import { evidenceArtifactClaimEvidence } from './evidence-artifact-claim-evidence.js'
 import { evidenceAnalysis } from './evidence-analysis.js'
 import { evidenceVerificationAttempt } from './evidence-verification.js'
 import { outbox, webhookDelivery, webhookEndpoint } from './events.js'
@@ -59,6 +60,7 @@ export * from './validations.js'
 export * from './claims.js'
 export * from './evidence.js'
 export * from './evidence-artifact.js'
+export * from './evidence-artifact-claim-evidence.js'
 export * from './evidence-analysis.js'
 export * from './evidence-verification.js'
 export * from './events.js'
@@ -120,6 +122,7 @@ export const schema = {
   addressSignalCache,
   evidence,
   evidenceArtifact,
+  evidenceArtifactClaimEvidence,
   evidenceAnalysis,
   evidenceVerificationAttempt,
   outbox,

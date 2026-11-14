@@ -1,5 +1,10 @@
 import { problem, problems, type Problem } from '@comprova/contracts'
-import { CUSTOMER_DOCUMENT_INTAKE_SOURCE } from '@comprova/core'
+import {
+  CUSTOMER_DOCUMENT_INTAKE_CHECKER,
+  CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION,
+  CUSTOMER_DOCUMENT_INTAKE_SOURCE,
+  CUSTOMER_DOCUMENT_INTAKE_STATUS,
+} from '@comprova/core'
 import { and, eq, insertPendingEvidenceAnalysis, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
@@ -26,9 +31,9 @@ import {
  */
 
 export const EVIDENCE_INTAKE_SOURCE = CUSTOMER_DOCUMENT_INTAKE_SOURCE
-export const EVIDENCE_INTAKE_CHECKER = 'customer_document_intake'
-export const EVIDENCE_INTAKE_CHECKER_VERSION = '1.0.0'
-export const EVIDENCE_INTAKE_STATUS = 'pending'
+export const EVIDENCE_INTAKE_CHECKER = CUSTOMER_DOCUMENT_INTAKE_CHECKER
+export const EVIDENCE_INTAKE_CHECKER_VERSION = CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION
+export const EVIDENCE_INTAKE_STATUS = CUSTOMER_DOCUMENT_INTAKE_STATUS
 
 export const EVIDENCE_INTAKE_CONTENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const
 
