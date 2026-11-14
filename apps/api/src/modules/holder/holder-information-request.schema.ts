@@ -43,6 +43,9 @@ export const CreateHolderInformationRequestBody = z.object({
       },
     ),
   expiresAt: z.string().datetime().optional(),
+  // PR 1: validation opcional que originou esta solicitação. Deve pertencer ao
+  // mesmo tenant.
+  validationId: z.string().uuid().optional(),
 })
 
 export const HolderInformationRequestTransitionBody = z.object({
@@ -66,6 +69,8 @@ export const HolderInformationRequestCreatedResponse = z.object({
   ),
   state: z.string(),
   expiresAt: z.string().nullable(),
+  // PR 1: validation que originou esta solicitação, quando aplicável.
+  validationId: z.string().uuid().nullable(),
   createdBy: z.string(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

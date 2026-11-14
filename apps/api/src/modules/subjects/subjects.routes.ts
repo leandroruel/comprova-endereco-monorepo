@@ -37,6 +37,12 @@ export const registerSubjectRoutes = (instance: FastifyInstance, deps: SubjectRo
       },
     },
     async (request, reply) =>
-      controller.erase(request.tenant?.tenantId, request.tenant?.apiKeyId, request.params.id, reply),
+      controller.erase(
+        request.tenant?.tenantId,
+        request.tenant?.apiKeyId ?? null,
+        request.sessionUser?.id ?? null,
+        request.params.id,
+        reply,
+      ),
   )
 }

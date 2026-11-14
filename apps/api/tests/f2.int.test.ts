@@ -8,7 +8,7 @@ import {
 } from '@comprova/testing'
 import { createLogger, createMetrics } from '@comprova/observability'
 import type { SafeFetch } from '@comprova/providers'
-import { createDbPool, runMigrations, eq } from '@comprova/db'
+import { and, createDbPool, runMigrations, eq } from '@comprova/db'
 import * as t from '@comprova/db'
 import { buildApp, buildFastPathDeps } from '../src/app.js'
 import { batchTick } from '../src/services/batch-processor.js'
@@ -16,6 +16,7 @@ import { publishTick } from '../src/modules/webhooks/outbox-publisher.js'
 import { verifyWebhookSignature } from '../src/modules/webhooks/webhook-crypto.js'
 import Redis from 'ioredis'
 import { appendFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 
 const PEPPER = 'test-pepper-123'
@@ -277,5 +278,83 @@ describe('batch', () => {
       headers: { authorization: `Bearer ${otherKey}` },
     })
     expect(foreign.statusCode).toBe(404)
+  })
+
+  it('registra o usuario autenticado como ator da auditoria no processamento em lote', async () => {
+    const actorUserId = randomUUID()
+
+    // Cria o usuario (FK de batch.userId referencia auth_user).
+    await adminPool.db.insert(t.authUser).values({
+      id: actorUserId,
+      name: 'Batch Actor',
+      email: 'batch-actor@exemplo.com',
+      emailVerified: true,
+    })
+
+    // Cria um lote diretamente no banco com userId preenchido (simula o
+    // usuario autenticado por sessao que originou o lote).
+    const batchId = randomUUID()
+    await adminPool.db.insert(t.batch).values({
+      batchId,
+      tenantId: tenant,
+      userId: actorUserId,
+      status: 'queued',
+      totalItems: 1,
+      mode: 'fast',
+      legalBasis: 'FRAUD_PREVENTION',
+    })
+    const itemId = randomUUID()
+    await adminPool.db.insert(t.batchItem).values({
+      itemId,
+      batchId,
+      tenantId: tenant,
+      position: 0,
+      docType: 'CNPJ',
+      docDigits: '12345678000195',
+      status: 'pending',
+    })
+
+    const fastPath = buildFastPathDeps(appPool.db, {
+      DATABASE_URL: db.appUrl,
+      REDIS_URL: testRedis.url,
+      API_KEY_PEPPER: PEPPER,
+      CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+      CREDENTIAL_SIGNING_KEYS: '[]',
+      SIGNING_KEY_PROVIDER: 'local',
+      PORT: 3000,
+      HOST: '127.0.0.1',
+      LOG_LEVEL: 'silent',
+      POLICY_VERSION: '2026.11.1',
+      TERMS_VERSION: '1.0.0',
+      TERMS_APPROVED: 'true',
+      TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
+      WORKER_LOOPS: false,
+    })
+
+    // Executa o tick: o batch-processor deve propagar userId para o
+    // FastPathTenantContext, resultando em session:<userId> no auditLog.
+    await batchTick({ adminDb: adminPool.db, fastPath })
+
+    // O tick processa todos os itens pendentes, inclusive de outros lotes
+    // criados no mesmo arquivo. Escopa a auditoria pela validacao gerada para
+    // o item deste lote para nao depender do estado global da tabela.
+    const [processedItem] = await adminPool.db
+      .select({ status: t.batchItem.status, validationId: t.batchItem.validationId })
+      .from(t.batchItem)
+      .where(eq(t.batchItem.itemId, itemId))
+    expect(processedItem?.status).toBe('completed')
+    expect(processedItem?.validationId).not.toBeNull()
+
+    const auditRows = await adminPool.db
+      .select({ actor: t.auditLog.actor })
+      .from(t.auditLog)
+      .where(
+        and(
+          eq(t.auditLog.action, 'validation.create'),
+          eq(t.auditLog.targetId, processedItem!.validationId!),
+        ),
+      )
+    expect(auditRows).toHaveLength(1)
+    expect(auditRows[0]!.actor).toBe(`session:${actorUserId}`)
   })
 })

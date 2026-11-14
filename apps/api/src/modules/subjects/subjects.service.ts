@@ -47,14 +47,19 @@ export const listSubjectValidations = async (
 export const eraseSubject = async (
   db: Db,
   tenantId: string,
-  apiKeyId: string,
+  apiKeyId: string | null,
+  userId: string | null | undefined,
   subjectId: string,
 ): Promise<number | null> =>
   withTenant(db, tenantId, async (tx) => {
+    // Ponto comum de sincronização com createHolderInformationRequest: o
+    // subject é lockado primeiro (mesma ordem em ambos os fluxos), serializando
+    // associação e exclusão neste registro estável e evitando deadlocks.
     const subject = await tx
       .select({ subjectId: t.subject.subjectId })
       .from(t.subject)
       .where(eq(t.subject.subjectId, subjectId))
+      .for('update') // bloqueia o subject para impedir associação concorrente durante a exclusão
       .limit(1)
     if (subject.length === 0) return null
 
@@ -62,9 +67,17 @@ export const eraseSubject = async (
       .select({ validationId: t.validation.validationId })
       .from(t.validation)
       .where(eq(t.validation.subjectId, subjectId))
+      .for('update') // bloqueia as validações para impedir associação concorrente durante a exclusão
     const validationIds = validations.map((validation) => validation.validationId)
 
     if (validationIds.length > 0) {
+      // Desvincula as solicitações do Holder antes de excluir as validações,
+      // evitando referências órfãs em holder_information_request.validation_id.
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ validationId: null })
+        .where(inArray(t.holderInformationRequest.validationId, validationIds))
+
       const claims = await tx
         .select({ claimId: t.claim.claimId })
         .from(t.claim)
@@ -90,9 +103,13 @@ export const eraseSubject = async (
     await tx.delete(t.validation).where(eq(t.validation.subjectId, subjectId))
     await tx.delete(t.subject).where(eq(t.subject.subjectId, subjectId))
 
+    if (apiKeyId === null && (userId === null || userId === undefined)) {
+      throw new Error('subject.erasure without authenticated userId')
+    }
+
     await tx.insert(t.auditLog).values({
       tenantId,
-      actor: `api-key:${apiKeyId}`,
+      actor: apiKeyId !== null ? `api-key:${apiKeyId}` : `session:${userId}`,
       action: 'subject.erasure',
       targetType: 'subject',
       targetId: subjectId,

@@ -30,12 +30,13 @@ export const makeSubjectController = (deps: SubjectControllerDeps) => ({
 
   erase: async (
     tenantId: string | undefined,
-    apiKeyId: string | undefined,
+    apiKeyId: string | null | undefined,
+    userId: string | null | undefined,
     subjectId: string,
     reply: FastifyReply,
   ) => {
-    if (tenantId === undefined || apiKeyId === undefined) throw new Error('tenant context missing')
-    const erased = await eraseSubject(deps.db, tenantId, apiKeyId, subjectId)
+    if (tenantId === undefined) throw new Error('tenant context missing')
+    const erased = await eraseSubject(deps.db, tenantId, apiKeyId ?? null, userId, subjectId)
     if (erased === null) {
       return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problems.notFound('subject'))
     }

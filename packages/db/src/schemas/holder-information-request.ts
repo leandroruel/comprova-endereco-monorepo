@@ -42,6 +42,11 @@ export const holderInformationRequest = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     expiredAt: timestamp('expired_at', { withTimezone: true }),
+    // PR 1: validation opcional que originou esta solicitação. Nullable para
+    // preservar compatibilidade com solicitações criadas antes desta alteração.
+    // Sem FK direta porque a PK de `validation` é composta e particionada; a
+    // aplicação garante consistência (mesmo tenant) no momento da associação.
+    validationId: uuid('validation_id'),
   },
   (t) => [
     // Integridade referencial composta: holder pertence ao mesmo tenant.
@@ -61,6 +66,12 @@ export const holderInformationRequest = pgTable(
     index('holder_information_request_expires_at_idx').on(t.expiresAt),
     index('holder_information_request_tenant_state_idx').on(t.tenantId, t.state),
     index('holder_information_request_tenant_holder_idx').on(t.tenantId, t.holderId),
+    // PR 1: consulta de solicitações por validation (mesmo tenant).
+    index('holder_information_request_validation_idx').on(t.tenantId, t.validationId),
+    // PR 1: índice parcial para consultas rápidas por validation (mesmo tenant).
+    index('holder_information_request_validation_request_idx')
+      .on(t.validationId)
+      .where(sql`${t.validationId} IS NOT NULL`),
   ],
 )
 

@@ -56,6 +56,8 @@ export interface FastPathTenantContext {
   readonly apiKeyId: string | null
   /** Snapshot dos scopes efetivos no momento da emissão (V-1/§3). */
   readonly issuerScopes?: readonly string[] | null
+  /** ID do usuário autenticado por sessão. `null` para operações por API Key. */
+  readonly userId?: string | null
 }
 
 export interface FastPathRequest {
@@ -892,7 +894,12 @@ export const runFastPath = async (
 
     await tx.insert(auditLog).values({
       tenantId: tenant.tenantId,
-      actor: tenant.apiKeyId === null ? 'system:batch' : `api-key:${tenant.apiKeyId}`,
+      actor:
+        tenant.apiKeyId !== null
+          ? `api-key:${tenant.apiKeyId}`
+          : tenant.userId !== null && tenant.userId !== undefined
+            ? `session:${tenant.userId}`
+            : 'system:batch',
       action: 'validation.create',
       targetType: 'validation',
       targetId: validationId,

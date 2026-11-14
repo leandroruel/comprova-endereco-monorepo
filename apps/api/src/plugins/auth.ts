@@ -6,7 +6,8 @@ import { ALL_API_SCOPES, validateScopesForKeyType } from './scope.js'
 
 export interface TenantContext {
   readonly tenantId: string
-  readonly apiKeyId: string
+  /** `null` quando a autenticação é por sessão de usuário (não há API Key). */
+  readonly apiKeyId: string | null
   readonly scopes: readonly string[]
   readonly rateLimitRps: number
   readonly burst: number
@@ -108,9 +109,9 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
       // verdade). Nunca confia apenas no cache local, mesmo que ele ainda
       // não tenha expirado. Isso garante que uma chave revogada nunca seja
       // aceita, independentemente do estado do Redis.
-      const revoked = await isRevokedInDb(db, cached.ctx.apiKeyId)
+      const revoked = await isRevokedInDb(db, cached.ctx.apiKeyId!)
       if (revoked) {
-        cacheInvalidate(cached.ctx.apiKeyId)
+        cacheInvalidate(cached.ctx.apiKeyId!)
         return unauthorized(reply)
       }
       request.tenant = cached.ctx

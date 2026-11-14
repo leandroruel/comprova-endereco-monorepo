@@ -83,6 +83,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
     async (request, reply) =>
       controller.contest(
         request.tenant,
+        request.sessionUser?.id ?? null,
         request.params.id,
         request.body.reason,
         deps.fastPath.docHmacKey,
