@@ -468,6 +468,57 @@ ANONIMA`, `MICROEMPRESA`, `EMPRESARIO INDIVIDUAL`). Sem nome extraído ou sem
   camada textual, documento inválido, reprocessamento, nova versão,
   cross-tenant/RLS, logs sem PII e skip/backoff sem bloquear outro tenant.
 
+### 5.4.1 Documento do Holder no pipeline de evidências (F4.3 → F1.2/F1.3, implementado)
+
+Um documento enviado pelo Holder em resposta a uma
+`holder_information_request` vinculada a uma Validation passa a participar do
+mesmo pipeline F1.1/F1.2/F1.3. Decisão completa no
+[ADR-0045](adr/0045-documento-do-holder-no-pipeline-de-evidencias.md).
+
+- **Sem pipeline paralelo:** o worker F4.3 continua consumindo o outbox
+  `holder_submission.processing_requested`. Quando
+  `holder_information_request.validation_id` existe, ele resolve a Validation e
+  garante `claim` e recibo `customer_submitted_document` com as mesmas regras da
+  F1.1. Nenhuma fila, broker ou workflow novo é criado.
+- **Artefato preservado:** o `evidence_artifact` do Holder continua com
+  `claim_evidence_id = NULL` e `holder_information_request_id` preenchido. A
+  regra de fonte exclusiva (`evidence_artifact_one_source_check`) e o
+  write-once não mudam; nenhum byte é copiado.
+- **Vínculo 1:1:** a tabela aditiva `evidence_artifact_claim_evidence` associa o
+  artefato ao recibo. PK em `artifact_id` e `UNIQUE (claim_evidence_id)`
+  garantem, no banco, no máximo um artefato por recibo e um recibo por artefato.
+  FKs compostas com `tenant_id`, RLS FORCE e `ON DELETE CASCADE` acompanham
+  retenção/erasure.
+- **Semântica do recibo:** `source = customer_submitted_document`,
+  `checker = customer_document_intake`, `stance = unknown`, `strength = 0`,
+  `confidence = 0` e `detail.verification.status = pending`. O
+  `detail.origin` registra apenas ids da solicitação, do documento e do
+  artefato. Nenhuma aprovação de identidade ou residência é antecipada.
+- **Cardinalidade:** somente o primeiro documento ativo da solicitação é
+  associado ao recibo. O índice parcial existente
+  `(claim_id) WHERE source = 'customer_submitted_document'` continua sendo a
+  barreira da cardinalidade 1:1 Validation ↔ documento. Uma segunda
+  solicitação para a mesma Validation reutiliza o recibo e não cria segundo
+  vínculo; documentos adicionais seguem apenas como documentos do Holder.
+- **F1.3 sem bifurcação:** `findNext` resolve o `claim_evidence` por
+  `COALESCE(evidence_artifact.claim_evidence_id,
+evidence_artifact_claim_evidence.claim_evidence_id)`. Upload direto e
+  documento do Holder entram no mesmo candidato; a materialização
+  `uploaded_document`, o índice de idempotência e o backoff não mudam.
+- **Concorrência/idempotência:** a Validation é travada com `FOR UPDATE` antes
+  de criar claim/recibo, serializando com a F1.1. Claim, recibo, artefato e
+  vínculo usam `ON CONFLICT DO NOTHING` + releitura; replay de outbox, retry e
+  execuções concorrentes não duplicam nada.
+- **Sem vínculo ou Validation ausente:** a solicitação continua apenas como
+  documento do Holder (artefato + análise). Nenhuma evidência da Validation é
+  ressuscitada. O evento é marcado como publicado após o processamento.
+- **Sem mudança de score:** a linha F1.3 continua sem `signal`; `score`,
+  `confidence`, `weightedScore` e veredito permanecem inalterados.
+- **Teste:** `apps/api/tests/holder-evidence-integration.int.test.ts` cobre
+  fluxo principal, F1.2/F1.3, cardinalidade, replay/retry, concorrência,
+  separação Holder × Subject, solicitação sem vínculo, Validation inexistente,
+  tenant divergente, RLS e unicidade no banco.
+
 ### 5.5 Contrato fiscal e materialização (F2.1, implementado)
 
 A F2.1 define o contrato e a materialização da primeira fonte externa; a
