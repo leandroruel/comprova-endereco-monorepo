@@ -677,6 +677,9 @@ export const holderSubmissionProcessingTick = async (
 
         let claimTarget: ClaimTarget | null = null
         let linkedValidation: ValidationForClaim | undefined
+        // Validation expirada não recebe novo artefato, recibo nem associação:
+        // seu grafo está em remoção pela retenção (mesmo lock, mesma ordem).
+        let validationExpired = false
         const validationId = requestRow[0]?.validationId
         if (validationId !== null && validationId !== undefined) {
           linkedValidation = await loadValidationForClaim(tx, tenantId, validationId)
@@ -691,6 +694,20 @@ export const holderSubmissionProcessingTick = async (
                 reason: 'HOLDER_VALIDATION_NOT_FOUND',
               },
               'holder request validation not found; skipping claim materialization',
+            )
+          } else if (linkedValidation.expiresAt.getTime() <= now.getTime()) {
+            // A retention só roda sobre validations expiradas e trava a mesma
+            // linha antes de descobrir/excluir: nada criado aqui sobreviveria
+            // ou escaparia dela.
+            validationExpired = true
+            deps.logger.warn(
+              {
+                request_id: requestId,
+                tenant_id: tenantId,
+                validation_id: validationId,
+                reason: 'HOLDER_VALIDATION_EXPIRED',
+              },
+              'holder request validation expired; skipping artifact and claim materialization',
             )
           } else {
             try {
@@ -724,7 +741,7 @@ export const holderSubmissionProcessingTick = async (
           readonly artifact: MaterializedArtifact
         } | null = null
 
-        for (const doc of documents) {
+        for (const doc of validationExpired ? [] : documents) {
           try {
             const artifact = await ensureArtifact(tx, {
               tenantId,

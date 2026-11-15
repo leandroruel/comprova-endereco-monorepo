@@ -21,8 +21,10 @@ F1.3).
 > **Emenda (revisão da PR #73, 2026-11-14):** a seleção da Claim de endereço
 > passou a ser derivada do `subject.docType` (nunca `.limit(1)` sem condição de
 > domínio), a cardinalidade 1:1 Validation ↔ documento ganhou uma relação
-> explícita no banco (`validation_customer_document`, migration `0067`) e a
-> retenção do artefato do Holder passou a acompanhar o ciclo da Validation.
+> explícita no banco (`validation_customer_document`, migration `0067`), a
+> retenção do artefato do Holder passou a acompanhar o ciclo da Validation e
+> criação/associação/retenção passaram a compartilhar um protocolo único de
+> lock por Validation, com verificação de `expires_at`.
 > Detalhes na seção [Emenda](#emenda--revisão-da-pr-73-2026-11-14) ao final.
 > As decisões originais abaixo continuam válidas.
 
@@ -333,3 +335,53 @@ lastreia.
 - retenção remove artefato do Holder, associação e vínculo ao expirar a
   Validation;
 - teste unitário de `addressClaimForSubjectDocType` (`packages/core`).
+
+### E4. Descoberta de artefatos do Holder sem associação (retenção)
+
+A descoberta original da retenção cobria `evidence_artifact.claim_evidence_id`
+(upload direto) e `evidence_artifact_claim_evidence` (associado). Ficava de
+fora o artefato do Holder vinculado **apenas** à
+`holder_information_request` — por exemplo, a segunda submissão quando o recibo
+da Validation já tem artefato direto do F1.1. O objeto pessoal permanecia no
+storage além do prazo.
+
+`validationRetentionTick` agora descobre também por
+`evidence_artifact.holder_information_request_id →
+holder_information_request.id → holder_information_request.validation_id`,
+com filtro explícito de `tenant_id` em todas as consultas (o `validation_id` da
+request não tem FK). Ao remover a validation, o vínculo
+`holder_information_request.validation_id` é limpado (mesmo padrão da erasure
+do subject), para que processamentos futuros tratem a solicitação como não
+vinculada em vez de apontarem para uma validation removida.
+
+### E5. Protocolo de lock e expiração
+
+Todo caminho que altera o conjunto de artefatos/recibos/associações de uma
+Validation adquire o MESMO lock — `SELECT ... FOR UPDATE` na linha da
+`validation` (id + tenant) como **primeiro** lock — e verifica `expires_at`:
+
+| Caminho                                        | Lock                                   | Expiração                                                                    |
+| ---------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------- |
+| F1.1 `uploadEvidence` (API)                    | já existia                             | nova: `404` (expired ≡ inexistente, inclusive replay)                        |
+| Worker F4.3 (`holderSubmissionProcessingTick`) | já existia quando vinculado            | nova: loga `HOLDER_VALIDATION_EXPIRED` e não cria artefato/recibo/associação |
+| API `processDocuments`                         | nova: `FOR UPDATE` quando vinculado    | nova: não cria artefato                                                      |
+| Retenção (`validationRetentionTick`)           | nova: `FOR UPDATE` antes da descoberta | — (só roda sobre expiradas)                                                  |
+
+A retenção executa descoberta, exclusão no storage e exclusão de linhas dentro
+de **uma** transação que segura o lock até o commit. Justificativa para manter
+a transação aberta durante o I/O de storage: a descoberta precisa valer até a
+exclusão (criação nenhuma pode se intrometer); os deletes são idempotentes e
+limitados ao conjunto descoberto, e falha em qualquer deles desfaz a transação
+inteira — as linhas permanecem e o tick seguinte repete (recuperação
+preservada). Quando o commit ocorre, objeto e linhas somem juntos: não sobra
+linha apontando para objeto inexistente nem objeto que escape da retenção. A
+ordem de aquisição é única (validation primeiro), sem inversão que leve a
+deadlock; `evidence-verification` (F1.3) não cria artefato/associação e, na
+pior hipótese, provoca falha de FK na retenção, que é retomada no tick
+seguinte.
+
+Uma Validation inexistente/removida durante o processamento segue o ADR §7
+(apenas artefato + análise do Holder). Cenários de concorrência cobertos por
+teste de integração: retenção × worker (serialização pelo lock, sem órfãos),
+retenção × upload F1.1 (rejeitado com `404`) e submissão/upload em Validation
+expirada (nada persistido).

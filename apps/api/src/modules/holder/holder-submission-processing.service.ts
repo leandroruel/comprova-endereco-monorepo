@@ -334,6 +334,9 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
       )
       .limit(1)
     const validationId = requestRow?.validationId
+    // Protocolo de lock: quando a solicitação está vinculada, a linha da
+    // validation é travada com FOR UPDATE (mesma ordem do intake F1.1 e do
+    // worker F4.3) antes de criar qualquer artefato para o grafo dela.
     const [validationRow] =
       validationId === null || validationId === undefined
         ? []
@@ -341,7 +344,19 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
             .select({ expiresAt: t.validation.expiresAt })
             .from(t.validation)
             .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
+            .for('update')
             .limit(1)
+
+    // Validation expirada não recebe novo artefato: seu grafo está em remoção
+    // pela retenção (que adquire o mesmo lock antes de descobrir/excluir).
+    if (validationRow !== undefined && validationRow.expiresAt.getTime() <= new Date().getTime()) {
+      return {
+        processed: 0,
+        failed: documents.length,
+        errors: documents.map((doc) => `${doc.documentId}: VALIDATION_EXPIRED`),
+      }
+    }
+
     const retentionUntil = validationRow?.expiresAt ?? new Date(Date.now() + 30 * 86_400_000)
 
     for (const doc of documents) {

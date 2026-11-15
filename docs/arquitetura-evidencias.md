@@ -531,9 +531,16 @@ evidence_artifact_claim_evidence.claim_evidence_id)`. Upload direto e
 - **Retenção coerente:** com Validation, o artefato do Holder usa
   `validation.expires_at` como `retention_until` (mesmo ciclo da evidência);
   `validationRetentionTick` remove objeto, artefato, associação e vínculo junto
-  com o grafo da Validation. Artefatos de solicitações sem Validation ficam com
-  30 dias e não têm job dedicado por `retention_until` — limitação documentada
-  em `docs/lgpd/retencao.md`.
+  com o grafo da Validation — incluindo artefatos do Holder ainda **sem**
+  associação, descobertos por `evidence_artifact.holder_information_request_id
+→ holder_information_request.validation_id` (segunda submissão quando o
+  recibo já tem artefato direto). Criação/associação (F1.1, worker, API) e
+  retenção compartilham o mesmo `FOR UPDATE` na linha da Validation, que
+  verifica `expires_at`: Validation expirada não recebe novo artefato, recibo
+  nem associação (upload responde `404`; worker e API não materializam).
+  Artefatos de solicitações sem Validation ficam com 30 dias e não têm job
+  dedicado por `retention_until` — limitação documentada em
+  `docs/lgpd/retencao.md`.
 - **Teste:** `apps/api/tests/holder-evidence-integration.int.test.ts` cobre
   fluxo principal, F1.2/F1.3, cardinalidade, replay/retry, concorrência,
   separação Holder × Subject, solicitação sem vínculo, Validation inexistente,

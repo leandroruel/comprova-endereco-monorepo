@@ -37,9 +37,16 @@ da validation é decisão de F1.
 
 - **Com Validation:** o artefato nasce com `retention_until =
 validation.expires_at` e é removido por `validationRetentionTick` junto com o
-  grafo da validation (objeto antes da linha), inclusive os vinculados apenas
-  por `evidence_artifact_claim_evidence` + `validation_customer_document`.
-  Evidência e documento que a lastreia expiram juntos.
+  grafo da validation (objeto antes da linha) — inclusive os vinculados apenas
+  ao request, descobertos por `evidence_artifact.holder_information_request_id
+→ holder_information_request.validation_id` (ex.: segunda submissão quando o
+  recibo já tem artefato direto do F1.1), além dos associados por
+  `evidence_artifact_claim_evidence` + `validation_customer_document`.
+  Evidência e documento que a lastreia expiram juntos. Ao remover a validation,
+  o vínculo `holder_information_request.validation_id` é limpado (mesmo padrão
+  da erasure do subject). Criação/associação (F1.1, worker, API) e retenção
+  compartilham o mesmo `FOR UPDATE` na linha da validation e verificam
+  `expires_at`: validation expirada não recebe novo artefato nem associação.
 - **Sem Validation (limitação):** o artefato nasce com 30 dias, mas **não
   existe job** que remova `evidence_artifact` somente por `retention_until`
   vencido — o tick existente cobre apenas `evidence` (material VLM/rua). A

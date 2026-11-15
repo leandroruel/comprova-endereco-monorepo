@@ -166,7 +166,12 @@ const loadValidation = async (
     .where(eq(t.validation.validationId, validationId))
     .limit(1)
   const rows = lock ? await query.for('update') : await query
-  return rows[0]
+  const validation = rows[0]
+  // Validation expirada não recebe nova evidência: o grafo entra em remoção
+  // pela retenção. Tratada como inexistente (404), inclusive para replay —
+  // o cliente cria uma nova validation para enviar outro documento.
+  if (validation !== undefined && validation.expiresAt.getTime() <= Date.now()) return undefined
+  return validation
 }
 
 const loadSubjectDocType = async (tx: DbTx, validation: IntakeValidation): Promise<string> => {

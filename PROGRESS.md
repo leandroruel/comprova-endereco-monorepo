@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **Documento do Holder no pipeline de evidências (PR #73) em revisão + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-14)
+Estado: **Documento do Holder no pipeline de evidências (PR #73) em revisão + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
 
 ## Documento do Holder no pipeline de evidências (PR #73) (2026-11-14)
 
@@ -64,6 +64,23 @@ art_link.claim_evidence_id)`, unificando upload direto e documento do Holder
   `retention_until` — limitação documentada em `docs/lgpd/retencao.md` com
   recomendação de estender o tick existente de `evidence` (decisão futura
   própria).
+- Revisão 2: a descoberta da retenção inclui artefatos do Holder ainda **sem**
+  associação, por `evidence_artifact.holder_information_request_id →
+holder_information_request.validation_id` com filtro de tenant (ex.: segunda
+  submissão quando o recibo já tem artefato direto do F1.1). Ao remover a
+  validation, `holder_information_request.validation_id` é limpado (mesmo
+  padrão da erasure do subject).
+- Revisão 2: protocolo único de lock — F1.1 (API), worker F4.3, API
+  `processDocuments` e `validationRetentionTick` adquirem o mesmo `FOR UPDATE`
+  na linha da validation (validation primeiro, sem inversão) e verificam
+  `expires_at`. Validation expirada não recebe novo artefato, recibo nem
+  associação: upload F1.1 responde `404` (expired ≡ inexistente, inclusive
+  replay), worker e API não materializam. A retenção executa descoberta,
+  exclusão no storage e exclusão de linhas numa única transação que segura o
+  lock até o commit; falha em qualquer delete de objeto desfaz tudo e o tick
+  seguinte repete (idempotente). `evidence-verification` (F1.3) não cria
+  artefato/associação; na pior hipótese provoca falha de FK na retenção, retomada
+  no tick seguinte.
 - Testes: `apps/api/tests/holder-evidence-integration.int.test.ts` cobre fluxo
   principal com F1.2/F1.3, cardinalidade, replay/retry, concorrência, separação
   Holder × Subject, solicitação sem vínculo, Validation inexistente, tenant
@@ -72,15 +89,26 @@ art_link.claim_evidence_id)`, unificando upload direto e documento do Holder
   segundo recibo/vínculo), adoção de recibo legado, rejeição no banco sem
   registros parciais, F1.1 gravando o vínculo, `409` após recibo do Holder,
   worker sem segundo vínculo com artefato direto e retenção do artefato
-  Holder-linked. `packages/core/src/claim.test.ts` cobre o helper de Claim.
+  Holder-linked. `apps/worker/src/modules/retention/retention.int.test.ts`
+  cobre artefato Holder sem associação (isolamento por validation/tenant) e os
+  cenários de lock: retenção × worker (serialização, sem órfãos), retenção ×
+  upload F1.1 (rejeitado com `404`) e submissão/upload em Validation expirada
+  (nada persistido). `packages/core/src/claim.test.ts` cobre o helper de Claim.
   Migrações `0066`/`0067` validadas em PostgreSQL 16 (duplicidade, cross-tenant,
   cascade e backfill determinístico).
 - Limitações: sem OCR, sem autenticação oficial do documento e sem expansão
   multi-documento. Artefato do Holder sem Validation não tem job de remoção por
   `retention_until` (ver retenção acima).
-- Gates locais: `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm db:fence` e
-  suíte completa `vitest run --project node` (122 arquivos, 1467 testes,
-  incluindo toda a integração com testcontainers).
+- Execução de testes e gates — **executados localmente** (Docker disponível
+  nesta rodada; testcontainers reais): suíte completa `vitest run --project
+node` — 122 arquivos, 1472 testes, incluindo toda a integração (F1.1/F1.2/F1.3,
+  holder-evidence, retention, concorrência) —, `pnpm typecheck`, `pnpm lint`
+  (exit 0, apenas warnings preexistentes), `pnpm format` (arquivos da PR) e
+  `pnpm db:fence`. **No CI**: o repositório não possui checks configurados
+  (`gh pr checks` não reporta checks), portanto nada ficou pendente de CI —
+  toda a validação desta PR foi local. Em rodadas anteriores (sem Docker), a
+  integração foi exercitada contra PostgreSQL 16 local com migrations
+  aplicadas; essas execuções foram substituídas pela suíte completa acima.
 
 ## F3.3 — medição de uso, idempotência, cotas e reconciliação (2026-11-06)
 
