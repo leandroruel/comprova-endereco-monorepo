@@ -347,8 +347,20 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
             .for('update')
             .limit(1)
 
+    // A solicitação tinha validation e ela desapareceu entre a leitura do
+    // vínculo e o lock (retenção/erasure concorrentes). Falha fechada: nunca
+    // vira "nunca vinculada" nem cria artefato com retenção de 30 dias.
+    if (validationId !== null && validationId !== undefined && validationRow === undefined) {
+      return {
+        processed: 0,
+        failed: documents.length,
+        errors: documents.map((doc) => `${doc.documentId}: VALIDATION_REMOVED`),
+      }
+    }
+
     // Validation expirada não recebe novo artefato: seu grafo está em remoção
-    // pela retenção (que adquire o mesmo lock antes de descobrir/excluir).
+    // pela retenção (que adquire o mesmo lock antes de descobrir/excluir). A
+    // comparação acontece depois da aquisição do lock.
     if (validationRow !== undefined && validationRow.expiresAt.getTime() <= new Date().getTime()) {
       return {
         processed: 0,

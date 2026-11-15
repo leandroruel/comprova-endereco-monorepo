@@ -42,16 +42,24 @@ const insertSubject = async (tenantId: string, docHmacSeed: string): Promise<str
   return subjectId
 }
 
+// A PK de `validation` é (validation_id, created_at). O mesmo validationId é
+// inserido em tenants diferentes (teste de isolamento): com `now()` de
+// precisão de milissegundo, duas inserções no mesmo ms colidem
+// (`validation_2026_11_pkey`) — flake observado no CI. O contador garante
+// created_at distinto por inserção.
+let createdAtOffset = 0
+
 const insertValidation = async (
   tenantId: string,
   validationId: string,
   status: 'completed' | 'partial' | 'queued',
 ): Promise<void> => {
   const subjectId = await insertSubject(tenantId, validationId)
+  const createdAt = new Date(Date.now() + createdAtOffset++)
   await admin`INSERT INTO validation
     (validation_id, tenant_id, subject_id, mode, status, verdict, score, confidence, policy_version, legal_basis, created_at, completed_at, expires_at)
     VALUES (${validationId}, ${tenantId}, ${subjectId}, 'fast', ${status}, 'INSUFFICIENT_EVIDENCE', 0.5, 0.9, '2026.11.1', 'CONSENT',
-      ${new Date()}, ${status === 'completed' ? new Date() : null}, ${new Date(Date.now() + 30 * 86_400_000)})`
+      ${createdAt}, ${status === 'completed' ? new Date() : null}, ${new Date(Date.now() + 30 * 86_400_000)})`
 }
 
 /** Insere um evento "histórico" (sem event_id/event_type/billable). */

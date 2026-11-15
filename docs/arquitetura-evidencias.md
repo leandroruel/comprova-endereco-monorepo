@@ -523,8 +523,12 @@ evidence_artifact_claim_evidence.claim_evidence_id)`. Upload direto e
   de criar claim/recibo, serializando com a F1.1. Claim, recibo, artefato e
   vínculo usam `ON CONFLICT DO NOTHING` + releitura; replay de outbox, retry e
   execuções concorrentes não duplicam nada.
-- **Sem vínculo ou Validation ausente:** a solicitação continua apenas como
-  documento do Holder (artefato + análise). Nenhuma evidência da Validation é
+- **Sem vínculo ou Validation ausente:** com `validation_id` NULL a solicitação
+  continua apenas como documento do Holder (artefato + análise, retenção F4.3
+  de 30 dias). Validation inexistente ou removida concorrentemente — a request
+  tinha vínculo e o lock não encontra a linha — falha fechado (emenda E7 do
+  ADR-0045): nenhum artefato/análise/associação e estado `failed`, nunca
+  convertido em "nunca vinculada". Nenhuma evidência da Validation é
   ressuscitada. O evento é marcado como publicado após o processamento.
 - **Sem mudança de score:** a linha F1.3 continua sem `signal`; `score`,
   `confidence`, `weightedScore` e veredito permanecem inalterados.

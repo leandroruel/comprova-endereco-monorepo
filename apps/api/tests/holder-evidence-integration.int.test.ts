@@ -519,7 +519,10 @@ describe('PR #73 — documento do Holder no pipeline de evidências', () => {
     expect(links).toHaveLength(0)
   })
 
-  it('Validation inexistente não materializa claim, recibo nem vínculo', async () => {
+  it('Validation inexistente falha fechado sem materializar artefato, recibo nem vínculo', async () => {
+    // A request tem validation_id, mas a Validation não existe: a partir da
+    // emenda E7 do ADR-0045 isso NUNCA vira "nunca vinculada" (nenhum artefato
+    // com retenção de 30 dias) — o processamento termina em 'failed'.
     const tenantId = await tenantOf('holder-evidence-missing-validation')
     const validationId = randomUUID()
     const { requestId } = await seedRequest({
@@ -535,16 +538,28 @@ describe('PR #73 — documento do Holder no pipeline de evidências', () => {
     expect(claims).toHaveLength(0)
     expect(await countReceipts(validationId)).toBe(0)
 
+    // Falha fechada: nenhum artefato, nenhuma associação no tenant.
     const artifacts = await adminPool.db
       .select()
       .from(t.evidenceArtifact)
       .where(eq(t.evidenceArtifact.holderInformationRequestId, requestId))
-    expect(artifacts).toHaveLength(1)
+    expect(artifacts).toHaveLength(0)
     const links = await adminPool.db
       .select()
       .from(t.evidenceArtifactClaimEvidence)
-      .where(eq(t.evidenceArtifactClaimEvidence.artifactId, artifacts[0]!.artifactId))
+      .where(eq(t.evidenceArtifactClaimEvidence.tenantId, tenantId))
     expect(links).toHaveLength(0)
+
+    // O processamento não é marcado como sucesso.
+    const [processingRow] = await adminPool.db
+      .select({
+        state: t.holderSubmissionProcessing.state,
+        lastError: t.holderSubmissionProcessing.lastError,
+      })
+      .from(t.holderSubmissionProcessing)
+      .where(eq(t.holderSubmissionProcessing.holderInformationRequestId, requestId))
+    expect(processingRow?.state).toBe('failed')
+    expect(processingRow?.lastError).toBe('HOLDER_VALIDATION_REMOVED')
   })
 
   it('solicitação de outro tenant não é processada nem materializada', async () => {

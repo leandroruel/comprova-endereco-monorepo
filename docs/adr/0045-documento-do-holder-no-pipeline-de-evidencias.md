@@ -385,3 +385,52 @@ Uma Validation inexistente/removida durante o processamento segue o ADR §7
 teste de integração: retenção × worker (serialização pelo lock, sem órfãos),
 retenção × upload F1.1 (rejeitado com `404`) e submissão/upload em Validation
 expirada (nada persistido).
+
+### E6. Documento original do Holder na retenção
+
+O upload F4.2 grava objeto + `holder_information_request_document` **antes** de
+qualquer `evidence_artifact`. A retenção agora descobre também esses documentos
+originais para os requests da Validation expirada (join por
+`holder_information_request.validation_id`, tenant-scoped, somente
+`upload_state = 'stored'` sem tombstone — o contrato do schema garante que
+nesse estado o objeto existe). O objeto sai do storage e a linha recebe o
+tombstone `deleted_at` (mesmo mecanismo da remoção pelo Holder): estado
+explícito que impede reprocessamento e preserva a auditoria — nenhuma linha
+fica apontando para objeto inexistente sem estado. Artefato e documento
+compartilham a mesma `storage_key`; as chaves são deduplicadas antes da
+exclusão. O audit `validation.expired` passou a registrar `documents_removed`.
+A falha de qualquer delete desfaz a transação inteira: documento permanece
+ativo e o tick seguinte redescobre tudo (recuperação preservada).
+
+### E7. Corrida entre leitura do vínculo e o lock
+
+O fluxo lia `holder_information_request.validation_id` antes de travar a
+Validation; se a retenção removesse a Validation nesse intervalo, o `undefined`
+do lock era interpretado como "nunca vinculada" e a submissão virava artefato
+com retenção independente de 30 dias. Agora os três estados são distintos:
+
+1. **Nunca vinculada** (`validation_id` NULL na leitura) → fluxo F4.3
+   preservado (artefato + análise, 30 dias);
+2. **Validation válida** → fluxo vinculado;
+3. **Tinha vínculo e a Validation sumiu ao tentar o lock** → falha fechada: a
+   solicitação é relida dentro da transação (comprovando desvinculação pela
+   retenção/erasure ou ponteiro pendente), **nenhum** artefato, análise ou
+   associação é criado e o processamento termina em `failed` com
+   `lastError = 'HOLDER_VALIDATION_REMOVED'` — nunca sucesso nem conversão
+   automática para "nunca vinculada". Vale para worker F4.3 e API
+   `processDocuments`.
+
+O relógio usado na comparação de expiração é relido com o clock injetável
+imediatamente **depois** de adquirir o lock (a espera pelo lock pode consumir o
+prazo); a API compara `expires_at` após o `FOR UPDATE` em `loadValidation` e em
+`processDocuments`.
+
+A distinção do estado 3 **substitui**, para Validation inexistente/removida, o
+comportamento do §7 (que tratava esses casos como domínio Holder com artefato +
+análise): a partir desta emenda, apenas `validation_id` NULL segue o fluxo F4.3.
+
+O CI (`pnpm test`) falhava de forma intermitente em
+`usage-backfill.migration.int.test.ts` por colisão da PK
+`(validation_id, created_at)` quando o mesmo `validationId` era inserido em
+dois tenants no mesmo milissegundo (`created_at = new Date()`); o teste passou a
+usar `created_at` monotônico. Falha preexistente, não introduzida por esta PR.

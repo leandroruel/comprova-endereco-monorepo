@@ -786,8 +786,16 @@ const silentLogger = createLogger({ level: 'silent' })
 
 const seedHolderSubmission = async (
   tenantId: string,
-  validationId: string,
-): Promise<{ requestId: string; storageKey: string }> => {
+  validationId: string | null,
+): Promise<{
+  requestId: string
+  storageKey: string
+  documentId: string
+  itemId: string
+  contentType: string
+  sizeBytes: number
+  sha256: Buffer
+}> => {
   const holderId = randomUUID()
   await adminPool.db.insert(t.holder).values({
     holderId,
@@ -811,6 +819,7 @@ const seedHolderSubmission = async (
   })
   const documentId = randomUUID()
   const storageKey = `tenants/${tenantId}/holder-requests/${requestId}/${documentId}`
+  const sha256 = sha256Of(pdf())
   await adminPool.db.insert(t.holderInformationRequestDocument).values({
     documentId,
     tenantId,
@@ -820,7 +829,7 @@ const seedHolderSubmission = async (
     storageKey,
     contentType: 'application/pdf',
     sizeBytes: 3,
-    sha256: sha256Of(pdf()),
+    sha256,
     originalFilename: 'comprovante.pdf',
   })
   await adminPool.db.insert(t.outbox).values({
@@ -832,7 +841,15 @@ const seedHolderSubmission = async (
       tenant_id: tenantId,
     },
   })
-  return { requestId, storageKey }
+  return {
+    requestId,
+    storageKey,
+    documentId,
+    itemId: 'address-proof-0',
+    contentType: 'application/pdf',
+    sizeBytes: 3,
+    sha256,
+  }
 }
 
 const graphRowsFor = async (tenantId: string, validationId: string) => {
@@ -1095,6 +1112,363 @@ describe('protocolo de lock: retenção × criação/associação (P1 revisão)'
           .select({ artifactId: t.evidenceArtifact.artifactId })
           .from(t.evidenceArtifact)
           .where(eq(t.evidenceArtifact.tenantId, tenantId))
+      ).length,
+    ).toBe(0)
+  })
+})
+
+// =====================================================================
+// Rodada 3 — documentos ORIGINAIS do Holder na retenção (P1).
+// =====================================================================
+describe('retention dos documentos originais do Holder sem evidence_artifact (P1 r3)', () => {
+  it('Caso A: documento sem evidence_artifact é removido do storage e tombstoned', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'ret-doc-no-artifact' })
+    const subjectId = await createSubject(adminPool.db, tenantId)
+    const validationId = await createValidation(adminPool.db, tenantId, subjectId)
+    await adminPool.db
+      .update(t.validation)
+      .set({ expiresAt: pastDate() })
+      .where(eq(t.validation.validationId, validationId))
+    // Upload F4.2 completo, ainda NÃO materializado como evidence_artifact.
+    const submission = await seedHolderSubmission(tenantId, validationId)
+
+    const { store, deletedKeys } = trackingStore()
+    const removed = await validationRetentionTick(adminPool.db, store)
+    expect(removed).toBeGreaterThanOrEqual(1)
+
+    // O objeto original saiu do storage.
+    expect(deletedKeys).toContain(submission.storageKey)
+
+    // O registro permanece com o tombstone explícito do modelo F4.2 —
+    // "Documento recebido = stored && deletedAt IS NULL" deixa de valer.
+    const [docRow] = await adminPool.db
+      .select({
+        deletedAt: t.holderInformationRequestDocument.deletedAt,
+        uploadState: t.holderInformationRequestDocument.uploadState,
+      })
+      .from(t.holderInformationRequestDocument)
+      .where(eq(t.holderInformationRequestDocument.documentId, submission.documentId))
+    expect(docRow?.uploadState).toBe('stored')
+    expect(docRow?.deletedAt).not.toBeNull()
+
+    // A validação saiu e a request foi desvinculada.
+    expect(
+      (
+        await adminPool.db
+          .select({ validationId: t.validation.validationId })
+          .from(t.validation)
+          .where(eq(t.validation.validationId, validationId))
+      ).length,
+    ).toBe(0)
+    const [requestRow] = await adminPool.db
+      .select({ validationId: t.holderInformationRequest.validationId })
+      .from(t.holderInformationRequest)
+      .where(eq(t.holderInformationRequest.id, submission.requestId))
+    expect(requestRow?.validationId).toBeNull()
+
+    // Auditoria registra os documentos removidos.
+    const audits = await adminPool.db
+      .select({ details: t.auditLog.details })
+      .from(t.auditLog)
+      .where(eq(t.auditLog.action, 'validation.expired'))
+    expect(audits.some((row) => row.details.documents_removed === 1)).toBe(true)
+  })
+
+  it('Caso B: documento com evidence_artifact — objeto sai uma única vez e ambos os registros são tratados', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'ret-doc-with-artifact' })
+    const subjectId = await createSubject(adminPool.db, tenantId)
+    const validationId = await createValidation(adminPool.db, tenantId, subjectId)
+    await adminPool.db
+      .update(t.validation)
+      .set({ expiresAt: pastDate() })
+      .where(eq(t.validation.validationId, validationId))
+    const submission = await seedHolderSubmission(tenantId, validationId)
+
+    // Artefato do Holder compartilha o MESMO storage_key do documento (F4.2/F4.3).
+    const artifactId = randomUUID()
+    await adminPool.db.insert(t.evidenceArtifact).values({
+      artifactId,
+      tenantId,
+      claimEvidenceId: null,
+      holderInformationRequestId: submission.requestId,
+      storageKey: submission.storageKey,
+      contentType: submission.contentType,
+      sizeBytes: submission.sizeBytes,
+      sha256: submission.sha256,
+      retentionUntil: new Date(Date.now() + 86_400_000),
+    })
+
+    const { store, deletedKeys } = trackingStore()
+    await validationRetentionTick(adminPool.db, store)
+
+    // Mesma chave aparece EXATAMENTE uma vez (dedupe artefato × documento).
+    expect(deletedKeys.filter((key) => key === submission.storageKey)).toHaveLength(1)
+
+    // Linha do artefato removida; documento tombstoned.
+    expect(
+      (
+        await adminPool.db
+          .select({ artifactId: t.evidenceArtifact.artifactId })
+          .from(t.evidenceArtifact)
+          .where(eq(t.evidenceArtifact.artifactId, artifactId))
+      ).length,
+    ).toBe(0)
+    const [docRow] = await adminPool.db
+      .select({ deletedAt: t.holderInformationRequestDocument.deletedAt })
+      .from(t.holderInformationRequestDocument)
+      .where(eq(t.holderInformationRequestDocument.documentId, submission.documentId))
+    expect(docRow?.deletedAt).not.toBeNull()
+  })
+
+  it('Caso C: falha no storage mantém estado para retry e a nova execução conclui', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'ret-doc-retry' })
+    const subjectId = await createSubject(adminPool.db, tenantId)
+    const validationId = await createValidation(adminPool.db, tenantId, subjectId)
+    await adminPool.db
+      .update(t.validation)
+      .set({ expiresAt: pastDate() })
+      .where(eq(t.validation.validationId, validationId))
+    const submission = await seedHolderSubmission(tenantId, validationId)
+
+    const base = makeFakeObjectStore()
+    const failingStore: ObjectStore = {
+      put: base.put,
+      delete: async (key) => {
+        if (key === submission.storageKey) throw new Error('storage unavailable')
+        await base.delete(key)
+      },
+    }
+
+    // Primeira execução: delete do objeto falha → transação inteira desfeita.
+    await validationRetentionTick(adminPool.db, failingStore)
+
+    // Estado suficiente para retry: validação e documento permanecem ATIVOS
+    // (sem tombstone), então o próximo tick redescobre tudo.
+    expect(
+      (
+        await adminPool.db
+          .select({ validationId: t.validation.validationId })
+          .from(t.validation)
+          .where(eq(t.validation.validationId, validationId))
+      ).length,
+    ).toBe(1)
+    const [docRow] = await adminPool.db
+      .select({ deletedAt: t.holderInformationRequestDocument.deletedAt })
+      .from(t.holderInformationRequestDocument)
+      .where(eq(t.holderInformationRequestDocument.documentId, submission.documentId))
+    expect(docRow?.deletedAt).toBeNull()
+
+    // Retry com storage recuperado conclui a limpeza.
+    const { store, deletedKeys } = trackingStore()
+    await validationRetentionTick(adminPool.db, store)
+    expect(deletedKeys).toContain(submission.storageKey)
+    expect(
+      (
+        await adminPool.db
+          .select({ validationId: t.validation.validationId })
+          .from(t.validation)
+          .where(eq(t.validation.validationId, validationId))
+      ).length,
+    ).toBe(0)
+    const [docRowAfter] = await adminPool.db
+      .select({ deletedAt: t.holderInformationRequestDocument.deletedAt })
+      .from(t.holderInformationRequestDocument)
+      .where(eq(t.holderInformationRequestDocument.documentId, submission.documentId))
+    expect(docRowAfter?.deletedAt).not.toBeNull()
+  })
+})
+
+// =====================================================================
+// Rodada 3 — corrida entre leitura do validation_id e aquisição do lock.
+// =====================================================================
+describe('corrida validation_id × lock (P1 r3)', () => {
+  it('Caso A: validation removida antes do lock — worker falha fechado, sem artefato nem análise', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'ret-race-worker' })
+    const subjectId = await createSubject(adminPool.db, tenantId)
+    const validationId = await createValidation(adminPool.db, tenantId, subjectId)
+    const submission = await seedHolderSubmission(tenantId, validationId)
+
+    // Remoção concorrente da validation (a request fica com ponteiro pendente —
+    // a retenção real desvincula na mesma transação; aqui simulamos a janela
+    // em que o worker leu o vínculo antes da remoção).
+    await adminPool.db.delete(t.validation).where(eq(t.validation.validationId, validationId))
+
+    const processed = await holderSubmissionProcessingTick({
+      db: adminPool.db,
+      store: makeFakeObjectStore(),
+      logger: silentLogger,
+    })
+    // O tick processa todos os eventos pendentes do arquivo; o que importa
+    // aqui é o estado DESTA solicitação, verificado abaixo.
+    expect(processed).toBeGreaterThanOrEqual(1)
+
+    // Nenhum artefato novo e nenhuma análise pendente.
+    const artifacts = await adminPool.db
+      .select({ artifactId: t.evidenceArtifact.artifactId })
+      .from(t.evidenceArtifact)
+      .where(eq(t.evidenceArtifact.holderInformationRequestId, submission.requestId))
+    expect(artifacts).toHaveLength(0)
+    expect(
+      (
+        await adminPool.db
+          .select({ analysisId: t.evidenceAnalysis.analysisId })
+          .from(t.evidenceAnalysis)
+          .where(eq(t.evidenceAnalysis.tenantId, tenantId))
+      ).length,
+    ).toBe(0)
+
+    // O processamento NÃO é sucesso: estado terminal 'failed' com motivo.
+    const [processingRow] = await adminPool.db
+      .select({
+        state: t.holderSubmissionProcessing.state,
+        lastError: t.holderSubmissionProcessing.lastError,
+      })
+      .from(t.holderSubmissionProcessing)
+      .where(eq(t.holderSubmissionProcessing.holderInformationRequestId, submission.requestId))
+    expect(processingRow?.state).toBe('failed')
+    expect(processingRow?.lastError).toBe('HOLDER_VALIDATION_REMOVED')
+  })
+
+  it('Caso A (API): processDocuments com validation removida falha sem inserir artefato', async () => {
+    const { makeHolderSubmissionProcessingService } =
+      await import('../../../../api/src/modules/holder/holder-submission-processing.service.js')
+    const tenantId = await createTenant(adminPool.db, { name: 'ret-race-api' })
+    const subjectId = await createSubject(adminPool.db, tenantId)
+    const validationId = await createValidation(adminPool.db, tenantId, subjectId)
+    const submission = await seedHolderSubmission(tenantId, validationId)
+    await adminPool.db.delete(t.validation).where(eq(t.validation.validationId, validationId))
+
+    const processing = makeHolderSubmissionProcessingService({
+      db: adminPool.db,
+      store: makeFakeObjectStore(),
+      logger: silentLogger,
+    })
+    const result = await adminPool.db.transaction((tx) =>
+      processing.processDocuments(tx, tenantId, submission.requestId, [
+        {
+          documentId: submission.documentId,
+          storageKey: submission.storageKey,
+          itemId: submission.itemId,
+          contentType: submission.contentType,
+          sizeBytes: submission.sizeBytes,
+          sha256: submission.sha256,
+        },
+      ]),
+    )
+    expect(result.processed).toBe(0)
+    expect(result.failed).toBe(1)
+    expect(result.errors[0]).toContain('VALIDATION_REMOVED')
+    expect(
+      (
+        await adminPool.db
+          .select({ artifactId: t.evidenceArtifact.artifactId })
+          .from(t.evidenceArtifact)
+          .where(eq(t.evidenceArtifact.holderInformationRequestId, submission.requestId))
+      ).length,
+    ).toBe(0)
+  })
+
+  it('Caso B: solicitação originalmente sem validation preserva o fluxo F4.3 com retenção de 30 dias', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'ret-race-unlinked' })
+    const submission = await seedHolderSubmission(tenantId, null)
+
+    const processed = await holderSubmissionProcessingTick({
+      db: adminPool.db,
+      store: makeFakeObjectStore(),
+      logger: silentLogger,
+    })
+    expect(processed).toBeGreaterThanOrEqual(1)
+
+    const [artifact] = await adminPool.db
+      .select()
+      .from(t.evidenceArtifact)
+      .where(eq(t.evidenceArtifact.holderInformationRequestId, submission.requestId))
+    expect(artifact).toBeDefined()
+    expect(artifact!.claimEvidenceId).toBeNull()
+    // Política F4.3: retenção independente de ~30 dias, sem validation.
+    expect(artifact!.retentionUntil.getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000)
+    expect(artifact!.retentionUntil.getTime()).toBeLessThanOrEqual(Date.now() + 31 * 86_400_000)
+    expect(
+      (
+        await adminPool.db
+          .select({ analysisId: t.evidenceAnalysis.analysisId })
+          .from(t.evidenceAnalysis)
+          .where(eq(t.evidenceAnalysis.artifactId, artifact!.artifactId))
+      ).length,
+    ).toBe(1)
+    const [processingRow] = await adminPool.db
+      .select({ state: t.holderSubmissionProcessing.state })
+      .from(t.holderSubmissionProcessing)
+      .where(eq(t.holderSubmissionProcessing.holderInformationRequestId, submission.requestId))
+    expect(processingRow?.state).toBe('processed')
+  })
+
+  it('relógio avança enquanto o lock espera: validation passa a ser tratada como expirada', async () => {
+    const tenantId = await createTenant(adminPool.db, { name: 'ret-clock' })
+    const subjectId = await createSubject(adminPool.db, tenantId)
+    const validationId = await createValidation(adminPool.db, tenantId, subjectId)
+    const expiresAt = new Date(Date.now() + 86_400_000)
+    await adminPool.db
+      .update(t.validation)
+      .set({ expiresAt })
+      .where(eq(t.validation.validationId, validationId))
+    await seedHolderSubmission(tenantId, validationId)
+
+    // Relógio inicial ANTES da expiração.
+    let clock = new Date(Date.now() + 60_000)
+    expect(clock.getTime()).toBeLessThan(expiresAt.getTime())
+
+    let releaseKeeper!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseKeeper = resolve
+    })
+    const keeper = adminPool.db.transaction(async (tx) => {
+      await tx
+        .select({ validationId: t.validation.validationId })
+        .from(t.validation)
+        .where(eq(t.validation.validationId, validationId))
+        .for('update')
+      await gate
+    })
+
+    const tickPromise = holderSubmissionProcessingTick({
+      db: adminPool.db,
+      store: makeFakeObjectStore(),
+      logger: silentLogger,
+      now: () => clock,
+    })
+    // Dá tempo de o tick chegar ao lock da validation e esperar nele.
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    // O relógio avança para DEPOIS de expiresAt antes de liberar o lock.
+    clock = new Date(expiresAt.getTime() + 60_000)
+    releaseKeeper()
+    await keeper
+    await tickPromise
+
+    // Tratada como expirada: nada materializado e a validation permanece
+    // (quem a remove é a retenção, não o worker).
+    expect(
+      (
+        await adminPool.db
+          .select({ validationId: t.validation.validationId })
+          .from(t.validation)
+          .where(eq(t.validation.validationId, validationId))
+      ).length,
+    ).toBe(1)
+    expect(
+      (
+        await adminPool.db
+          .select({ artifactId: t.evidenceArtifact.artifactId })
+          .from(t.evidenceArtifact)
+          .where(eq(t.evidenceArtifact.tenantId, tenantId))
+      ).length,
+    ).toBe(0)
+    expect(
+      (
+        await adminPool.db
+          .select({ artifactId: t.evidenceArtifactClaimEvidence.artifactId })
+          .from(t.evidenceArtifactClaimEvidence)
+          .where(eq(t.evidenceArtifactClaimEvidence.tenantId, tenantId))
       ).length,
     ).toBe(0)
   })

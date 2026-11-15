@@ -99,16 +99,63 @@ holder_information_request.validation_id` com filtro de tenant (ex.: segunda
 - Limitações: sem OCR, sem autenticação oficial do documento e sem expansão
   multi-documento. Artefato do Holder sem Validation não tem job de remoção por
   `retention_until` (ver retenção acima).
-- Execução de testes e gates — **executados localmente** (Docker disponível
-  nesta rodada; testcontainers reais): suíte completa `vitest run --project
-node` — 122 arquivos, 1472 testes, incluindo toda a integração (F1.1/F1.2/F1.3,
-  holder-evidence, retention, concorrência) —, `pnpm typecheck`, `pnpm lint`
-  (exit 0, apenas warnings preexistentes), `pnpm format` (arquivos da PR) e
-  `pnpm db:fence`. **No CI**: o repositório não possui checks configurados
-  (`gh pr checks` não reporta checks), portanto nada ficou pendente de CI —
-  toda a validação desta PR foi local. Em rodadas anteriores (sem Docker), a
-  integração foi exercitada contra PostgreSQL 16 local com migrations
-  aplicadas; essas execuções foram substituídas pela suíte completa acima.
+- Revisão 3: a retenção cobre também o documento ORIGINAL do Holder
+  (`holder_information_request_document`) ainda sem `evidence_artifact` —
+  objeto sai do storage e a linha recebe o tombstone `deleted_at` (mesmo
+  mecanismo da remoção pelo Holder); chaves artefato × documento são
+  deduplicadas e o audit `validation.expired` registra `documents_removed`.
+  Falha de storage desfaz a transação e o tick seguinte redescobre (documento
+  permanece ativo até concluir).
+- Revisão 3: corrida leitura do vínculo × lock — Validation inexistente ou
+  removida concorrentemente (request tinha `validation_id` e o lock não encontra
+  a linha) falha fechado: nenhum artefato/análise/associação e estado `failed`
+  com `lastError = 'HOLDER_VALIDATION_REMOVED'`, nunca convertido em "nunca
+  vinculada" (emenda E7 do ADR-0045; substitui o §7 para esses casos). Request
+  criada sem `validation_id` preserva o fluxo F4.3 com retenção de 30 dias.
+- Revisão 3: o relógio da comparação de expiração é relido com o clock
+  injetável imediatamente depois de adquirir o lock da validation (a espera
+  pode consumir o prazo); na API a comparação acontece após o `FOR UPDATE`.
+- Revisão 3: corrige flake preexistente (não introduzido por esta PR) no CI:
+  `usage-backfill.migration.int.test.ts` inseria o mesmo `validationId` em dois
+  tenants com `created_at = new Date()` — PK `(validation_id, created_at)`
+  colidia quando as inserções caíam no mesmo milissegundo;
+  `created_at` agora é monotônico por inserção.
+- Testes: `apps/api/tests/holder-evidence-integration.int.test.ts` cobre fluxo
+  principal com F1.2/F1.3, cardinalidade, replay/retry, concorrência, separação
+  Holder × Subject, solicitação sem vínculo, Validation inexistente (falha
+  fechada), tenant divergente, RLS e unicidade no banco; a revisão agregou
+  múltiplas Claims (recibo só na canônica), recibo em finalidade errada (não
+  reutilizado, sem segundo recibo/vínculo), adoção de recibo legado, rejeição
+  no banco sem registros parciais, F1.1 gravando o vínculo, `409` após recibo
+  do Holder, worker sem segundo vínculo com artefato direto e retenção do
+  artefato Holder-linked.
+  `apps/worker/src/modules/retention/retention.int.test.ts` cobre artefato
+  Holder sem associação (isolamento por validation/tenant), documento original
+  sem `evidence_artifact` (removido + tombstone, dedupe, retry após falha de
+  storage) e os cenários de lock: retenção × worker (serialização, sem
+  órfãos), retenção × upload F1.1 (rejeitado com `404`), submissão/upload em
+  Validation expirada (nada persistido), validation removida antes do lock
+  (worker e API falham sem criar nada), request originalmente sem validation
+  (F4.3 com 30 dias) e relógio avançando durante a espera do lock.
+  `packages/core/src/claim.test.ts` cobre o helper de Claim. Migrações
+  `0066`/`0067` validadas em PostgreSQL 16 (duplicidade, cross-tenant, cascade
+  e backfill determinístico).
+- Limitações: sem OCR, sem autenticação oficial do documento e sem expansão
+  multi-documento. Artefato do Holder sem Validation não tem job de remoção por
+  `retention_until` (ver retenção acima).
+- Execução de testes e gates — **executados localmente** (Docker disponível;
+  testcontainers reais): suíte completa `vitest run --project node` (122
+  arquivos, incluindo toda a integração — F1.1/F1.2/F1.3, holder-evidence,
+  retention, concorrência), `pnpm typecheck`, `pnpm lint` (exit 0, apenas
+  warnings preexistentes), `pnpm format` (arquivos da PR) e `pnpm db:fence`.
+  **No CI**: a PR possui workflows ativos (`ci`, `security`, `CodeRabbit`); o
+  job `ci` falhou em `pnpm test` no commit anterior por causa do flake
+  descrito acima — corrigido nesta rodada, e o resultado da reexecução fica
+  registrado nos checks da PR. Em rodadas anteriores (sem Docker local), a
+  integração foi exercitada contra PostgreSQL 16 local; essas execuções foram
+  substituídas pela suíte completa. Nenhum teste foi pulado nem asserção
+  enfraquecida para acomodar a implementação; o teste de Validation inexistente
+  foi atualizado para o novo contrato da emenda E7 (falha fechada).
 
 ## F3.3 — medição de uso, idempotência, cotas e reconciliação (2026-11-06)
 

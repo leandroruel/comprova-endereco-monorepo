@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, type Db, type DbTx } from '@comprova/db'
+import { and, eq, inArray, isNull, lte, sql, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
 import type { ObjectStore } from '@comprova/providers'
@@ -12,6 +12,7 @@ const recordExpirationAudit = async (
   tx: DbTx,
   validation: ExpiredValidation,
   artifactsRemoved: number,
+  documentsRemoved: number,
 ): Promise<void> => {
   await tx.insert(t.auditLog).values({
     tenantId: validation.tenantId,
@@ -22,6 +23,7 @@ const recordExpirationAudit = async (
     details: {
       removed: 1,
       artifacts_removed: artifactsRemoved,
+      documents_removed: documentsRemoved,
     },
   })
 }
@@ -49,6 +51,11 @@ const recordExpirationAudit = async (
  * tick — `store.delete` é idempotente. Quando o commit ocorre, objeto e linhas
  * somem juntos; não sobra linha apontando para objeto inexistente nem objeto
  * que escape da retenção.
+ *
+ * O documento ORIGINAL do Holder (`holder_information_request_document`) é
+ * coberto mesmo sem `evidence_artifact`: o objeto sai do storage e a linha
+ * recebe o tombstone `deleted_at` (mesmo mecanismo da remoção pelo Holder),
+ * estado explícito que impede reprocessamento e preserva a auditoria.
  */
 const deleteValidationGraph = async (
   db: Db,
@@ -159,11 +166,47 @@ const deleteValidationGraph = async (
       (artifact, index, all) => all.findIndex((other) => other.artifactId === artifact.artifactId) === index,
     )
 
+    // Documentos ORIGINAIS do Holder para os requests da validation — o upload
+    // F4.2 grava o objeto e a linha ANTES de qualquer evidence_artifact. Um
+    // documento ainda sem artefato (submissão não materializada) também tem
+    // PII no storage e precisa sair com o grafo. Somente `stored` sem
+    // tombstone tem objeto garantido no storage (contrato do schema F4.2).
+    const holderDocuments = await tx
+      .select({
+        documentId: t.holderInformationRequestDocument.documentId,
+        storageKey: t.holderInformationRequestDocument.storageKey,
+      })
+      .from(t.holderInformationRequestDocument)
+      .innerJoin(
+        t.holderInformationRequest,
+        and(
+          eq(t.holderInformationRequest.id, t.holderInformationRequestDocument.holderInformationRequestId),
+          eq(t.holderInformationRequest.tenantId, t.holderInformationRequestDocument.tenantId),
+        ),
+      )
+      .where(
+        and(
+          eq(t.holderInformationRequest.validationId, validationId),
+          eq(t.holderInformationRequest.tenantId, tenantId),
+          eq(t.holderInformationRequestDocument.uploadState, 'stored'),
+          isNull(t.holderInformationRequestDocument.deletedAt),
+        ),
+      )
+
+    // Artefato e documento compartilham o MESMO storage_key: dedupe para não
+    // deletar a mesma chave duas vezes.
+    const storageKeys = [
+      ...new Set([
+        ...artifacts.map((artifact) => artifact.storageKey),
+        ...holderDocuments.map((doc) => doc.storageKey),
+      ]),
+    ]
+
     // O objeto sai antes do commit das linhas. Se um delete falhar, a
     // transação inteira é desfeita e a validation continua elegível para o
     // próximo tick (o delete no storage é idempotente).
-    for (const artifact of artifacts) {
-      await store.delete(artifact.storageKey)
+    for (const storageKey of storageKeys) {
+      await store.delete(storageKey)
     }
 
     if (artifacts.length > 0) {
@@ -173,6 +216,21 @@ const deleteValidationGraph = async (
           artifacts.map((artifact) => artifact.artifactId),
         ),
       )
+    }
+
+    // Tombstone do modelo F4.2 (`deleted_at`), mesmo mecanismo da remoção pelo
+    // Holder: a linha permanece com estado explícito de "objeto removido",
+    // permitindo auditoria e evitando reprocessamento do documento.
+    if (holderDocuments.length > 0) {
+      await tx
+        .update(t.holderInformationRequestDocument)
+        .set({ deletedAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()` })
+        .where(
+          inArray(
+            t.holderInformationRequestDocument.documentId,
+            holderDocuments.map((doc) => doc.documentId),
+          ),
+        )
     }
 
     await tx
@@ -217,7 +275,7 @@ const deleteValidationGraph = async (
     await tx
       .delete(t.validation)
       .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
-    await recordExpirationAudit(tx, validation, artifacts.length)
+    await recordExpirationAudit(tx, validation, artifacts.length, holderDocuments.length)
   })
 }
 

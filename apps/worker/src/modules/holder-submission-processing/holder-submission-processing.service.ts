@@ -560,7 +560,10 @@ export const holderSubmissionProcessingTick = async (
   deps: HolderSubmissionProcessingWorkerDeps,
 ): Promise<number> => {
   const batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE
-  const now = (deps.now ?? (() => new Date()))()
+  // Relógio do tick. O lock da validation pode esperar: ele é relido com o
+  // relógio injetável imediatamente depois de adquirido (ver abaixo), antes
+  // de qualquer comparação de expiração.
+  let now = (deps.now ?? (() => new Date()))()
   let processed = 0
 
   const events = (await deps.db.execute(sql`
@@ -680,20 +683,43 @@ export const holderSubmissionProcessingTick = async (
         // Validation expirada não recebe novo artefato, recibo nem associação:
         // seu grafo está em remoção pela retenção (mesmo lock, mesma ordem).
         let validationExpired = false
+        // A solicitação TINHA validation e ela desapareceu entre a leitura do
+        // vínculo e a aquisição do lock (retenção/erasure concorrentes). Falha
+        // fechada: nenhum artefato/análise/associação com retenção de 30 dias —
+        // nunca se converte em "solicitação nunca vinculada".
+        let validationRemoved = false
         const validationId = requestRow[0]?.validationId
         if (validationId !== null && validationId !== undefined) {
           linkedValidation = await loadValidationForClaim(tx, tenantId, validationId)
+          // O lock pode esperar pela retenção: relê o relógio injetável logo
+          // depois de adquiri-lo, antes de comparar `expires_at`.
+          now = (deps.now ?? (() => new Date()))()
           if (linkedValidation === undefined) {
-            // Validation removida por erasure ou vínculo inconsistente: não
-            // ressuscita evidência. O artefato do Holder segue o ciclo F4.3.
-            deps.logger.warn(
+            // Releitura dentro da transação: comprova se a desvinculação foi
+            // feita pela retenção/erasure (`validation_id` agora NULL) ou se o
+            // ponteiro ficou pendente. Em ambos os casos NÃO há materialização.
+            const [reread] = await tx
+              .select({ validationId: t.holderInformationRequest.validationId })
+              .from(t.holderInformationRequest)
+              .where(
+                and(
+                  eq(t.holderInformationRequest.id, requestId),
+                  eq(t.holderInformationRequest.tenantId, tenantId),
+                ),
+              )
+              .limit(1)
+            const unlinkedConcurrently = reread === undefined || reread.validationId === null
+            validationRemoved = true
+            deps.logger.error(
               {
                 request_id: requestId,
                 tenant_id: tenantId,
                 validation_id: validationId,
-                reason: 'HOLDER_VALIDATION_NOT_FOUND',
+                reason: unlinkedConcurrently
+                  ? 'HOLDER_VALIDATION_REMOVED_CONCURRENTLY'
+                  : 'HOLDER_VALIDATION_DANGLING_REFERENCE',
               },
-              'holder request validation not found; skipping claim materialization',
+              'holder request validation removed before lock; failing closed without materialization',
             )
           } else if (linkedValidation.expiresAt.getTime() <= now.getTime()) {
             // A retention só roda sobre validations expiradas e trava a mesma
@@ -741,7 +767,7 @@ export const holderSubmissionProcessingTick = async (
           readonly artifact: MaterializedArtifact
         } | null = null
 
-        for (const doc of validationExpired ? [] : documents) {
+        for (const doc of validationExpired || validationRemoved ? [] : documents) {
           try {
             const artifact = await ensureArtifact(tx, {
               tenantId,
@@ -824,7 +850,20 @@ export const holderSubmissionProcessingTick = async (
           }
         }
 
-        const state = failedCount === documents.length ? 'failed' : failedCount > 0 ? 'partial' : 'processed'
+        // Remoção concorrente da validation: a submissão NÃO é sucesso — estado
+        // terminal 'failed' com motivo, sem retry (a remoção não é transitória).
+        const state = validationRemoved
+          ? 'failed'
+          : failedCount === documents.length
+            ? 'failed'
+            : failedCount > 0
+              ? 'partial'
+              : 'processed'
+        const lastError = validationRemoved
+          ? 'HOLDER_VALIDATION_REMOVED'
+          : failedCount > 0
+            ? `${failedCount} de ${documents.length} documento(s) falharam`
+            : null
 
         await tx
           .insert(t.holderSubmissionProcessing)
@@ -834,7 +873,7 @@ export const holderSubmissionProcessingTick = async (
             tenantId,
             state,
             attempts: 1,
-            lastError: failedCount > 0 ? `${failedCount} de ${documents.length} documento(s) falharam` : null,
+            lastError,
             createdAt: sql`clock_timestamp()`,
             updatedAt: sql`clock_timestamp()`,
             processedAt: sql`clock_timestamp()`,
@@ -844,8 +883,7 @@ export const holderSubmissionProcessingTick = async (
             set: {
               state,
               attempts: sql`${t.holderSubmissionProcessing.attempts} + 1`,
-              lastError:
-                failedCount > 0 ? `${failedCount} de ${documents.length} documento(s) falharam` : null,
+              lastError,
               updatedAt: sql`clock_timestamp()`,
               processedAt: sql`clock_timestamp()`,
             },
