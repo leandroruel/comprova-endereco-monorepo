@@ -17,6 +17,7 @@ import { batch, batchItem } from './batches.js'
 import { addressSignalCache, claim, claimEvidence, signal } from './claims.js'
 import { evidence } from './evidence.js'
 import { evidenceArtifact } from './evidence-artifact.js'
+import { evidenceArtifactClaimEvidence } from './evidence-artifact-claim-evidence.js'
 import { evidenceAnalysis } from './evidence-analysis.js'
 import { evidenceVerificationAttempt } from './evidence-verification.js'
 import { outbox, webhookDelivery, webhookEndpoint } from './events.js'
@@ -37,6 +38,7 @@ import { apiKey, tenant } from './tenancy.js'
 import { organizationInvitation, organizationMember } from './organizations.js'
 import { auditLog, tenantQuotaAudit, usageBillingUnit, usageEvent, usageEventIdempotency } from './usage.js'
 import { validation, validationIdempotency } from './validations.js'
+import { validationCustomerDocument } from './validation-customer-document.js'
 import { holder } from './holder.js'
 import { holderInformationRequest } from './holder-information-request.js'
 import { holderInformationRequestEvent } from './holder-information-request-event.js'
@@ -56,9 +58,11 @@ export * from './auth.js'
 export * from './addresses.js'
 export * from './subjects.js'
 export * from './validations.js'
+export * from './validation-customer-document.js'
 export * from './claims.js'
 export * from './evidence.js'
 export * from './evidence-artifact.js'
+export * from './evidence-artifact-claim-evidence.js'
 export * from './evidence-analysis.js'
 export * from './evidence-verification.js'
 export * from './events.js'
@@ -114,12 +118,14 @@ export const schema = {
   subject,
   validation,
   validationIdempotency,
+  validationCustomerDocument,
   claim,
   claimEvidence,
   signal,
   addressSignalCache,
   evidence,
   evidenceArtifact,
+  evidenceArtifactClaimEvidence,
   evidenceAnalysis,
   evidenceVerificationAttempt,
   outbox,

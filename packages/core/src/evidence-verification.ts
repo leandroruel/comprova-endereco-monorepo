@@ -74,8 +74,16 @@ export type EvidenceVerificationStatus = (typeof EVIDENCE_VERIFICATION_STATUSES)
 /** Fonte lógica da verificação do documento enviado (não é o intake F1.1). */
 export const UPLOADED_DOCUMENT_SOURCE = 'uploaded_document'
 export const UPLOADED_DOCUMENT_CHECKER = 'document_upload_verification'
-/** Fonte da observação de intake criada pela F1.1 (recibo, não verificação). */
+/** Fonte da observação de intake criada pela F1.1/F4.3 (recibo, não verificação). */
 export const CUSTOMER_DOCUMENT_INTAKE_SOURCE = 'customer_submitted_document'
+/**
+ * Checker da observação de intake. É o mesmo recibo lógico quando o documento
+ * chega pelo upload direto (F1.1) ou pela submissão do Holder (F4.3).
+ */
+export const CUSTOMER_DOCUMENT_INTAKE_CHECKER = 'customer_document_intake'
+export const CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION = '1.0.0'
+/** A evidência nasce pendente/inconclusiva; a F1.3 é quem produz a leitura. */
+export const CUSTOMER_DOCUMENT_INTAKE_STATUS = 'pending'
 /** Versão da política de comparação; bump quando a semântica mudar. */
 export const UPLOADED_DOCUMENT_VERIFICATION_VERSION = '1.0.0'
 

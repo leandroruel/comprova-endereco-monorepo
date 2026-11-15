@@ -1,5 +1,12 @@
 import { problem, problems, type Problem } from '@comprova/contracts'
-import { CUSTOMER_DOCUMENT_INTAKE_SOURCE } from '@comprova/core'
+import {
+  CUSTOMER_DOCUMENT_INTAKE_CHECKER,
+  CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION,
+  CUSTOMER_DOCUMENT_INTAKE_SOURCE,
+  CUSTOMER_DOCUMENT_INTAKE_STATUS,
+  addressClaimForSubjectDocType,
+  type AddressClaimSpec,
+} from '@comprova/core'
 import { and, eq, insertPendingEvidenceAnalysis, withTenant, type Db, type DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import type { Logger } from '@comprova/observability'
@@ -26,9 +33,9 @@ import {
  */
 
 export const EVIDENCE_INTAKE_SOURCE = CUSTOMER_DOCUMENT_INTAKE_SOURCE
-export const EVIDENCE_INTAKE_CHECKER = 'customer_document_intake'
-export const EVIDENCE_INTAKE_CHECKER_VERSION = '1.0.0'
-export const EVIDENCE_INTAKE_STATUS = 'pending'
+export const EVIDENCE_INTAKE_CHECKER = CUSTOMER_DOCUMENT_INTAKE_CHECKER
+export const EVIDENCE_INTAKE_CHECKER_VERSION = CUSTOMER_DOCUMENT_INTAKE_CHECKER_VERSION
+export const EVIDENCE_INTAKE_STATUS = CUSTOMER_DOCUMENT_INTAKE_STATUS
 
 export const EVIDENCE_INTAKE_CONTENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const
 
@@ -159,15 +166,49 @@ const loadValidation = async (
     .where(eq(t.validation.validationId, validationId))
     .limit(1)
   const rows = lock ? await query.for('update') : await query
-  return rows[0]
+  const validation = rows[0]
+  // Validation expirada não recebe nova evidência: o grafo entra em remoção
+  // pela retenção. Tratada como inexistente (404), inclusive para replay —
+  // o cliente cria uma nova validation para enviar outro documento.
+  if (validation !== undefined && validation.expiresAt.getTime() <= Date.now()) return undefined
+  return validation
 }
 
-const loadClaimId = async (tx: DbTx, validationId: string): Promise<string | undefined> => {
+const loadSubjectDocType = async (tx: DbTx, validation: IntakeValidation): Promise<string> => {
+  const subjectRows = await tx
+    .select({ docType: t.subject.docType })
+    .from(t.subject)
+    .where(and(eq(t.subject.subjectId, validation.subjectId), eq(t.subject.tenantId, validation.tenantId)))
+    .limit(1)
+  const docType = subjectRows[0]?.docType
+  if (docType === undefined) throw new Error('validation subject missing')
+  return docType
+}
+
+/**
+ * Claim de endereço da Validation, derivada de `subject.docType` com a mesma
+ * regra do ADR-0037 (CNPJ → `business_registered_address`/`organization`;
+ * demais → `address_exists`/`person`). Outras Claims da Validation pertencem a
+ * outras finalidades e nunca são candidatas. Duas Claims da mesma finalidade
+ * configuram inconsistência e falham fechado.
+ */
+const loadAddressClaimId = async (
+  tx: DbTx,
+  validation: IntakeValidation,
+  spec: AddressClaimSpec,
+): Promise<string | undefined> => {
   const rows = await tx
     .select({ claimId: t.claim.claimId })
     .from(t.claim)
-    .where(eq(t.claim.validationId, validationId))
-    .limit(1)
+    .where(
+      and(
+        eq(t.claim.tenantId, validation.tenantId),
+        eq(t.claim.validationId, validation.validationId),
+        eq(t.claim.type, spec.type),
+        eq(t.claim.subjectType, spec.subjectType),
+      ),
+    )
+  if (rows.length > 1) throw new EvidenceIntakeError(problems.evidencePersistenceFailed())
   return rows[0]?.claimId
 }
 
@@ -190,6 +231,129 @@ const loadExistingEvidence = async (tx: DbTx, claimId: string): Promise<Existing
     .where(and(eq(t.claimEvidence.claimId, claimId), eq(t.claimEvidence.source, EVIDENCE_INTAKE_SOURCE)))
     .limit(1)
   return rows[0]
+}
+
+type CustomerDocumentLookup =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'canonical'; readonly evidence: ExistingEvidence }
+  | { readonly kind: 'other-claim' }
+
+const loadReceiptsForValidation = async (
+  tx: DbTx,
+  tenantId: string,
+  validationId: string,
+): Promise<readonly { readonly claimId: string }[]> =>
+  tx
+    .select({ claimId: t.claimEvidence.claimId })
+    .from(t.claimEvidence)
+    .innerJoin(
+      t.claim,
+      and(eq(t.claim.claimId, t.claimEvidence.claimId), eq(t.claim.tenantId, t.claimEvidence.tenantId)),
+    )
+    .where(
+      and(
+        eq(t.claim.tenantId, tenantId),
+        eq(t.claim.validationId, validationId),
+        eq(t.claimEvidence.source, EVIDENCE_INTAKE_SOURCE),
+      ),
+    )
+
+/**
+ * Recibo já existente para a Validation. A relação `validation_customer_document`
+ * é a fonte autoritativa; o recibo só é reutilizável se estiver na Claim de
+ * endereço resolvida. O fallback pela Claim cobre recibos legados anteriores à
+ * relação explícita; um recibo em outra finalidade é inconsistência, nunca
+ * reaproveitamento.
+ */
+const loadCustomerDocument = async (
+  tx: DbTx,
+  tenantId: string,
+  validationId: string,
+  claimId: string,
+): Promise<CustomerDocumentLookup> => {
+  const [link] = await tx
+    .select({
+      claimEvidenceId: t.validationCustomerDocument.claimEvidenceId,
+      claimId: t.claimEvidence.claimId,
+      artifactId: t.evidenceArtifact.artifactId,
+      sha256: t.evidenceArtifact.sha256,
+      contentType: t.evidenceArtifact.contentType,
+    })
+    .from(t.validationCustomerDocument)
+    .innerJoin(
+      t.claimEvidence,
+      and(
+        eq(t.claimEvidence.claimEvidenceId, t.validationCustomerDocument.claimEvidenceId),
+        eq(t.claimEvidence.tenantId, t.validationCustomerDocument.tenantId),
+      ),
+    )
+    .leftJoin(
+      t.evidenceArtifact,
+      and(
+        eq(t.evidenceArtifact.claimEvidenceId, t.claimEvidence.claimEvidenceId),
+        eq(t.evidenceArtifact.tenantId, t.claimEvidence.tenantId),
+      ),
+    )
+    .where(
+      and(
+        eq(t.validationCustomerDocument.tenantId, tenantId),
+        eq(t.validationCustomerDocument.validationId, validationId),
+      ),
+    )
+    .limit(1)
+
+  if (link !== undefined) {
+    if (link.claimId !== claimId) return { kind: 'other-claim' }
+    return {
+      kind: 'canonical',
+      evidence: {
+        claimEvidenceId: link.claimEvidenceId,
+        artifactId: link.artifactId,
+        sha256: link.sha256,
+        contentType: link.contentType,
+      },
+    }
+  }
+
+  const existing = await loadExistingEvidence(tx, claimId)
+  if (existing !== undefined) return { kind: 'canonical', evidence: existing }
+
+  const receipts = await loadReceiptsForValidation(tx, tenantId, validationId)
+  return receipts.length === 0 ? { kind: 'none' } : { kind: 'other-claim' }
+}
+
+/**
+ * Materializa a relação 1:1 recibo ↔ Validation. `validation_id` é PK: se já
+ * existir um vínculo para outra linha, o pedido falha como `409`, sem substituir
+ * o documento existente.
+ */
+const linkValidationCustomerDocument = async (
+  tx: DbTx,
+  input: { readonly tenantId: string; readonly validationId: string; readonly claimEvidenceId: string },
+): Promise<void> => {
+  await tx
+    .insert(t.validationCustomerDocument)
+    .values({
+      validationId: input.validationId,
+      claimEvidenceId: input.claimEvidenceId,
+      tenantId: input.tenantId,
+    })
+    .onConflictDoNothing()
+
+  const [link] = await tx
+    .select({ claimEvidenceId: t.validationCustomerDocument.claimEvidenceId })
+    .from(t.validationCustomerDocument)
+    .where(
+      and(
+        eq(t.validationCustomerDocument.tenantId, input.tenantId),
+        eq(t.validationCustomerDocument.validationId, input.validationId),
+      ),
+    )
+    .limit(1)
+
+  if (link === undefined || link.claimEvidenceId !== input.claimEvidenceId) {
+    throw new EvidenceIntakeError(problems.evidenceAlreadyExists())
+  }
 }
 
 const loadIdempotency = async (
@@ -246,19 +410,10 @@ const replayOf = async (
 }
 
 const ensureClaim = async (tx: DbTx, validation: IntakeValidation): Promise<string> => {
-  const existing = await loadClaimId(tx, validation.validationId)
+  const spec = addressClaimForSubjectDocType(await loadSubjectDocType(tx, validation))
+  const existing = await loadAddressClaimId(tx, validation, spec)
   if (existing !== undefined) return existing
 
-  const subjectRows = await tx
-    .select({ docType: t.subject.docType })
-    .from(t.subject)
-    .where(eq(t.subject.subjectId, validation.subjectId))
-    .limit(1)
-  const docType = subjectRows[0]?.docType
-  if (docType === undefined) throw new Error('validation subject missing')
-
-  const type = docType === 'CNPJ' ? 'business_registered_address' : 'address_exists'
-  const subjectType = docType === 'CNPJ' ? 'organization' : 'person'
   await tx
     .insert(t.claim)
     .values({
@@ -267,13 +422,13 @@ const ensureClaim = async (tx: DbTx, validation: IntakeValidation): Promise<stri
       validationId: validation.validationId,
       subjectId: validation.subjectId,
       addressId: validation.addressId,
-      type,
-      subjectType,
+      type: spec.type,
+      subjectType: spec.subjectType,
       targetType: 'address',
     })
     .onConflictDoNothing()
 
-  const claimId = await loadClaimId(tx, validation.validationId)
+  const claimId = await loadAddressClaimId(tx, validation, spec)
   if (claimId === undefined) throw new Error('claim insert failed')
   return claimId
 }
@@ -324,25 +479,29 @@ const preflight = async (
       }
     }
 
-    const claimId = await loadClaimId(tx, input.validationId)
-    if (claimId === undefined) {
-      if (marker !== undefined) throw persistenceFailed()
-      return { kind: 'upload' as const }
-    }
+    const spec = addressClaimForSubjectDocType(await loadSubjectDocType(tx, validation))
+    const claimId = await loadAddressClaimId(tx, validation, spec)
+    const existing =
+      claimId === undefined
+        ? ({ kind: 'none' } as const)
+        : await loadCustomerDocument(tx, input.tenantId, input.validationId, claimId)
 
-    const existing = await loadExistingEvidence(tx, claimId)
     if (marker !== undefined) {
-      if (existing === undefined || !matches(existing, contentType, sha256)) {
+      if (existing.kind !== 'canonical' || !matches(existing.evidence, contentType, sha256)) {
         throw persistenceFailed()
       }
-      return { kind: 'replay' as const, result: await replayOf(tx, input, existing) }
+      return { kind: 'replay' as const, result: await replayOf(tx, input, existing.evidence) }
     }
-    if (existing === undefined) return { kind: 'upload' as const }
-    if (matches(existing, contentType, sha256)) {
+    if (existing.kind === 'none') return { kind: 'upload' as const }
+    if (existing.kind === 'other-claim') {
+      // Recibo da Validation está em outra finalidade: nunca o reutiliza.
+      throw new EvidenceIntakeError(problems.evidenceAlreadyExists())
+    }
+    if (matches(existing.evidence, contentType, sha256)) {
       // Replay por conteúdo com uma key nova: registra o alias para que um
       // reuso dessa key com outro conteúdo seja detectado como mismatch.
       await recordIdempotency(tx, input, requestHash)
-      return { kind: 'replay' as const, result: await replayOf(tx, input, existing) }
+      return { kind: 'replay' as const, result: await replayOf(tx, input, existing.evidence) }
     }
     throw new EvidenceIntakeError(problems.evidenceAlreadyExists())
   })
@@ -368,8 +527,20 @@ const errorConstraintOf = (error: unknown, depth = 0): string | null => {
   return errorConstraintOf((error as { cause?: unknown }).cause, depth + 1)
 }
 
-const isDuplicateCustomerDocument = (error: unknown): boolean =>
-  errorCodeOf(error) === '23505' && errorConstraintOf(error) === 'idx_claim_evidence_customer_document_uq'
+const DUPLICATE_CUSTOMER_DOCUMENT_CONSTRAINTS: ReadonlySet<string> = new Set([
+  'idx_claim_evidence_customer_document_uq',
+  'validation_customer_document_pkey',
+  'validation_customer_document_claim_evidence_uq',
+])
+
+const isDuplicateCustomerDocument = (error: unknown): boolean => {
+  const constraint = errorConstraintOf(error)
+  return (
+    errorCodeOf(error) === '23505' &&
+    constraint !== null &&
+    DUPLICATE_CUSTOMER_DOCUMENT_CONSTRAINTS.has(constraint)
+  )
+}
 
 const compensate = async (
   deps: EvidenceIntakeDeps,
@@ -472,19 +643,33 @@ export const uploadEvidence = async (
         }
       }
 
-      const existing = await loadExistingEvidence(tx, claimId)
+      const existing = await loadCustomerDocument(tx, input.tenantId, input.validationId, claimId)
       if (marker !== undefined) {
-        if (existing === undefined || !matches(existing, contentType, sha256)) {
+        if (existing.kind !== 'canonical' || !matches(existing.evidence, contentType, sha256)) {
           throw persistenceFailed()
         }
-        return replayOf(tx, input, existing)
+        await linkValidationCustomerDocument(tx, {
+          tenantId: input.tenantId,
+          validationId: input.validationId,
+          claimEvidenceId: existing.evidence.claimEvidenceId,
+        })
+        return replayOf(tx, input, existing.evidence)
       }
-      if (existing !== undefined) {
-        if (!matches(existing, contentType, sha256)) {
+      if (existing.kind === 'other-claim') {
+        throw new EvidenceIntakeError(problems.evidenceAlreadyExists())
+      }
+      if (existing.kind === 'canonical') {
+        if (!matches(existing.evidence, contentType, sha256)) {
           throw new EvidenceIntakeError(problems.evidenceAlreadyExists())
         }
+        // Recibo legado ainda sem a relação explícita: adota o vínculo 1:1.
+        await linkValidationCustomerDocument(tx, {
+          tenantId: input.tenantId,
+          validationId: input.validationId,
+          claimEvidenceId: existing.evidence.claimEvidenceId,
+        })
         await recordIdempotency(tx, input, requestHash)
-        return replayOf(tx, input, existing)
+        return replayOf(tx, input, existing.evidence)
       }
 
       const now = new Date()
@@ -524,6 +709,15 @@ export const uploadEvidence = async (
             size_bytes: input.data.byteLength,
           },
         },
+      })
+
+      // Relação 1:1 recibo ↔ Validation imposta pelo banco. Uma corrida com o
+      // worker F4.3 (que também cria o recibo sob o mesmo lock) não duplica:
+      // o conflito é traduzido em 409 e a transação é desfeita.
+      await linkValidationCustomerDocument(tx, {
+        tenantId: input.tenantId,
+        validationId: input.validationId,
+        claimEvidenceId,
       })
 
       await insertEvidenceArtifact(tx, {

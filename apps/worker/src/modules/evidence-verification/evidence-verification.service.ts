@@ -25,6 +25,11 @@ import { loadClaimVerificationContext } from './claim-context.js'
  * observação F1.1 (`customer_submitted_document`) permanece imutável e não é
  * reutilizada: ela é o recibo do intake, não a verificação.
  *
+ * O candidato inclui dois caminhos de artefato:
+ *   - upload direto F1.1: `evidence_artifact.claim_evidence_id` preenchido;
+ *   - documento do Holder (F4.3): artefato ligado à solicitação e associado ao
+ *     recibo por `evidence_artifact_claim_evidence` (1:1).
+ *
  * Garantias:
  *   - uma linha por (`claim_id`, checker, checker_version); replay/retry não
  *     duplica e uma nova versão cria outra linha sem apagar a anterior;
@@ -110,8 +115,15 @@ const findNext = async (
     JOIN evidence_artifact art
       ON art.artifact_id = ea.artifact_id
      AND art.tenant_id = ea.tenant_id
+    -- F1.1 liga o artefato diretamente ao recibo (claim_evidence_id). O
+    -- documento do Holder mantém claim_evidence_id NULL e participa do
+    -- pipeline pelo vínculo explícito 1:1 (F4.3/PR #73). COALESCE resolve os
+    -- dois caminhos sem alterar a semântica write-once do artefato.
+    LEFT JOIN evidence_artifact_claim_evidence art_link
+      ON art_link.artifact_id = art.artifact_id
+     AND art_link.tenant_id = ea.tenant_id
     JOIN claim_evidence ce
-      ON ce.claim_evidence_id = art.claim_evidence_id
+      ON ce.claim_evidence_id = COALESCE(art.claim_evidence_id, art_link.claim_evidence_id)
      AND ce.tenant_id = ea.tenant_id
     JOIN claim c
       ON c.claim_id = ce.claim_id

@@ -321,6 +321,56 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
     let failed = 0
     const errors: string[] = []
 
+    // O artefato acompanha o ciclo da Validation quando a solicitação está
+    // vinculada; sem vínculo, mantém a política F4.3 de 30 dias.
+    const [requestRow] = await tx
+      .select({ validationId: t.holderInformationRequest.validationId })
+      .from(t.holderInformationRequest)
+      .where(
+        and(
+          eq(t.holderInformationRequest.id, holderInformationRequestId),
+          eq(t.holderInformationRequest.tenantId, tenantId),
+        ),
+      )
+      .limit(1)
+    const validationId = requestRow?.validationId
+    // Protocolo de lock: quando a solicitação está vinculada, a linha da
+    // validation é travada com FOR UPDATE (mesma ordem do intake F1.1 e do
+    // worker F4.3) antes de criar qualquer artefato para o grafo dela.
+    const [validationRow] =
+      validationId === null || validationId === undefined
+        ? []
+        : await tx
+            .select({ expiresAt: t.validation.expiresAt })
+            .from(t.validation)
+            .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
+            .for('update')
+            .limit(1)
+
+    // A solicitação tinha validation e ela desapareceu entre a leitura do
+    // vínculo e o lock (retenção/erasure concorrentes). Falha fechada: nunca
+    // vira "nunca vinculada" nem cria artefato com retenção de 30 dias.
+    if (validationId !== null && validationId !== undefined && validationRow === undefined) {
+      return {
+        processed: 0,
+        failed: documents.length,
+        errors: documents.map((doc) => `${doc.documentId}: VALIDATION_REMOVED`),
+      }
+    }
+
+    // Validation expirada não recebe novo artefato: seu grafo está em remoção
+    // pela retenção (que adquire o mesmo lock antes de descobrir/excluir). A
+    // comparação acontece depois da aquisição do lock.
+    if (validationRow !== undefined && validationRow.expiresAt.getTime() <= new Date().getTime()) {
+      return {
+        processed: 0,
+        failed: documents.length,
+        errors: documents.map((doc) => `${doc.documentId}: VALIDATION_EXPIRED`),
+      }
+    }
+
+    const retentionUntil = validationRow?.expiresAt ?? new Date(Date.now() + 30 * 86_400_000)
+
     for (const doc of documents) {
       try {
         // Verifica se já existe um artefato para este documento nesta solicitação.
@@ -354,9 +404,7 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
             contentType: doc.contentType,
             sizeBytes: doc.sizeBytes,
             sha256: doc.sha256,
-            // Política de retenção de `evidence_artifact` (30d) — ver
-            // docs/lgpd/retencao.md.
-            retentionUntil: new Date(Date.now() + 30 * 86_400_000),
+            retentionUntil,
           })
         }
 

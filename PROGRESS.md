@@ -1,6 +1,161 @@
 # PROGRESS.md
 
-Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-06)
+Estado: **Documento do Holder no pipeline de evidências (PR #73) em revisão + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+
+## Documento do Holder no pipeline de evidências (PR #73) (2026-11-14)
+
+- Um documento enviado pelo Holder em uma `holder_information_request` vinculada
+  a uma Validation passa a participar do pipeline F1.1/F1.2/F1.3 existente. Não
+  há fila, worker ou pipeline paralelo; o worker F4.3 continua consumindo o
+  outbox `holder_submission.processing_requested`.
+- O `evidence_artifact` do Holder permanece pertencendo à solicitação
+  (`holder_information_request_id`, `claim_evidence_id = NULL`). A regra de
+  fonte exclusiva e o write-once do ADR-0035 não mudam e nenhum byte é copiado.
+- Nova tabela aditiva `evidence_artifact_claim_evidence` (migration `0066`)
+  associa o artefato ao recibo `customer_submitted_document` com cardinalidade
+  1:1 garantida no banco: PK em `artifact_id` e `UNIQUE (claim_evidence_id)`.
+  FKs compostas com `tenant_id`, RLS FORCE e `ON DELETE CASCADE`.
+- O recibo reutiliza as mesmas regras da F1.1: `source =
+customer_submitted_document`, `checker = customer_document_intake`,
+  `stance = unknown`, `strength = 0`, `confidence = 0`,
+  `detail.verification.status = pending`. `detail.origin` guarda apenas ids
+  técnicos. A identidade do Holder não é comparada com `subject.docHmac` e não
+  há aprovação automática de identidade/residência.
+- Revisão: a Claim de endereço é resolvida pelo domínio — `subject.docType`
+  (CNPJ → `business_registered_address`/`organization`; demais →
+  `address_exists`/`person`) via `addressClaimForSubjectDocType`, no worker e
+  no F1.1. Outras Claims da Validation nunca são candidatas; duas Claims da
+  mesma finalidade são inconsistência (worker loga e pula o recibo; F1.1 falha
+  fechado) e recibo em finalidade errada nunca é reutilizado.
+- Revisão: cardinalidade 1:1 Validation ↔ documento imposta no banco pela nova
+  tabela `validation_customer_document` (migration `0067`): `validation_id` é
+  PK, `claim_evidence_id` é UNIQUE, FK composta com `claim_evidence`
+  (mesmo tenant), RLS FORCE, sem UPDATE e `ON DELETE CASCADE`; backfill
+  determinístico prefere o recibo da Claim canônica. F1.1 e worker gravam o
+  vínculo na mesma transação do recibo; conflito vira `409
+EVIDENCE_ALREADY_EXISTS` (F1.1) ou inconsistência logada com rollback em
+  savepoint (worker). O índice por Claim
+  `idx_claim_evidence_customer_document_uq` é preservado. Somente o primeiro
+  documento ativo da solicitação é associado; documentos adicionais continuam
+  apenas no domínio do Holder. Uma segunda solicitação reutiliza o recibo e
+  não cria segundo vínculo.
+- F1.3 passou a resolver o candidato por `COALESCE(art.claim_evidence_id,
+art_link.claim_evidence_id)`, unificando upload direto e documento do Holder
+  sem alterar a materialização `uploaded_document`, o índice de idempotência ou
+  o backoff.
+- Concorrência: a Validation é travada com `FOR UPDATE` antes de criar
+  claim/recibo, serializando com a F1.1. Claim, recibo, artefato e vínculo usam
+  `ON CONFLICT DO NOTHING` + releitura; replay de outbox, retry e execuções
+  concorrentes não duplicam nada. A unicidade é imposta pelo banco.
+- Solicitação sem `validation_id`, Validation inexistente ou evento com tenant
+  divergente não materializa claim/recibo/vínculo; o documento segue apenas como
+  documento do Holder.
+- Sem mudança de score: a linha F1.3 continua sem `signal`; `score`,
+  `confidence`, `weightedScore` e veredito permanecem inalterados.
+- Decisão em
+  [ADR-0045](docs/adr/0045-documento-do-holder-no-pipeline-de-evidencias.md) e
+  em
+  [`docs/arquitetura-evidencias.md`](docs/arquitetura-evidencias.md#541-documento-do-holder-no-pipeline-de-evidências-f43--f12f13-implementado).
+- Revisão: retenção coerente — com Validation, o artefato do Holder nasce com
+  `retention_until = validation.expires_at` e é removido por
+  `validationRetentionTick` junto com o grafo (objeto antes da linha),
+  inclusive os vinculados apenas por associação/vínculo explícito. Artefatos de
+  solicitações sem Validation ficam com 30 dias e não têm job dedicado por
+  `retention_until` — limitação documentada em `docs/lgpd/retencao.md` com
+  recomendação de estender o tick existente de `evidence` (decisão futura
+  própria).
+- Revisão 2: a descoberta da retenção inclui artefatos do Holder ainda **sem**
+  associação, por `evidence_artifact.holder_information_request_id →
+holder_information_request.validation_id` com filtro de tenant (ex.: segunda
+  submissão quando o recibo já tem artefato direto do F1.1). Ao remover a
+  validation, `holder_information_request.validation_id` é limpado (mesmo
+  padrão da erasure do subject).
+- Revisão 2: protocolo único de lock — F1.1 (API), worker F4.3, API
+  `processDocuments` e `validationRetentionTick` adquirem o mesmo `FOR UPDATE`
+  na linha da validation (validation primeiro, sem inversão) e verificam
+  `expires_at`. Validation expirada não recebe novo artefato, recibo nem
+  associação: upload F1.1 responde `404` (expired ≡ inexistente, inclusive
+  replay), worker e API não materializam. A retenção executa descoberta,
+  exclusão no storage e exclusão de linhas numa única transação que segura o
+  lock até o commit; falha em qualquer delete de objeto desfaz tudo e o tick
+  seguinte repete (idempotente). `evidence-verification` (F1.3) não cria
+  artefato/associação; na pior hipótese provoca falha de FK na retenção, retomada
+  no tick seguinte.
+- Testes: `apps/api/tests/holder-evidence-integration.int.test.ts` cobre fluxo
+  principal com F1.2/F1.3, cardinalidade, replay/retry, concorrência, separação
+  Holder × Subject, solicitação sem vínculo, Validation inexistente, tenant
+  divergente, RLS e unicidade no banco; a revisão agregou múltiplas Claims
+  (recibo só na canônica), recibo em finalidade errada (não reutilizado, sem
+  segundo recibo/vínculo), adoção de recibo legado, rejeição no banco sem
+  registros parciais, F1.1 gravando o vínculo, `409` após recibo do Holder,
+  worker sem segundo vínculo com artefato direto e retenção do artefato
+  Holder-linked. `apps/worker/src/modules/retention/retention.int.test.ts`
+  cobre artefato Holder sem associação (isolamento por validation/tenant) e os
+  cenários de lock: retenção × worker (serialização, sem órfãos), retenção ×
+  upload F1.1 (rejeitado com `404`) e submissão/upload em Validation expirada
+  (nada persistido). `packages/core/src/claim.test.ts` cobre o helper de Claim.
+  Migrações `0066`/`0067` validadas em PostgreSQL 16 (duplicidade, cross-tenant,
+  cascade e backfill determinístico).
+- Limitações: sem OCR, sem autenticação oficial do documento e sem expansão
+  multi-documento. Artefato do Holder sem Validation não tem job de remoção por
+  `retention_until` (ver retenção acima).
+- Revisão 3: a retenção cobre também o documento ORIGINAL do Holder
+  (`holder_information_request_document`) ainda sem `evidence_artifact` —
+  objeto sai do storage e a linha recebe o tombstone `deleted_at` (mesmo
+  mecanismo da remoção pelo Holder); chaves artefato × documento são
+  deduplicadas e o audit `validation.expired` registra `documents_removed`.
+  Falha de storage desfaz a transação e o tick seguinte redescobre (documento
+  permanece ativo até concluir).
+- Revisão 3: corrida leitura do vínculo × lock — Validation inexistente ou
+  removida concorrentemente (request tinha `validation_id` e o lock não encontra
+  a linha) falha fechado: nenhum artefato/análise/associação e estado `failed`
+  com `lastError = 'HOLDER_VALIDATION_REMOVED'`, nunca convertido em "nunca
+  vinculada" (emenda E7 do ADR-0045; substitui o §7 para esses casos). Request
+  criada sem `validation_id` preserva o fluxo F4.3 com retenção de 30 dias.
+- Revisão 3: o relógio da comparação de expiração é relido com o clock
+  injetável imediatamente depois de adquirir o lock da validation (a espera
+  pode consumir o prazo); na API a comparação acontece após o `FOR UPDATE`.
+- Revisão 3: corrige flake preexistente (não introduzido por esta PR) no CI:
+  `usage-backfill.migration.int.test.ts` inseria o mesmo `validationId` em dois
+  tenants com `created_at = new Date()` — PK `(validation_id, created_at)`
+  colidia quando as inserções caíam no mesmo milissegundo;
+  `created_at` agora é monotônico por inserção.
+- Testes: `apps/api/tests/holder-evidence-integration.int.test.ts` cobre fluxo
+  principal com F1.2/F1.3, cardinalidade, replay/retry, concorrência, separação
+  Holder × Subject, solicitação sem vínculo, Validation inexistente (falha
+  fechada), tenant divergente, RLS e unicidade no banco; a revisão agregou
+  múltiplas Claims (recibo só na canônica), recibo em finalidade errada (não
+  reutilizado, sem segundo recibo/vínculo), adoção de recibo legado, rejeição
+  no banco sem registros parciais, F1.1 gravando o vínculo, `409` após recibo
+  do Holder, worker sem segundo vínculo com artefato direto e retenção do
+  artefato Holder-linked.
+  `apps/worker/src/modules/retention/retention.int.test.ts` cobre artefato
+  Holder sem associação (isolamento por validation/tenant), documento original
+  sem `evidence_artifact` (removido + tombstone, dedupe, retry após falha de
+  storage) e os cenários de lock: retenção × worker (serialização, sem
+  órfãos), retenção × upload F1.1 (rejeitado com `404`), submissão/upload em
+  Validation expirada (nada persistido), validation removida antes do lock
+  (worker e API falham sem criar nada), request originalmente sem validation
+  (F4.3 com 30 dias) e relógio avançando durante a espera do lock.
+  `packages/core/src/claim.test.ts` cobre o helper de Claim. Migrações
+  `0066`/`0067` validadas em PostgreSQL 16 (duplicidade, cross-tenant, cascade
+  e backfill determinístico).
+- Limitações: sem OCR, sem autenticação oficial do documento e sem expansão
+  multi-documento. Artefato do Holder sem Validation não tem job de remoção por
+  `retention_until` (ver retenção acima).
+- Execução de testes e gates — **executados localmente** (Docker disponível;
+  testcontainers reais): suíte completa `vitest run --project node` (122
+  arquivos, incluindo toda a integração — F1.1/F1.2/F1.3, holder-evidence,
+  retention, concorrência), `pnpm typecheck`, `pnpm lint` (exit 0, apenas
+  warnings preexistentes), `pnpm format` (arquivos da PR) e `pnpm db:fence`.
+  **No CI**: a PR possui workflows ativos (`ci`, `security`, `CodeRabbit`); o
+  job `ci` falhou em `pnpm test` no commit anterior por causa do flake
+  descrito acima — corrigido nesta rodada, e o resultado da reexecução fica
+  registrado nos checks da PR. Em rodadas anteriores (sem Docker local), a
+  integração foi exercitada contra PostgreSQL 16 local; essas execuções foram
+  substituídas pela suíte completa. Nenhum teste foi pulado nem asserção
+  enfraquecida para acomodar a implementação; o teste de Validation inexistente
+  foi atualizado para o novo contrato da emenda E7 (falha fechada).
 
 ## F3.3 — medição de uso, idempotência, cotas e reconciliação (2026-11-06)
 
