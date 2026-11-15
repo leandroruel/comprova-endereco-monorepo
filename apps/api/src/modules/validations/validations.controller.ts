@@ -8,6 +8,7 @@ import {
   problem,
   problems,
   type CreateValidationRequest,
+  type ValidationsListDto,
   type ValidationDto,
 } from '@comprova/contracts'
 import { isValidDocument, type AddressComponents } from '@comprova/core'
@@ -24,7 +25,12 @@ import {
   issueCredential,
   type CredentialIssuerDeps,
 } from '../../services/credential-issuer.js'
-import { contestValidation, getValidationDetails } from './validations.service.js'
+import {
+  contestValidation,
+  getValidationDetails,
+  listValidations,
+  type ListValidationsQuery,
+} from './validations.service.js'
 
 export interface ValidationControllerDeps {
   readonly db: Db
@@ -136,6 +142,33 @@ const addressComponentsFromDto = (dto: {
 })
 
 export const makeValidationController = (deps: ValidationControllerDeps) => ({
+  list: async (
+    tenantId: string | undefined,
+    query: ListValidationsQuery,
+    reply: FastifyReply,
+  ): Promise<ValidationsListDto | FastifyReply> => {
+    if (tenantId === undefined) throw new Error('tenant context missing')
+    const result = await listValidations(deps.db, tenantId, query)
+    // Item deliberadamente enxuto (ValidationListItemDtoSchema): sem endereço,
+    // signals, detail de evidências, hashes ou ids internos.
+    const body: ValidationsListDto = {
+      validations: result.items.map((item) => ({
+        validation_id: item.validationId,
+        status: item.status,
+        verdict: item.verdict,
+        score: item.score,
+        confidence: item.confidence,
+        has_customer_document: item.hasCustomerDocument,
+        created_at: item.createdAt.toISOString(),
+        expires_at: item.expiresAt.toISOString(),
+      })),
+      total: result.total,
+      limit: query.limit,
+      offset: query.offset,
+    }
+    return reply.send(body)
+  },
+
   get: async (
     tenantId: string | undefined,
     validationId: string,

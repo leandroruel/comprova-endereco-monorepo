@@ -241,6 +241,31 @@ export const ValidationDtoSchema = z.object({
   expires_at: z.string(),
 })
 
+/**
+ * Item de listagem de validações (dashboard do Verifier). Deliberadamente
+ * ENXUTO: sem endereço, signals, detail de evidências, hashes ou ids internos
+ * — o detalhe completo vem de `GET /validations/:id` (ValidationDtoSchema).
+ */
+export const ValidationListItemDtoSchema = z.object({
+  validation_id: z.uuid(),
+  status: ValStatusSchema,
+  verdict: VerdictSchema.nullable(),
+  score: z.number().min(-1).max(1).nullable(),
+  confidence: z.number().min(0).max(1).nullable(),
+  /** Recibo `customer_submitted_document` já materializado para a validation. */
+  has_customer_document: z.boolean(),
+  created_at: z.string(),
+  expires_at: z.string(),
+})
+
+/** Resposta paginada de validações (convenção limit/offset + total do usage). */
+export const ValidationsListDtoSchema = z.object({
+  validations: z.array(ValidationListItemDtoSchema),
+  total: z.number().int(),
+  limit: z.number().int(),
+  offset: z.number().int(),
+})
+
 export const BatchItemSchema = z.object({
   type: DocTypeSchema,
   value: z.string().min(11).max(20),
@@ -269,5 +294,7 @@ export type Verdict = z.infer<typeof VerdictSchema>
 export type Stance = z.infer<typeof StanceSchema>
 export type CreateValidationRequest = z.infer<typeof CreateValidationRequestSchema>
 export type ValidationDto = z.infer<typeof ValidationDtoSchema>
+export type ValidationListItemDto = z.infer<typeof ValidationListItemDtoSchema>
+export type ValidationsListDto = z.infer<typeof ValidationsListDtoSchema>
 export type SignalDto = z.infer<typeof SignalDtoSchema>
 export type EvidenceVerificationDto = z.infer<typeof EvidenceVerificationDtoSchema>

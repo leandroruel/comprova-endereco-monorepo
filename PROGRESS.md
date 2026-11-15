@@ -1,6 +1,51 @@
 # PROGRESS.md
 
-Estado: **Documento do Holder no pipeline de evidências (PR #73) em revisão + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do Holder no pipeline de evidências (PR #73) mergeado + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+
+## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
+
+- O dashboard do Verifier passa a listar e detalhar validações da sua
+  organização, fechando o ciclo: Holder submete → pipeline F1.1/F1.2/F1.3 →
+  Verifier acompanha e consulta o resultado do assessment.
+- **Novo endpoint `GET /v1/validations`** (único endpoint novo): paginação
+  `limit`/`offset` + `total` (convenção usage), ordenação estável por
+  `created_at desc` + id, `has_customer_document` via EXISTS sobre o recibo
+  `customer_submitted_document` (sem N+1). Auth idêntica às demais rotas de
+  consumo: sessão (tenantId no query validado por membership em
+  `organization_member` com RLS) ou M2M (`verify:m2m`) + `validate:read` +
+  `requireTenantMatch`. O `tenantId` do browser é contexto, nunca autoridade.
+- **Novo contrato** `ValidationListItemDtoSchema`/`ValidationsListDtoSchema`
+  (`packages/contracts`): item deliberadamente enxuto — id, status, veredito,
+  score, confiança, `has_customer_document`, timestamps. Sem endereço, signals,
+  detail de evidências, hashes ou ids internos.
+- **Detalhe reutiliza `GET /v1/validations/:id` intacto** (ValidationDtoSchema):
+  veredito, score/confiança, explicação (+detail), evidências consideradas
+  (`evidence_summary`, signals com origem), dimensões documento/endereço/titular
+  (`evidence_verification`), consulta fiscal (`fiscal_verification`,
+  `fiscal_reference`, `fiscal_reassessment`) e `progress` (estágios F1.2→F1.3→F2).
+- **Estados de interface** (`validations-state.ts`, puro e testado):
+  aguardando documento / documento recebido / em processamento / concluído /
+  inconclusivo / falha / expirada. Taxonomia preservada: `inconclusive`,
+  `unavailable`, `unsupported`, `not_extracted` e `not_found` têm variantes
+  neutras — nunca reprovados ou fraude; o documento recebido não é aprovação.
+  Reavaliação fiscal pendente mantém o resultado em processamento (nunca
+  definitivo antecipado).
+- **Polling** reutiliza react-query (`refetchInterval`) apenas enquanto há
+  processamento/reavaliação pendente (3s), sem loops desnecessários.
+- Troca de organização invalida a seleção (o detalhe pertence à organização
+  anterior). `tenantId` via query param validado por membership — sem IDOR
+  (testes de 404 com id de outro tenant, sessão e M2M).
+- Correção lateral: `useCallback` sem import em `dashboard.tsx` do
+  verifier-dashboard quebrava o `tsc -b` do app (pré-existente; o CI não
+  typechecka esse app — corrigido para viabilizar a validação local).
+- Testes: `apps/api/tests/validations-list.int.test.ts` (listagem própria com
+  M2M e sessão, paginação, `tenantId` divergente → 403, limit inválido → 400,
+  IDOR 404 no detalhe e isolamento da listagem, chaves exatas do DTO e
+  ausência de PII/hashes internos, regressão do detalhe) e
+  `apps/verifier-dashboard/src/pages/validations-state.test.ts` (estados
+  intermediários/finais, inconclusivo ≠ reprovação, reavaliação pendente).
+- Sem OCR novo, VLM/LLM, holder auth, SSI/wallet, mudança de scoring/policy ou
+  expansão multi-documento.
 
 ## Documento do Holder no pipeline de evidências (PR #73) (2026-11-14)
 

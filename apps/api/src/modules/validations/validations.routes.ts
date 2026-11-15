@@ -1,6 +1,11 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
-import { requireReadScope, requireWriteScope, requireSessionOrM2MVerify } from '../../plugins/scope.js'
+import {
+  requireReadScope,
+  requireTenantMatch,
+  requireWriteScope,
+  requireSessionOrM2MVerify,
+} from '../../plugins/scope.js'
 import {
   makeEvidenceIntakeController,
   type EvidenceIntakeControllerDeps,
@@ -18,9 +23,11 @@ import {
   CreateValidationHeaders,
   CreateValidationRequestSchema,
   GetValidationParams,
+  ListValidationsQuerySchema,
   NotModifiedResponse,
   ProblemSchema,
   SecuredVerifiableCredentialSchema,
+  ValidationsListResponseSchema,
   ValidationDtoSchema,
 } from './validations.schema.js'
 
@@ -30,6 +37,18 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
   const app = instance.withTypeProvider<ZodTypeProvider>()
   const controller = makeValidationController(deps)
   const evidenceController = makeEvidenceIntakeController(deps)
+
+  app.get(
+    '/validations',
+    {
+      preHandler: [requireSessionOrM2MVerify(deps.db), requireReadScope, requireTenantMatch],
+      schema: {
+        querystring: ListValidationsQuerySchema,
+        response: { 200: ValidationsListResponseSchema },
+      },
+    },
+    async (request, reply) => controller.list(request.tenant?.tenantId, request.query, reply),
+  )
 
   app.get(
     '/validations/:id',

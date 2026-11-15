@@ -261,6 +261,76 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
     }
   })
 
+export interface ListValidationsQuery {
+  readonly limit: number
+  readonly offset: number
+}
+
+export interface ValidationListItem {
+  readonly validationId: string
+  readonly status: (typeof t.validation.$inferSelect)['status']
+  readonly verdict: (typeof t.validation.$inferSelect)['verdict']
+  readonly score: number | null
+  readonly confidence: number | null
+  readonly hasCustomerDocument: boolean
+  readonly createdAt: Date
+  readonly expiresAt: Date
+}
+
+export interface ValidationsListResult {
+  readonly items: readonly ValidationListItem[]
+  readonly total: number
+}
+
+/**
+ * Listagem paginada de validações do tenant (dashboard do Verifier).
+ *
+ * Uma única query com `count` total e ordenação estável por `created_at`
+ * (desc) + `validation_id` (desempate determinístico na paginação). O estado
+ * da submissão documental é resolvido por EXISTS sobre o recibo
+ * `customer_submitted_document` — sem N+1 e sem expor conteúdo de evidência.
+ * RLS + filtro explícito de tenant restringem a leitura ao tenant autenticado.
+ */
+export const listValidations = async (
+  db: Db,
+  tenantId: string,
+  query: ListValidationsQuery,
+): Promise<ValidationsListResult> =>
+  withTenant(db, tenantId, async (tx) => {
+    const items = await tx
+      .select({
+        validationId: t.validation.validationId,
+        status: t.validation.status,
+        verdict: t.validation.verdict,
+        score: t.validation.score,
+        confidence: t.validation.confidence,
+        createdAt: t.validation.createdAt,
+        expiresAt: t.validation.expiresAt,
+        hasCustomerDocument: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM claim c
+          JOIN claim_evidence ce
+            ON ce.claim_id = c.claim_id
+           AND ce.tenant_id = c.tenant_id
+          WHERE c.validation_id = validation.validation_id
+            AND c.tenant_id = validation.tenant_id
+            AND ce.source = ${CUSTOMER_DOCUMENT_INTAKE_SOURCE}
+        )`,
+      })
+      .from(t.validation)
+      .where(eq(t.validation.tenantId, tenantId))
+      .orderBy(desc(t.validation.createdAt), desc(t.validation.validationId))
+      .limit(query.limit)
+      .offset(query.offset)
+
+    const [countRow] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(t.validation)
+      .where(eq(t.validation.tenantId, tenantId))
+
+    return { items, total: countRow?.total ?? 0 }
+  })
+
 export const setWorkflowId = async (
   db: Db,
   tenantId: string,

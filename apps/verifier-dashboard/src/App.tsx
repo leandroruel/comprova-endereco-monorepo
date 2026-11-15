@@ -9,8 +9,11 @@ import { OnboardingPage } from '@/pages/onboarding'
 import { DashboardPage } from '@/pages/dashboard'
 import { MembersPage } from '@/pages/members'
 import { IntegrationsPage } from '@/pages/integrations'
+import { ValidationsPage } from '@/pages/validations'
+import { ValidationDetailPage } from '@/pages/validation-detail'
 
-type Route = 'login' | 'onboarding' | 'dashboard' | 'members' | 'integrations'
+type Route =
+  'login' | 'onboarding' | 'dashboard' | 'members' | 'integrations' | 'validations' | 'validation-detail'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +47,8 @@ export default function App() {
   const activeOrgIdRef = useRef(activeOrgId)
   activeOrgIdRef.current = activeOrgId
   const [loading, setLoading] = useState(true)
+  /** Validação selecionada na listagem para o detalhe (PR #74). */
+  const [selectedValidationId, setSelectedValidationId] = useState<string | null>(null)
 
   const resolveRoute = useCallback(async () => {
     setLoading(true)
@@ -128,7 +133,18 @@ export default function App() {
     setUser(null)
     setOrganizations([])
     setActiveOrgId(null)
+    setSelectedValidationId(null)
     setRoute('login' as Route)
+  }, [])
+
+  /**
+   * Troca de organização invalida o contexto da validação selecionada: a
+   * autorização é por membership e o detalhe pertence à organização anterior.
+   */
+  const handleSetActiveOrgId = useCallback((id: string | null) => {
+    setActiveOrgId(id)
+    setSelectedValidationId(null)
+    setRoute((current) => (current === 'validation-detail' ? 'validations' : current))
   }, [])
 
   return (
@@ -161,11 +177,11 @@ export default function App() {
         <Layout
           user={user}
           onLogout={handleLogout}
-          currentRoute={route}
+          currentRoute={route === 'validation-detail' ? 'validations' : route}
           setRoute={setRoute}
           organizations={organizations}
           activeOrgId={activeOrgId}
-          setActiveOrgId={setActiveOrgId}
+          setActiveOrgId={handleSetActiveOrgId}
         >
           {route === 'onboarding' ? (
             <OnboardingPage
@@ -179,6 +195,20 @@ export default function App() {
             <MembersPage user={user} activeOrgId={activeOrgId} />
           ) : route === 'integrations' ? (
             <IntegrationsPage tenantId={activeOrgId ?? ''} />
+          ) : route === 'validations' ? (
+            <ValidationsPage
+              activeOrgId={activeOrgId}
+              onSelectValidation={(validationId) => {
+                setSelectedValidationId(validationId)
+                setRoute('validation-detail')
+              }}
+            />
+          ) : route === 'validation-detail' && selectedValidationId !== null ? (
+            <ValidationDetailPage
+              activeOrgId={activeOrgId}
+              validationId={selectedValidationId}
+              onBack={() => setRoute('validations')}
+            />
           ) : (
             <DashboardPage
               user={user}

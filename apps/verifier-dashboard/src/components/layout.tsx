@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LogOut, LayoutDashboard, Users, ShieldCheck, Menu, X } from 'lucide-react'
+import { LogOut, LayoutDashboard, Users, ShieldCheck, FileSearch, Menu, X } from 'lucide-react'
 
 interface LayoutProps {
   user: { id: string; email: string; name: string; role: string }
@@ -12,10 +12,11 @@ interface LayoutProps {
   children: React.ReactNode
 }
 
-type Route = 'login' | 'onboarding' | 'dashboard' | 'members' | 'integrations'
+type Route = 'login' | 'onboarding' | 'dashboard' | 'members' | 'integrations' | 'validations'
 
 const navItems: Array<{ label: string; route: Route; icon: React.ElementType }> = [
   { label: 'Visão geral', route: 'dashboard', icon: LayoutDashboard },
+  { label: 'Validações', route: 'validations', icon: FileSearch },
   { label: 'Membros', route: 'members', icon: Users },
   { label: 'Integrações', route: 'integrations', icon: ShieldCheck },
 ]
