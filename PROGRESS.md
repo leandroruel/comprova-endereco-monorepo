@@ -44,6 +44,23 @@ Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do H
   ausência de PII/hashes internos, regressão do detalhe) e
   `apps/verifier-dashboard/src/pages/validations-state.test.ts` (estados
   intermediários/finais, inconclusivo ≠ reprovação, reavaliação pendente).
+- Novos testes de autenticação do Verifier Dashboard:
+  `apps/api/tests/auth-verifier-validations.int.test.ts` (7 testes): sessão
+  válida + Origin do verifier → 403 (membership não resolvida, ver falha
+  abaixo); sessão ausente → 401; usuário autenticado sem vínculo com a org
+  solicitada → 403; validação de outra organização → 403; Origin ausente e
+  Origin não permitido → fallback legado resolve a sessão do verifier mas
+  membership falha (403). Nenhum teste duplicado com
+  `auth-cookie-prefix.int.test.ts` (que cobre /api/me e /v1/auth/*).
+- Falha de autenticação identificada: o middleware
+  `requireSessionOrM2MVerify` valida membership em `organization_member` usando
+  `sessionUser.id`. Para sessões do Verifier, esse id vem de `verifier_user`,
+  mas a FK `organization_member_user_id_fkey` referencia a tabela `user` do
+  admin. Como os ids são de tabelas distintas, nenhuma membership é encontrada
+  e sessões do Verifier não conseguem acessar rotas de validação (403). Isso
+  impede o fluxo do dashboard do Verifier e precisa de correção de produção
+  (avaliar se a membership deve referenciar `verifier_user` ou se há uma
+  tabela de usuários unificada).
 - Sem OCR novo, VLM/LLM, holder auth, SSI/wallet, mudança de scoring/policy ou
   expansão multi-documento.
 
