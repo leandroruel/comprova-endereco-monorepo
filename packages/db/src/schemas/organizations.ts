@@ -1,11 +1,14 @@
 import { pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
-import { authUser } from './auth.js'
 import { tenant } from './tenancy.js'
+import { verifierAuthUser } from './auth.js'
 
 /**
  * Associação explícita usuário ↔ organização (tenant do tipo 'organization').
  * Um usuário pode pertencer a múltiplas organizações; uma organização pode
  * ter múltiplos membros. O usuário que cria a organização recebe 'owner'.
+ *
+ * A identidade canônica é `verifier_user.id` (tabela do dashboard do
+ * Verifier), não a tabela legada `user` (Better Auth principal).
  */
 export const organizationMember = pgTable(
   'organization_member',
@@ -16,7 +19,7 @@ export const organizationMember = pgTable(
       .references(() => tenant.tenantId),
     userId: text('user_id')
       .notNull()
-      .references(() => authUser.id),
+      .references(() => verifierAuthUser.id),
     role: text('role').notNull().default('member'),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
     invitedBy: text('invited_by'),

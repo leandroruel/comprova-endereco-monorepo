@@ -4,6 +4,8 @@ import { runMigrations, createDbPool, sql } from '@comprova/db'
 import Redis from 'ioredis'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { buildApp } from '../src/app.js'
+import * as t from '@comprova/db'
+import { eq } from '@comprova/db'
 
 const PEPPER = 'test-pepper-123'
 
@@ -126,86 +128,82 @@ const validationB = await createValidation(adminPool.db, tenantB, subjectB, {
 
 // Cria um usuário no verifier
 const VERIFIER_PASSWORD = 'SenhaForte123!'
-const verifierEmailA = `verifier-a-${Date.now()}@exemplo.com`
+const verifierEmail = `verifier-${Date.now()}@exemplo.com`
 
 await app.inject({
   method: 'POST',
   url: '/v1/auth/verifier/sign-up/email',
-  body: { email: verifierEmailA, password: VERIFIER_PASSWORD, name: 'Verifier A' },
+  body: { email: verifierEmail, password: VERIFIER_PASSWORD, name: 'Verifier Teste' },
 })
 await app.inject({
   method: 'POST',
   url: '/v1/auth/verifier/sign-in/email',
-  body: { email: verifierEmailA, password: VERIFIER_PASSWORD },
+  body: { email: verifierEmail, password: VERIFIER_PASSWORD },
 })
 
-// Obtém cookie de sessão do usuário A
-const signInA = await app.inject({
+// Obtém cookie de sessão
+const signIn = await app.inject({
   method: 'POST',
   url: '/v1/auth/verifier/sign-in/email',
-  body: { email: verifierEmailA, password: VERIFIER_PASSWORD },
+  body: { email: verifierEmail, password: VERIFIER_PASSWORD },
 })
 
-const setCookieA = signInA.headers['set-cookie']
+const setCookie = signIn.headers['set-cookie']
+const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie ?? ''
 
-const cookieStrA = Array.isArray(setCookieA) ? setCookieA.join('; ') : setCookieA ?? ''
+// Resolve o id real do usuário criado pelo better-auth
+const userRow = await adminPool.db
+  .select({ id: t.verifierAuthUser.id })
+  .from(t.verifierAuthUser)
+  .where(eq(t.verifierAuthUser.email, verifierEmail))
+  .limit(1)
 
-// Nota: não é possível vincular o usuário do verifier (verifier_user.id) à
-// organização via organization_member, porque a FK
-// organization_member_user_id_fkey referencia a tabela `user` do admin, não
-// `verifier_user`. Isso causa a falha de autenticação documentada acima.
+const userId = userRow[0]?.id
+if (!userId) {
+  throw new Error('não foi possível resolver o id do usuário verifier')
+}
 
-// Helpers de requisição com sessão
-const injectWithCookie = (cookie: string, method = 'GET', url = '/', body?: unknown) =>
+// Vincula o usuário à organização A como owner
+await adminPool.db.insert(t.organizationMember).values({
+  organizationMemberId: crypto.randomUUID(),
+  tenantId: tenantA,
+  userId,
+  role: 'owner',
+})
+
+// Helper de requisição com sessão do Verifier
+const injectVerifier = (method = 'GET', url = '/', body?: unknown, extraHeaders: Record<string, string> = {}) =>
   app.inject({
     method,
     url,
     headers: {
-      cookie,
+      cookie: cookieStr,
       ...(body ? { 'content-type': 'application/json' } : {}),
       ...(body ? { body: JSON.stringify(body) } : {}),
+      ...extraHeaders,
     },
   })
 
-const injectVerifierA = (method = 'GET', url = '/', body?: unknown) =>
-  injectWithCookie(cookieStrA, method, url, body)
-
-/**
- * Falha de autenticação identificada durante a elaboração destes testes:
- *
- * O middleware `requireSessionOrM2MVerify` (apps/api/src/plugins/scope.ts)
- * valida a membership do usuário em `organization_member` usando
- * `sessionUser.id`. Para sessões do Verifier, esse id vem da tabela
- * `verifier_user` (better-auth do verifier), enquanto a FK
- * `organization_member_user_id_fkey` referencia a tabela `user` do admin.
- * Como os ids são de tabelas distintas, nenhuma membership é encontrada e
- * qualquer rota de validação acessada com sessão do Verifier retorna 403.
- *
- * Isso afeta diretamente o fluxo do dashboard do Verifier: mesmo com sessão
- * válida e usuário vinculado à organização, as rotas de listagem e detalhe
- * de validações são inacessíveis. Os testes abaixo documentam esse
- * comportamento real (403) para os cenários que envolvem sessão do Verifier
- * + tenantId.
- *
- * Recomendação (fora do escopo deste teste): avaliar se a membership deve
- * referenciar `verifier_user` ou se existe uma tabela de usuários unificada
- * que deveria ser usada pelo dashboard do Verifier.
- */
 describe('autenticação Verifier Dashboard - validações', () => {
-  describe('cenários com sessão do Verifier (membership não resolvida por FK mismatch)', () => {
-    it('cenário 1: sessão válida + Origin do verifier → 403 (membership não encontrada)', async () => {
-      const res = await injectVerifierA('GET', `/v1/validations?tenantId=${tenantA}`, {
+  describe('cenários de sucesso (sessão válida + vínculo com organização)', () => {
+    it('cenário 1: sessão válida com Origin do verifier lista validações da própria organização', async () => {
+      const res = await injectVerifier('GET', `/v1/validations?tenantId=${tenantA}`, undefined, {
         origin: 'http://verifier.localhost:5174',
       })
-      // Esperado: 200. Real: 403 por causa da falha de membership (ver nota acima).
-      expect(res.statusCode).toBe(403)
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(Array.isArray(body.validations)).toBe(true)
+      expect(body.validations.some((v: { validation_id: string }) => v.validation_id === validationA)).toBe(true)
     })
 
-    it('cenário 2: sessão válida + detalhe de validação própria → 403 (mesma falha)', async () => {
-      const res = await injectVerifierA('GET', `/v1/validations/${validationA}?tenantId=${tenantA}`, {
+    it('cenário 2: sessão válida consulta detalhe de validação da própria organização', async () => {
+      const res = await injectVerifier('GET', `/v1/validations/${validationA}?tenantId=${tenantA}`, undefined, {
         origin: 'http://verifier.localhost:5174',
       })
-      expect(res.statusCode).toBe(403)
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.validation_id).toBe(validationA)
+      expect(body.verdict).toBe('RESIDENTIAL')
     })
   })
 
@@ -225,23 +223,20 @@ describe('autenticação Verifier Dashboard - validações', () => {
     })
 
     it('cenário 4: usuário autenticado sem vínculo com a organização solicitada não acessa', async () => {
-      // Verifier A tenta acessar dados do tenant B (não é membro).
-      // Como a membership nunca é encontrada (falha de FK documentada acima),
-      // o detalhe retorna 403 antes de chegar na rota (não 404).
-      const listRes = await injectVerifierA('GET', `/v1/validations?tenantId=${tenantB}`, {
+      // O usuário é membro apenas do tenant A. Tentar acessar tenant B deve retornar 403.
+      const listRes = await injectVerifier('GET', `/v1/validations?tenantId=${tenantB}`, undefined, {
         origin: 'http://verifier.localhost:5174',
       })
       expect(listRes.statusCode).toBe(403)
 
-      const detailRes = await injectVerifierA('GET', `/v1/validations/${validationB}?tenantId=${tenantB}`, {
+      const detailRes = await injectVerifier('GET', `/v1/validations/${validationB}?tenantId=${tenantB}`, undefined, {
         origin: 'http://verifier.localhost:5174',
       })
       expect(detailRes.statusCode).toBe(403)
     })
 
     it('cenário 5: consulta de validação de outra organização não retorna seus dados', async () => {
-      // Mesmo sendo membro de A, não deve ver validações de B
-      const listRes = await injectVerifierA('GET', `/v1/validations?tenantId=${tenantB}`, {
+      const listRes = await injectVerifier('GET', `/v1/validations?tenantId=${tenantB}`, undefined, {
         origin: 'http://verifier.localhost:5174',
       })
       expect(listRes.statusCode).toBe(403)
@@ -250,32 +245,18 @@ describe('autenticação Verifier Dashboard - validações', () => {
       expect(body.validations).toBeUndefined()
     })
 
-    it('cenário 6: Origin ausente — fallback legado resolve sessão do verifier, depois falha na membership (403)', async () => {
-      // Sem Origin, o makeSessionMiddleware usa fallback legado
-      // [legacy, admin, verifier] e consegue resolver a sessão do verifier
-      // pelo cookie. Depois a membership não é encontrada (FK mismatch),
-      // resultando em 403. Para obter 401 verdadeiro, não deve haver cookie
-      // nenhum (cenário 3).
-      const res = await app.inject({
-        method: 'GET',
-        url: `/v1/validations?tenantId=${tenantA}`,
-        headers: { cookie: cookieStrA },
-      })
-      expect(res.statusCode).toBe(403)
+    it('cenário 6: Origin ausente resolve sessão via fallback legado (usuário existe no verifier)', async () => {
+      // Sem Origin/Referer: fallback legado tenta todas as instâncias
+      // [legacy, admin, verifier] e consegue resolver a sessão do verifier.
+      const res = await injectVerifier('GET', `/v1/validations?tenantId=${tenantA}`)
+      expect(res.statusCode).toBe(200)
     })
 
-    it('cenário 6b: Origin não permitido (outro domínio) — fallback legado também resolve a sessão (403)', async () => {
-      // Mesmo com origin não reconhecido, o fallback legado tenta todas as
-      // instâncias e resolve a sessão do verifier. A membership falha depois.
-      const res = await app.inject({
-        method: 'GET',
-        url: `/v1/validations?tenantId=${tenantA}`,
-        headers: {
-          cookie: cookieStrA,
-          origin: 'http://malicious.example.com',
-        },
+    it('cenário 6b: Origin não permitido também resolve via fallback legado', async () => {
+      const res = await injectVerifier('GET', `/v1/validations?tenantId=${tenantA}`, undefined, {
+        origin: 'http://malicious.example.com',
       })
-      expect(res.statusCode).toBe(403)
+      expect(res.statusCode).toBe(200)
     })
   })
 })
