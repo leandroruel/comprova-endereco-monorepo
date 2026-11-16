@@ -72,11 +72,47 @@ describe('validationUiState', () => {
 
   it('reavaliação fiscal pendente mantém o resultado em processamento', () => {
     expect(
-      isProcessing({ status: 'completed', progressStatus: 'completed', fiscalReassessment: 'pending' }),
+      isProcessing({
+        status: 'completed',
+        hasCustomerDocument: true,
+        progressStatus: 'completed',
+        fiscalReassessment: 'pending',
+      }),
     ).toBe(true)
-    expect(isProcessing({ status: 'completed', progressStatus: 'completed', fiscalReassessment: null })).toBe(
-      false,
+    expect(
+      isProcessing({
+        status: 'completed',
+        hasCustomerDocument: true,
+        progressStatus: 'completed',
+        fiscalReassessment: null,
+      }),
+    ).toBe(false)
+  })
+
+  it('validation queued sem documento NÃO está em processamento (sem polling ocioso)', () => {
+    expect(isProcessing({ status: 'queued', hasCustomerDocument: false })).toBe(false)
+    expect(
+      validationUiState(base({ status: 'queued', hasCustomerDocument: false, progressStatus: null })),
+    ).toBe('awaiting_document')
+    expect(isProcessing({ status: 'running', hasCustomerDocument: false, progressStatus: null })).toBe(false)
+    // Com documento recebido, volta a processar.
+    expect(isProcessing({ status: 'queued', hasCustomerDocument: true })).toBe(true)
+  })
+
+  it('veredito retido com trabalho pendente não aparece como definitivo', () => {
+    // Progresso em curso + veredito antigo → processamento, não concluído.
+    expect(
+      validationUiState(base({ status: 'completed', verdict: 'RESIDENTIAL', progressStatus: 'in_progress' })),
+    ).toBe('processing')
+    // Reavaliação fiscal pendente + veredito antigo → processamento.
+    expect(
+      validationUiState(base({ status: 'completed', verdict: 'RESIDENTIAL', fiscalReassessment: 'pending' })),
+    ).toBe('processing')
+    const badge = validationUiBadge(
+      base({ status: 'completed', verdict: 'RESIDENTIAL', fiscalReassessment: 'pending' }),
     )
+    expect(badge.state).toBe('processing')
+    expect(badge.variant).toBe('warning')
   })
 })
 

@@ -12,7 +12,7 @@ import { createLogger, createMetrics } from '@comprova/observability'
 import { createDbPool, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import Redis from 'ioredis'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.js'
 
@@ -93,7 +93,8 @@ const mainValidationIds = [
   failedValidation,
 ]
 
-// Uma validação com documento do cliente já submetido (recibo materializado).
+// Uma validação com documento do cliente já submetido (recibo + artefato +
+// análise pendente → document_processing = true).
 const documentedValidation = await createValidation(adminPool.db, tenantMain, subjectMain, {
   status: 'running',
 })
@@ -108,8 +109,9 @@ const documentedValidation = await createValidation(adminPool.db, tenantMain, su
     subjectType: 'person',
     targetType: 'address',
   })
+  const receiptId = randomUUID()
   await adminPool.db.insert(t.claimEvidence).values({
-    claimEvidenceId: randomUUID(),
+    claimEvidenceId: receiptId,
     tenantId: tenantMain,
     claimId,
     checker: 'customer_document_intake',
@@ -122,6 +124,26 @@ const documentedValidation = await createValidation(adminPool.db, tenantMain, su
     ttlSeconds: 3600,
     expiresAt: new Date(Date.now() + 3_600_000),
     detail: {},
+  })
+  const artifactId = randomUUID()
+  await adminPool.db.insert(t.evidenceArtifact).values({
+    artifactId,
+    tenantId: tenantMain,
+    claimEvidenceId: receiptId,
+    storageKey: `tenants/${tenantMain}/evidence/${artifactId}`,
+    contentType: 'application/pdf',
+    sizeBytes: 3,
+    sha256: randomBytes(32),
+    retentionUntil: new Date(Date.now() + 86_400_000),
+  })
+  await adminPool.db.insert(t.evidenceAnalysis).values({
+    analysisId: randomUUID(),
+    tenantId: tenantMain,
+    artifactId,
+    analyzer: 'document_intelligence',
+    analyzerVersion: '1.0.0',
+    contractVersion: '1.0.0',
+    status: 'pending',
   })
 }
 
@@ -146,6 +168,7 @@ const LIST_ITEM_KEYS = [
   'score',
   'confidence',
   'has_customer_document',
+  'document_processing',
   'created_at',
   'expires_at',
 ].sort()
@@ -179,10 +202,13 @@ describe('GET /v1/validations (PR #74)', () => {
     }
     expect(JSON.stringify(body)).not.toMatch(/storage_key|storageKey|sha256|doc_hmac|document_hash/)
 
-    // Estado da submissão documental: só a validação com recibo marca true.
+    // Estado da submissão documental: só a validação com recibo marca true;
+    // com análise de intake pendente, o processamento do documento está em curso.
     const byId = new Map(body.validations.map((v) => [v.validation_id as string, v]))
     expect(byId.get(documentedValidation)?.has_customer_document).toBe(true)
+    expect(byId.get(documentedValidation)?.document_processing).toBe(true)
     expect(byId.get(completedValidation)?.has_customer_document).toBe(false)
+    expect(byId.get(completedValidation)?.document_processing).toBe(false)
 
     // Estados e taxonomia preservados.
     expect(byId.get(completedValidation)?.verdict).toBe('RESIDENTIAL')
@@ -394,16 +420,31 @@ describe('GET /v1/validations (PR #74)', () => {
     })
   })
 
-  it('regressão: detalhe por M2M continua intacto', async () => {
+  it('regressão: detalhe por M2M continua intacto e expõe has_customer_document', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/validations/${completedValidation}`,
       headers: { Authorization: `Bearer ${keyMain}` },
     })
     expect(res.statusCode).toBe(200)
-    const body = res.json() as { validation_id: string; verdict: string; status: string }
+    const body = res.json() as {
+      validation_id: string
+      verdict: string
+      status: string
+      has_customer_document?: boolean
+    }
     expect(body.validation_id).toBe(completedValidation)
     expect(body.verdict).toBe('RESIDENTIAL')
     expect(body.status).toBe('completed')
+    expect(body.has_customer_document).toBe(false)
+
+    // A validação com recibo materializado expõe a presença do documento.
+    const documented = await app.inject({
+      method: 'GET',
+      url: `/v1/validations/${documentedValidation}`,
+      headers: { Authorization: `Bearer ${keyMain}` },
+    })
+    expect(documented.statusCode).toBe(200)
+    expect((documented.json() as { has_customer_document?: boolean }).has_customer_document).toBe(true)
   })
 })

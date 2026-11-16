@@ -73,10 +73,12 @@ export function ValidationDetailPage({ activeOrgId, validationId, onBack }: Vali
     queryFn: () => getValidation(activeOrgId!, validationId),
     enabled: !!activeOrgId && !!validationId,
     // Reutiliza o mecanismo de atualização existente (react-query): polling
-    // apenas enquanto há processamento/reavaliação pendente.
+    // apenas enquanto há processamento/reavaliação pendente — e somente após
+    // o intake do documento (validation `queued` sem documento está ociosa).
     refetchInterval: (query) =>
       isProcessing({
         status: query.state.data?.status as never,
+        hasCustomerDocument: query.state.data?.has_customer_document ?? false,
         progressStatus: (query.state.data?.progress?.status ?? null) as never,
         fiscalReassessment: query.state.data?.fiscal_reassessment ?? null,
       })
@@ -125,11 +127,15 @@ export function ValidationDetailPage({ activeOrgId, validationId, onBack }: Vali
   const badge = validationUiBadge({
     status: data.status as never,
     verdict: (data.verdict ?? null) as never,
-    hasCustomerDocument: data.evidence_summary !== null,
+    // Presença do documento vem da evidência do recibo (contrato), NÃO de
+    // `evidence_summary` — que existe para qualquer claim, antes do intake.
+    hasCustomerDocument: data.has_customer_document ?? false,
     progressStatus: (data.progress?.status ?? null) as never,
+    fiscalReassessment: data.fiscal_reassessment ?? null,
   })
   const processing = isProcessing({
     status: data.status as never,
+    hasCustomerDocument: data.has_customer_document ?? false,
     progressStatus: (data.progress?.status ?? null) as never,
     fiscalReassessment: data.fiscal_reassessment ?? null,
   })

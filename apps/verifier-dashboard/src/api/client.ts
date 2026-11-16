@@ -260,6 +260,7 @@ export interface ValidationListItem {
   score: number | null
   confidence: number | null
   has_customer_document: boolean
+  document_processing: boolean
   created_at: string
   expires_at: string
 }
@@ -340,6 +341,7 @@ export interface ValidationDetail {
   } | null
   fiscal_reference: string | null
   fiscal_reassessment: string | null
+  has_customer_document?: boolean
   signals: {
     checker: string
     checker_version: string

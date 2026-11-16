@@ -196,7 +196,10 @@ export default function App() {
           ) : route === 'integrations' ? (
             <IntegrationsPage tenantId={activeOrgId ?? ''} />
           ) : route === 'validations' ? (
+            // key por organização: trocar de organização reinicia a paginação
+            // (estado local não vaza entre organizações).
             <ValidationsPage
+              key={activeOrgId ?? 'none'}
               activeOrgId={activeOrgId}
               onSelectValidation={(validationId) => {
                 setSelectedValidationId(validationId)

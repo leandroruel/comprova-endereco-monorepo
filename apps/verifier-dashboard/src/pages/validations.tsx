@@ -36,7 +36,7 @@ interface ValidationsPageProps {
 export function ValidationsPage({ activeOrgId, onSelectValidation }: ValidationsPageProps) {
   const [offset, setOffset] = useState(0)
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['validations', activeOrgId, offset],
     queryFn: () => listValidations(activeOrgId!, { limit: PAGE_SIZE, offset }),
     enabled: !!activeOrgId,
@@ -75,7 +75,12 @@ export function ValidationsPage({ activeOrgId, onSelectValidation }: Validations
             <p className="text-sm text-destructive">
               {(error as Error | undefined)?.message ?? 'Erro ao carregar validações'}
             </p>
-            <Button className="mt-4" onClick={() => setOffset(0)}>
+            <Button
+              className="mt-4"
+              onClick={() => {
+                refetch()
+              }}
+            >
               Tentar novamente
             </Button>
           </CardContent>
@@ -129,6 +134,10 @@ export function ValidationsPage({ activeOrgId, onSelectValidation }: Validations
                     status: validation.status as never,
                     verdict: (validation.verdict ?? null) as never,
                     hasCustomerDocument: validation.has_customer_document,
+                    // Indicador compacto do contrato: análise de intake em
+                    // curso distingue "Documento recebido" de "Em
+                    // processamento" na listagem.
+                    progressStatus: validation.document_processing ? 'in_progress' : null,
                   })
                   return (
                     <TableRow key={validation.validation_id}>

@@ -237,6 +237,12 @@ export const ValidationDtoSchema = z.object({
   progress: ValidationProgressSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
+  /**
+   * Recibo `customer_submitted_document` já materializado para a validation
+   * (mesmo predicado da listagem). Presente no GET; o POST de criação não
+   * materializa recibo, por isso o campo é opcional no contrato.
+   */
+  has_customer_document: z.boolean().optional(),
   created_at: z.string(),
   expires_at: z.string(),
 })
@@ -254,6 +260,12 @@ export const ValidationListItemDtoSchema = z.object({
   confidence: z.number().min(0).max(1).nullable(),
   /** Recibo `customer_submitted_document` já materializado para a validation. */
   has_customer_document: z.boolean(),
+  /**
+   * Processamento do documento em curso: existe análise de intake (F1.2) não
+   * terminal para o artefato do recibo. Distingue "Documento recebido" de
+   * "Em processamento" na listagem.
+   */
+  document_processing: z.boolean(),
   created_at: z.string(),
   expires_at: z.string(),
 })

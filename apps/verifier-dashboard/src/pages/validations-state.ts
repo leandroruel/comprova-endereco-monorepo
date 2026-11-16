@@ -40,6 +40,8 @@ export interface ValidationUiInput {
   readonly verdict: Verdict | null
   readonly hasCustomerDocument: boolean
   readonly progressStatus?: ProgressStatus | null
+  /** Reavaliação fiscal pendente (F2.2b): resultado antigo não é definitivo. */
+  readonly fiscalReassessment?: string | null
 }
 
 const ACTIVE_STATUSES: ReadonlySet<ValidationStatus> = new Set([
@@ -53,14 +55,18 @@ export const validationUiState = (input: ValidationUiInput): ValidationUiState =
   if (input.status === 'failed') return 'failed'
   if (input.status === 'expired') return 'expired'
   if (input.progressStatus === 'failed') return 'failed'
+  // Trabalho pendente (processamento em curso ou reavaliação fiscal agendada)
+  // vem ANTES dos vereditos: um veredito retido não é definitivo enquanto
+  // houver reprocessamento.
+  if (input.progressStatus === 'in_progress' || input.fiscalReassessment === 'pending') {
+    return 'processing'
+  }
   if (input.verdict === 'INSUFFICIENT_EVIDENCE') return 'inconclusive'
   if (input.verdict !== null) return 'completed'
   if (ACTIVE_STATUSES.has(input.status)) {
     if (!input.hasCustomerDocument) return 'awaiting_document'
     // Recibo existe e nada foi processado ainda (progress null): documento
-    // recebido. Com progresso em curso — inclusive reavaliação fiscal
-    // pendente — permanece em processamento; o resultado antigo não é
-    // apresentado como definitivo.
+    // recebido. Com progresso em curso permanece em processamento.
     if (input.progressStatus === null || input.progressStatus === undefined) return 'document_received'
     return 'processing'
   }
@@ -171,12 +177,18 @@ export const dimensionBadge = (outcome: DimensionOutcome): { label: string; vari
 /**
  * Indica se o detalhe deve continuar sendo atualizado (polling): há
  * processamento ou reavaliação pendente.
+ *
+ * Uma validation `queued` SEM documento não está em processamento — está
+ * aguardando envio; o polling e o aviso de "em processamento" só valem
+ * depois do intake do documento (`has_customer_document`).
  */
 export const isProcessing = (input: {
   readonly status: ValidationStatus
+  readonly hasCustomerDocument: boolean
   readonly progressStatus?: ProgressStatus | null
   readonly fiscalReassessment?: string | null
 }): boolean => {
+  if (!input.hasCustomerDocument) return false
   if (input.status === 'queued' || input.status === 'running' || input.status === 'partial') return true
   if (input.progressStatus === 'in_progress') return true
   // F2.2b: reavaliação fiscal pendente/agendada mantém o acompanhamento.
