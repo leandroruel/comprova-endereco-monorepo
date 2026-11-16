@@ -64,6 +64,31 @@ Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do H
 - Sem OCR novo, VLM/LLM, holder auth, SSI/wallet, mudança de scoring/policy ou
   expansão multi-documento.
 
+## Refinamento da identidade do Verifier (PR #75) (2026-11-15)
+
+- **Eliminada a tabela legada `user` como fonte de identidade para memberships
+  de organização.** A FK `organization_member.user_id` agora referencia
+  `verifier_user.id` (migração `0068`), não mais `user.id` (migração `0019`).
+  Isso corrige a falha identificada na PR #74 onde sessões do Verifier não
+  conseguiam ser membro de organização (403 em todas rotas protegidas).
+- **Migration 0069:** Documenta que `organization_invitation.accepted_by`
+  armazena IDs de `verifier_user` (sem FK direta, por ser multi-tenant).
+- **Migration 0070:** Altera FK `batch.user_id` de `user.id` para
+  `verifier_user.id`.
+- **`packages/db/src/schemas/organizations.ts`:** FK de `userId` referencia
+  `verifierAuthUser` em vez de `authUser`.
+- **`apps/api/src/modules/organizations/organizations.service.ts`:** Todas as
+  consultas `t.authUser` → `t.verifierAuthUser`.
+- **Testes:** `apps/api/tests/auth-verifier-organization.int.test.ts` (8
+  testes): criar organização como owner, listar organizações, acessar
+  organização própria, usuário sem membership recebe null, isolamento entre
+  tenants, criar e aceitar convites com a nova identidade.
+- A tabela `user` (legado) ainda existe no banco mas não é mais usada como
+  fonte de identidade para memberships. Pode ser removida em uma etapa futura
+  após verificar que nenhuma outra dependência restante.
+- As tabelas `admin_user` (dashboard admin) e `verifier_user` (dashboard
+  verifier) continuam separadas por design (isolamento de sessões).
+
 ## Documento do Holder no pipeline de evidências (PR #73) (2026-11-14)
 
 - Um documento enviado pelo Holder em uma `holder_information_request` vinculada
