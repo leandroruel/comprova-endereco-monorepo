@@ -4,8 +4,8 @@
 # sozinho libera o arquivo inteiro; por isso a entrada nova abaixo é só um regex
 # de linha (nada de `paths` para o teste do worker).
 #
-# Não desabilita a detecção de segredos no restante do repositório: os dois
-# regexes abaixo só casam texto exato de teste que não pode ser um segredo.
+# Não desabilita a detecção de segredos no restante do repositório: os regexes
+# abaixo só casam texto exato de teste que não pode ser um segredo.
 
 [extend]
 useDefault = true
@@ -25,29 +25,15 @@ useDefault = true
 # (identificador de API, não material secreto). O detector genérico casa
 # `KeySpec = ECC_NIST_EDWARDS25519` como "generic-api-key" pela entropia do
 # valor; o regex de linha abaixo cobre os únicos pontos que citam o KeySpec.
-# `test-pepper-migration-upgrade` em `auth-verifier-migration-upgrade.int.test.ts`
-# é um valor de teste óbvio (não é um segredo real), usado apenas para configurar
-# o pepper de API key em testes de integração.
-# `test-pepper-flow-validation` em `auth-verifier-flow-validation.int.test.ts` é
-# do mesmo tipo: valor de teste óbvio, não segredo.
+# `test-pepper-migration-upgrade` e `test-pepper-flow-validation` em testes de
+# integração do Verifier são literais óbvios de teste, não segredos reais.
 [allowlist]
-description = "vetor de teste público da W3C (eddsa-jcs-2022), referência a variável no teste do worker e KeySpec público do AWS KMS"
-paths = ['''packages/credential/src/data-integrity\.test\.ts$''']
+description = "vetor de teste público da W3C, referência a variável no teste do worker, KeySpec público do AWS KMS e valores de pepper de teste em integrações do Verifier"
 regexTarget = "line"
 regexes = [
   '''SECRET_KEY_MULTIBASE''',
   '''private_key_pem:\s*signing\.privateKeyPkcs8Pem''',
   '''ECC_NIST_EDWARDS25519''',
-  '''test-pepper-migration-upgrade''',
-  '''test-pepper-flow-validation''',
-]
-
-# Valores de pepper de teste em arquivos de integração do Verifier.
-# São literais óbvios de teste, não segredos reais.
-[allowlist]
-description = "valores de pepper de teste em testes de integração do Verifier"
-regexTarget = "line"
-regexes = [
   '''test-pepper-migration-upgrade''',
   '''test-pepper-flow-validation''',
 ]
