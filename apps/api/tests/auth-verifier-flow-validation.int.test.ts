@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createTenant, startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
+import { afterAll, describe, expect, it } from 'vitest'
+import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import { runMigrations, createDbPool, sql, eq, and } from '@comprova/db'
 import Redis from 'ioredis'
 import { createLogger, createMetrics } from '@comprova/observability'
