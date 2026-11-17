@@ -29,6 +29,7 @@ useDefault = true
 # integração do Verifier são literais óbvios de teste, não segredos reais.
 [allowlist]
 description = "vetor de teste público da W3C, referência a variável no teste do worker, KeySpec público do AWS KMS e valores de pepper de teste em integrações do Verifier"
+paths = ['''packages/credential/src/data-integrity\.test\.ts$''', '''apps/api/tests/auth-verifier-migration-upgrade\.int\.test\.ts$''', '''apps/api/tests/auth-verifier-flow-validation\.int\.test\.ts$''']
 regexTarget = "line"
 regexes = [
   '''SECRET_KEY_MULTIBASE''',
