@@ -68,8 +68,7 @@ const requestOrigin = (request: FastifyRequest): string | undefined => {
  * auth correspondente ao dashboard que fez a request:
  * - origin do verifier   → somente a instância verifier;
  * - origin do admin      → somente a instância admin;
- * - sem origem conhecida → legacy, admin e verifier (ordem legada, para
- *   curl/testes/scripts server-to-server).
+ * - sem origem conhecida → nenhuma sessão é resolvida (sem fallback).
  *
  * A sessão é opcional: rotas que a exigem usam `requireSessionUser` (ou
  * `requireOrganizationAccess`) e retornam 401 quando não há sessão.
@@ -78,7 +77,6 @@ const requestOrigin = (request: FastifyRequest): string | undefined => {
  * autenticação distinto do `authenticate` (chaves de API/Bearer).
  */
 export interface SessionMiddlewareAuths {
-  readonly legacy: AuthInstance
   readonly admin: AuthInstance
   readonly verifier: AuthInstance
 }
@@ -95,7 +93,7 @@ export const makeSessionMiddleware = (auths: SessionMiddlewareAuths) => {
           ? [auths.verifier]
           : origin !== undefined && ADMIN_ORIGINS.has(origin)
             ? [auths.admin]
-            : [auths.legacy, auths.admin, auths.verifier]
+            : []
 
       const headers = new Headers()
       headers.set('cookie', cookieHeader)

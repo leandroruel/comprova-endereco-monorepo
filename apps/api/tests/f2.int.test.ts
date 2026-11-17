@@ -283,8 +283,9 @@ describe('batch', () => {
   it('registra o usuario autenticado como ator da auditoria no processamento em lote', async () => {
     const actorUserId = randomUUID()
 
-    // Cria o usuario (FK de batch.userId referencia auth_user).
-    await adminPool.db.insert(t.authUser).values({
+    // Cria o usuario (FK de batch.userId referencia verifier_user após a
+    // migração 0070).
+    await adminPool.db.insert(t.verifierAuthUser).values({
       id: actorUserId,
       name: 'Batch Actor',
       email: 'batch-actor@exemplo.com',

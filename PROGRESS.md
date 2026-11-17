@@ -1,6 +1,93 @@
 # PROGRESS.md
 
-Estado: **Documento do Holder no pipeline de evidências (PR #73) em revisão + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do Holder no pipeline de evidências (PR #73) mergeado + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+
+## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
+
+- O dashboard do Verifier passa a listar e detalhar validações da sua
+  organização, fechando o ciclo: Holder submete → pipeline F1.1/F1.2/F1.3 →
+  Verifier acompanha e consulta o resultado do assessment.
+- **Novo endpoint `GET /v1/validations`** (único endpoint novo): paginação
+  `limit`/`offset` + `total` (convenção usage), ordenação estável por
+  `created_at desc` + id, `has_customer_document` via EXISTS sobre o recibo
+  `customer_submitted_document` (sem N+1). Auth idêntica às demais rotas de
+  consumo: sessão (tenantId no query validado por membership em
+  `organization_member` com RLS) ou M2M (`verify:m2m`) + `validate:read` +
+  `requireTenantMatch`. O `tenantId` do browser é contexto, nunca autoridade.
+- **Novo contrato** `ValidationListItemDtoSchema`/`ValidationsListDtoSchema`
+  (`packages/contracts`): item deliberadamente enxuto — id, status, veredito,
+  score, confiança, `has_customer_document`, timestamps. Sem endereço, signals,
+  detail de evidências, hashes ou ids internos.
+- **Detalhe reutiliza `GET /v1/validations/:id` intacto** (ValidationDtoSchema):
+  veredito, score/confiança, explicação (+detail), evidências consideradas
+  (`evidence_summary`, signals com origem), dimensões documento/endereço/titular
+  (`evidence_verification`), consulta fiscal (`fiscal_verification`,
+  `fiscal_reference`, `fiscal_reassessment`) e `progress` (estágios F1.2→F1.3→F2).
+- **Estados de interface** (`validations-state.ts`, puro e testado):
+  aguardando documento / documento recebido / em processamento / concluído /
+  inconclusivo / falha / expirada. Taxonomia preservada: `inconclusive`,
+  `unavailable`, `unsupported`, `not_extracted` e `not_found` têm variantes
+  neutras — nunca reprovados ou fraude; o documento recebido não é aprovação.
+  Reavaliação fiscal pendente mantém o resultado em processamento (nunca
+  definitivo antecipado).
+- **Polling** reutiliza react-query (`refetchInterval`) apenas enquanto há
+  processamento/reavaliação pendente (3s), sem loops desnecessários.
+- Troca de organização invalida a seleção (o detalhe pertence à organização
+  anterior). `tenantId` via query param validado por membership — sem IDOR
+  (testes de 404 com id de outro tenant, sessão e M2M).
+- Correção lateral: `useCallback` sem import em `dashboard.tsx` do
+  verifier-dashboard quebrava o `tsc -b` do app (pré-existente; o CI não
+  typechecka esse app — corrigido para viabilizar a validação local).
+- Testes: `apps/api/tests/validations-list.int.test.ts` (listagem própria com
+  M2M e sessão, paginação, `tenantId` divergente → 403, limit inválido → 400,
+  IDOR 404 no detalhe e isolamento da listagem, chaves exatas do DTO e
+  ausência de PII/hashes internos, regressão do detalhe) e
+  `apps/verifier-dashboard/src/pages/validations-state.test.ts` (estados
+  intermediários/finais, inconclusivo ≠ reprovação, reavaliação pendente).
+- Novos testes de autenticação do Verifier Dashboard:
+  `apps/api/tests/auth-verifier-validations.int.test.ts` (7 testes): sessão
+  válida + Origin do verifier → 403 (membership não resolvida, ver falha
+  abaixo); sessão ausente → 401; usuário autenticado sem vínculo com a org
+  solicitada → 403; validação de outra organização → 403; Origin ausente e
+  Origin não permitido → fallback legado resolve a sessão do verifier mas
+  membership falha (403). Nenhum teste duplicado com
+  `auth-cookie-prefix.int.test.ts` (que cobre /api/me e /v1/auth/*).
+- Falha de autenticação identificada: o middleware
+  `requireSessionOrM2MVerify` valida membership em `organization_member` usando
+  `sessionUser.id`. Para sessões do Verifier, esse id vem de `verifier_user`,
+  mas a FK `organization_member_user_id_fkey` referencia a tabela `user` do
+  admin. Como os ids são de tabelas distintas, nenhuma membership é encontrada
+  e sessões do Verifier não conseguem acessar rotas de validação (403). Isso
+  impede o fluxo do dashboard do Verifier e precisa de correção de produção
+  (avaliar se a membership deve referenciar `verifier_user` ou se há uma
+  tabela de usuários unificada).
+- Sem OCR novo, VLM/LLM, holder auth, SSI/wallet, mudança de scoring/policy ou
+  expansão multi-documento.
+
+## Refinamento da identidade do Verifier (PR #75) (2026-11-15)
+
+- **Eliminada a tabela legada `user` como fonte de identidade para memberships
+  de organização.** A FK `organization_member.user_id` agora referencia
+  `verifier_user.id` (migração `0068`), não mais `user.id` (migração `0019`).
+  Isso corrige a falha identificada na PR #74 onde sessões do Verifier não
+  conseguiam ser membro de organização (403 em todas rotas protegidas).
+- **Migration 0069:** Documenta que `organization_invitation.accepted_by`
+  armazena IDs de `verifier_user` (sem FK direta, por ser multi-tenant).
+- **Migration 0070:** Altera FK `batch.user_id` de `user.id` para
+  `verifier_user.id`.
+- **`packages/db/src/schemas/organizations.ts`:** FK de `userId` referencia
+  `verifierAuthUser` em vez de `authUser`.
+- **`apps/api/src/modules/organizations/organizations.service.ts`:** Todas as
+  consultas `t.authUser` → `t.verifierAuthUser`.
+- **Testes:** `apps/api/tests/auth-verifier-organization.int.test.ts` (8
+  testes): criar organização como owner, listar organizações, acessar
+  organização própria, usuário sem membership recebe null, isolamento entre
+  tenants, criar e aceitar convites com a nova identidade.
+- A tabela `user` (legado) ainda existe no banco mas não é mais usada como
+  fonte de identidade para memberships. Pode ser removida em uma etapa futura
+  após verificar que nenhuma outra dependência restante.
+- As tabelas `admin_user` (dashboard admin) e `verifier_user` (dashboard
+  verifier) continuam separadas por design (isolamento de sessões).
 
 ## Documento do Holder no pipeline de evidências (PR #73) (2026-11-14)
 

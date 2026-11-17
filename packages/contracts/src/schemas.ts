@@ -237,8 +237,45 @@ export const ValidationDtoSchema = z.object({
   progress: ValidationProgressSchema.nullable().optional(),
   explanation: z.string().nullable(),
   explanation_detail: AssessmentExplanationDtoSchema.nullable().optional(),
+  /**
+   * Recibo `customer_submitted_document` já materializado para a validation
+   * (mesmo predicado da listagem). Presente no GET; o POST de criação não
+   * materializa recibo, por isso o campo é opcional no contrato.
+   */
+  has_customer_document: z.boolean().optional(),
   created_at: z.string(),
   expires_at: z.string(),
+})
+
+/**
+ * Item de listagem de validações (dashboard do Verifier). Deliberadamente
+ * ENXUTO: sem endereço, signals, detail de evidências, hashes ou ids internos
+ * — o detalhe completo vem de `GET /validations/:id` (ValidationDtoSchema).
+ */
+export const ValidationListItemDtoSchema = z.object({
+  validation_id: z.uuid(),
+  status: ValStatusSchema,
+  verdict: VerdictSchema.nullable(),
+  score: z.number().min(-1).max(1).nullable(),
+  confidence: z.number().min(0).max(1).nullable(),
+  /** Recibo `customer_submitted_document` já materializado para a validation. */
+  has_customer_document: z.boolean(),
+  /**
+   * Processamento do documento em curso: existe análise de intake (F1.2) não
+   * terminal para o artefato do recibo. Distingue "Documento recebido" de
+   * "Em processamento" na listagem.
+   */
+  document_processing: z.boolean(),
+  created_at: z.string(),
+  expires_at: z.string(),
+})
+
+/** Resposta paginada de validações (convenção limit/offset + total do usage). */
+export const ValidationsListDtoSchema = z.object({
+  validations: z.array(ValidationListItemDtoSchema),
+  total: z.number().int(),
+  limit: z.number().int(),
+  offset: z.number().int(),
 })
 
 export const BatchItemSchema = z.object({
@@ -269,5 +306,7 @@ export type Verdict = z.infer<typeof VerdictSchema>
 export type Stance = z.infer<typeof StanceSchema>
 export type CreateValidationRequest = z.infer<typeof CreateValidationRequestSchema>
 export type ValidationDto = z.infer<typeof ValidationDtoSchema>
+export type ValidationListItemDto = z.infer<typeof ValidationListItemDtoSchema>
+export type ValidationsListDto = z.infer<typeof ValidationsListDtoSchema>
 export type SignalDto = z.infer<typeof SignalDtoSchema>
 export type EvidenceVerificationDto = z.infer<typeof EvidenceVerificationDtoSchema>

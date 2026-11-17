@@ -341,7 +341,7 @@ describe('auth session context por origem do dashboard', () => {
     expect(body.email).toBe(ADMIN_EMAIL)
   })
 
-  it('/api/me sem Origin/Referer mantém o fallback legado (admin antes de verifier)', async () => {
+  it('/api/me sem Origin/Referer não resolve sessão (401)', async () => {
     const adminCookieStr = Array.isArray(adminSetCookie) ? adminSetCookie.join('; ') : (adminSetCookie ?? '')
     const verifierCookieStr = Array.isArray(verifierSetCookie)
       ? verifierSetCookie.join('; ')
@@ -353,8 +353,6 @@ describe('auth session context por origem do dashboard', () => {
       url: '/api/me',
       headers: { cookie: cookies },
     })
-    expect(res.statusCode).toBe(200)
-    const body = res.json()
-    expect(body.email).toBe(ADMIN_EMAIL)
+    expect(res.statusCode).toBe(401)
   })
 })

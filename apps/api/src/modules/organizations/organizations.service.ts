@@ -71,9 +71,9 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
   ): Promise<OrganizationDto> => {
     // Verifica se o usuário existe
     const user = await db
-      .select({ id: t.authUser.id, email: t.authUser.email })
-      .from(t.authUser)
-      .where(eq(t.authUser.id, userId))
+      .select({ id: t.verifierAuthUser.id, email: t.verifierAuthUser.email })
+      .from(t.verifierAuthUser)
+      .where(eq(t.verifierAuthUser.id, userId))
       .limit(1)
     if (user.length === 0) {
       throw new Error('user not found')
@@ -326,9 +326,9 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     // Busca o usuário por email (normalizado para comparação case-insensitiva)
     const normalizedEmail = normalizeEmail(create.email)
     const users = await db
-      .select({ id: t.authUser.id, email: t.authUser.email, name: t.authUser.name })
-      .from(t.authUser)
-      .where(sql`lower(${t.authUser.email}) = ${normalizedEmail}`)
+      .select({ id: t.verifierAuthUser.id, email: t.verifierAuthUser.email, name: t.verifierAuthUser.name })
+      .from(t.verifierAuthUser)
+      .where(sql`lower(${t.verifierAuthUser.email}) = ${normalizedEmail}`)
       .limit(1)
 
     const user = users[0]
@@ -400,14 +400,14 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
           organizationMemberId: t.organizationMember.organizationMemberId,
           tenantId: t.organizationMember.tenantId,
           userId: t.organizationMember.userId,
-          userEmail: t.authUser.email,
-          userName: t.authUser.name,
+          userEmail: t.verifierAuthUser.email,
+          userName: t.verifierAuthUser.name,
           role: t.organizationMember.role,
           joinedAt: t.organizationMember.joinedAt,
           invitedBy: t.organizationMember.invitedBy,
         })
         .from(t.organizationMember)
-        .innerJoin(t.authUser, eq(t.organizationMember.userId, t.authUser.id))
+        .innerJoin(t.verifierAuthUser, eq(t.organizationMember.userId, t.verifierAuthUser.id))
         .where(eq(t.organizationMember.tenantId, tenantId))
     })
 
@@ -532,9 +532,9 @@ export const makeOrganizationsService = (deps: OrganizationsServiceDeps) => {
     // Busca o usuário autenticado para obter seu e-mail e nome.
     // A tabela `user` não tem RLS, então a consulta é direta.
     const users = await db
-      .select({ id: t.authUser.id, email: t.authUser.email, name: t.authUser.name })
-      .from(t.authUser)
-      .where(eq(t.authUser.id, userId))
+      .select({ id: t.verifierAuthUser.id, email: t.verifierAuthUser.email, name: t.verifierAuthUser.name })
+      .from(t.verifierAuthUser)
+      .where(eq(t.verifierAuthUser.id, userId))
       .limit(1)
 
     if (users.length === 0) {

@@ -44,7 +44,7 @@ let m2mOrgTenantId: string
 const signUp = async (email: string, password: string, name: string): Promise<string> => {
   const res = await app.inject({
     method: 'POST',
-    url: '/api/auth/sign-up/email',
+    url: '/v1/auth/verifier/sign-up/email',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, name }),
   })
@@ -55,7 +55,7 @@ const signUp = async (email: string, password: string, name: string): Promise<st
 const loginAndGetCookie = async (email: string, password: string): Promise<string> => {
   const res = await app.inject({
     method: 'POST',
-    url: '/api/auth/sign-in/email',
+    url: '/v1/auth/verifier/sign-in/email',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   })
@@ -63,7 +63,7 @@ const loginAndGetCookie = async (email: string, password: string): Promise<strin
   const setCookie = res.headers['set-cookie']
   if (!setCookie) throw new Error('No set-cookie header')
   const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie
-  const match = cookieHeader.match(/legacy-auth\.session_token=([^;]+)/)
+  const match = cookieHeader.match(/verifier-auth\.session_token=([^;]+)/)
   const token = match?.[1]
   if (!token) throw new Error('Session token not found in cookie')
   return token
@@ -71,7 +71,8 @@ const loginAndGetCookie = async (email: string, password: string): Promise<strin
 
 const injectWithSession = async (method: string, url: string, body?: unknown) => {
   const headers: Record<string, string> = {
-    Cookie: `legacy-auth.session_token=${ownerSessionCookie}`,
+    Cookie: `verifier-auth.session_token=${ownerSessionCookie}`,
+    origin: 'http://verifier.localhost:5174',
   }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'

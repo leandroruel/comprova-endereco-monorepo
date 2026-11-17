@@ -123,6 +123,25 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
     const claim = claimRows[0] ?? null
     const evidenceSummary = claim === null ? null : await evidenceSummaryForClaim(tx, claim.claimId)
 
+    // PR #74: presença do documento do cliente = recibo materializado (mesmo
+    // predicado da listagem). NÃO se infere de `evidence_summary`, que existe
+    // para qualquer claim — inclusive antes do intake do documento.
+    const receiptRows =
+      claim === null
+        ? []
+        : await tx
+            .select({ claimEvidenceId: t.claimEvidence.claimEvidenceId })
+            .from(t.claimEvidence)
+            .where(
+              and(
+                eq(t.claimEvidence.claimId, claim.claimId),
+                eq(t.claimEvidence.tenantId, tenantId),
+                eq(t.claimEvidence.source, CUSTOMER_DOCUMENT_INTAKE_SOURCE),
+              ),
+            )
+            .limit(1)
+    const hasCustomerDocument = receiptRows.length > 0
+
     // F1.3: a leitura corrente é a verificação materializada mais recente.
     // Versões anteriores permanecem no banco para auditoria, mas não são
     // sobrescritas (claim_evidence é imutável).
@@ -253,12 +272,128 @@ export const getValidationDetails = async (db: Db, tenantId: string, validationI
       signals,
       claim,
       evidenceSummary,
+      hasCustomerDocument,
       evidenceVerification,
       fiscalVerification,
       fiscalReferenceStatus,
       progress,
       address,
     }
+  })
+
+export interface ListValidationsQuery {
+  readonly limit: number
+  readonly offset: number
+}
+
+export interface ValidationListItem {
+  readonly validationId: string
+  readonly status: (typeof t.validation.$inferSelect)['status']
+  readonly verdict: (typeof t.validation.$inferSelect)['verdict']
+  readonly score: number | null
+  readonly confidence: number | null
+  readonly hasCustomerDocument: boolean
+  readonly documentProcessing: boolean
+  readonly createdAt: Date
+  readonly expiresAt: Date
+}
+
+export interface ValidationsListResult {
+  readonly items: readonly ValidationListItem[]
+  readonly total: number
+}
+
+/**
+ * Listagem paginada de validações do tenant (dashboard do Verifier).
+ *
+ * Página e total vêm da MESMA declaração SQL (o total é subquery escalar no
+ * próprio SELECT): sob READ COMMITTED, uma única declaração lê um único
+ * snapshot — a página e o total nunca divergem (duas queries separadas
+ * podiam ver commits diferentes entre elas). Quando a página é vazia (offset
+ * além do total), o total é recomposto com um count dedicado — para página
+ * vazia legítima de paginação não há página/total a confrontar.
+ *
+ * Ordenação estável por `created_at` (desc) + `validation_id` (desempate
+ * determinístico). O estado da submissão documental é resolvido por EXISTS
+ * sobre o recibo `customer_submitted_document` e o processamento do documento
+ * pela existência de análise de intake (F1.2) não terminal — sem N+1 e sem
+ * expor conteúdo de evidência. RLS + filtro explícito de tenant restringem a
+ * leitura ao tenant autenticado.
+ */
+export const listValidations = async (
+  db: Db,
+  tenantId: string,
+  query: ListValidationsQuery,
+): Promise<ValidationsListResult> =>
+  withTenant(db, tenantId, async (tx) => {
+    const items = await tx
+      .select({
+        validationId: t.validation.validationId,
+        status: t.validation.status,
+        verdict: t.validation.verdict,
+        score: t.validation.score,
+        confidence: t.validation.confidence,
+        createdAt: t.validation.createdAt,
+        expiresAt: t.validation.expiresAt,
+        hasCustomerDocument: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM claim c
+          JOIN claim_evidence ce
+            ON ce.claim_id = c.claim_id
+           AND ce.tenant_id = c.tenant_id
+          WHERE c.validation_id = validation.validation_id
+            AND c.tenant_id = validation.tenant_id
+            AND ce.source = ${CUSTOMER_DOCUMENT_INTAKE_SOURCE}
+        )`,
+        documentProcessing: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM claim c
+          JOIN claim_evidence ce
+            ON ce.claim_id = c.claim_id
+           AND ce.tenant_id = c.tenant_id
+          JOIN evidence_artifact a
+            ON a.claim_evidence_id = ce.claim_evidence_id
+           AND a.tenant_id = ce.tenant_id
+          JOIN evidence_analysis ea
+            ON ea.artifact_id = a.artifact_id
+           AND ea.tenant_id = a.tenant_id
+          WHERE c.validation_id = validation.validation_id
+            AND c.tenant_id = validation.tenant_id
+            AND ce.source = ${CUSTOMER_DOCUMENT_INTAKE_SOURCE}
+            AND ea.status IN ('pending', 'analyzing')
+        )`,
+        pageTotal: sql<number>`(SELECT count(*)::int FROM validation v2 WHERE v2.tenant_id = ${tenantId})`,
+      })
+      .from(t.validation)
+      .where(eq(t.validation.tenantId, tenantId))
+      .orderBy(desc(t.validation.createdAt), desc(t.validation.validationId))
+      .limit(query.limit)
+      .offset(query.offset)
+
+    if (items[0] !== undefined) {
+      // pageTotal vem do mesmo snapshot da página (subquery no mesmo SELECT).
+      return {
+        items: items.map((row) => ({
+          validationId: row.validationId,
+          status: row.status,
+          verdict: row.verdict,
+          score: row.score,
+          confidence: row.confidence,
+          hasCustomerDocument: row.hasCustomerDocument,
+          documentProcessing: row.documentProcessing,
+          createdAt: row.createdAt,
+          expiresAt: row.expiresAt,
+        })),
+        total: items[0].pageTotal,
+      }
+    }
+
+    // Página vazia (offset além do total): recomponde o total para a UI.
+    const [countRow] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(t.validation)
+      .where(eq(t.validation.tenantId, tenantId))
+    return { items: [], total: countRow?.total ?? 0 }
   })
 
 export const setWorkflowId = async (

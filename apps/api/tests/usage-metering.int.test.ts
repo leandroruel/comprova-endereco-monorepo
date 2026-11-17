@@ -1171,7 +1171,7 @@ describe('usage metering — autenticação por sessão e M2M', () => {
   const signUp = async (email: string, password: string, name: string): Promise<void> => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/auth/sign-up/email',
+      url: '/v1/auth/verifier/sign-up/email',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, name }),
     })
@@ -1181,26 +1181,34 @@ describe('usage metering — autenticação por sessão e M2M', () => {
   const loginAndGetCookie = async (email: string, password: string): Promise<string> => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/auth/sign-in/email',
+      url: '/v1/auth/verifier/sign-in/email',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     })
     expect(res.statusCode).toBe(200)
     const setCookie = res.headers['set-cookie']
     const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : String(setCookie ?? '')
-    const token = cookieHeader.match(/legacy-auth\.session_token=([^;]+)/)?.[1]
+    const token = cookieHeader.match(/verifier-auth\.session_token=([^;]+)/)?.[1]
     if (!token) throw new Error('Session token not found in cookie')
     return token
   }
 
   const injectWithSession = async (method: string, url: string, cookie: string) =>
-    app.inject({ method, url, headers: { Cookie: `legacy-auth.session_token=${cookie}` } })
+    app.inject({
+      method,
+      url,
+      headers: { Cookie: `verifier-auth.session_token=${cookie}`, origin: 'http://verifier.localhost:5174' },
+    })
 
   const createOrganization = async (cookie: string, name: string, email: string): Promise<string> => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/organizations',
-      headers: { Cookie: `legacy-auth.session_token=${cookie}`, 'Content-Type': 'application/json' },
+      headers: {
+        Cookie: `verifier-auth.session_token=${cookie}`,
+        'Content-Type': 'application/json',
+        origin: 'http://verifier.localhost:5174',
+      },
       body: JSON.stringify({ name, email, termsVersion: '1.0.0' }),
     })
     expect(created.statusCode).toBe(201)

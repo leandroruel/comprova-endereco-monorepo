@@ -8,6 +8,7 @@ import {
   problem,
   problems,
   type CreateValidationRequest,
+  type ValidationsListDto,
   type ValidationDto,
 } from '@comprova/contracts'
 import { isValidDocument, type AddressComponents } from '@comprova/core'
@@ -24,7 +25,12 @@ import {
   issueCredential,
   type CredentialIssuerDeps,
 } from '../../services/credential-issuer.js'
-import { contestValidation, getValidationDetails } from './validations.service.js'
+import {
+  contestValidation,
+  getValidationDetails,
+  listValidations,
+  type ListValidationsQuery,
+} from './validations.service.js'
 
 export interface ValidationControllerDeps {
   readonly db: Db
@@ -136,6 +142,34 @@ const addressComponentsFromDto = (dto: {
 })
 
 export const makeValidationController = (deps: ValidationControllerDeps) => ({
+  list: async (
+    tenantId: string | undefined,
+    query: ListValidationsQuery,
+    reply: FastifyReply,
+  ): Promise<ValidationsListDto | FastifyReply> => {
+    if (tenantId === undefined) throw new Error('tenant context missing')
+    const result = await listValidations(deps.db, tenantId, query)
+    // Item deliberadamente enxuto (ValidationListItemDtoSchema): sem endereço,
+    // signals, detail de evidências, hashes ou ids internos.
+    const body: ValidationsListDto = {
+      validations: result.items.map((item) => ({
+        validation_id: item.validationId,
+        status: item.status,
+        verdict: item.verdict,
+        score: item.score,
+        confidence: item.confidence,
+        has_customer_document: item.hasCustomerDocument,
+        document_processing: item.documentProcessing,
+        created_at: item.createdAt.toISOString(),
+        expires_at: item.expiresAt.toISOString(),
+      })),
+      total: result.total,
+      limit: query.limit,
+      offset: query.offset,
+    }
+    return reply.send(body)
+  },
+
   get: async (
     tenantId: string | undefined,
     validationId: string,
@@ -152,6 +186,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
       signals,
       claim,
       evidenceSummary,
+      hasCustomerDocument,
       evidenceVerification,
       fiscalVerification,
       fiscalReferenceStatus,
@@ -209,6 +244,7 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
               target: { type: 'address', id: claim.addressId },
             },
       evidence_summary: evidenceSummary,
+      has_customer_document: hasCustomerDocument,
       evidence_verification: parsedVerification?.success === true ? parsedVerification.data : null,
       fiscal_verification: parsedFiscal?.success === true ? parsedFiscal.data : null,
       fiscal_reference: parsedReference?.success === true ? parsedReference.data : null,

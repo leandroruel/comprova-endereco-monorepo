@@ -252,6 +252,117 @@ export async function createApiKey(body: {
   })
 }
 
+/** Item de listagem de validações (contrato `ValidationListItemDtoSchema`). */
+export interface ValidationListItem {
+  validation_id: string
+  status: string
+  verdict: string | null
+  score: number | null
+  confidence: number | null
+  has_customer_document: boolean
+  document_processing: boolean
+  created_at: string
+  expires_at: string
+}
+
+/**
+ * GET /v1/validations — lista paginada de validações da organização.
+ * A autorização vem da sessão (cookie): o `tenantId` é apenas contexto de
+ * consulta validado por membership no backend.
+ */
+export async function listValidations(
+  tenantId: string,
+  pagination: { limit?: number; offset?: number } = {},
+): Promise<{
+  validations: ValidationListItem[]
+  total: number
+  limit: number
+  offset: number
+}> {
+  const query = new URLSearchParams({
+    tenantId,
+    limit: String(pagination.limit ?? 20),
+    offset: String(pagination.offset ?? 0),
+  })
+  return apiRequest(`/validations?${query.toString()}`, { method: 'GET' })
+}
+
+/** DTO público do detalhe (contrato `ValidationDtoSchema`). Campos usados pelo UI. */
+export interface ValidationDetail {
+  validation_id: string
+  status: string
+  verdict: string | null
+  confidence: number | null
+  score: number | null
+  policy_version: string | null
+  explanation: string | null
+  explanation_detail: {
+    code: string
+    message: string
+    supporting_evidence: string[]
+    contradicting_evidence: string[]
+  } | null
+  created_at: string
+  expires_at: string
+  progress: {
+    status: 'in_progress' | 'completed' | 'failed'
+    steps: { stage: string; status: string }[]
+  } | null
+  evidence_summary: { supporting: number; contradicting: number; unknown: number } | null
+  claim: {
+    id: string
+    type: string
+    subject: { type: string; id: string }
+    target: { type: string; id: string | null }
+  } | null
+  evidence_verification: {
+    status: string
+    method: string
+    source: { kind: string; id: string; authority: string | null; environment: string }
+    document: string
+    address: string
+    holder: string
+    analysis_id: string
+    analyzer: { id: string; version: string }
+    contract_version: string
+    observed_at: string
+    limitations: string[]
+    error_codes: string[]
+  } | null
+  fiscal_verification: {
+    status: string
+    method: string
+    document: string
+    address: string
+    holder: string
+    observed_at: string
+    limitations: string[]
+    error_codes: string[]
+  } | null
+  fiscal_reference: string | null
+  fiscal_reassessment: string | null
+  has_customer_document?: boolean
+  signals: {
+    checker: string
+    checker_version: string
+    stance: string
+    strength: number
+    confidence: number
+    source: string
+    observed_at: string
+    ttl_seconds: number
+  }[]
+}
+
+/**
+ * GET /v1/validations/:id — detalhe/resultado da validação. O `tenantId` é
+ * exigido pelo fluxo de sessão e validado por membership no backend.
+ */
+export async function getValidation(tenantId: string, validationId: string): Promise<ValidationDetail> {
+  const query = new URLSearchParams({ tenantId })
+  return apiRequest(`/validations/${validationId}?${query.toString()}`, { method: 'GET' })
+}
+
 /** GET /m2m/api-keys — lista credenciais da organização (sem segredo). */
 export async function listApiKeys(tenantId: string): Promise<{
   apiKeys: Array<{
