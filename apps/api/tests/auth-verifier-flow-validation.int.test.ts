@@ -73,12 +73,7 @@ const extractSessionToken = (setCookie: string | string[] | undefined): string =
   return match[1]!
 }
 
-const injectWithSession = (
-  method: string,
-  url: string,
-  cookieStr: string,
-  body?: unknown,
-) =>
+const injectWithSession = (method: string, url: string, cookieStr: string, body?: unknown) =>
   app.inject({
     method,
     url,
@@ -181,12 +176,7 @@ describe('fluxo real de autenticação do Verifier (criação de validação)', 
       const auditRow = await adminPool.db
         .select({ actor: t.auditLog.actor, action: t.auditLog.action })
         .from(t.auditLog)
-        .where(
-          and(
-            eq(t.auditLog.targetId, body.validation_id),
-            eq(t.auditLog.action, 'validation.create'),
-          ),
-        )
+        .where(and(eq(t.auditLog.targetId, body.validation_id), eq(t.auditLog.action, 'validation.create')))
         .limit(1)
       expect(auditRow.length).toBe(1)
       expect(auditRow[0]!.actor).toBe(`session:${userRow[0]!.id}`)
