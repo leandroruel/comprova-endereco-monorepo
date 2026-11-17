@@ -53,20 +53,12 @@ export default function App() {
   /** Offset de paginação de validações por organização, preservado ao voltar do detalhe. */
   const [validationsOffset, setValidationsOffset] = useState<Record<string, number>>({})
 
-  const getValidationsOffset = (orgId: string): number => {
-    return validationsOffset[orgId] ?? 0
-  }
-
   const setValidationsOrgOffset = (orgId: string, offset: number) => {
     setValidationsOffset((prev) => ({ ...prev, [orgId]: offset }))
   }
 
-  const resetValidationsOffset = (orgId: string) => {
-    setValidationsOffset((prev) => {
-      const next = { ...prev }
-      delete next[orgId]
-      return next
-    })
+  const getValidationsOffset = (orgId: string): number => {
+    return validationsOffset[orgId] ?? 0
   }
 
   const resolveRoute = useCallback(async () => {
@@ -159,19 +151,14 @@ export default function App() {
   /**
    * Troca de organização invalida o contexto da validação selecionada: a
    * autorização é por membership e o detalhe pertence à organização anterior.
-   * Reseta o offset de paginação da organização anterior.
+   * O offset de paginação de cada organização é preservado individualmente; só
+   * inicia em zero quando a organização ainda não tem um offset registrado.
    */
-  const handleSetActiveOrgId = useCallback(
-    (id: string | null) => {
-      setActiveOrgId(id)
-      setSelectedValidationId(null)
-      setRoute((current) => (current === 'validation-detail' ? 'validations' : current))
-      if (activeOrgId) {
-        resetValidationsOffset(activeOrgId)
-      }
-    },
-    [activeOrgId, resetValidationsOffset],
-  )
+  const handleSetActiveOrgId = useCallback((id: string | null) => {
+    setActiveOrgId(id)
+    setSelectedValidationId(null)
+    setRoute((current) => (current === 'validation-detail' ? 'validations' : current))
+  }, [])
 
   return (
     <QueryClientProvider client={queryClient}>
