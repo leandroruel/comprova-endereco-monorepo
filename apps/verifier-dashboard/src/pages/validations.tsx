@@ -131,7 +131,10 @@ export function ValidationsPage({ activeOrgId, onSelectValidation }: Validations
 
   // Item 7.3: se o offset ficou além do total após atualização/exclusão,
   // retrocede para a última página válida em vez de mostrar página vazia.
-  if (offset > 0 && offset >= total && total > 0) {
+  // Quando total === 0, qualquer offset > 0 é inválido: volta ao início.
+  if (total === 0 && offset > 0) {
+    setOffset(0)
+  } else if (offset > 0 && offset >= total && total > 0) {
     const lastPageOffset = Math.max(0, Math.ceil(total / PAGE_SIZE) * PAGE_SIZE - PAGE_SIZE)
     setOffset(lastPageOffset)
   }

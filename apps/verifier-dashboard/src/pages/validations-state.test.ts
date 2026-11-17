@@ -111,6 +111,25 @@ describe('validationUiState', () => {
     ).toBe(false)
   })
 
+  it('progressStatus failed com status running não é processamento ativo', () => {
+    // Caso específico: validação ainda em running mas progresso já falhou.
+    expect(
+      isProcessing({
+        status: 'running',
+        hasCustomerDocument: true,
+        progressStatus: 'failed',
+      }),
+    ).toBe(false)
+    expect(
+      isProcessing({
+        status: 'running',
+        hasCustomerDocument: true,
+        progressStatus: 'failed',
+        fiscalReassessment: 'pending',
+      }),
+    ).toBe(false)
+  })
+
   it('veredito retido com trabalho pendente não aparece como definitivo', () => {
     // Progresso em curso + veredito antigo → processamento, não concluído.
     expect(
