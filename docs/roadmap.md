@@ -415,11 +415,13 @@ texto/estrutura/observações
   imagem retorna `unsupported`/`OCR_NOT_IMPLEMENTED`. Nenhum provider externo,
   URL ou VLM é acionado nesta etapa.
 - O serviço Document Intelligence (apps/document-intelligence, FastAPI + Marker
-  2.x) foi integrado ao analyzer como fallback explícito (ADR-0043): PDFs
-  escaneados ou com camada textual insuficiente são enviados ao Marker para
-  OCR/layout, com fallback para a camada local em caso de indisponibilidade,
-  timeout ou falha de parsing. O caminho determinístico de QR/referência fiscal
-  não passa pelo OCR.
+  2.x) foi integrado ao analyzer como fallback explícito (ADR-0043), mas **apenas
+  para PDFs**: PDFs escaneados ou com camada textual insuficiente são enviados ao
+  Marker para OCR/layout, com fallback para a camada local em caso de
+  indisponibilidade, timeout ou falha de parsing. Arquivos de imagem isolados
+  (JPEG/PNG) continuam retornando `unsupported`/`OCR_NOT_IMPLEMENTED`; o Marker
+  não é acionado para eles. O caminho determinístico de QR/referência fiscal não
+  passa pelo OCR.
 - O parser PDF é conservador: PDFs escaneados, fontes CID/Type0 sem `ToUnicode`
   ou layout complexo retornam `inconclusive`/`NO_TEXT_LAYER`.
 - A saída é validada por schema e identidade do analisador. Saída inválida vira
@@ -514,11 +516,12 @@ de produto; elas não bloqueiam o vertical slice atual.
 
 ### Ainda falta para concluir a Fase 1
 
-- OCR de imagem contra serviço Marker ao vivo: a integração está implementada
-  (ADR-0043) e testada com cliente mockado, mas não foi exercida contra um
-  serviço Document Intelligence em execução (requer perfil `document-intelligence`
-  do Docker Compose, download de modelos do Marker e warmup). Limitação
-  documentada acima.
+- OCR de PDF (imagem digitalizada) contra serviço Marker ao vivo: a integração
+  está implementada (ADR-0043) e testada com cliente mockado, mas não foi
+  exercida contra um serviço Document Intelligence em execução (requer perfil
+  `document-intelligence` do Docker Compose, download de modelos do Marker e
+  warmup). Arquivos de imagem isolados (JPEG/PNG) continuam fora do escopo do
+  Marker (`unsupported`/`OCR_NOT_IMPLEMENTED`). Limitação documentada acima.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
   contrato, mas a decisão de produto é F1.3/F3.
 
