@@ -6,25 +6,20 @@ SET application_name = 'comprova-migrations';
 -- =====================================================================
 -- PR #75 — Preflight de compatibilidade de identidade verifier_user.
 -- =====================================================================
--- As migrations 0068, 0070 e 0071 alteram as FKs de organization_member,
--- batch e validation para apontar para verifier_user.id. Como a migration
--- 0056 copiou usuários da tabela legada `user` para `verifier_user` no
--- momento de sua execução, usuários criados diretamente na tabela `user`
--- depois da 0056 podem deixar registros órfãos em organization_member,
--- batch e validation.
+-- Esta migration roda ANTES das migrations 0068, 0070 e 0071, que alteram
+-- as FKs de organization_member, batch e validation para apontar para
+-- verifier_user.id.
+--
+-- Como a migration 0056 copiou usuários da tabela legada `user` para
+-- verifier_user no momento de sua execução, usuários criados diretamente
+-- na tabela `user` depois da 0056 podem deixar registros órfãos em
+-- organization_member, batch e validation.
 --
 -- Adicionar uma FK com validação (ADD CONSTRAINT sem NOT VALID) falha se
--- houver registros órfãos. Como a verificação de 0072 vem DEPOIS das
--- alterações de 0068/0070/0071, registros órfãos podem fazer a migration
--- falhar antes da verificação.
---
--- Esta migration executa um preflight ANTES de qualquer alteração de FK
--- (ela roda depois de 0072, mas serve como verificação de segurança para
--- ambientes que já aplicaram 0068/0070/0071 sem problemas, e para novos
--- ambientes onde 0068/0070/0071 já validam implicitamente).
---
--- Se houver registros órfãos, interrompe com erro explícito informando a
--- tabela e a quantidade de registros afetados, sem perder dados.
+-- houver registros órfãos. Esta migration verifica a existência de
+-- registros órfãos ANTES de qualquer alteração de FK, lançando erro
+-- explícito com a tabela e a quantidade de registros afetados, sem
+-- perder dados.
 -- =====================================================================
 
 DO $$
@@ -68,9 +63,3 @@ BEGIN
     RAISE EXCEPTION '%', msg;
   END IF;
 END $$;
-
--- Valida todas as constraints existentes para garantir integridade referencial.
--- Isso é feito em transações separadas para evitar bloqueios prolongados.
-ALTER TABLE organization_member VALIDATE CONSTRAINT organization_member_user_id_fkey;
-ALTER TABLE batch VALIDATE CONSTRAINT batch_user_id_fkey;
-ALTER TABLE validation VALIDATE CONSTRAINT validation_user_id_fkey;

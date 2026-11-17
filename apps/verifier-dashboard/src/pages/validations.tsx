@@ -54,6 +54,27 @@ export function ValidationsPage({
     staleTime: 15_000,
   })
 
+  const validations = data?.validations ?? []
+  const total = data?.total ?? 0
+  const page = Math.floor(offset / PAGE_SIZE) + 1
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // Item 7.3: se o offset ficou além do total após atualização/exclusão,
+  // retrocede para a última página válida em vez de mostrar página vazia.
+  // Quando total === 0, qualquer offset > 0 é inválido: volta ao início.
+  // O efeito só roda quando os dados da consulta estão disponíveis
+  // (data !== undefined), evitando correções prematuras antes do primeiro
+  // carregamento.
+  useEffect(() => {
+    if (!activeOrgId || data === undefined) return
+    if (total === 0 && offset > 0) {
+      setOffset(0)
+    } else if (offset > 0 && offset >= total && total > 0) {
+      const lastPageOffset = Math.max(0, Math.ceil(total / PAGE_SIZE) * PAGE_SIZE - PAGE_SIZE)
+      setOffset(lastPageOffset)
+    }
+  }, [activeOrgId, offset, total, data, setOffset, PAGE_SIZE])
+
   if (!activeOrgId) {
     return (
       <div className="max-w-md mx-auto">
@@ -98,26 +119,6 @@ export function ValidationsPage({
       </div>
     )
   }
-
-  const validations = data?.validations ?? []
-  const total = data?.total ?? 0
-  const page = Math.floor(offset / PAGE_SIZE) + 1
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
-
-  // Item 7.3: se o offset ficou além do total após atualização/exclusão,
-  // retrocede para a última página válida em vez de mostrar página vazia.
-  // Quando total === 0, qualquer offset > 0 é inválido: volta ao início.
-  // Isso roda em um useEffect para evitar atualizações de estado durante a
-  // renderização, que podem causar loops quando o offset é controlado pelo pai.
-  useEffect(() => {
-    if (!activeOrgId) return
-    if (total === 0 && offset > 0) {
-      setOffset(0)
-    } else if (offset > 0 && offset >= total && total > 0) {
-      const lastPageOffset = Math.max(0, Math.ceil(total / PAGE_SIZE) * PAGE_SIZE - PAGE_SIZE)
-      setOffset(lastPageOffset)
-    }
-  }, [activeOrgId, offset, total, setOffset, PAGE_SIZE])
 
   return (
     <div className="space-y-6">

@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
-import { runMigrations, createDbPool, sql, eq, and } from '@comprova/db'
+import { runMigrations, createDbPool, eq, and, sql } from '@comprova/db'
 import Redis from 'ioredis'
-import { createLogger, createMetrics } from '@comprova/observability'
+import postgres from 'postgres'
 import { buildApp } from '../src/app.js'
 import * as t from '@comprova/db'
 
@@ -48,15 +48,15 @@ const app = await buildApp({
   },
   db: appPool.db,
   redis,
-  logger: createLogger({ level: 'silent' }),
-  metrics: createMetrics(),
+  logger: ({ info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, child: () => ({ info: () => {}, error: () => {}, warn: () => {}, debug: () => {} }) } as any),
+  metrics: ({ httpRequests: { inc: () => {} }, httpErrors: { inc: () => {} }, httpDuration: { observe: () => {} } } as any),
 })
 
 afterAll(async () => {
   await app.close()
   redis.disconnect()
-  await adminPool.end()
   await appPool.end()
+  await adminPool.end()
   await testRedis.stop()
   await db.stop()
 })
@@ -141,12 +141,13 @@ describe('fluxo real de autenticação do Verifier (criação de validação)', 
       },
     )
 
-    // A rota espera tenantId no query para sessão de usuário
-    // Nota: o runFastPath depende de dados de referência (CNEFE/Receita) que
-    // podem não estar disponíveis no banco de teste; nesse caso a resposta
-    // pode ser 500. Verificamos que a autenticação e a sessão funcionam
-    // corretamente (não 401/403) e que o user_id seria preenchido com
-    // verifier_user.id quando a validação for concluída.
+    // A rota espera tenantId no query para sessão de usuário. O runFastPath
+    // depende de dados de referência (CNEFE/Receita) que podem não estar
+    // disponíveis no banco de teste; nesse caso a resposta pode ser 500. Se
+    // a validação foi criada com sucesso (200), verificamos a integridade
+    // dos dados. Se falhou por falta de referência, verificamos apenas que
+    // a autenticação e a sessão funcionam (não 401/403).
+    console.log('validation create status:', res.statusCode, 'body:', res.body.slice(0, 200))
     expect([200, 500]).toContain(res.statusCode)
 
     // Se a validação foi criada com sucesso, verifica a integridade dos dados

@@ -10,6 +10,9 @@ export default defineConfig({
     // dashboard (componentes no projeto `dashboard`, tipos nos de nó).
     alias: {
       '@': dashboardSrc,
+      '@comprova/observability': fileURLToPath(
+        new URL('./packages/observability/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {
