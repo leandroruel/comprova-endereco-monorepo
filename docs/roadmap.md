@@ -19,9 +19,9 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
   primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
   o vertical slice F3.2 pelo dashboard.
 - **Em andamento:** F0 (checklist de produção), F1 (documentos complexos via
-  Marker — integração entregue em ADR-0043, validação de integração real com o
-  serviço ao vivo pendente), F2 (expansão/hardening da cobertura fiscal), F3.3
-  (medição/cobrança) e F6 (operação/segurança).
+  Marker — integração entregue em ADR-0043 e **validada com serviço ao vivo**),
+  F2 (expansão/hardening da cobertura fiscal), F3.3 (medição/cobrança) e F6
+  (operação/segurança).
 - **Próximo passo:** fechar F3.3 e o checklist de produção; a unidade de
   cobrança definitiva, o tratamento comercial de indisponibilidade de fonte
   externa (hoje: não faturável, política provisória do ADR-0044 §3b) e as
@@ -422,6 +422,12 @@ texto/estrutura/observações
   (JPEG/PNG) continuam retornando `unsupported`/`OCR_NOT_IMPLEMENTED`; o Marker
   não é acionado para eles. O caminho determinístico de QR/referência fiscal não
   passa pelo OCR.
+- **Integração real validada:** o serviço Marker foi executado ao vivo
+  (perfil `document-intelligence` do Docker Compose) e testado ponta a ponta
+  com o pipeline TypeScript (`apps/api/tests/evidence-analysis-marker-real.int.test.ts`):
+  PDF textual (camada local, sem chamar Marker), PDF digitalizado (OCR real via
+  Marker, extrai titular/endereço/CEP) e PDF multipágina. O upload duplicado e
+  o replay também foram validadas com o serviço ao vivo.
 - O parser PDF é conservador: PDFs escaneados, fontes CID/Type0 sem `ToUnicode`
   ou layout complexo retornam `inconclusive`/`NO_TEXT_LAYER`.
 - A saída é validada por schema e identidade do analisador. Saída inválida vira
@@ -429,12 +435,6 @@ texto/estrutura/observações
 - **Isto é um adaptador técnico, não uma capacidade central do produto.** O
   protocolo `DocumentAnalyzer` permite trocar por OCR/VLM/parser dedicado sem
   mudar o contrato de entendimento.
-- **Limitação de validação:** todos os testes de integração do Marker usam o
-  cliente HTTP mockado (`packages/providers/src/document-intelligence/client.test.ts`
-  e `packages/providers/src/document-analyzer/analyze.marker.test.ts`). Não há
-  teste contra um serviço Marker ao vivo (requer download de modelos,
-  warmup e infraestrutura separada via `--profile document-intelligence`).
-  Isso significa que a integração real não foi exercida ponta a ponta em CI.
 
 ### F1.2b — Document understanding (entregue no MVP F1.2)
 
@@ -516,28 +516,27 @@ de produto; elas não bloqueiam o vertical slice atual.
 
 ### Ainda falta para concluir a Fase 1
 
-- OCR de PDF (imagem digitalizada) contra serviço Marker ao vivo: a integração
-  está implementada (ADR-0043) e testada com cliente mockado, mas não foi
-  exercida contra um serviço Document Intelligence em execução (requer perfil
-  `document-intelligence` do Docker Compose, download de modelos do Marker e
-  warmup). Arquivos de imagem isolados (JPEG/PNG) continuam fora do escopo do
-  Marker (`unsupported`/`OCR_NOT_IMPLEMENTED`). Limitação documentada acima.
+- OCR de imagem isolada (JPEG/PNG): o Marker não processa imagens isoladas,
+  apenas PDFs. Para suportar imagens isoladas, seria necessário converter a
+  imagem para PDF (PIL já disponível) e enviar ao Marker, ou adicionar um OCR
+  dedicado (ex.: Tesseract — ver recomendação na seção de débito técnico). Não
+  implementado nesta etapa.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
   contrato, mas a decisão de produto é F1.3/F3.
 
 ### Estado atual comprovado
 
-| Item                           | Evidência                                                                                      | Situação                                                                   |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant    |
-| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming              |
-| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                         |
-| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local; imagem `unsupported` (OCR futuro) |
-| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência               |
-| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                  |
-| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score       |
-| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única        |
-| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência   |
+| Item                           | Evidência                                                                                      | Situação                                                                                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant                                                                                 |
+| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming                                                                                           |
+| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                                                                                                      |
+| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local; imagem `unsupported` (OCR futuro); Marker como fallback para PDFs escaneados, **validado com serviço ao vivo** |
+| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência                                                                                            |
+| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                                                                                               |
+| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score                                                                                    |
+| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única                                                                                     |
+| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência                                                                                |
 
 ### Lacunas
 
@@ -592,8 +591,12 @@ de produto; elas não bloqueiam o vertical slice atual.
   `inconclusive` e `unsupported` nunca viram `contradicts`; `evidence_analysis`
   consumida sem duplicar a observação F1.1; teste de múltiplas versões; teste de
   cross-tenant e de idempotência da materialização.
-- **Integração real com Marker:** não validada contra serviço ao vivo (mockado
-  em todos os testes de integração). Veja limitação acima na F1.2a.
+- **Integração real com Marker:** validada com serviço Document Intelligence ao
+  vivo (perfil `document-intelligence` do Docker Compose). Testes de integração
+  em `apps/api/tests/evidence-analysis-marker-real.int.test.ts` cobrem PDF
+  textual, PDF digitalizado (OCR real), PDF multipágina, fluxo completo
+  (upload → análise → verificação), replay e upload com conteúdo diferente
+  (409).
 
 ### Riscos
 

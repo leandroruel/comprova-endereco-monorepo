@@ -342,6 +342,55 @@ unknown`, sem `signal` (não altera score).
 
 Sem migrations adicionadas (nenhuma alteração de schema foi necessária).
 
+## Validação ponta a ponta com Marker real (serviço Document Intelligence ao vivo) (2026-11-17)
+
+O serviço Document Intelligence (apps/document-intelligence, FastAPI + Marker 2.x)
+foi executado ao vivo (perfil `document-intelligence` do Docker Compose) e a
+integração com o pipeline TypeScript foi validada ponta a ponta.
+
+**Serviço validado:**
+
+- Inicialização, carregamento de modelos do Marker e warmup concluídos com
+  sucesso (`/ready` → 200).
+- Timeout e tratamento de indisponibilidade mapeados para códigos estáveis
+  (`MARKER_UNAVAILABLE`, `MARKER_TIMEOUT`, `MARKER_BUSY`, `MARKER_PARSING_FAILED`,
+  `OCR_NO_USABLE_TEXT`).
+- Nenhum dado bruto do Marker persistido; apenas metadados mínimos de
+  proveniência (`provider`, `markerVersion`, `pages`, `processingTimeMs`, `fallback`,
+  `fields`).
+
+**Integração real validada (6 testes de integração, PostgreSQL real):**
+
+- PDF textual: camada local suficiente, Marker não chamado, titular/endereço/CEP
+  extraídos, CPF/CNPJ não persistidos (PII).
+- PDF digitalizado (imagem sem camada de texto): OCR real via Marker, extrai
+  titular/endereço/CEP, `provenance.provider = 'marker'`.
+- PDF multipágina: texto extraído preservando ordem de leitura.
+- Fluxo completo: upload → análise → verificação materializa `claim_evidence`
+  (`uploaded_document`, `stance = unknown`, sem `signal`, sem score alterado).
+- Replay do upload: não cria segunda análise nem reexecuta o Marker.
+- Upload com conteúdo diferente na mesma validation: `409` (sem duplicar).
+- Sem PII bruta nos logs nem no detalhe da verificação.
+
+**Recomendação sobre OCR de imagens isoladas (JPEG/PNG):**
+
+- O Marker processa apenas PDFs; imagens isoladas retornam
+  `unsupported`/`OCR_NOT_IMPLEMENTED`. Não implementado nesta etapa.
+- Alternativa sem novas dependências: converter a imagem para PDF com PIL (já
+  disponível no ambiente) e enviar ao Marker — o OCR de imagem embutida em PDF
+  foi validado com sucesso.
+- Se OCR direto de imagens isoladas for necessário no futuro: Tesseract é a
+  recomendação (open source Apache 2.0, suporte a português, leve, binário do
+  sistema), mas requer instalação de pacote do sistema e não foi avaliado em
+  profundidade neste ambiente (sem privilégios de root para `apt`).
+
+**Verificações executadas:** `pnpm vitest run --project node` (133 arquivos /
+1536 testes, node), `pnpm typecheck` (12/12), `pnpm lint` (exit 0, apenas
+warnings preexistentes), `pnpm format` (OK), `pnpm db:fence` (exit 0). Sem
+regressões.
+
+Sem migrations adicionadas (nenhuma alteração de schema foi necessária).
+
 ## Vertical slice end-to-end pelo dashboard (F3) (2026-10-26)
 
 O fluxo completo do produto passa a ser executável pela interface, sem
