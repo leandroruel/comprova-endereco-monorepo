@@ -1,5 +1,4 @@
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { useEffect } from 'react'
 import { FileSearch } from 'lucide-react'
 import { listValidations, type ValidationListItem } from '@/api/client'
 import {
