@@ -226,6 +226,13 @@ describe('upgrade de migrations — identidade verifier_user', () => {
   it('0056 + dados legacy criados depois da 0056 + reconciliação + 0068/0070/0071 preserva registros', async () => {
     await applyMigrationsUpTo0056()
 
+    // 1. Limpa órfãos do teste anterior (primeiro teste do arquivo) para que
+    // o preflight 0067 não falhe por órfãos deixados para trás.
+    await adminPool.db.delete(t.validation).where(eq(t.validation.userId, 'legacy-user-002'))
+    await adminPool.db.delete(t.batch).where(eq(t.batch.userId, 'legacy-user-002'))
+    await adminPool.db.delete(t.organizationMember).where(eq(t.organizationMember.userId, 'legacy-user-002'))
+    await adminClient.unsafe(`DELETE FROM "user" WHERE id = 'legacy-user-002'`)
+
     // 1. Insere um usuário legado diretamente na tabela `user` (simula conta
     // criada depois da migration 0056). Este usuário existe apenas na tabela
     // legada `user`, não em verifier_user.
