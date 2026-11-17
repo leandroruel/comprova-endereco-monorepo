@@ -2,7 +2,6 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import { runMigrations, createDbPool, eq, and, sql } from '@comprova/db'
 import Redis from 'ioredis'
-import postgres from 'postgres'
 import { buildApp } from '../src/app.js'
 import * as t from '@comprova/db'
 
@@ -48,8 +47,23 @@ const app = await buildApp({
   },
   db: appPool.db,
   redis,
-  logger: ({ info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, child: () => ({ info: () => {}, error: () => {}, warn: () => {}, debug: () => {} }) } as any),
-  metrics: ({ httpRequests: { inc: () => {} }, httpErrors: { inc: () => {} }, httpDuration: { observe: () => {} } } as any),
+  logger: {
+    info: () => undefined,
+    error: () => undefined,
+    warn: () => undefined,
+    debug: () => undefined,
+    child: () => ({
+      info: () => undefined,
+      error: () => undefined,
+      warn: () => undefined,
+      debug: () => undefined,
+    }),
+  } as any,
+  metrics: {
+    httpRequests: { inc: () => undefined },
+    httpErrors: { inc: () => undefined },
+    httpDuration: { observe: () => undefined },
+  } as any,
 })
 
 afterAll(async () => {

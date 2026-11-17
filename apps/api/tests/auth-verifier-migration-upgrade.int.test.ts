@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
+import { startTestDb, startTestRedis } from '@comprova/testing'
 import { createDbPool, eq, sql } from '@comprova/db'
 import Redis from 'ioredis'
 import * as fs from 'node:fs'
