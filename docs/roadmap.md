@@ -18,8 +18,9 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
 - **Entregues:** F0.1/F0.2; F1.1/F1.2a/F1.2b/F1.3; F2.1; F2.2a e a
   primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
   o vertical slice F3.2 pelo dashboard.
-- **Em andamento:** F0 (evento faturável e checklist de produção), F1 (OCR e
-  documentos complexos), F2 (expansão/hardening da cobertura fiscal), F3.3
+- **Em andamento:** F0 (checklist de produção), F1 (documentos complexos via
+  Marker — integração entregue em ADR-0043, validação de integração real com o
+  serviço ao vivo pendente), F2 (expansão/hardening da cobertura fiscal), F3.3
   (medição/cobrança) e F6 (operação/segurança).
 - **Próximo passo:** fechar F3.3 e o checklist de produção; a unidade de
   cobrança definitiva, o tratamento comercial de indisponibilidade de fonte
@@ -413,6 +414,14 @@ texto/estrutura/observações
 - MVP: PDF textual extraído localmente (streams simples/`FlateDecode`);
   imagem retorna `unsupported`/`OCR_NOT_IMPLEMENTED`. Nenhum provider externo,
   URL ou VLM é acionado nesta etapa.
+- O serviço Document Intelligence (apps/document-intelligence, FastAPI + Marker
+  2.x) foi integrado ao analyzer como fallback explícito (ADR-0043), mas **apenas
+  para PDFs**: PDFs escaneados ou com camada textual insuficiente são enviados ao
+  Marker para OCR/layout, com fallback para a camada local em caso de
+  indisponibilidade, timeout ou falha de parsing. Arquivos de imagem isolados
+  (JPEG/PNG) continuam retornando `unsupported`/`OCR_NOT_IMPLEMENTED`; o Marker
+  não é acionado para eles. O caminho determinístico de QR/referência fiscal não
+  passa pelo OCR.
 - O parser PDF é conservador: PDFs escaneados, fontes CID/Type0 sem `ToUnicode`
   ou layout complexo retornam `inconclusive`/`NO_TEXT_LAYER`.
 - A saída é validada por schema e identidade do analisador. Saída inválida vira
@@ -420,6 +429,12 @@ texto/estrutura/observações
 - **Isto é um adaptador técnico, não uma capacidade central do produto.** O
   protocolo `DocumentAnalyzer` permite trocar por OCR/VLM/parser dedicado sem
   mudar o contrato de entendimento.
+- **Limitação de validação:** todos os testes de integração do Marker usam o
+  cliente HTTP mockado (`packages/providers/src/document-intelligence/client.test.ts`
+  e `packages/providers/src/document-analyzer/analyze.marker.test.ts`). Não há
+  teste contra um serviço Marker ao vivo (requer download de modelos,
+  warmup e infraestrutura separada via `--profile document-intelligence`).
+  Isso significa que a integração real não foi exercida ponta a ponta em CI.
 
 ### F1.2b — Document understanding (entregue no MVP F1.2)
 
@@ -501,7 +516,12 @@ de produto; elas não bloqueiam o vertical slice atual.
 
 ### Ainda falta para concluir a Fase 1
 
-- OCR de imagem e mais formatos de documento.
+- OCR de PDF (imagem digitalizada) contra serviço Marker ao vivo: a integração
+  está implementada (ADR-0043) e testada com cliente mockado, mas não foi
+  exercida contra um serviço Document Intelligence em execução (requer perfil
+  `document-intelligence` do Docker Compose, download de modelos do Marker e
+  warmup). Arquivos de imagem isolados (JPEG/PNG) continuam fora do escopo do
+  Marker (`unsupported`/`OCR_NOT_IMPLEMENTED`). Limitação documentada acima.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
   contrato, mas a decisão de produto é F1.3/F3.
 
@@ -572,6 +592,8 @@ de produto; elas não bloqueiam o vertical slice atual.
   `inconclusive` e `unsupported` nunca viram `contradicts`; `evidence_analysis`
   consumida sem duplicar a observação F1.1; teste de múltiplas versões; teste de
   cross-tenant e de idempotência da materialização.
+- **Integração real com Marker:** não validada contra serviço ao vivo (mockado
+  em todos os testes de integração). Veja limitação acima na F1.2a.
 
 ### Riscos
 

@@ -7,14 +7,29 @@
 # deixou de existir sem o pool reescrito do v4. Se voltar a ser preciso suprimir
 # algo, cada item precisa de `statement` (por que é aceitável) e `expired_at`.
 #
-# glob 10.5.0 / minimatch 5.1.9 / minimatch 9.0.9 (DoS): toda a subárvore de
-# testcontainers → archiver → archiver-utils/readdir-glob (este último puxa
-# minimatch 5.1.9) e glob 10.5.0 (que puxa minimatch 9.0.9). Tooling de teste,
-# ausente do runtime. As correções são majors (glob >=14.0.2, minimatch
-# >=11.0.1) controladas pelos parents. `purls` restringe cada supressão à
-# versão efetivamente avaliada — o ID sozinho ocultaria achados de outros
-# caminhos que esta justificativa não cobre.
+# picomatch 4.0.7 (CVE-2026-112366, DoS via single-branch): dependência
+# transitiva profunda, não declarada diretamente. Sem fixed version publicada
+# ainda; não há caminho de atualização seguro sem quebrar a árvore de deps.
+# Revisar quando houver fixed version ou quando o parent atualizar.
+# `purls` restringe à versão efetivamente avaliada.
 vulnerabilities:
+  - id: CVE-2026-112366
+    purls:
+      - pkg:npm/picomatch@4.0.7
+    statement: >-
+      picomatch 4.0.7 é dependência transitiva profunda (não declarada
+      diretamente), sem fixed version publicada. DoS via single-branch de
+      baixo impacto no contexto de build/test do Comprova. Revisar quando
+      houver versão corrigida.
+    expired_at: 2026-12-17
+
+  # glob 10.5.0 / minimatch 5.1.9 / minimatch 9.0.9 (DoS): toda a subárvore de
+  # testcontainers → archiver → archiver-utils/readdir-glob (este último puxa
+  # minimatch 5.1.9) e glob 10.5.0 (que puxa minimatch 9.0.9). Tooling de teste,
+  # ausente do runtime. As correções são majors (glob >=14.0.2, minimatch
+  # >=11.0.1) controladas pelos parents. `purls` restringe cada supressão à
+  # versão efetivamente avaliada — o ID sozinho ocultaria achados de outros
+  # caminhos que esta justificativa não cobre.
   - id: CVE-2026-118773
     purls:
       - pkg:npm/glob@10.5.0

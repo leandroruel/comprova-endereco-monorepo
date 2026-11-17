@@ -55,10 +55,12 @@ const responseOf = (
   readonly evidence_id: string
   readonly artifact_id: string
   readonly status: 'pending'
+  readonly replayed: boolean
 } => ({
   evidence_id: result.evidenceId,
   artifact_id: result.artifactId,
   status: result.status,
+  replayed: result.replayed,
 })
 
 export interface EvidenceIntakeController {

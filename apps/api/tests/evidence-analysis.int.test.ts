@@ -528,6 +528,65 @@ describe('F1.2 — análise do comprovante', () => {
     expect(removed).toBeGreaterThanOrEqual(1)
     expect((await graphOf(validationId)).analyses).toHaveLength(0)
   })
+
+  it('falha de persistência deixa a análise em analyzing para retry, sem perder o job', async () => {
+    const validationId = await makeValidation(tenantA)
+    await upload(validationId, keyA, pdfWithText(fullBill))
+
+    let shouldFailPersist = true
+
+    // Proxy que faz tx.update lançar erro quando shouldFailPersist estiver
+    // ativado. claimNext usa tx.execute (SQL cru) e não é afetado; loadArtifact
+    // usa tx.select (delegado); só persistResult usa tx.update(...).
+    const failingDb = new Proxy(adminPool.db as any, {
+      get(target: any, prop: string, receiver: unknown) {
+        const value = Reflect.get(target, prop, receiver)
+        if (prop === 'transaction') {
+          return async (fn: (tx: any) => Promise<unknown>) => {
+            return target.transaction(async (realTx: any) => {
+              const wrappedTx = new Proxy(realTx, {
+                get(t: any, p: string, r: unknown) {
+                  if (p === 'update') {
+                    return (_table: any) => {
+                      if (shouldFailPersist) {
+                        throw new Error('PERSISTENCE_FAILURE_SIMULATED')
+                      }
+                      return realTx.update(_table)
+                    }
+                  }
+                  return Reflect.get(realTx, p, r)
+                },
+              })
+              return fn(wrappedTx)
+            })
+          }
+        }
+        return value
+      },
+    })
+
+    // 1ª tentativa: persistência falha, análise fica em analyzing (não terminaliza)
+    await runTick({ db: failingDb as any })
+    const afterFirst = (await graphOf(validationId)).analyses[0]
+    expect(afterFirst).toBeDefined()
+    expect(afterFirst?.status).toBe('analyzing')
+    expect(afterFirst?.result).toBeNull()
+    expect(afterFirst?.attempts).toBe(1)
+
+    // Torna a linha "esticada" para ser re-reivindicada no tick seguinte
+    await adminPool.db
+      .update(t.evidenceAnalysis)
+      .set({ updatedAt: new Date(Date.now() - 600_000) })
+      .where(eq(t.evidenceAnalysis.analysisId, afterFirst!.analysisId))
+
+    // 2ª tentativa: persistência OK, análise chega ao terminal completed
+    shouldFailPersist = false
+    await runTick()
+    const afterSecond = (await graphOf(validationId)).analyses[0]
+    expect(afterSecond?.status).toBe('completed')
+    expect(afterSecond?.result?.status).toBe('completed')
+    expect(afterSecond?.analysisId).toBe(afterFirst?.analysisId)
+  })
 })
 
 describe('F2.2b — referência fiscal extraída do artefato', () => {

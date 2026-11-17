@@ -275,6 +275,73 @@ holder_information_request.validation_id` com filtro de tenant (ex.: segunda
   agora distinguem entregas concluídas, cobertura limitada a SVRS/RS+SP e lacunas
   futuras. O próximo passo comercial é F3.3: evento faturável, cotas e reconciliação.
 
+## Validação do pipeline de documentos para o MVP (próxima etapa do plano) (2026-11-17)
+
+Auditoria completa do fluxo de comprovação de residência por documentos (F1.1 →
+F1.2 → F1.3 → F3) e validação de lacunas. Nenhuma nova funcionalidade de produto
+foi introduzida (sem SSI, DID, wallets, VLM/LLM, RAG, embeddings, Temporal ou
+novas dependências de API paga).
+
+**Fluxo rastreado e validado:**
+
+1. `POST /v1/validations/:id/evidence` (intake F1.1): upload multipart, magic bytes,
+   SHA-256 no servidor, storage privado tenant-scoped, `claim_evidence`
+   `customer_submitted_document` com `stance = unknown`, `detail.verification.status =
+pending`, idempotência por SHA-256 + índice único parcial.
+2. `evidence_analysis` (`pending`) enfileirado na mesma transação do artefato.
+3. Worker consome com `FOR UPDATE SKIP LOCKED`, confere tamanho/SHA-256, executa o
+   `DocumentAnalyzer` (unpdf camada local + Marker como fallback explícito via
+   `DOCUMENT_INTELLIGENCE_URL`).
+4. Resultado terminal persistido em `evidence_analysis.result` (append-only,
+   imutável por trigger, schema + identidade do analisador validados).
+5. `verifyEvidenceTick` (F1.3) consome análises terminais e materializa
+   `claim_evidence` (`uploaded_document`, `document_upload_verification`) com as
+   três dimensões independentes (`document`, `address`, `holder`), `stance =
+unknown`, sem `signal` (não altera score).
+6. Reavaliação via `deepEnrich` (F3) consome as observações e produz assessment.
+
+**Problemas identificados e correções aplicadas:**
+
+- Lacuna de teste: falha durante a persistência dos resultados não era coberta.
+  Adicionado teste em
+  `apps/api/tests/evidence-analysis.int.test.ts` que simula erro de DB em
+  `persistResult` e verifica que a análise fica em `analyzing` para retry e
+  chega ao terminal `completed` na tentativa seguinte (sem perda de job).
+
+**Cobertura de teste (integração, PostgreSQL real via testcontainers):**
+
+- Documento válido e legível: extração de endereço/titular/datas, CPF/CNPJ não
+  persistidos (PII), observação pending preservada.
+- Documento ilegível/inválido: `inconclusive`/`invalid`, sem `address = differs`
+  automático.
+- Documento sem endereço/titular: `not_extracted`, não falha.
+- Documento com endereço/titular divergente: `FIELD_CONFLICT_*` / `differs`,
+  sem aprovação automática.
+- Falha do serviço Document Intelligence: `unavailable`/`timeout`/`busy` mapeados
+  para códigos estáveis, fallback local com limitação observável.
+- Reprocessamento/replay: não duplica nem reescreve resultado terminal.
+- Upload duplicado: replay idempotente `200` + `Idempotent-Replayed: true`.
+- Falha de leitura do objeto: fica em `analyzing` para retry, terminaliza após
+  esgotar tentativas.
+- Isolamento entre tenants: RLS FORCE, FK composta, 404 cross-tenant.
+- Retenção: análise removida em cascata com o artefato.
+
+**Limitações documentadas:**
+
+- Integração real com o serviço Marker não foi exercida contra um serviço ao
+  vivo (apenas cliente mockado). Requer perfil `document-intelligence` do Docker
+  Compose, download de modelos e warmup.
+- `kind` do documento permanece `unknown` (ADR-0038: não há lista de
+  concessionárias; adaptadores de fonte fiscal podem preencher futuramente).
+- Artefato do Holder sem Validation não tem job dedicado de remoção por
+  `retention_until` (documentado em `docs/lgpd/retencao.md`).
+
+**Verificações executadas:** `pnpm test` (133 arquivos / 1536 testes, node),
+`pnpm typecheck` (12/12), `pnpm lint` (exit 0, apenas warnings preexistentes),
+`pnpm format` (OK), `pnpm db:fence` (exit 0). Sem regressões.
+
+Sem migrations adicionadas (nenhuma alteração de schema foi necessária).
+
 ## Vertical slice end-to-end pelo dashboard (F3) (2026-10-26)
 
 O fluxo completo do produto passa a ser executável pela interface, sem
