@@ -41,3 +41,13 @@ regexes = [
   '''test-pepper-migration-upgrade''',
   '''test-pepper-flow-validation''',
 ]
+
+# Valores de pepper de teste em arquivos de integração do Verifier.
+# São literais óbvios de teste, não segredos reais.
+[allowlist]
+description = "valores de pepper de teste em testes de integração do Verifier"
+regexTarget = "line"
+regexes = [
+  '''test-pepper-migration-upgrade''',
+  '''test-pepper-flow-validation''',
+]
