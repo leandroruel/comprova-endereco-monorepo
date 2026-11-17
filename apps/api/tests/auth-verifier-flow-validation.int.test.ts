@@ -102,12 +102,6 @@ const createOrg = async (token: string, name: string) => {
 }
 
 describe('fluxo real de autenticação do Verifier (criação de validação)', () => {
-  let tenantA: string
-
-  beforeAll(async () => {
-    tenantA = await createTenant(adminPool.db, { name: 'flow-org-validation' })
-  })
-
   it('cria validação com sessão real do Verifier e registra auditoria corretamente', async () => {
     const email = `flow-validation-${Date.now()}@exemplo.com`
     const token = await signUpAndIn(email, 'SenhaForte123!', 'Verifier Validation')
