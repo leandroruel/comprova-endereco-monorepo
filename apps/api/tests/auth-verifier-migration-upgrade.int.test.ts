@@ -16,6 +16,9 @@ const adminPool = createDbPool(db.adminUrl)
 const testRedis = await startTestRedis()
 const redis = new Redis(testRedis.url)
 
+await adminClient`GRANT USAGE ON SCHEMA public TO app_user`
+await adminClient`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO app_user`
+
 const appPool = createDbPool(db.appUrl)
 const app = await buildApp({
   config: {
@@ -51,12 +54,13 @@ afterAll(async () => {
 })
 
 describe('upgrade de migrations — identidade verifier_user', () => {
-  it('0056 + dados legacy + 0068/0070/0071 preserva registros e FKs válidas', async () => {
-    // Garante que app_user enxerga as tabelas
-    await adminClient`GRANT USAGE ON SCHEMA public TO app_user`
-    await adminClient`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO app_user`
+  it('0056 + dados legacy + 0068/0070/0071/0072 preserva registros e FKs RESTRICT', async () => {
+    // 1. Todas as migrations já foram aplicadas por runMigrations acima,
+    // incluindo 0056 (cria verifier_user), 0068/0070/0071 (altera FKs) e
+    // 0072 (reconcile: verifica órfãos, adiciona NOT VALID + VALIDATE,
+    // altera para ON DELETE RESTRICT).
 
-    // 1. Cria um usuário legado diretamente na tabela `user`
+    // 2. Insere um usuário legacy diretamente na tabela `user`
     const legacyUserId = 'legacy-user-001'
     await adminClient.unsafe(`
       INSERT INTO "user" (id, name, email, email_verified, image, role, banned, ban_reason, ban_expires, created_at, updated_at)
@@ -64,7 +68,7 @@ describe('upgrade de migrations — identidade verifier_user', () => {
       ON CONFLICT (id) DO NOTHING
     `)
 
-    // 2. Copia o usuário legacy para verifier_user (reconciliação de identidade)
+    // Copia o usuário legacy para verifier_user (reconciliação de identidade)
     await adminClient.unsafe(`
       INSERT INTO verifier_user (id, name, email, email_verified, image, role, banned, ban_reason, ban_expires, created_at, updated_at)
       SELECT id, name, email, email_verified, image, role, banned, ban_reason, ban_expires, created_at, updated_at
@@ -76,7 +80,7 @@ describe('upgrade de migrations — identidade verifier_user', () => {
     const { createTenant } = await import('@comprova/testing')
     const tenantId: string = await createTenant(adminPool.db, { name: 'org-migration-upgrade' })
 
-    // organization_member referenciando o usuário legacy (agora válido porque existe em verifier_user)
+    // organization_member referenciando o usuário legacy
     await adminPool.db.insert(t.organizationMember).values({
       organizationMemberId: crypto.randomUUID(),
       tenantId,
@@ -122,7 +126,7 @@ describe('upgrade de migrations — identidade verifier_user', () => {
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
     })
 
-    // 4. Verifica que os registros existem e as FKs (0068, 0070, 0071) são válidas
+    // 4. Verifica que os registros existem e as FKs são válidas
     const memberCount = await adminPool.db
       .select({ count: sql<number>`count(*)::int` })
       .from(t.organizationMember)
@@ -149,16 +153,26 @@ describe('upgrade de migrations — identidade verifier_user', () => {
       .limit(1)
     expect(verifierUser.length).toBe(1)
 
-    // 5. Verifica que registros órfãos impediriam a FK (teste de segurança)
-    const orphanUserId = 'orphan-user-999'
-    const orphanMemberCount = await adminPool.db
+    // 5. Testa que RESTRICT impede a exclusão do verifier_user com referências históricas
+    await expect(adminClient`DELETE FROM verifier_user WHERE id = ${legacyUserId}`).rejects.toThrow(
+      /foreign key constraint|violates foreign key/,
+    )
+
+    // 6. Confirma que o histórico permanece intacto após a tentativa falha de exclusão
+    const memberStillThere = await adminPool.db
       .select({ count: sql<number>`count(*)::int` })
       .from(t.organizationMember)
-      .where(eq(t.organizationMember.userId, orphanUserId))
-    expect(orphanMemberCount[0]!.count).toBe(0)
+      .where(eq(t.organizationMember.userId, legacyUserId))
+    expect(memberStillThere[0]!.count).toBe(1)
 
-    // Tentativa de inserir órfão falharia com FK RESTRICT (0072)
-    // Isso demonstra que a estratégia de RESTRICT protege dados históricos
+    const validationStillThere = await adminPool.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(t.validation)
+      .where(eq(t.validation.validationId, validationId))
+    expect(validationStillThere[0]!.count).toBe(1)
+
+    // 7. Verifica que inserir um órfão é rejeitado pelo RESTRICT
+    const orphanUserId = 'orphan-user-999'
     await expect(
       adminPool.db.insert(t.organizationMember).values({
         organizationMemberId: crypto.randomUUID(),

@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { FileSearch } from 'lucide-react'
 import { listValidations, type ValidationListItem } from '@/api/client'
 import {
@@ -22,34 +22,11 @@ import { statusLabel, validationUiBadge } from '@/pages/validations-state'
 
 const PAGE_SIZE = 20
 
-const offsetKeyFor = (orgId: string): string => `comprova.validations.offset.${orgId}`
-
-const loadPersistedOffset = (orgId: string): number => {
-  if (typeof window === 'undefined') return 0
-  try {
-    const raw = window.sessionStorage.getItem(offsetKeyFor(orgId))
-    if (raw !== null) {
-      const parsed = Number(raw)
-      if (Number.isFinite(parsed) && parsed >= 0) return parsed
-    }
-  } catch {
-    // sessionStorage indisponível: começa do zero.
-  }
-  return 0
-}
-
-const persistOffset = (orgId: string, offset: number): void => {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem(offsetKeyFor(orgId), String(offset))
-  } catch {
-    // sessionStorage indisponível: ignora.
-  }
-}
-
 interface ValidationsPageProps {
   activeOrgId: string | null
   onSelectValidation: (validationId: string) => void
+  offset: number
+  setOffset: (offset: number) => void
 }
 
 /**
@@ -57,25 +34,23 @@ interface ValidationsPageProps {
  *
  * O `tenantId` é contexto de consulta: a autorização é da sessão validada por
  * membership no backend (`requireSessionOrM2MVerify`), nunca do browser.
+ *
+ * O `offset` é controlado pelo pai (`App`) para sobreviver à navegação de
+ * detalhe → listagem (item 7.2 da revisão da PR #75).
  */
-export function ValidationsPage({ activeOrgId, onSelectValidation }: ValidationsPageProps) {
-  const [offset, setOffset] = useState(() => {
-    if (!activeOrgId) return 0
-    return loadPersistedOffset(activeOrgId)
-  })
-
-  // Persiste o offset na troca de página para sobreviver a navegação de
-  // detalhe → listagem (item 7.2 da revisão da PR #75).
-  useEffect(() => {
-    if (!activeOrgId) return
-    persistOffset(activeOrgId, offset)
-  }, [activeOrgId, offset])
-
+export function ValidationsPage({
+  activeOrgId,
+  onSelectValidation,
+  offset,
+  setOffset,
+}: ValidationsPageProps) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['validations', activeOrgId, offset],
     queryFn: () => listValidations(activeOrgId!, { limit: PAGE_SIZE, offset }),
     enabled: !!activeOrgId,
-    // A listagem é paginada no servidor: nunca carrega tudo.
+    // placeholderData mantém a tabela visível enquanto outra página carrega,
+    // evitando piscar de loading ao navegar entre páginas.
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
   })
 
@@ -220,7 +195,10 @@ export function ValidationsPage({ activeOrgId, onSelectValidation }: Validations
             </Table>
           )}
 
-          {pageCount > 1 && (
+          {/* O paginador permanece visível quando há offset > 0, mesmo com
+          pageCount = 1, para permitir voltar à página 1 após excluir todos os
+          itens da página atual (item 7.3 da revisão da PR #75). */}
+          {pageCount > 1 || offset > 0 ? (
             <div className="mt-4 flex items-center justify-between">
               <Button
                 variant="outline"
@@ -242,7 +220,7 @@ export function ValidationsPage({ activeOrgId, onSelectValidation }: Validations
                 Próxima
               </Button>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
     </div>

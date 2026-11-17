@@ -21,7 +21,11 @@ SET application_name = 'comprova-migrations';
 -- 1. Verifica se existem registros órfãos (user_id não existente em
 --    verifier_user) em organization_member, batch e validation. Se houver,
 --    interrompe com erro explícito, sem perda de dados.
--- 2. Altera as FKs existentes de ON DELETE CASCADE para ON DELETE RESTRICT,
+-- 2. Adiciona as FKs com NOT VALID (não valida linhas existentes), evitando
+--    o lock ACCESS EXCLUSIVE prolongado que um ALTER TABLE comum causaria.
+-- 3. Valida todas as constraints em transações separadas, confirmando a
+--    integridade referencial sem bloquear gravações por longos períodos.
+-- 4. Altera as FKs existentes de ON DELETE CASCADE para ON DELETE RESTRICT,
 --    impedindo a exclusão de um usuário Verifier enquanto houver
 --    referências históricas (validações, lotes, membros de organização).
 -- =====================================================================
@@ -68,7 +72,9 @@ BEGIN
   END IF;
 END $$;
 
--- Altera FK de organization_member.user_id para ON DELETE RESTRICT
+-- Adiciona FK de organization_member.user_id com NOT VALID (não valida linhas
+-- existentes, evitando ACCESS EXCLUSIVE prolongado). organization_member não
+-- é particionada, então NOT VALID é suportado.
 ALTER TABLE organization_member
   DROP CONSTRAINT IF EXISTS organization_member_user_id_fkey;
 
@@ -76,9 +82,11 @@ ALTER TABLE organization_member
   ADD CONSTRAINT organization_member_user_id_fkey
     FOREIGN KEY (user_id)
     REFERENCES verifier_user (id)
-    ON DELETE RESTRICT;
+    ON DELETE RESTRICT
+    NOT VALID;
 
--- Altera FK de batch.user_id para ON DELETE RESTRICT
+-- Adiciona FK de batch.user_id com NOT VALID. batch não é particionada,
+-- então NOT VALID é suportado.
 ALTER TABLE batch
   DROP CONSTRAINT IF EXISTS batch_user_id_fkey;
 
@@ -86,9 +94,12 @@ ALTER TABLE batch
   ADD CONSTRAINT batch_user_id_fkey
     FOREIGN KEY (user_id)
     REFERENCES verifier_user (id)
-    ON DELETE RESTRICT;
+    ON DELETE RESTRICT
+    NOT VALID;
 
--- Altera FK de validation.user_id para ON DELETE RESTRICT
+-- Adiciona FK de validation.user_id. validation é particionada por
+-- created_at, então NOT VALID não é suportado. Como já verificamos que não
+-- há registros órfãos acima, a validação inline é segura.
 ALTER TABLE validation
   DROP CONSTRAINT IF EXISTS validation_user_id_fkey;
 
@@ -97,3 +108,10 @@ ALTER TABLE validation
     FOREIGN KEY (user_id)
     REFERENCES verifier_user (id)
     ON DELETE RESTRICT;
+
+-- Valida as constraints NOT VALID em transações separadas, confirmando a
+-- integridade referencial sem bloquear gravações por longos períodos.
+-- validation já foi validada inline acima (não é NOT VALID).
+ALTER TABLE organization_member VALIDATE CONSTRAINT organization_member_user_id_fkey;
+
+ALTER TABLE batch VALIDATE CONSTRAINT batch_user_id_fkey;

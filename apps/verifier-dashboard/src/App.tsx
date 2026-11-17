@@ -50,6 +50,25 @@ export default function App() {
   /** Validação selecionada na listagem para o detalhe (PR #74). */
   const [selectedValidationId, setSelectedValidationId] = useState<string | null>(null)
 
+  /** Offset de paginação de validações por organização, preservado ao voltar do detalhe. */
+  const [validationsOffset, setValidationsOffset] = useState<Record<string, number>>({})
+
+  const getValidationsOffset = (orgId: string): number => {
+    return validationsOffset[orgId] ?? 0
+  }
+
+  const setValidationsOrgOffset = (orgId: string, offset: number) => {
+    setValidationsOffset((prev) => ({ ...prev, [orgId]: offset }))
+  }
+
+  const resetValidationsOffset = (orgId: string) => {
+    setValidationsOffset((prev) => {
+      const next = { ...prev }
+      delete next[orgId]
+      return next
+    })
+  }
+
   const resolveRoute = useCallback(async () => {
     setLoading(true)
     try {
@@ -140,12 +159,19 @@ export default function App() {
   /**
    * Troca de organização invalida o contexto da validação selecionada: a
    * autorização é por membership e o detalhe pertence à organização anterior.
+   * Reseta o offset de paginação da organização anterior.
    */
-  const handleSetActiveOrgId = useCallback((id: string | null) => {
-    setActiveOrgId(id)
-    setSelectedValidationId(null)
-    setRoute((current) => (current === 'validation-detail' ? 'validations' : current))
-  }, [])
+  const handleSetActiveOrgId = useCallback(
+    (id: string | null) => {
+      setActiveOrgId(id)
+      setSelectedValidationId(null)
+      setRoute((current) => (current === 'validation-detail' ? 'validations' : current))
+      if (activeOrgId) {
+        resetValidationsOffset(activeOrgId)
+      }
+    },
+    [activeOrgId, resetValidationsOffset],
+  )
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -196,11 +222,10 @@ export default function App() {
           ) : route === 'integrations' ? (
             <IntegrationsPage tenantId={activeOrgId ?? ''} />
           ) : route === 'validations' ? (
-            // key por organização: trocar de organização reinicia a paginação
-            // (estado local não vaza entre organizações).
             <ValidationsPage
-              key={activeOrgId ?? 'none'}
               activeOrgId={activeOrgId}
+              offset={getValidationsOffset(activeOrgId ?? '')}
+              setOffset={(offset) => setValidationsOrgOffset(activeOrgId ?? '', offset)}
               onSelectValidation={(validationId) => {
                 setSelectedValidationId(validationId)
                 setRoute('validation-detail')
