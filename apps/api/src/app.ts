@@ -40,10 +40,8 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import { DEFAULT_EVIDENCE_MAX_CONCURRENCY, type AppConfig } from './config.js'
 import { makeAuthenticate } from './plugins/auth.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
-import { createAuth } from './auth.js'
 import { createAuthAdmin } from './auth-admin.js'
 import { createAuthVerifier } from './auth-verifier.js'
-import { registerAuthRoutes } from './routes/auth-routes.js'
 import { registerAuthAdminRoutes } from './routes/auth-admin-routes.js'
 import { registerAuthVerifierRoutes } from './routes/auth-verifier-routes.js'
 import { makeSessionMiddleware, type AuthInstance } from './plugins/session.js'
@@ -316,8 +314,6 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     signingKeyProvider,
     credentialTtlSeconds: fastPath.policy.credential_ttl_seconds,
   }
-  const auth = createAuth(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
-
   // Instâncias separadas do Better Auth para admin e verifier, com tabelas
   // de auth distintas (isolamento total de sessões entre os dashboards).
   const authAdmin = createAuthAdmin(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
@@ -331,13 +327,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   app.addHook(
     'preHandler',
     makeSessionMiddleware({
-      legacy: auth as unknown as AuthInstance,
       admin: authAdmin as unknown as AuthInstance,
       verifier: authVerifier as unknown as AuthInstance,
     }),
   )
   app.addHook('preHandler', authenticate)
-  registerAuthRoutes(app, auth)
 
   await app.register(
     async (v1) => {

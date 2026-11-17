@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { FileSearch } from 'lucide-react'
 import { listValidations, type ValidationListItem } from '@/api/client'
 import {
@@ -22,6 +22,31 @@ import { statusLabel, validationUiBadge } from '@/pages/validations-state'
 
 const PAGE_SIZE = 20
 
+const offsetKeyFor = (orgId: string): string => `comprova.validations.offset.${orgId}`
+
+const loadPersistedOffset = (orgId: string): number => {
+  if (typeof window === 'undefined') return 0
+  try {
+    const raw = window.sessionStorage.getItem(offsetKeyFor(orgId))
+    if (raw !== null) {
+      const parsed = Number(raw)
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed
+    }
+  } catch {
+    // sessionStorage indisponível: começa do zero.
+  }
+  return 0
+}
+
+const persistOffset = (orgId: string, offset: number): void => {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(offsetKeyFor(orgId), String(offset))
+  } catch {
+    // sessionStorage indisponível: ignora.
+  }
+}
+
 interface ValidationsPageProps {
   activeOrgId: string | null
   onSelectValidation: (validationId: string) => void
@@ -34,7 +59,17 @@ interface ValidationsPageProps {
  * membership no backend (`requireSessionOrM2MVerify`), nunca do browser.
  */
 export function ValidationsPage({ activeOrgId, onSelectValidation }: ValidationsPageProps) {
-  const [offset, setOffset] = useState(0)
+  const [offset, setOffset] = useState(() => {
+    if (!activeOrgId) return 0
+    return loadPersistedOffset(activeOrgId)
+  })
+
+  // Persiste o offset na troca de página para sobreviver a navegação de
+  // detalhe → listagem (item 7.2 da revisão da PR #75).
+  useEffect(() => {
+    if (!activeOrgId) return
+    persistOffset(activeOrgId, offset)
+  }, [activeOrgId, offset])
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['validations', activeOrgId, offset],
@@ -93,6 +128,13 @@ export function ValidationsPage({ activeOrgId, onSelectValidation }: Validations
   const total = data?.total ?? 0
   const page = Math.floor(offset / PAGE_SIZE) + 1
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // Item 7.3: se o offset ficou além do total após atualização/exclusão,
+  // retrocede para a última página válida em vez de mostrar página vazia.
+  if (offset > 0 && offset >= total && total > 0) {
+    const lastPageOffset = Math.max(0, Math.ceil(total / PAGE_SIZE) * PAGE_SIZE - PAGE_SIZE)
+    setOffset(lastPageOffset)
+  }
 
   return (
     <div className="space-y-6">

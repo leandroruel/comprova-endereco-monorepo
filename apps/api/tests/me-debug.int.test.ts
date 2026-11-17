@@ -53,7 +53,10 @@ const readOnlyKey = (
 ).plaintext
 
 // Define o usuário da sessão como admin via banco (simula o usuário logado)
-await adminPool.db.update(t.authUser).set({ role: 'admin' }).where(eq(t.authUser.id, 'admin-user-id'))
+await adminPool.db
+  .update(t.verifierAuthUser)
+  .set({ role: 'admin' })
+  .where(eq(t.verifierAuthUser.id, 'admin-user-id'))
 
 const appPool = createDbPool(db.appUrl)
 const app = await buildApp({

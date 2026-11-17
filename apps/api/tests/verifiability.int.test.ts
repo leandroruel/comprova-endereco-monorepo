@@ -497,7 +497,7 @@ describe('V-1 — actor de origem batch', () => {
   it('propaga o user_id do lote para validation.user_id (sem api_key)', async () => {
     const userId = `batch-user-${randomUUID()}`
     await adminPool.db
-      .insert(t.authUser)
+      .insert(t.verifierAuthUser)
       .values({ id: userId, name: 'Batch Owner', email: `${userId}@test.local` })
 
     const batchId = randomUUID()

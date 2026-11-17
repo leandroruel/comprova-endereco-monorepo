@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { createTenant, createSubject, createValidation, startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
-import { runMigrations, createDbPool, sql, eq, and } from '@comprova/db'
+import { createTenant, startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
+import { runMigrations, createDbPool, sql } from '@comprova/db'
 import Redis from 'ioredis'
 import { randomUUID } from 'node:crypto'
 import { createLogger, createMetrics } from '@comprova/observability'
@@ -43,14 +43,23 @@ await adminPool.db.execute(sql`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA publ
 const appPool = createDbPool(db.appUrl)
 const app = await buildApp({
   config: {
-    DATABASE_URL: db.appUrl, REDIS_URL: testRedis.url, API_KEY_PEPPER: PEPPER,
-    CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test', CREDENTIAL_SIGNING_KEYS: '[]',
-    SIGNING_KEY_PROVIDER: 'local', PORT: 3000, HOST: '127.0.0.1',
-    LOG_LEVEL: 'silent', POLICY_VERSION: '2026.11.1',
-    TERMS_VERSION: '1.0.0', TERMS_APPROVED: 'true',
-    TERMS_DOCUMENT_HASH: 'sha256:abc123def456', WORKER_LOOPS: false,
+    DATABASE_URL: db.appUrl,
+    REDIS_URL: testRedis.url,
+    API_KEY_PEPPER: PEPPER,
+    CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+    CREDENTIAL_SIGNING_KEYS: '[]',
+    SIGNING_KEY_PROVIDER: 'local',
+    PORT: 3000,
+    HOST: '127.0.0.1',
+    LOG_LEVEL: 'silent',
+    POLICY_VERSION: '2026.11.1',
+    TERMS_VERSION: '1.0.0',
+    TERMS_APPROVED: 'true',
+    TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
+    WORKER_LOOPS: false,
   },
-  db: appPool.db, redis,
+  db: appPool.db,
+  redis,
   logger: createLogger({ level: 'silent' }),
   metrics: createMetrics(),
 })
@@ -77,19 +86,6 @@ await adminPool.db.insert(t.verifierAuthUser).values({
 // Cria dois tenants
 const tenantA = await createTenant(adminPool.db, { name: 'org-verifier-a' })
 const tenantB = await createTenant(adminPool.db, { name: 'org-verifier-b' })
-
-// Cria um subject e validação em cada tenant
-const subjectA = await createSubject(adminPool.db, tenantA, 'CNPJ')
-const subjectB = await createSubject(adminPool.db, tenantB, 'CNPJ')
-
-const validationA = await createValidation(adminPool.db, tenantA, subjectA, {
-  verdict: 'RESIDENTIAL',
-  explanationSummary: 'Endereço parece residencial.',
-})
-const validationB = await createValidation(adminPool.db, tenantB, subjectB, {
-  verdict: 'RESIDENTIAL',
-  explanationSummary: 'Endereço da org B.',
-})
 
 // Vincula o usuário à organização A como owner
 await adminPool.db.insert(t.organizationMember).values({
@@ -186,13 +182,7 @@ describe('autenticação Verifier Dashboard - organizações (serviço direto)',
       })
 
       // Primeiro cria um convite para esse email
-      const invite = await orgService.createInvitation(
-        tenantA,
-        inviteeEmail,
-        'member',
-        verifierId,
-        7,
-      )
+      const invite = await orgService.createInvitation(tenantA, inviteeEmail, 'member', verifierId, 7)
 
       // Aceita o convite com o usuário convidado
       const member = await orgService.acceptInvitation(invite.token, inviteeId)

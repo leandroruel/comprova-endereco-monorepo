@@ -189,6 +189,8 @@ export const isProcessing = (input: {
   readonly fiscalReassessment?: string | null
 }): boolean => {
   if (!input.hasCustomerDocument) return false
+  // Estados terminais nunca são processamento ativo.
+  if (input.status === 'failed' || input.status === 'expired') return false
   if (input.status === 'queued' || input.status === 'running' || input.status === 'partial') return true
   if (input.progressStatus === 'in_progress') return true
   // F2.2b: reavaliação fiscal pendente/agendada mantém o acompanhamento.

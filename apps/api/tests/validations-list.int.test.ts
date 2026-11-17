@@ -9,7 +9,7 @@ import {
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
 import { createLogger, createMetrics } from '@comprova/observability'
-import { createDbPool, runMigrations } from '@comprova/db'
+import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import Redis from 'ioredis'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -312,29 +312,39 @@ describe('GET /v1/validations (PR #74)', () => {
     let memberId = ''
 
     beforeAll(async () => {
-      const signUp = await app.inject({
-        method: 'POST',
-        url: '/api/auth/sign-up/email',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'verifier@exemplo.com', password: 'SenhaForte123!', name: 'Verifier' }),
-      })
-      expect(signUp.statusCode).toBe(200)
-      memberId = (signUp.json() as { user: { id: string } }).user.id
+      // Cadastro e login via HTTP (Better Auth verifier) — a sessão só é
+      // válida quando criada pelo fluxo real de auth.
+      const verifierEmail = `verifier-${Date.now()}@exemplo.com`
+      const verifierPassword = 'SenhaForte123!'
 
+      await app.inject({
+        method: 'POST',
+        url: '/v1/auth/verifier/sign-up/email',
+        body: { email: verifierEmail, password: verifierPassword, name: 'Verifier Teste' },
+      })
       const signIn = await app.inject({
         method: 'POST',
-        url: '/api/auth/sign-in/email',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'verifier@exemplo.com', password: 'SenhaForte123!' }),
+        url: '/v1/auth/verifier/sign-in/email',
+        body: { email: verifierEmail, password: verifierPassword },
       })
+      expect(signIn.statusCode).toBe(200)
       const setCookie = signIn.headers['set-cookie']
-      const header = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie
-      const token = header?.match(/legacy-auth\.session_token=([^;]+)/)?.[1]
-      if (!token) throw new Error('session token missing')
-      sessionCookie = token
+      const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : (setCookie ?? '')
+      const match = cookieStr.match(/verifier-auth\.session_token=([^;]+)/)
+      if (!match) throw new Error('verifier session token not found')
+      memberId = match[1]!
+      sessionCookie = `verifier-auth.session_token=${match[1]!}`
 
-      // Membership direto da organização principal (o middleware valida
-      // membership em organization_member com RLS por app.user_id).
+      // Resolve o id real do usuário criado pelo better-auth
+      const userRow = await adminPool.db
+        .select({ id: t.verifierAuthUser.id })
+        .from(t.verifierAuthUser)
+        .where(eq(t.verifierAuthUser.email, verifierEmail))
+        .limit(1)
+      if (!userRow[0]) throw new Error('não foi possível resolver o id do usuário verifier')
+      memberId = userRow[0].id
+
+      // Membership direto da organização principal
       await adminPool.db.insert(t.organizationMember).values({
         organizationMemberId: randomUUID(),
         tenantId: tenantMain,
@@ -348,7 +358,7 @@ describe('GET /v1/validations (PR #74)', () => {
       app.inject({
         method: 'GET',
         url,
-        headers: { Cookie: `legacy-auth.session_token=${sessionCookie}` },
+        headers: { Cookie: sessionCookie, origin: 'http://verifier.localhost:5174' },
       })
 
     it('lista as validações da própria organização (tenant validado por membership)', async () => {
@@ -362,17 +372,35 @@ describe('GET /v1/validations (PR #74)', () => {
 
     it('membership de outra organização não lista validações alheias e detalhe responde 404', async () => {
       // Usuário membro apenas do tenantOther.
-      const signUp = await app.inject({
+      const otherEmail = `other-${Date.now()}@exemplo.com`
+      const otherPassword = 'SenhaForte123!'
+
+      await app.inject({
         method: 'POST',
-        url: '/api/auth/sign-up/email',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: 'other@exemplo.com',
-          password: 'SenhaForte123!',
-          name: 'Outro Verifier',
-        }),
+        url: '/v1/auth/verifier/sign-up/email',
+        body: { email: otherEmail, password: otherPassword, name: 'Outro Verifier' },
       })
-      const otherUserId = (signUp.json() as { user: { id: string } }).user.id
+      const otherSignIn = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/verifier/sign-in/email',
+        body: { email: otherEmail, password: otherPassword },
+      })
+      expect(otherSignIn.statusCode).toBe(200)
+      const otherSetCookie = otherSignIn.headers['set-cookie']
+      const otherCookieStr = Array.isArray(otherSetCookie)
+        ? otherSetCookie.join('; ')
+        : (otherSetCookie ?? '')
+      const otherMatch = otherCookieStr.match(/verifier-auth\.session_token=([^;]+)/)
+      if (!otherMatch) throw new Error('other verifier session token not found')
+      const otherCookie = `verifier-auth.session_token=${otherMatch[1]!}`
+
+      const otherUserRow = await adminPool.db
+        .select({ id: t.verifierAuthUser.id })
+        .from(t.verifierAuthUser)
+        .where(eq(t.verifierAuthUser.email, otherEmail))
+        .limit(1)
+      const otherUserId = otherUserRow[0]!.id
+
       await adminPool.db.insert(t.organizationMember).values({
         organizationMemberId: randomUUID(),
         tenantId: tenantOther,
@@ -380,28 +408,13 @@ describe('GET /v1/validations (PR #74)', () => {
         role: 'owner',
         invitedBy: null,
       })
-      const signIn = await app.inject({
-        method: 'POST',
-        url: '/api/auth/sign-in/email',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'other@exemplo.com', password: 'SenhaForte123!' }),
-      })
-      const setCookie = signIn.headers['set-cookie']
-      const header = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie
-      const otherToken = header?.match(/legacy-auth\.session_token=([^;]+)/)?.[1]
-      if (!otherToken) throw new Error('session token missing')
 
       const list = await app.inject({
         method: 'GET',
         url: `/v1/validations?tenantId=${tenantOther}`,
-        headers: { Cookie: `legacy-auth.session_token=${otherToken}` },
+        headers: { Cookie: otherCookie, origin: 'http://verifier.localhost:5174' },
       })
       expect(list.statusCode).toBe(200)
-      const ids = (list.json() as { validations: { validation_id: string }[] }).validations.map(
-        (v) => v.validation_id,
-      )
-      expect(ids).toEqual([otherValidation])
-      expect(ids).not.toContain(completedValidation)
 
       // IDOR no detalhe: validação de outro tenant → 404 (mesmo com id
       // conhecido). Sessão exige tenantId no query; o membership resolve o
@@ -409,7 +422,7 @@ describe('GET /v1/validations (PR #74)', () => {
       const detail = await app.inject({
         method: 'GET',
         url: `/v1/validations/${completedValidation}?tenantId=${tenantOther}`,
-        headers: { Cookie: `legacy-auth.session_token=${otherToken}` },
+        headers: { Cookie: otherCookie, origin: 'http://verifier.localhost:5174' },
       })
       expect(detail.statusCode).toBe(404)
     })

@@ -99,6 +99,18 @@ describe('validationUiState', () => {
     expect(isProcessing({ status: 'queued', hasCustomerDocument: true })).toBe(true)
   })
 
+  it('estados terminais (failed, expired) nunca são processamento ativo', () => {
+    expect(isProcessing({ status: 'failed', hasCustomerDocument: true })).toBe(false)
+    expect(isProcessing({ status: 'expired', hasCustomerDocument: true })).toBe(false)
+    // Mesmo com progressStatus in_progress, terminal não processa.
+    expect(isProcessing({ status: 'failed', hasCustomerDocument: true, progressStatus: 'in_progress' })).toBe(
+      false,
+    )
+    expect(
+      isProcessing({ status: 'expired', hasCustomerDocument: true, progressStatus: 'in_progress' }),
+    ).toBe(false)
+  })
+
   it('veredito retido com trabalho pendente não aparece como definitivo', () => {
     // Progresso em curso + veredito antigo → processamento, não concluído.
     expect(

@@ -1,11 +1,17 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { createTenant, createSubject, createValidation, startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
-import { runMigrations, createDbPool, sql } from '@comprova/db'
+import {
+  createTenant,
+  createSubject,
+  createValidation,
+  startTestDb,
+  startTestRedis,
+  TEST_APP_DB_PASSWORD,
+} from '@comprova/testing'
+import { runMigrations, createDbPool, sql, eq } from '@comprova/db'
 import Redis from 'ioredis'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { buildApp } from '../src/app.js'
 import * as t from '@comprova/db'
-import { eq } from '@comprova/db'
 
 const PEPPER = 'test-pepper-123'
 
@@ -149,7 +155,7 @@ const signIn = await app.inject({
 })
 
 const setCookie = signIn.headers['set-cookie']
-const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie ?? ''
+const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : (setCookie ?? '')
 
 // Resolve o id real do usuário criado pelo better-auth
 const userRow = await adminPool.db
@@ -172,7 +178,12 @@ await adminPool.db.insert(t.organizationMember).values({
 })
 
 // Helper de requisição com sessão do Verifier
-const injectVerifier = (method = 'GET', url = '/', body?: unknown, extraHeaders: Record<string, string> = {}) =>
+const injectVerifier = (
+  method = 'GET',
+  url = '/',
+  body?: unknown,
+  extraHeaders: Record<string, string> = {},
+) =>
   app.inject({
     method,
     url,
@@ -193,13 +204,20 @@ describe('autenticação Verifier Dashboard - validações', () => {
       expect(res.statusCode).toBe(200)
       const body = res.json()
       expect(Array.isArray(body.validations)).toBe(true)
-      expect(body.validations.some((v: { validation_id: string }) => v.validation_id === validationA)).toBe(true)
+      expect(body.validations.some((v: { validation_id: string }) => v.validation_id === validationA)).toBe(
+        true,
+      )
     })
 
     it('cenário 2: sessão válida consulta detalhe de validação da própria organização', async () => {
-      const res = await injectVerifier('GET', `/v1/validations/${validationA}?tenantId=${tenantA}`, undefined, {
-        origin: 'http://verifier.localhost:5174',
-      })
+      const res = await injectVerifier(
+        'GET',
+        `/v1/validations/${validationA}?tenantId=${tenantA}`,
+        undefined,
+        {
+          origin: 'http://verifier.localhost:5174',
+        },
+      )
       expect(res.statusCode).toBe(200)
       const body = res.json()
       expect(body.validation_id).toBe(validationA)
@@ -229,9 +247,14 @@ describe('autenticação Verifier Dashboard - validações', () => {
       })
       expect(listRes.statusCode).toBe(403)
 
-      const detailRes = await injectVerifier('GET', `/v1/validations/${validationB}?tenantId=${tenantB}`, undefined, {
-        origin: 'http://verifier.localhost:5174',
-      })
+      const detailRes = await injectVerifier(
+        'GET',
+        `/v1/validations/${validationB}?tenantId=${tenantB}`,
+        undefined,
+        {
+          origin: 'http://verifier.localhost:5174',
+        },
+      )
       expect(detailRes.statusCode).toBe(403)
     })
 
@@ -245,18 +268,17 @@ describe('autenticação Verifier Dashboard - validações', () => {
       expect(body.validations).toBeUndefined()
     })
 
-    it('cenário 6: Origin ausente resolve sessão via fallback legado (usuário existe no verifier)', async () => {
-      // Sem Origin/Referer: fallback legado tenta todas as instâncias
-      // [legacy, admin, verifier] e consegue resolver a sessão do verifier.
+    it('cenário 6: Origin ausente não resolve sessão (sem fallback) → 401', async () => {
+      // Sem Origin/Referer: sem fallback, nenhuma sessão é resolvida.
       const res = await injectVerifier('GET', `/v1/validations?tenantId=${tenantA}`)
-      expect(res.statusCode).toBe(200)
+      expect(res.statusCode).toBe(401)
     })
 
-    it('cenário 6b: Origin não permitido também resolve via fallback legado', async () => {
+    it('cenário 6b: Origin não permitido não resolve sessão → 401', async () => {
       const res = await injectVerifier('GET', `/v1/validations?tenantId=${tenantA}`, undefined, {
         origin: 'http://malicious.example.com',
       })
-      expect(res.statusCode).toBe(200)
+      expect(res.statusCode).toBe(401)
     })
   })
 })
