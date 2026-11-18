@@ -2,6 +2,10 @@ import { fileURLToPath } from 'node:url'
 import { playwright } from '@vitest/browser-playwright'
 import { configDefaults, defineConfig } from 'vitest/config'
 
+// Timeout para o teste de integração real com o Marker (Document Intelligence),
+// alinhado ao timeout do cliente DI (360s) mais margem de inicialização.
+const TEST_TIMEOUT_MS_REAL_MARKER = 400_000
+
 const dashboardSrc = fileURLToPath(new URL('./apps/dashboard/src', import.meta.url))
 
 export default defineConfig({
@@ -40,7 +44,14 @@ export default defineConfig({
             'apps/**/tests/**/*.test.{ts,tsx}',
             'packages/**/src/**/*.test.{ts,tsx}',
           ],
-          exclude: [...configDefaults.exclude, 'apps/dashboard/src/**/*.test.tsx'],
+          exclude: [
+            ...configDefaults.exclude,
+            'apps/dashboard/src/**/*.test.tsx',
+            // O teste de integração real com o Marker depende de um serviço
+            // externo (Document Intelligence) que não é iniciado na suíte
+            // padrão. Ele roda em um projeto dedicado (`marker-real`) no CI.
+            'apps/api/tests/evidence-analysis-marker-real.int.test.ts',
+          ],
         },
       },
       {
@@ -63,6 +74,24 @@ export default defineConfig({
           },
         },
       },
+      ...(process.env.MARKER_REAL_ENABLED === '1'
+        ? [
+            {
+              extends: true,
+              test: {
+                name: 'marker-real',
+                // Integração real com o serviço Document Intelligence (Marker).
+                // Requer o serviço em execução em http://localhost:8000.
+                // Executado apenas no job CI dedicado `marker-real`
+                // (com MARKER_REAL_ENABLED=1), não no `pnpm test` padrão.
+                include: ['apps/api/tests/evidence-analysis-marker-real.int.test.ts'],
+                testTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
+                hookTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
+                maxWorkers: 1,
+              },
+            },
+          ]
+        : []),
     ],
   },
 })

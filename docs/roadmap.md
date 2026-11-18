@@ -19,13 +19,14 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
   primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
   o vertical slice F3.2 pelo dashboard.
 - **Em andamento:** F0 (checklist de produção), F1 (documentos complexos via
-  Marker — integração entregue em ADR-0043, validação de integração real com o
-  serviço ao vivo pendente), F2 (expansão/hardening da cobertura fiscal), F3.3
-  (medição/cobrança) e F6 (operação/segurança).
-- **Próximo passo:** fechar F3.3 e o checklist de produção; a unidade de
-  cobrança definitiva, o tratamento comercial de indisponibilidade de fonte
-  externa (hoje: não faturável, política provisória do ADR-0044 §3b) e as
-  regras de faturamento continuam decisões comerciais abertas.
+  Marker — integração entregue em ADR-0043 e **validada com serviço ao vivo**),
+  F2 (expansão/hardening da cobertura fiscal) e F6 (operação/segurança).
+- **Próximo passo:** o checklist de produção; a unidade de cobrança definitiva,
+  o tratamento comercial de indisponibilidade de fonte externa (hoje: não
+  faturável, política provisória do ADR-0044 §3b) e as regras de faturamento
+  continuam decisões comerciais abertas. A F3.3 (medição/cobrança) está
+  entregue (PR #63); resta apenas a decisão comercial sobre a unidade de
+  cobrança e a tabela de preços.
 - **Futuro:** F4 (fluxo do titular), F7 (NFAg-e/outras fontes) e F8 (SSI).
   F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda
   faltam decisões e o kit de verificação do produto.
@@ -422,19 +423,26 @@ texto/estrutura/observações
   (JPEG/PNG) continuam retornando `unsupported`/`OCR_NOT_IMPLEMENTED`; o Marker
   não é acionado para eles. O caminho determinístico de QR/referência fiscal não
   passa pelo OCR.
+- **Bloqueador de segurança do MVP:** o Marker 2.1.0 utiliza o Surya OCR, que é
+  servido como um modelo VLM (vision-language model) via `llama.cpp` em CPU,
+  mesmo com `use_llm=False` (esta opção apenas desativa o LLM opcional de
+  aprimoramento, não o VLM do OCR). Isso conflita diretamente com a restrição do
+  MVP de "não utilizar LLM, VLM, RAG ou embeddings". Não há como desativar o VLM
+  no Marker sem substituir o serviço inteiro.
+- **Integração real validada:** o serviço Marker foi executado ao vivo
+  (perfil `document-intelligence` do Docker Compose) e testado ponta a ponta
+  com o pipeline TypeScript (`apps/api/tests/evidence-analysis-marker-real.int.test.ts`):
+  PDF textual (camada local, sem chamar Marker), PDF digitalizado (OCR real via
+  Marker/Surya VLM, extrai titular/endereço/CEP) e PDF multipágina. O upload
+  duplicado e o replay também foram validadas com o serviço ao vivo.
 - O parser PDF é conservador: PDFs escaneados, fontes CID/Type0 sem `ToUnicode`
   ou layout complexo retornam `inconclusive`/`NO_TEXT_LAYER`.
 - A saída é validada por schema e identidade do analisador. Saída inválida vira
   `failed`, não fica presa em `analyzing`.
 - **Isto é um adaptador técnico, não uma capacidade central do produto.** O
   protocolo `DocumentAnalyzer` permite trocar por OCR/VLM/parser dedicado sem
-  mudar o contrato de entendimento.
-- **Limitação de validação:** todos os testes de integração do Marker usam o
-  cliente HTTP mockado (`packages/providers/src/document-intelligence/client.test.ts`
-  e `packages/providers/src/document-analyzer/analyze.marker.test.ts`). Não há
-  teste contra um serviço Marker ao vivo (requer download de modelos,
-  warmup e infraestrutura separada via `--profile document-intelligence`).
-  Isso significa que a integração real não foi exercida ponta a ponta em CI.
+  mudar o contrato de entendimento. A alternativa não-VLM (ex.: Tesseract) não
+  está disponível no ambiente e não foi avaliada em profundidade.
 
 ### F1.2b — Document understanding (entregue no MVP F1.2)
 
@@ -516,28 +524,27 @@ de produto; elas não bloqueiam o vertical slice atual.
 
 ### Ainda falta para concluir a Fase 1
 
-- OCR de PDF (imagem digitalizada) contra serviço Marker ao vivo: a integração
-  está implementada (ADR-0043) e testada com cliente mockado, mas não foi
-  exercida contra um serviço Document Intelligence em execução (requer perfil
-  `document-intelligence` do Docker Compose, download de modelos do Marker e
-  warmup). Arquivos de imagem isolados (JPEG/PNG) continuam fora do escopo do
-  Marker (`unsupported`/`OCR_NOT_IMPLEMENTED`). Limitação documentada acima.
+- OCR de imagem isolada (JPEG/PNG): o Marker não processa imagens isoladas,
+  apenas PDFs. Para suportar imagens isoladas, seria necessário converter a
+  imagem para PDF (PIL já disponível) e enviar ao Marker, ou adicionar um OCR
+  dedicado (ex.: Tesseract — ver recomendação na seção de débito técnico). Não
+  implementado nesta etapa.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
   contrato, mas a decisão de produto é F1.3/F3.
 
 ### Estado atual comprovado
 
-| Item                           | Evidência                                                                                      | Situação                                                                   |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant    |
-| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming              |
-| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                         |
-| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local; imagem `unsupported` (OCR futuro) |
-| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência               |
-| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                  |
-| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score       |
-| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única        |
-| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência   |
+| Item                           | Evidência                                                                                      | Situação                                                                                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant                                                                                 |
+| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming                                                                                           |
+| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                                                                                                      |
+| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local; imagem `unsupported` (OCR futuro); Marker como fallback para PDFs escaneados, **validado com serviço ao vivo** |
+| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência                                                                                            |
+| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                                                                                               |
+| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score                                                                                    |
+| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única                                                                                     |
+| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência                                                                                |
 
 ### Lacunas
 
@@ -592,8 +599,12 @@ de produto; elas não bloqueiam o vertical slice atual.
   `inconclusive` e `unsupported` nunca viram `contradicts`; `evidence_analysis`
   consumida sem duplicar a observação F1.1; teste de múltiplas versões; teste de
   cross-tenant e de idempotência da materialização.
-- **Integração real com Marker:** não validada contra serviço ao vivo (mockado
-  em todos os testes de integração). Veja limitação acima na F1.2a.
+- **Integração real com Marker:** validada com serviço Document Intelligence ao
+  vivo (perfil `document-intelligence` do Docker Compose). Testes de integração
+  em `apps/api/tests/evidence-analysis-marker-real.int.test.ts` cobrem PDF
+  textual, PDF digitalizado (OCR real), PDF multipágina, fluxo completo
+  (upload → análise → verificação), replay e upload com conteúdo diferente
+  (409).
 
 ### Riscos
 
@@ -792,8 +803,10 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
 operar a consulta comercial com cobrança auditável. A policy não é fonte; a fonte
 não decide o veredito.
 
-**Estado:** F3.1 e o vertical slice F3.2 estão entregues. F3.3 é a próxima
-etapa comercial e ainda não está concluída.
+**Estado:** F3.1, o vertical slice F3.2 e a F3.3 (medição de uso,
+cobrança, idempotência e reconciliação) estão entregues (PR #63). A
+**unidade de cobrança definitiva** e a tabela de preços seguem como
+decisão comercial aberta (ADR-0044).
 
 ### F3.1 — Policy engine e scoring (primeiro slice entregue em 2026-10-25)
 
@@ -835,10 +848,10 @@ de desenvolvimento e não representa cobrança pronta para produção.
 
 ### F3.3 — Medição de uso e cobrança
 
-**Estado:** implementada em revisão (PR #63) — idempotência e identidade
-comercial no banco, cotas soft/hard, consulta e reconciliação entregues; a
-**unidade de cobrança definitiva** e a tabela de preços seguem como decisão
-comercial aberta (ADR-0044).
+**Estado:** entregue (PR #63) — idempotência e identidade comercial no banco,
+cotas soft/hard, consulta e reconciliação entregues; a **unidade de cobrança
+definitiva** e a tabela de preços seguem como decisão comercial aberta
+(ADR-0044).
 
 **Estado atual comprovado**
 
@@ -1213,18 +1226,18 @@ Não confundir "SSI" com "credencial":
 
 ### Adicionar / acompanhar
 
-| Item                                    | Fase    | Estado / por quê                                          |
-| --------------------------------------- | ------- | --------------------------------------------------------- |
-| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes               |
-| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação        |
-| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                   |
-| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente |
-| Fluxo comercial e cobrança por consulta | F3      | F3.2 entregue; F3.3 é o próximo passo B2B                 |
-| Fluxo do titular por link seguro        | F4      | Futuro; requisito de coleta/atualização                   |
-| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui           |
-| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua         |
-| Medição faturável                       | F3      | Próximo; sem isso não há receita auditável                |
-| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                   |
+| Item                                    | Fase    | Estado / por quê                                                                               |
+| --------------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                    |
+| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                             |
+| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                        |
+| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                      |
+| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial |
+| Fluxo do titular por link seguro        | F4      | Futuro; requisito de coleta/atualização                                                        |
+| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                |
+| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                              |
+| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial  |
+| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                        |
 
 ## Decisões de produto em aberto
 
@@ -1279,5 +1292,5 @@ entendimento do comprovante, com `evidence_analysis` append-only e idempotente
 consulta real NF3-e SVRS para RS/SP entregues; cobertura adicional, cache,
 métricas e hardening continuam no backlog.
 
-**Próximo passo:** fechar o checklist de produção e implementar a **F3.3**
-(evento faturável canônico, cotas, reconciliação e regras de não cobrança).
+**Próximo passo:** fechar o checklist de produção; a decisão comercial sobre a
+unidade de cobrança e a tabela de preços permanece aberta (ADR-0044).

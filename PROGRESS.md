@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do Holder no pipeline de evidências (PR #73) mergeado + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do Holder no pipeline de evidências (PR #73) mergeado + F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
 
 ## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
 
@@ -273,7 +273,8 @@ holder_information_request.validation_id` com filtro de tenant (ex.: segunda
   observabilidade fiscal e logs persistidos também foram incorporados ao `main`.
 - `docs/roadmap.md`, `docs/architecture.md` e `docs/arquitetura-evidencias.md`
   agora distinguem entregas concluídas, cobertura limitada a SVRS/RS+SP e lacunas
-  futuras. O próximo passo comercial é F3.3: evento faturável, cotas e reconciliação.
+  futuras. O próximo passo comercial é F4: fluxo do titular com link/token seguro
+  para submissão de documentos.
 
 ## Validação do pipeline de documentos para o MVP (próxima etapa do plano) (2026-11-17)
 
@@ -328,9 +329,10 @@ unknown`, sem `signal` (não altera score).
 
 **Limitações documentadas:**
 
-- Integração real com o serviço Marker não foi exercida contra um serviço ao
-  vivo (apenas cliente mockado). Requer perfil `document-intelligence` do Docker
-  Compose, download de modelos e warmup.
+- Integração real com o serviço Marker validada com serviço ao vivo
+  (`apps/api/tests/evidence-analysis-marker-real.int.test.ts`):
+  PDF textual, PDF digitalizado (OCR real), PDF multipágina, replay e upload
+  com conteúdo diferente (409).
 - `kind` do documento permanece `unknown` (ADR-0038: não há lista de
   concessionárias; adaptadores de fonte fiscal podem preencher futuramente).
 - Artefato do Holder sem Validation não tem job dedicado de remoção por
@@ -339,6 +341,63 @@ unknown`, sem `signal` (não altera score).
 **Verificações executadas:** `pnpm test` (133 arquivos / 1536 testes, node),
 `pnpm typecheck` (12/12), `pnpm lint` (exit 0, apenas warnings preexistentes),
 `pnpm format` (OK), `pnpm db:fence` (exit 0). Sem regressões.
+
+Sem migrations adicionadas (nenhuma alteração de schema foi necessária).
+
+## Validação ponta a ponta com Marker real (serviço Document Intelligence ao vivo) (2026-11-17)
+
+O serviço Document Intelligence (apps/document-intelligence, FastAPI + Marker 2.x)
+foi executado ao vivo (perfil `document-intelligence` do Docker Compose) e a
+integração com o pipeline TypeScript foi validada ponta a ponta.
+
+**Serviço validado:**
+
+- Inicialização, carregamento de modelos do Marker e warmup concluídos com
+  sucesso (`/ready` → 200).
+- Timeout e tratamento de indisponibilidade mapeados para códigos estáveis
+  (`MARKER_UNAVAILABLE`, `MARKER_TIMEOUT`, `MARKER_BUSY`, `MARKER_PARSING_FAILED`,
+  `OCR_NO_USABLE_TEXT`).
+- Nenhum dado bruto do Marker persistido; apenas metadados mínimos de
+  proveniência (`provider`, `markerVersion`, `pages`, `processingTimeMs`, `fallback`,
+  `fields`).
+
+**Integração real validada (6 testes de integração, PostgreSQL real):**
+
+- PDF textual: camada local suficiente, Marker não chamado, titular/endereço/CEP
+  extraídos, CPF/CNPJ não persistidos (PII).
+- PDF digitalizado (imagem sem camada de texto): OCR real via Marker/Surya VLM,
+  extrai titular/endereço/CEP, `provenance.provider = 'marker'`.
+- PDF multipágina: texto extraído de todas as páginas.
+- Fluxo completo: upload → análise → verificação materializa `claim_evidence`
+  (`uploaded_document`, `stance = unknown`, sem `signal`, sem score alterado).
+- Replay do upload: não cria segunda análise nem reexecuta o Marker.
+- Upload com conteúdo diferente na mesma validation: `409` (sem duplicar).
+- Sem PII bruta nos logs nem no detalhe da verificação.
+
+**Recomendação sobre OCR de imagens isoladas (JPEG/PNG):**
+
+- O Marker processa apenas PDFs; imagens isoladas retornam
+  `unsupported`/`OCR_NOT_IMPLEMENTED`. Não implementado nesta etapa.
+- Alternativa sem novas dependências: converter a imagem para PDF com PIL (já
+  disponível no ambiente) e enviar ao Marker — o OCR de imagem embutida em PDF
+  foi validado com sucesso.
+- Se OCR direto de imagens isoladas for necessário no futuro: Tesseract é a
+  recomendação (open source Apache 2.0, suporte a português, leve, binário do
+  sistema), mas requer instalação de pacote do sistema e não foi avaliado em
+  profundidade neste ambiente (sem privilégios de root para `apt`).
+
+**Bloqueador de segurança do MVP — VLM no serviço Marker:**
+O serviço Document Intelligence usa o Marker 2.1.0, que emprega o Surya OCR
+servido como um modelo VLM via `llama.cpp` em CPU, mesmo com `use_llm=False`
+(esta opção apenas desativa o LLM opcional de aprimoramento, não o VLM do OCR).
+Isso conflita diretamente com a restrição do MVP de "não utilizar LLM, VLM,
+RAG ou embeddings". Não há como desativar o VLM no Marker sem substituir o
+serviço inteiro.
+
+**Verificações executadas:** `pnpm vitest run --project node` (133 arquivos /
+1536 testes, node), `pnpm typecheck` (12/12), `pnpm lint` (exit 0, apenas
+warnings preexistentes), `pnpm format` (OK), `pnpm db:fence` (exit 0). Sem
+regressões.
 
 Sem migrations adicionadas (nenhuma alteração de schema foi necessária).
 
