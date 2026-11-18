@@ -1236,7 +1236,7 @@ Não confundir "SSI" com "credencial":
 | Fluxo do titular por link seguro        | F4      | Futuro; requisito de coleta/atualização                                                        |
 | Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                |
 | Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                              |
-| Medição faturável                       | F3      | Próximo; sem isso não há receita auditável                                                     |
+| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial  |
 | Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                        |
 
 ## Decisões de produto em aberto

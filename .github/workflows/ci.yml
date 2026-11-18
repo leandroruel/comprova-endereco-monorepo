@@ -35,7 +35,7 @@ jobs:
 
   marker-real:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: [ci]
     steps:
       # O teste de integração com Marker precisa do serviço Document Intelligence
@@ -53,13 +53,14 @@ jobs:
       # Inicia apenas o serviço Document Intelligence (perfil dedicado).
       - run: docker compose --profile document-intelligence up -d document-intelligence
       # Aguarda o Document Intelligence ficar pronto (health check /ready).
+      # O primeiro boot baixa os pesos do modelo e roda o warmup (~5 min).
       - run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 180); do
             if curl -sf http://localhost:8000/ready > /dev/null 2>&1; then
               echo "Document Intelligence está pronto"
               exit 0
             fi
-            echo "Aguardando Document Intelligence... ($i/60)"
+            echo "Aguardando Document Intelligence... ($i/180)"
             sleep 5
           done
           echo "Document Intelligence não ficou pronto a tempo" >&2

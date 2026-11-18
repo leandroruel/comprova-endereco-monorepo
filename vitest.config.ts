@@ -74,21 +74,24 @@ export default defineConfig({
           },
         },
       },
-      {
-        extends: true,
-        test: {
-          name: 'marker-real',
-          // Integração real com o serviço Document Intelligence (Marker).
-          // Requer o serviço em execução em http://localhost:8000. Executado
-          // apenas no job CI dedicado `marker-real` (com MARKER_REAL_ENABLED=1),
-          // não no `pnpm test` padrão.
-          enabled: !!process.env.MARKER_REAL_ENABLED,
-          include: ['apps/api/tests/evidence-analysis-marker-real.int.test.ts'],
-          testTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
-          hookTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
-          maxWorkers: 1,
-        },
-      },
+      ...(process.env.MARKER_REAL_ENABLED === '1'
+        ? [
+            {
+              extends: true,
+              test: {
+                name: 'marker-real',
+                // Integração real com o serviço Document Intelligence (Marker).
+                // Requer o serviço em execução em http://localhost:8000.
+                // Executado apenas no job CI dedicado `marker-real`
+                // (com MARKER_REAL_ENABLED=1), não no `pnpm test` padrão.
+                include: ['apps/api/tests/evidence-analysis-marker-real.int.test.ts'],
+                testTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
+                hookTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
+                maxWorkers: 1,
+              },
+            },
+          ]
+        : []),
     ],
   },
 })
