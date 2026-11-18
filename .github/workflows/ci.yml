@@ -31,7 +31,7 @@ jobs:
       - run: pnpm format
       - run: pnpm typecheck
       - run: pnpm db:fence
-      - run: pnpm test
+      - run: pnpm vitest run --project node --project dashboard
 
   marker-real:
     runs-on: ubuntu-latest
