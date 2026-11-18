@@ -68,6 +68,7 @@ jobs:
       - run: pnpm vitest run --project marker-real
         env:
           DOCUMENT_INTELLIGENCE_URL: http://localhost:8000
+          MARKER_REAL_ENABLED: '1'
 
   security:
     runs-on: ubuntu-latest
