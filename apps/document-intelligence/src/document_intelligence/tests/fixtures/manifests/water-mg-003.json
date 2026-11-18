@@ -1,0 +1,29 @@
+{
+  "id": "water-mg-003",
+  "arquivo": "documents/water/mg/water-mg-003.pdf",
+  "tipo": "agua",
+  "emissor": "Serviço Municipal de Saneamento Demo MG",
+  "uf": "MG",
+  "cidade": "Belo Horizonte",
+  "versao_layout": "v1.1",
+  "variante": "conta_detalhada",
+  "qualidade": "limpo",
+  "formato": "digital",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "cpf",
+    "endereco",
+    "cep",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_m3",
+    "valor_agua",
+    "referencia"
+  ],
+  "criado_em": "2026-05-18"
+}

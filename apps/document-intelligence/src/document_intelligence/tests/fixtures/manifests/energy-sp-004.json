@@ -1,0 +1,29 @@
+{
+  "id": "energy-sp-004",
+  "arquivo": "documents/energy/sp/energy-sp-004.pdf",
+  "tipo": "energia",
+  "emissor": "Distribuidora Energia Demo SP",
+  "uf": "SP",
+  "cidade": "São Paulo",
+  "versao_layout": "v1.2",
+  "variante": "coluna_esquerda",
+  "qualidade": "baixo_contraste",
+  "formato": "escaneado",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "cpf",
+    "endereco",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_kwh",
+    "valor_energia",
+    "referencia"
+  ],
+  "nota": "Documento com baixo contraste: campos de cep podem não ser OCRizados com confiança.",
+  "criado_em": "2026-05-18"
+}

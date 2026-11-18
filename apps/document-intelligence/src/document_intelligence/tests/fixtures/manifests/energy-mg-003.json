@@ -1,0 +1,29 @@
+{
+  "id": "energy-mg-003",
+  "arquivo": "documents/energy/mg/energy-mg-003.pdf",
+  "tipo": "energia",
+  "emissor": "Distribuidora Energia Demo MG",
+  "uf": "MG",
+  "cidade": "Belo Horizonte",
+  "versao_layout": "v1.3",
+  "variante": "tabela_simples",
+  "qualidade": "limpo",
+  "formato": "digital",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "cpf",
+    "endereco",
+    "cep",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_kwh",
+    "valor_energia",
+    "referencia"
+  ],
+  "criado_em": "2026-05-18"
+}
