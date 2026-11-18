@@ -838,10 +838,10 @@ de desenvolvimento e não representa cobrança pronta para produção.
 
 ### F3.3 — Medição de uso e cobrança
 
-**Estado:** implementada em revisão (PR #63) — idempotência e identidade
-comercial no banco, cotas soft/hard, consulta e reconciliação entregues; a
-**unidade de cobrança definitiva** e a tabela de preços seguem como decisão
-comercial aberta (ADR-0044).
+**Estado:** entregue (PR #63) — idempotência e identidade comercial no banco,
+cotas soft/hard, consulta e reconciliação entregues; a **unidade de cobrança
+definitiva** e a tabela de preços seguem como decisão comercial aberta
+(ADR-0044).
 
 **Estado atual comprovado**
 

@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do Holder no pipeline de evidências (PR #73) mergeado + F3.3 (medição de uso, idempotência, cotas e reconciliação) em revisão no PR #63 + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do Holder no pipeline de evidências (PR #73) mergeado + F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
 
 ## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
 
@@ -273,7 +273,8 @@ holder_information_request.validation_id` com filtro de tenant (ex.: segunda
   observabilidade fiscal e logs persistidos também foram incorporados ao `main`.
 - `docs/roadmap.md`, `docs/architecture.md` e `docs/arquitetura-evidencias.md`
   agora distinguem entregas concluídas, cobertura limitada a SVRS/RS+SP e lacunas
-  futuras. O próximo passo comercial é F3.3: evento faturável, cotas e reconciliação.
+  futuras. O próximo passo comercial é F4: fluxo do titular com link/token seguro
+  para submissão de documentos.
 
 ## Validação do pipeline de documentos para o MVP (próxima etapa do plano) (2026-11-17)
 
@@ -328,9 +329,10 @@ unknown`, sem `signal` (não altera score).
 
 **Limitações documentadas:**
 
-- Integração real com o serviço Marker não foi exercida contra um serviço ao
-  vivo (apenas cliente mockado). Requer perfil `document-intelligence` do Docker
-  Compose, download de modelos e warmup.
+- Integração real com o serviço Marker validada com serviço ao vivo
+  (`apps/api/tests/evidence-analysis-marker-real.int.test.ts`):
+  PDF textual, PDF digitalizado (OCR real), PDF multipágina, replay e upload
+  com conteúdo diferente (409).
 - `kind` do documento permanece `unknown` (ADR-0038: não há lista de
   concessionárias; adaptadores de fonte fiscal podem preencher futuramente).
 - Artefato do Holder sem Validation não tem job dedicado de remoção por

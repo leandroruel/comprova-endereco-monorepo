@@ -75,81 +75,33 @@ def build_image_pdf_from_png(png_bytes: bytes) -> bytes:
     """PDF de uma página com uma imagem raster PNG embutida (sem camada de texto).
 
     Simula um documento digitalizado/foto: o Marker precisa fazer OCR.
+
+    A imagem PNG recebida é incorporada diretamente ao PDF, preservando seu
+    conteúdo visual para que o OCR consiga extrair o texto.
     """
-    import struct
-    import zlib
+    from io import BytesIO
 
-    out = bytearray(b"%PDF-1.4\n")
+    from PIL import Image
 
-    width = 612
-    height = 792
-    # PNG simples: imagem branca (IDAT com filtro none, um byte por linha de 0xFF).
-    raw = b""
-    for _ in range(height):
-        raw += b"\x00" + b"\xff" * width
-    compressed = zlib.compress(raw)
+    # Abre a imagem PNG recebida e salva como PDF de uma página, incorporando
+    # os pixels originais. Isso garante que o texto desenhado na imagem esteja
+    # disponível para o OCR do Marker.
+    img = Image.open(BytesIO(png_bytes))
+    # Converte para RGB se necessário (PDF não suporta todos os modos).
+    if img.mode != "RGB":
+        img = img.convert("RGB")
 
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    ihdr_crc = zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF
-    idat_crc = zlib.crc32(b"IDAT" + compressed) & 0xFFFFFFFF
-    iend_crc = zlib.crc32(b"IEND") & 0xFFFFFFFF
+    buf = BytesIO()
+    img.save(buf, format="PDF", resolution=150.0)
+    pdf_bytes = buf.getvalue()
 
-    png = (
-        b"\x89PNG\r\n\x1a\n"
-        + struct.pack(">I", 13) + b"IHDR" + ihdr + struct.pack(">I", ihdr_crc)
-        + struct.pack(">I", len(compressed)) + b"IDAT" + compressed + struct.pack(">I", idat_crc)
-        + struct.pack(">I", 0) + b"IEND" + struct.pack(">I", iend_crc)
-    )
+    # Validação: o PDF deve ser um PDF válido e conter a imagem incorporada.
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise ValueError("PDF gerado não tem cabeçalho PDF válido")
+    if len(pdf_bytes) < 1000:
+        raise ValueError("PDF gerado está muito pequeno para conter a imagem")
 
-    xref_entries: list[tuple[int, int]] = []
-    objs: list[bytes] = []
-    out = bytearray(b"%PDF-1.4\n")
-
-    def add_obj(content: bytes) -> int:
-        nonlocal out
-        oid = len(objs) + 1
-        off = len(out)
-        xref_entries.append((oid, off))
-        out += f"{oid} 0 obj\n".encode() + content + b"\nendobj\n"
-        objs.append(content)
-        return oid
-
-    # Objeto 1: Catalog
-    cat_id = add_obj(b"<< /Type /Catalog /Pages 2 0 R >>")
-    # Objeto 2: Pages
-    pages_id = add_obj(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-    # Objeto 3: Page
-    page_id = add_obj(
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        b"/Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>"
-    )
-    # Objeto 4: Image XObject
-    img_id = add_obj(
-        b"<< /Type /XObject /Subtype /Image /Width "
-        + str(width).encode()
-        + b" /Height "
-        + str(height).encode()
-        + b" /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length "
-        + str(len(compressed)).encode()
-        + b">>\nstream\n"
-        + compressed
-        + b"\nendstream"
-    )
-    # Objeto 5: Contents (vazio - não há texto)
-    content_id = add_obj(b"<< /Length 0 >>\nstream\n\nendstream")
-
-    xref_pos = len(out)
-    max_id = len(objs)
-    out += f"xref\n0 {max_id + 1}\n".encode()
-    out += b"0000000000 65535 f \n"
-    for oid in range(1, max_id + 1):
-        off = xref_entries[oid - 1][1]
-        out += f"{off:010d} 00000 n \n".encode()
-    out += (
-        f"trailer\n<< /Size {max_id + 1} /Root {cat_id} 0 R >>\n"
-        f"startxref\n{xref_pos}\n%%EOF\n"
-    ).encode()
-    return bytes(out)
+    return pdf_bytes
 
 
 def conta_energia_pdf() -> bytes:

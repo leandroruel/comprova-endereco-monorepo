@@ -33,6 +33,42 @@ jobs:
       - run: pnpm db:fence
       - run: pnpm test
 
+  marker-real:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [ci]
+    steps:
+      # O teste de integração com Marker precisa do serviço Document Intelligence
+      # em execução (porta 8000). O PostgreSQL/Redis são provisionados pelo
+      # testcontainers dentro do próprio teste.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Inicia apenas o serviço Document Intelligence (perfil dedicado).
+      - run: docker compose --profile document-intelligence up -d document-intelligence
+      # Aguarda o Document Intelligence ficar pronto (health check /ready).
+      - run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/ready > /dev/null 2>&1; then
+              echo "Document Intelligence está pronto"
+              exit 0
+            fi
+            echo "Aguardando Document Intelligence... ($i/60)"
+            sleep 5
+          done
+          echo "Document Intelligence não ficou pronto a tempo" >&2
+          exit 1
+      # Executa apenas o teste de integração real com o Marker.
+      - run: pnpm vitest run --project node apps/api/tests/evidence-analysis-marker-real.int.test.ts
+        env:
+          DOCUMENT_INTELLIGENCE_URL: http://localhost:8000
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 10
