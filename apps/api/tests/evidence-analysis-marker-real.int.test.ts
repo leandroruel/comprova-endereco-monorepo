@@ -319,6 +319,13 @@ describe('F1.2/F1.3 — integração real com o Marker (Document Intelligence)',
       expect(v.signalId).toBeNull()
       expect(JSON.stringify(v.detail)).not.toContain('Joao Pereira Santos')
       expect(JSON.stringify(v.detail)).not.toContain('Avenida Paulista')
+      // Privacidade nos logs: não vazar PII (nome, CPF, endereço)
+      expect(logLines.length).toBeGreaterThan(0)
+      const captured = logLines.join('\n')
+      expect(captured).not.toContain('Joao Pereira Santos')
+      expect(captured).not.toContain('Avenida Paulista')
+      expect(captured).not.toContain('123.456.789-00')
+      expect(captured).not.toContain('12345678900')
       // A verificação não altera score/veredito.
       const detail = v.detail as Record<string, unknown>
       expect(detail).toHaveProperty('verification')
