@@ -423,19 +423,26 @@ texto/estrutura/observações
   (JPEG/PNG) continuam retornando `unsupported`/`OCR_NOT_IMPLEMENTED`; o Marker
   não é acionado para eles. O caminho determinístico de QR/referência fiscal não
   passa pelo OCR.
+- **Bloqueador de segurança do MVP:** o Marker 2.1.0 utiliza o Surya OCR, que é
+  servido como um modelo VLM (vision-language model) via `llama.cpp` em CPU,
+  mesmo com `use_llm=False` (esta opção apenas desativa o LLM opcional de
+  aprimoramento, não o VLM do OCR). Isso conflita diretamente com a restrição do
+  MVP de "não utilizar LLM, VLM, RAG ou embeddings". Não há como desativar o VLM
+  no Marker sem substituir o serviço inteiro.
 - **Integração real validada:** o serviço Marker foi executado ao vivo
   (perfil `document-intelligence` do Docker Compose) e testado ponta a ponta
   com o pipeline TypeScript (`apps/api/tests/evidence-analysis-marker-real.int.test.ts`):
   PDF textual (camada local, sem chamar Marker), PDF digitalizado (OCR real via
-  Marker, extrai titular/endereço/CEP) e PDF multipágina. O upload duplicado e
-  o replay também foram validadas com o serviço ao vivo.
+  Marker/Surya VLM, extrai titular/endereço/CEP) e PDF multipágina. O upload
+  duplicado e o replay também foram validadas com o serviço ao vivo.
 - O parser PDF é conservador: PDFs escaneados, fontes CID/Type0 sem `ToUnicode`
   ou layout complexo retornam `inconclusive`/`NO_TEXT_LAYER`.
 - A saída é validada por schema e identidade do analisador. Saída inválida vira
   `failed`, não fica presa em `analyzing`.
 - **Isto é um adaptador técnico, não uma capacidade central do produto.** O
   protocolo `DocumentAnalyzer` permite trocar por OCR/VLM/parser dedicado sem
-  mudar o contrato de entendimento.
+  mudar o contrato de entendimento. A alternativa não-VLM (ex.: Tesseract) não
+  está disponível no ambiente e não foi avaliada em profundidade.
 
 ### F1.2b — Document understanding (entregue no MVP F1.2)
 

@@ -365,8 +365,8 @@ integração com o pipeline TypeScript foi validada ponta a ponta.
 
 - PDF textual: camada local suficiente, Marker não chamado, titular/endereço/CEP
   extraídos, CPF/CNPJ não persistidos (PII).
-- PDF digitalizado (imagem sem camada de texto): OCR real via Marker, extrai
-  titular/endereço/CEP, `provenance.provider = 'marker'`.
+- PDF digitalizado (imagem sem camada de texto): OCR real via Marker/Surya VLM,
+  extrai titular/endereço/CEP, `provenance.provider = 'marker'`.
 - PDF multipágina: texto extraído de todas as páginas.
 - Fluxo completo: upload → análise → verificação materializa `claim_evidence`
   (`uploaded_document`, `stance = unknown`, sem `signal`, sem score alterado).
@@ -385,6 +385,14 @@ integração com o pipeline TypeScript foi validada ponta a ponta.
   recomendação (open source Apache 2.0, suporte a português, leve, binário do
   sistema), mas requer instalação de pacote do sistema e não foi avaliado em
   profundidade neste ambiente (sem privilégios de root para `apt`).
+
+**Bloqueador de segurança do MVP — VLM no serviço Marker:**
+O serviço Document Intelligence usa o Marker 2.1.0, que emprega o Surya OCR
+servido como um modelo VLM via `llama.cpp` em CPU, mesmo com `use_llm=False`
+(esta opção apenas desativa o LLM opcional de aprimoramento, não o VLM do OCR).
+Isso conflita diretamente com a restrição do MVP de "não utilizar LLM, VLM,
+RAG ou embeddings". Não há como desativar o VLM no Marker sem substituir o
+serviço inteiro.
 
 **Verificações executadas:** `pnpm vitest run --project node` (133 arquivos /
 1536 testes, node), `pnpm typecheck` (12/12), `pnpm lint` (exit 0, apenas
