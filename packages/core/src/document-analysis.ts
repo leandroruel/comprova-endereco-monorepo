@@ -150,7 +150,7 @@ export interface DocumentAnalysisFieldSources {
  * não o possuem.
  */
 export interface DocumentAnalysisProvenance {
-  readonly provider: 'local' | 'marker'
+  readonly provider: 'local' | 'marker' | 'tesseract'
   readonly markerVersion?: string
   readonly pages?: number
   readonly processingTimeMs?: number

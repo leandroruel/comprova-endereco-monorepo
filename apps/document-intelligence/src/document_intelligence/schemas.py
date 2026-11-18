@@ -103,7 +103,7 @@ class DocumentInfo(CamelModel):
 class ProcessingMetadata(CamelModel):
     """Metadados do processamento."""
 
-    processor: str = "marker"
+    processor: str = "tesseract"
     processor_version: str
     processing_time_ms: int
     contract_version: str = "1.0"

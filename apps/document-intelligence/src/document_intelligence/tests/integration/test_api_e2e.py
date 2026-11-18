@@ -1,4 +1,4 @@
-"""Teste end-to-end do endpoint HTTP com um PDF real (exige Marker)."""
+"""Teste end-to-end do endpoint HTTP com um PDF real (exige Tesseract)."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from document_intelligence.tests.conftest import requires_marker
+from document_intelligence.tests.conftest import requires_tesseract
 
-pytestmark = [pytest.mark.integration, requires_marker]
+pytestmark = [pytest.mark.integration, requires_tesseract]
 
 
 def test_parse_endpoint_pdf_real(client, sample_text_pdf: Path) -> None:
@@ -29,4 +29,4 @@ def test_parse_endpoint_pdf_real(client, sample_text_pdf: Path) -> None:
     assert body["document"]["sizeBytes"] == len(conteudo)
     assert "text" in body["content"]
     assert body["pages"][0]["pageNumber"] == 1
-    assert body["metadata"]["processor"] == "marker"
+    assert body["metadata"]["processor"] == "tesseract"

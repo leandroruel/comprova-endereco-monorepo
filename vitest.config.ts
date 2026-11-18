@@ -2,9 +2,9 @@ import { fileURLToPath } from 'node:url'
 import { playwright } from '@vitest/browser-playwright'
 import { configDefaults, defineConfig } from 'vitest/config'
 
-// Timeout para o teste de integração real com o Marker (Document Intelligence),
+// Timeout para o teste de integração real com o Document Intelligence (Tesseract),
 // alinhado ao timeout do cliente DI (360s) mais margem de inicialização.
-const TEST_TIMEOUT_MS_REAL_MARKER = 400_000
+const TEST_TIMEOUT_MS_REAL_TESSERACT = 400_000
 
 const dashboardSrc = fileURLToPath(new URL('./apps/dashboard/src', import.meta.url))
 
@@ -47,9 +47,9 @@ export default defineConfig({
           exclude: [
             ...configDefaults.exclude,
             'apps/dashboard/src/**/*.test.tsx',
-            // O teste de integração real com o Marker depende de um serviço
-            // externo (Document Intelligence) que não é iniciado na suíte
-            // padrão. Ele roda em um projeto dedicado (`marker-real`) no CI.
+            // O teste de integração real com o Document Intelligence depende de um
+            // serviço externo (Document Intelligence) que não é iniciado na suíte
+            // padrão. Ele roda em um projeto dedicado (`tesseract-real`) no CI.
             'apps/api/tests/evidence-analysis-marker-real.int.test.ts',
           ],
         },
@@ -74,19 +74,19 @@ export default defineConfig({
           },
         },
       },
-      ...(process.env.MARKER_REAL_ENABLED === '1'
+      ...(process.env.TESSERACT_REAL_ENABLED === '1'
         ? [
             {
               extends: true,
               test: {
-                name: 'marker-real',
-                // Integração real com o serviço Document Intelligence (Marker).
+                name: 'tesseract-real',
+                // Integração real com o serviço Document Intelligence (Tesseract).
                 // Requer o serviço em execução em http://localhost:8000.
-                // Executado apenas no job CI dedicado `marker-real`
-                // (com MARKER_REAL_ENABLED=1), não no `pnpm test` padrão.
+                // Executado apenas no job CI dedicado `tesseract-real`
+                // (com TESSERACT_REAL_ENABLED=1), não no `pnpm test` padrão.
                 include: ['apps/api/tests/evidence-analysis-marker-real.int.test.ts'],
-                testTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
-                hookTimeout: TEST_TIMEOUT_MS_REAL_MARKER,
+                testTimeout: TEST_TIMEOUT_MS_REAL_TESSERACT,
+                hookTimeout: TEST_TIMEOUT_MS_REAL_TESSERACT,
                 maxWorkers: 1,
               },
             },

@@ -1,9 +1,9 @@
-"""PDF sintético mínimo usado para "aquecer" os modelos do Marker.
+"""PDF sintético mínimo usado para "aquecer" o pipeline de OCR (Tesseract).
 
-O primeiro documento que exercita o caminho de layout/OCR de tabelas carrega
-pesos adicionais (rf-detr / reconhecimento) e pode levar minutos em CPU. Este
-módulo gera um PDF de uma página com um grid simples, sem dados reais, para que
-esse custo aconteça no startup e não na primeira requisição.
+O primeiro processamento de um documento pode carregar recursos adicionais
+do Tesseract e levar mais tempo em CPU. Este módulo gera um PDF de uma
+página com texto simples, sem dados reais, para que esse custo aconteça no
+startup e não na primeira requisição.
 """
 
 from __future__ import annotations

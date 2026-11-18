@@ -24,35 +24,33 @@ class Settings(BaseSettings):
 
     # Limites
     max_file_size_mb: int = Field(default=30, ge=1, le=1024)
-    # A inferência local do Marker é serializada (não é thread-safe). Este valor
-    # limita quantas requisições ficam em processamento/fila por processo.
+    # O processamento local com Tesseract é serializado por processo. Este
+    # valor limita quantas requisições ficam em processamento/fila.
     max_concurrency: int = Field(default=1, ge=1, le=64)
-    # Requisições adicionais admitidas aguardando o worker. A capacidade total
-    # é ``max_concurrency + max_queue``; o excedente recebe HTTP 429 antes de o
-    # corpo do upload ser lido (evita acumular PDFs inteiros em memória).
+    # Requisições adicionais admitidas aguardando o worker.
     max_queue: int = Field(default=2, ge=0, le=1024)
     timeout_s: int = Field(default=300, ge=1, le=3600)
-    # Limite de páginas explícito com default seguro: sem ele, um PDF grande
-    # poderia consumir a máquina inteira. Aplicado ANTES da inferência
-    # (inspeção com pypdfium2); acima disso → HTTP 422.
+    # Limite de páginas explícito com default seguro.
     max_pages: int = Field(default=100, ge=1)
 
-    # Imagens detectadas pelo Marker (Picture/Figure/Diagram). O recorte é
-    # embutido como data URL quando cabe nos tetos abaixo; excedentes ficam
-    # sem `imageRef` e são sinalizados honestamente (metadata + warning).
-    include_images: bool = Field(default=True)
+    # Imagens detectadas (reservado para futuro uso; atualmente os recortes
+    # de imagem não são gerados pelo Tesseract).
+    include_images: bool = Field(default=False)
     max_image_bytes: int = Field(default=262_144, ge=1)
     max_total_image_bytes: int = Field(default=2_097_152, ge=1)
 
-    # Modelos / processamento
-    # Carrega os modelos do Marker no startup (recomendado). Se ``False``, o
-    # carregamento acontece na primeira requisição de parsing.
+    # OCR / processamento
+    # Carrega/verifica dependências no startup (recomendado).
     preload_models: bool = Field(default=True)
-    # Executa um documento sintético no startup para carregar os modelos de
-    # layout/OCR (o primeiro documento com tabela pode levar minutos em CPU).
+    # Executa um documento sintético no startup para verificar o pipeline.
     warmup: bool = Field(default=True)
-    # Diretório de trabalho para arquivos temporários. ``None`` usa o diretório
-    # temporário do sistema (respeitando ``TMPDIR``).
+    # Idioma do Tesseract (padrão: português).
+    ocr_lang: str = Field(default="por")
+    # DPI de renderização de páginas PDF para OCR.
+    ocr_dpi: int = Field(default=200, ge=72, le=600)
+    # Aplica pré-processamento com OpenCV antes do OCR.
+    ocr_preprocess: bool = Field(default=False)
+    # Diretório de trabalho para arquivos temporários.
     temp_dir: str | None = Field(default=None)
     # Mínimo de memória livre (MiB) exigido em ``/ready``.
     min_free_memory_mb: int = Field(default=512, ge=0)

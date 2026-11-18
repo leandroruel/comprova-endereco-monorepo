@@ -1,15 +1,16 @@
 """Aplicação FastAPI do serviço Document Intelligence.
 
 Endpoints:
-    GET  /health      — liveness: 200 enquanto o processo está vivo (sem modelos)
-    GET  /ready       — readiness: 200 só com modelos carregados, warmup
-                        concluído e memória suficiente; senão 503
+    GET  /health      — liveness: 200 enquanto o processo está vivo (sem Tesseract)
+    GET  /ready       — readiness: 200 só com Tesseract instalado, idioma 'por'
+                        disponível, warmup concluído e memória suficiente;
+                        senão 503
     POST /documents/parse — recebe PDF via multipart e retorna JSON estruturado;
                         capacidade esgotada → 429 antes de ler o upload
 
-Os modelos do Marker são carregados uma única vez no startup (configurável por
-``DI_PRELOAD_MODELS``) e reutilizados entre requisições. O processamento é
-CPU-bound e roda em um ``ThreadPoolExecutor`` com paralelismo limitado.
+O processamento roda localmente com Tesseract 5 + pypdfium2, sem VLM, sem
+Marker e sem llama.cpp. O processamento é CPU-bound e roda em um
+``ThreadPoolExecutor`` com paralelismo limitado.
 """
 
 from __future__ import annotations
@@ -35,7 +36,8 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .logging import configure_logging, get_logger
-from .parser import CONTRACT_VERSION, MarkerParser
+from .ocr import is_tesseract_available, tesseract_version
+from .pdf_processor import build_parse_response
 from .queue import AdmissionSlot, ProcessingQueue
 from .schemas import (
     DocumentInfo,
@@ -61,7 +63,9 @@ logger = get_logger("document-intelligence.main")
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 # Instâncias compartilhadas (carregadas no startup / first use).
-parser = MarkerParser()
+# Não há modelo a carregar: o parser funciona sobre demanda.
+parser_ready = False
+parser_warmed = False
 # Capacidade = worker(s) + aguardando. Excedente recebe 429 antes de ler o
 # corpo do upload (não acumula PDFs em memória).
 queue = ProcessingQueue(
@@ -70,15 +74,15 @@ queue = ProcessingQueue(
 )
 executor = ThreadPoolExecutor(
     max_workers=settings.max_concurrency,
-    thread_name_prefix="di-marker",
+    thread_name_prefix="di-tesseract",
 )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
-    """Carrega modelos (opcional) no startup e agenda o warmup em background.
+    """Verifica Tesseract no startup e agenda o warmup em background.
 
-    Falha de carregamento não derruba o serviço: ``/ready`` reporta o erro e o
+    Falha de verificação não derruba o serviço: ``/ready`` reporta o erro e o
     orquestrador não roteia tráfego enquanto o estado for ``not_ready``.
     """
     configure_logging(level=settings.log_level, log_file=settings.log_file)
@@ -91,19 +95,21 @@ async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
         max_paginas=settings.max_pages,
         preload_models=settings.preload_models,
         warmup=settings.warmup,
+        ocr_lang=settings.ocr_lang,
     )
-    if settings.preload_models:
-        # Não derruba o serviço se o carregamento falhar: /ready reporta o erro.
-        try:
-            await asyncio.get_running_loop().run_in_executor(
-                executor, parser.load_models
-            )
-        except Exception as exc:  # pragma: no cover - falha de ambiente
-            logger.error(
-                "falha_ao_precarregar_modelos",
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
+    global parser_ready
+    # Não derruba o serviço se a verificação falhar: /ready reporta o erro.
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            executor, _verify_tesseract
+        )
+        parser_ready = True
+    except Exception as exc:  # pragma: no cover - falha de ambiente
+        logger.error(
+            "falha_ao_verificar_tesseract",
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
     if settings.warmup and settings.preload_models:
         # Aquecimento em background: /health responde imediatamente e /ready
         # sinaliza "não pronto" até o aquecimento concluir.
@@ -113,17 +119,69 @@ async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
     logger.info("servico_encerrando")
 
 
+def _verify_tesseract() -> None:
+    """Verifica se o Tesseract está instalado e com o idioma 'por' disponível.
+
+    Levanta exceção se não estiver disponível — o lifespan captura e loga.
+    """
+    if not is_tesseract_available():
+        raise RuntimeError(
+            "Tesseract não está instalado ou o idioma 'por' não está disponível"
+        )
+    logger.info(
+        "tesseract_disponivel",
+        versao=tesseract_version(),
+        idioma=settings.ocr_lang,
+    )
+
+
 async def _run_warmup() -> None:
     """Executa o warmup do parser no executor; falhas já são logadas lá."""
+    global parser_warmed
     try:
-        await asyncio.get_running_loop().run_in_executor(executor, parser.warmup)
-    except Exception:  # pragma: no cover - já logado no parser
+        await asyncio.get_running_loop().run_in_executor(executor, _warmup)
+        parser_warmed = True
+    except Exception:  # pragma: no cover - já logado no warmup
         pass
+
+
+def _warmup() -> None:
+    """Executa um documento sintético para verificar o pipeline de OCR.
+
+    O primeiro processamento pode carregar recursos adicionais do Tesseract.
+    Rodar isto no startup evita que a primeira requisição real estoure o
+    timeout.
+    """
+    from .security import temporary_pdf_path
+    from .warmup import build_warmup_pdf
+
+    logger.info("aquecendo_pipeline_ocr")
+    start = time.perf_counter()
+    try:
+        with temporary_pdf_path(
+            build_warmup_pdf(), prefix="di-warmup-", dir=settings.temp_dir
+        ) as path:
+            response = build_parse_response(path, "warmup", size_bytes=0)
+        if response.status != "completed":
+            raise RuntimeError(
+                f"aquecimento falhou: {response.error_code}"
+            )
+        logger.info(
+            "pipeline_ocr_aquecido",
+            duracao_ms=int((time.perf_counter() - start) * 1000),
+        )
+    except Exception as exc:  # pragma: no cover - falha de ambiente
+        logger.error(
+            "falha_no_aquecimento_do_pipeline",
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
 
 
 app = FastAPI(
     title="Document Intelligence",
-    description="Processamento documental com Marker (OCR + layout, sem LLM)",
+    description="Processamento documental com Tesseract (OCR, sem VLM, sem LLM)",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -164,8 +222,8 @@ async def admission_control(request: Request, call_next: Any) -> Any:
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 async def health() -> HealthResponse:
-    """Status do serviço. Não carrega modelos do Marker."""
-    return HealthResponse(status="ok", marker_available=_marker_importable())
+    """Status do serviço. Não carrega modelos nem depende de warmup."""
+    return HealthResponse(status="ok", marker_available=is_tesseract_available())
 
 
 @app.get(
@@ -179,23 +237,22 @@ async def health() -> HealthResponse:
 async def ready(response: Response) -> ReadyResponse:
     """Indica se o serviço está pronto para receber inferências.
 
-    Retorna **HTTP 200** somente quando os modelos estão carregados, o warmup
-    concluiu (quando habilitado) e há memória livre suficiente. Caso contrário,
-    **HTTP 503** com ``status: "not_ready"`` no corpo — sinal que orquestradores
-    usam para não rotear tráfego.
+    Retorna **HTTP 200** somente quando o Tesseract está disponível (com
+    idioma ``por``), o warmup concluiu (quando habilitado) e há memória livre
+    suficiente. Caso contrário, **HTTP 503** com ``status: "not_ready"``.
     """
     checks: dict[str, str] = {}
     ready_status = "ready"
 
-    checks["marker_modelos"] = (
-        "carregados" if parser.models_loaded else "não carregados"
+    checks["tesseract"] = (
+        "disponível" if parser_ready else "não disponível"
     )
-    if not parser.models_loaded:
+    if not parser_ready:
         ready_status = "not_ready"
 
     if settings.warmup:
-        checks["aquecimento"] = "concluído" if parser.warm else "em andamento"
-        if not parser.warm:
+        checks["aquecimento"] = "concluído" if parser_warmed else "em andamento"
+        if not parser_warm_available():
             ready_status = "not_ready"
 
     # Requisitos mínimos: memória livre.
@@ -215,9 +272,16 @@ async def ready(response: Response) -> ReadyResponse:
 
     return ReadyResponse(
         status=ready_status,  # type: ignore[arg-type]
-        models_loaded=parser.models_loaded,
+        models_loaded=parser_ready,
         checks=checks,
     )
+
+
+def parser_warm_available() -> bool:
+    """Retorna se o warmup está concluído (ou desabilitado)."""
+    if not settings.warmup:
+        return True
+    return parser_warmed
 
 
 async def _read_upload_bounded(file: UploadFile) -> bytes:
@@ -235,9 +299,6 @@ async def _read_upload_bounded(file: UploadFile) -> bytes:
             break
         total += len(chunk)
         if total > max_bytes:
-            # 413 literal: `status.HTTP_413_CONTENT_TOO_LARGE` só existe em
-            # Starlette >=0.48, e fastapi>=0.115,<1 permite resolver Starlette
-            # <0.47 (nesse caso o atributo levantaria AttributeError → 500).
             raise HTTPException(
                 status_code=413,
                 detail=(
@@ -257,10 +318,10 @@ def _process_document(
     """Pipeline síncrono completo; roda no executor de worker único.
 
     Tudo aqui bloqueia a thread: escrita do temporário, inspeção PDFium e
-    parse do Marker. Rodar na mesma thread do Marker serializa o PDFium com
-    a inferência (o PDFium não é thread-safe) e libera o event loop para
-    ``/health`` e ``/ready``. Erros de domínio (``SecurityError`` e
-    subclasses) são mapeados para HTTP pelo handler assíncrono.
+    parse com Tesseract. Rodar na mesma thread serializa o PDFium com o OCR
+    (o PDFium não é thread-safe) e libera o event loop para ``/health`` e
+    ``/ready``. Erros de domínio (``SecurityError`` e subclasses) são
+    mapeados para HTTP pelo handler assíncrono.
     """
     uploaded = validate_uploaded_pdf(
         data=data,
@@ -271,9 +332,9 @@ def _process_document(
     with temporary_pdf_path(
         uploaded.data, prefix="di-", dir=settings.temp_dir
     ) as pdf_path:
-        # Inspeção barata (sem modelos): páginas e criptografia.
+        # Inspeção barata (sem OCR): páginas e criptografia.
         inspect_pdf(pdf_path, max_pages=settings.max_pages)
-        return parser.parse(pdf_path, request_id, uploaded.size_bytes)
+        return build_parse_response(pdf_path, request_id, uploaded.size_bytes)
 
 
 @app.post("/documents/parse", response_model=ParseResponse, tags=["documents"])
@@ -287,7 +348,7 @@ async def parse_document(
     """Recebe um PDF via ``multipart/form-data`` e retorna JSON estruturado.
 
     Fluxo e garantias:
-    - **admissão antes da leitura**: se a capacidade (worker + aguardando) está
+    - **admissão antes da leitura**: se a capacidade (worker + fila) está
       esgotada, responde ``429`` sem carregar o corpo em memória;
     - somente PDFs válidos (assinatura ``%PDF-`` + magic bytes);
     - tamanho dentro do limite configurado (leitura em blocos, 413 cedo);
@@ -332,7 +393,7 @@ async def parse_document(
             file.content_type,
             request_id,
         )
-        # O slot passa a ser liberado quando a thread realmente terminar —
+        # O slot passa a ser liberado quando a thread realmente termina —
         # nem no fim da requisição, nem no timeout/cancelamento do cliente.
         future.add_done_callback(lambda _: slot.release())
         slot.transfer()
@@ -392,19 +453,9 @@ async def parse_document(
         duracao_ms=duracao_ms,
         avisos=len(response.warnings),
         error_type=response.error_code,
-        marker_version=response.metadata.processor_version,
+        tesseract_version=response.metadata.processor_version,
     )
     return response
-
-
-def _marker_importable() -> bool:
-    """Indica se o pacote ``marker`` está importável (instalação íntegra)."""
-    try:
-        import marker  # noqa: F401
-
-        return True
-    except Exception:
-        return False
 
 
 @app.exception_handler(Exception)
