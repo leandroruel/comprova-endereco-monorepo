@@ -65,7 +65,7 @@ jobs:
           echo "Document Intelligence não ficou pronto a tempo" >&2
           exit 1
       # Executa apenas o teste de integração real com o Marker.
-      - run: pnpm vitest run --project node apps/api/tests/evidence-analysis-marker-real.int.test.ts
+      - run: pnpm vitest run --project marker-real
         env:
           DOCUMENT_INTELLIGENCE_URL: http://localhost:8000
 

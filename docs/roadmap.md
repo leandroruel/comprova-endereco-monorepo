@@ -20,12 +20,13 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
   o vertical slice F3.2 pelo dashboard.
 - **Em andamento:** F0 (checklist de produção), F1 (documentos complexos via
   Marker — integração entregue em ADR-0043 e **validada com serviço ao vivo**),
-  F2 (expansão/hardening da cobertura fiscal), F3.3 (medição/cobrança) e F6
-  (operação/segurança).
-- **Próximo passo:** fechar F3.3 e o checklist de produção; a unidade de
-  cobrança definitiva, o tratamento comercial de indisponibilidade de fonte
-  externa (hoje: não faturável, política provisória do ADR-0044 §3b) e as
-  regras de faturamento continuam decisões comerciais abertas.
+  F2 (expansão/hardening da cobertura fiscal) e F6 (operação/segurança).
+- **Próximo passo:** o checklist de produção; a unidade de cobrança definitiva,
+  o tratamento comercial de indisponibilidade de fonte externa (hoje: não
+  faturável, política provisória do ADR-0044 §3b) e as regras de faturamento
+  continuam decisões comerciais abertas. A F3.3 (medição/cobrança) está
+  entregue (PR #63); resta apenas a decisão comercial sobre a unidade de
+  cobrança e a tabela de preços.
 - **Futuro:** F4 (fluxo do titular), F7 (NFAg-e/outras fontes) e F8 (SSI).
   F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda
   faltam decisões e o kit de verificação do produto.
@@ -795,8 +796,10 @@ efetivo de SP (SP não aparece como ambiente próprio na página de serviços).
 operar a consulta comercial com cobrança auditável. A policy não é fonte; a fonte
 não decide o veredito.
 
-**Estado:** F3.1 e o vertical slice F3.2 estão entregues. F3.3 é a próxima
-etapa comercial e ainda não está concluída.
+**Estado:** F3.1, o vertical slice F3.2 e a F3.3 (medição de uso,
+cobrança, idempotência e reconciliação) estão entregues (PR #63). A
+**unidade de cobrança definitiva** e a tabela de preços seguem como
+decisão comercial aberta (ADR-0044).
 
 ### F3.1 — Policy engine e scoring (primeiro slice entregue em 2026-10-25)
 
@@ -1216,18 +1219,18 @@ Não confundir "SSI" com "credencial":
 
 ### Adicionar / acompanhar
 
-| Item                                    | Fase    | Estado / por quê                                          |
-| --------------------------------------- | ------- | --------------------------------------------------------- |
-| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes               |
-| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação        |
-| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                   |
-| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente |
-| Fluxo comercial e cobrança por consulta | F3      | F3.2 entregue; F3.3 é o próximo passo B2B                 |
-| Fluxo do titular por link seguro        | F4      | Futuro; requisito de coleta/atualização                   |
-| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui           |
-| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua         |
-| Medição faturável                       | F3      | Próximo; sem isso não há receita auditável                |
-| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                   |
+| Item                                    | Fase    | Estado / por quê                                                                               |
+| --------------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                    |
+| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                             |
+| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                        |
+| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                      |
+| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial |
+| Fluxo do titular por link seguro        | F4      | Futuro; requisito de coleta/atualização                                                        |
+| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                |
+| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                              |
+| Medição faturável                       | F3      | Próximo; sem isso não há receita auditável                                                     |
+| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                        |
 
 ## Decisões de produto em aberto
 
@@ -1282,5 +1285,5 @@ entendimento do comprovante, com `evidence_analysis` append-only e idempotente
 consulta real NF3-e SVRS para RS/SP entregues; cobertura adicional, cache,
 métricas e hardening continuam no backlog.
 
-**Próximo passo:** fechar o checklist de produção e implementar a **F3.3**
-(evento faturável canônico, cotas, reconciliação e regras de não cobrança).
+**Próximo passo:** fechar o checklist de produção; a decisão comercial sobre a
+unidade de cobrança e a tabela de preços permanece aberta (ADR-0044).

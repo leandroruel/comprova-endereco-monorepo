@@ -345,7 +345,9 @@ describe('F1.2/F1.3 — integração real com o Marker (Document Intelligence)',
       expect(replay.statusCode).toBe(200)
       expect(replay.headers['idempotent-replayed']).toBe('true')
 
-      await runAnalysis()
+      // Segunda execução do ticker não deve processar nenhum job novo.
+      const secondProcessed = await runAnalysis()
+      expect(secondProcessed).toBe(0)
 
       const { analyses } = await graphOf(validationId)
       expect(analyses).toHaveLength(1)

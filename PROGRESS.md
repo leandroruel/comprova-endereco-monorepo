@@ -367,7 +367,7 @@ integração com o pipeline TypeScript foi validada ponta a ponta.
   extraídos, CPF/CNPJ não persistidos (PII).
 - PDF digitalizado (imagem sem camada de texto): OCR real via Marker, extrai
   titular/endereço/CEP, `provenance.provider = 'marker'`.
-- PDF multipágina: texto extraído preservando ordem de leitura.
+- PDF multipágina: texto extraído de todas as páginas.
 - Fluxo completo: upload → análise → verificação materializa `claim_evidence`
   (`uploaded_document`, `stance = unknown`, sem `signal`, sem score alterado).
 - Replay do upload: não cria segunda análise nem reexecuta o Marker.
