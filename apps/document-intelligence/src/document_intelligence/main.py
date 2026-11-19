@@ -66,6 +66,9 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024
 # Não há modelo a carregar: o parser funciona sobre demanda.
 parser_ready = False
 parser_warmed = False
+# Disponibilidade do Tesseract verificada no startup (evita subprocesso
+# bloqueante no endpoint /health). Atualizada pelo lifespan.
+tesseract_available_at_startup = False
 # Capacidade = worker(s) + aguardando. Excedente recebe 429 antes de ler o
 # corpo do upload (não acumula PDFs em memória).
 queue = ProcessingQueue(
@@ -97,13 +100,14 @@ async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
         warmup=settings.warmup,
         ocr_lang=settings.ocr_lang,
     )
-    global parser_ready
+    global parser_ready, tesseract_available_at_startup
     # Não derruba o serviço se a verificação falhar: /ready reporta o erro.
     try:
         await asyncio.get_running_loop().run_in_executor(
             executor, _verify_tesseract
         )
         parser_ready = True
+        tesseract_available_at_startup = True
     except Exception as exc:  # pragma: no cover - falha de ambiente
         logger.error(
             "falha_ao_verificar_tesseract",
@@ -120,13 +124,14 @@ async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
 
 
 def _verify_tesseract() -> None:
-    """Verifica se o Tesseract está instalado e com o idioma 'por' disponível.
+    """Verifica se o Tesseract está instalado e com o idioma configurado disponível.
 
     Levanta exceção se não estiver disponível — o lifespan captura e loga.
     """
-    if not is_tesseract_available():
+    if not is_tesseract_available(settings.ocr_lang):
         raise RuntimeError(
-            "Tesseract não está instalado ou o idioma 'por' não está disponível"
+            f"Tesseract não está instalado ou o idioma '{settings.ocr_lang}' "
+            f"não está disponível"
         )
     logger.info(
         "tesseract_disponivel",
@@ -222,8 +227,16 @@ async def admission_control(request: Request, call_next: Any) -> Any:
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 async def health() -> HealthResponse:
-    """Status do serviço. Não carrega modelos nem depende de warmup."""
-    return HealthResponse(status="ok", marker_available=is_tesseract_available())
+    """Status do serviço. Não carrega modelos nem depende de warmup.
+
+    Não executa subprocessos bloqueantes: a disponibilidade do Tesseract é
+    a verificada no startup e armazenada em ``tesseract_available_at_startup``.
+    A liveness é independente da disponibilidade do Tesseract.
+    """
+    return HealthResponse(
+        status="ok",
+        tesseract_available=tesseract_available_at_startup,
+    )
 
 
 @app.get(
@@ -245,9 +258,11 @@ async def ready(response: Response) -> ReadyResponse:
     ready_status = "ready"
 
     checks["tesseract"] = (
-        "disponível" if parser_ready else "não disponível"
+        f"disponível ({settings.ocr_lang})"
+        if tesseract_available_at_startup
+        else "não disponível"
     )
-    if not parser_ready:
+    if not tesseract_available_at_startup:
         ready_status = "not_ready"
 
     if settings.warmup:

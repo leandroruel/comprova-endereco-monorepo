@@ -108,6 +108,7 @@ const buildProvenance = (
   provider: 'local' | 'marker' | 'tesseract',
   overrides?: {
     readonly markerVersion?: string
+    readonly processorVersion?: string
     readonly pages?: number
     readonly processingTimeMs?: number
     readonly fallback?: boolean
@@ -115,6 +116,7 @@ const buildProvenance = (
 ): DocumentAnalysisProvenance => ({
   provider,
   ...(overrides?.markerVersion === undefined ? {} : { markerVersion: overrides.markerVersion }),
+  ...(overrides?.processorVersion === undefined ? {} : { processorVersion: overrides.processorVersion }),
   ...(overrides?.pages === undefined ? {} : { pages: overrides.pages }),
   ...(overrides?.processingTimeMs === undefined ? {} : { processingTimeMs: overrides.processingTimeMs }),
   ...(overrides?.fallback === undefined ? {} : { fallback: overrides.fallback }),
@@ -227,7 +229,10 @@ interface MergedFields {
  * fontes vira ausência + limitação observável.
  */
 const mergeFieldCandidates = (
-  textFields: readonly { readonly source: 'local' | 'marker'; readonly fields: PdfFields | null }[],
+  textFields: readonly {
+    readonly source: 'local' | 'marker' | 'tesseract'
+    readonly fields: PdfFields | null
+  }[],
   tables: readonly TableCandidate[],
 ): MergedFields => {
   const addressCandidates: SourcedAddress[] = []
@@ -520,7 +525,7 @@ const analyzePdf = async (
 
     if (provider === 'tesseract' && markerResult !== null) {
       provenance = buildProvenance('tesseract', {
-        markerVersion: markerResult.markerVersion,
+        processorVersion: markerResult.markerVersion,
         pages: markerResult.pages,
         processingTimeMs: markerResult.processingTimeMs,
       })
@@ -564,9 +569,17 @@ const analyzePdf = async (
     // e tabelas do Marker) antes de decidir o status. A comparação é explícita:
     // valores equivalentes são mantidos, divergentes não são escolhidos.
     const markerFields = markerTextUsable ? fieldsFromPdfText(markerText) : null
-    const textFields: { readonly source: 'local' | 'marker'; readonly fields: PdfFields | null }[] = []
+    const textFields: {
+      readonly source: 'local' | 'marker' | 'tesseract'
+      readonly fields: PdfFields | null
+    }[] = []
     if (localFields !== null) textFields.push({ source: 'local', fields: localFields })
-    if (markerFields !== null) textFields.push({ source: 'marker', fields: markerFields })
+    if (markerFields !== null) {
+      // Quando o provider e 'tesseract', os campos do texto-base vem do Tesseract
+      // e devem ser registrados com essa origem, nao com 'marker'.
+      const markerSource = provider === 'tesseract' ? 'tesseract' : 'marker'
+      textFields.push({ source: markerSource, fields: markerFields })
+    }
     const tableCandidates = markerResult === null ? [] : extractTableCandidates(markerResult.tables)
     const merged = mergeFieldCandidates(textFields, tableCandidates)
 

@@ -239,7 +239,7 @@ describe('F1.2/F1.3 — integração real com o Document Intelligence (Tesseract
   )
 
   it(
-    'PDF digitalizado: usa OCR do Tesseract e extrai campos',
+    'PDF digitalizado: usa OCR do Tesseract e extrai campos essenciais',
     async () => {
       const validationId = await makeValidation()
       const pdf = readFileSync(new URL('./fixtures/digitalizado.pdf', import.meta.url))
@@ -256,25 +256,14 @@ describe('F1.2/F1.3 — integração real com o Document Intelligence (Tesseract
       expect(result.status).toBe('completed')
       // Camada local insuficiente (sem texto): usa Tesseract como base.
       expect(result.provenance?.provider).toBe('tesseract')
-      expect(result.provenance?.markerVersion).toBe('5.5.0')
-      // OCR convencional (Tesseract) não tem detecção de layout: pode não
-      // extrair endereço de PDFs digitalizados de baixa qualidade. Quando
-      // extraído, valida os campos.
-      if (result.address.status === 'extracted') {
-        expect(result.address.value?.cep).toBe('01001000')
-        expect(result.address.value?.logradouro).toBe('RUA DAS FLORES')
-      }
-      // OCR de imagem digitalizada pode introduzir ruído (ex: "UF." em vez de "UF");
-      // verifica UF quando disponível, mas não falha por ruído de OCR.
-      const uf = result.address.value?.uf
-      if (uf) {
-        expect(uf).toBe('SP')
-      }
-      // OCR convencional pode não reconhecer o nome do titular em imagens
-      // de baixa qualidade. Quando extraído, valida.
-      if (result.holder.status === 'extracted') {
-        expect(result.holder.value?.name).toBe('Maria da Silva')
-      }
+      // OCR do Tesseract deve extrair os campos essenciais do documento digitalizado
+      // de boa qualidade. As verificações são exigentes (não condicionais), para
+      // que o teste falhe quando os campos não forem extraídos ou estiverem incorretos.
+      expect(result.address.status).toBe('extracted')
+      expect(result.address.value?.cep).toBe('01001000')
+      expect(result.address.value?.logradouro).toBe('RUA DAS FLORES')
+      expect(result.holder.status).toBe('extracted')
+      expect(result.holder.value?.name).toBe('Maria da Silva')
     },
     TEST_TIMEOUT_MS,
   )

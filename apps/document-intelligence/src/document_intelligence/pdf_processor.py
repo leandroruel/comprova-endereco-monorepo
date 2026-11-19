@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass
 
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_raw
 
 from .config import settings
 from .logging import get_logger
@@ -130,6 +131,20 @@ def _extract_text_layer(
     )
 
 
+# Limite de caracteres da camada textual acima do qual a página é considerada
+# "completa" e imagens adicionais são tratadas como decorativas. Abaixo desse
+# limite, a presença de imagens indica conteúdo escaneado não capturado pelo
+# texto (página mista).
+_MIN_TEXT_LAYER_FOR_FULL_PAGE = 100
+
+
+def _page_has_images(document: pdfium.PdfDocument, page_index: int) -> bool:
+    """Verifica se a página contém objetos de imagem (escaneados ou embutidos)."""
+    page = document[page_index]
+    images = list(page.get_objects(filter=[pdfium_raw.FPDF_PAGEOBJ_IMAGE]))
+    return len(images) > 0
+
+
 def _ocr_page(
     document: pdfium.PdfDocument,
     page_index: int,
@@ -148,19 +163,21 @@ def _ocr_page(
         pil_image = pil_image.convert("RGB")
     width_px, height_px = pil_image.size
 
-    fd, image_path = tempfile.mkstemp(
+    # Preserva caminhos separados: original e pré-processado.
+    fd, original_image_path = tempfile.mkstemp(
         prefix=f"di-ocr-p{page_number}-", suffix=".png", dir=settings.temp_dir
     )
     os.close(fd)
 
     try:
-        pil_image.save(image_path, format="PNG")
+        pil_image.save(original_image_path, format="PNG")
 
+        preprocessed_image_path = original_image_path
         if getattr(settings, "ocr_preprocess", False):
             try:
                 from .ocr import preprocess_image_for_ocr
 
-                image_path = preprocess_image_for_ocr(image_path)
+                preprocessed_image_path = preprocess_image_for_ocr(original_image_path)
             except Exception as exc:  # pragma: no cover - falha de OpenCV
                 logger.warning(
                     "falha_preprocessamento_ocr",
@@ -170,10 +187,11 @@ def _ocr_page(
 
         lang = getattr(settings, "ocr_lang", "por")
         lines = ocr_image(
-            image_path,
+            preprocessed_image_path,
             lang=lang,
             page_width_px=width_px,
             page_height_px=height_px,
+            dpi=getattr(settings, "ocr_dpi", 200),
         )
 
         elements: list[DocumentElement] = []
@@ -214,15 +232,12 @@ def _ocr_page(
             source="ocr",
         )
     finally:
-        try:
-            os.unlink(image_path)
-        except FileNotFoundError:
-            pass
-        preprocessed = image_path.replace(".png", "_preprocessed.png")
-        try:
-            os.unlink(preprocessed)
-        except FileNotFoundError:
-            pass
+        # Remove todos os arquivos temporários criados durante o processamento.
+        for path in (preprocessed_image_path, original_image_path):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
 
 
 def _process_pdf_pages(
@@ -246,8 +261,37 @@ def _process_pdf_pages(
             page_number = page_index + 1
 
             layer_result = _extract_text_layer(document, page_index, page_number)
+
             if layer_result is not None:
-                results.append(layer_result)
+                # Camada textual utilizável. Verifica se há imagens que podem
+                # conter conteúdo não capturado pelo texto (página mista:
+                # cabeçalho textual + conteúdo escaneado em imagem).
+                has_images = _page_has_images(document, page_index)
+                if (
+                    has_images
+                    and len(layer_result.text) < _MIN_TEXT_LAYER_FOR_FULL_PAGE
+                ):
+                    # Página mista: texto curto + imagens → também OCR para
+                    # não perder conteúdo nas imagens. Mantém o texto da camada
+                    # e acrescenta o do OCR sem descartar nenhum dos dois.
+                    any_ocr = True
+                    ocr_result = _ocr_page(document, page_index, page_number)
+                    combined_text = layer_result.text + "\n" + ocr_result.text
+                    combined_elements = layer_result.elements + ocr_result.elements
+                    results.append(
+                        _PageTextResult(
+                            page_number=page_number,
+                            text=combined_text,
+                            elements=combined_elements,
+                            width=layer_result.width,
+                            height=layer_result.height,
+                            source="mixed",
+                        )
+                    )
+                else:
+                    # Página totalmente digital: camada textual suficiente,
+                    # imagens (se houver) são decorativas.
+                    results.append(layer_result)
                 continue
 
             any_ocr = True

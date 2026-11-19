@@ -130,7 +130,7 @@ export interface DocumentAnalysisDimension<T> {
  * Origem de um campo quando texto local, texto do Marker e tabelas do Marker
  * coexistem. `marker_table` identifica candidatos extraídos de tabelas.
  */
-export const DOCUMENT_ANALYSIS_FIELD_SOURCES = ['local', 'marker', 'marker_table'] as const
+export const DOCUMENT_ANALYSIS_FIELD_SOURCES = ['local', 'marker', 'marker_table', 'tesseract'] as const
 
 export type DocumentAnalysisFieldSource = (typeof DOCUMENT_ANALYSIS_FIELD_SOURCES)[number]
 

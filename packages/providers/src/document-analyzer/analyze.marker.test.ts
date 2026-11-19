@@ -134,7 +134,7 @@ describe('análise com fallback para o Marker (F1.2)', () => {
     expect(result.status).toBe('completed')
     expect(result.provenance).toMatchObject({
       provider: 'tesseract',
-      markerVersion: '5.5.0',
+      processorVersion: '5.5.0',
       pages: 1,
       processingTimeMs: 10,
     })

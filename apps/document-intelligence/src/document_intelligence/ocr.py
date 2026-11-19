@@ -32,11 +32,9 @@ CONTRACT_VERSION = "1.0"
 # Nome do processador utilizado (substitui "marker").
 PROCESSOR_NAME = "tesseract"
 
-# Escala de coordenadas: Tesseract devolve pixels; o contrato usa pontos PDF
-# (72 pt = 1 polegada). A renderização é feita a ``OCR_DPI`` DPI.
-OCR_DPI = 200
+# Fator de conversão: Tesseract devolve pixels; o contrato usa pontos PDF
+# (72 pt = 1 polegada). A escala é calculada a partir do DPI da renderização.
 _POINTS_PER_INCH = 72.0
-_PIXEL_TO_POINT = _POINTS_PER_INCH / OCR_DPI  # 0.36
 
 
 @dataclass(frozen=True)
@@ -96,8 +94,12 @@ def tesseract_version() -> str | None:
         return None
 
 
-def is_tesseract_available() -> bool:
-    """``True`` se o Tesseract está instalado e o idioma ``por`` existe."""
+def is_tesseract_available(lang: str = DEFAULT_LANG) -> bool:
+    """``True`` se o Tesseract está instalado e o idioma configurado existe.
+
+    Verifica correspondência exata na lista de idiomas instalados, não
+    apenas substring, para evitar falsos positivos (ex.: "por" em "por_equ").
+    """
     binary = _tesseract_binary()
     if binary is None:
         return False
@@ -109,9 +111,8 @@ def is_tesseract_available() -> bool:
             timeout=10,
             check=True,
         )
-        langs = result.stdout.splitlines()
-        # A primeira linha é o cabeçalho "Available languages: ...".
-        return any(DEFAULT_LANG in line for line in langs)
+        langs = [line.strip() for line in result.stdout.splitlines()[1:] if line.strip()]
+        return lang in langs
     except Exception:  # pragma: no cover - falha de ambiente
         return False
 
@@ -215,14 +216,14 @@ def _parse_tsv(tsv_output: str) -> list[OcrWord]:
 
 
 def _words_to_lines(
-    words: list[OcrWord], page_width_px: int, page_height_px: int
+    words: list[OcrWord], page_width_px: int, page_height_px: int, dpi: int = 200
 ) -> list[OcrLine]:
     """Agrupa palavras por bloco/linha e devolve linhas com caixa unida.
 
     As coordenadas são convertidas de pixels (Tesseract, origem topo-esquerda)
-    para pontos PDF (origem baixo-esquerda), com escala ``72 / OCR_DPI``.
+    para pontos PDF (origem baixo-esquerda), com escala ``72 / dpi``.
     """
-    scale = _PIXEL_TO_POINT
+    scale = _POINTS_PER_INCH / dpi
     # Agrupa palavras por (block_num, par_num, line_num), preservando ordem.
     groups: dict[tuple[int, int, int], list[OcrWord]] = {}
     for word in words:
@@ -273,6 +274,7 @@ def ocr_image(
     lang: str = DEFAULT_LANG,
     page_width_px: int | None = None,
     page_height_px: int | None = None,
+    dpi: int = 200,
 ) -> list[OcrLine]:
     """Executa OCR em uma imagem e devolve linhas reconhecidas.
 
@@ -288,7 +290,7 @@ def ocr_image(
     words = _parse_tsv(tsv_output)
 
     if page_width_px is not None and page_height_px is not None:
-        return _words_to_lines(words, page_width_px, page_height_px)
+        return _words_to_lines(words, page_width_px, page_height_px, dpi=dpi)
 
     # Sem conversão: devolve linhas com coordenadas em pixels (mantido para
     # uso direto de imagens, não-PDF).
@@ -326,7 +328,7 @@ def ocr_image(
 def render_page_to_image(
     pdf_path: str,
     page_number: int,
-    dpi: int = OCR_DPI,
+    dpi: int = 200,
     output_path: str | None = None,
 ) -> tuple[str, int, int]:
     """Renderiza uma página de PDF em imagem (PNG) para OCR.
