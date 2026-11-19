@@ -54,8 +54,8 @@ const diResponse = (overrides: Partial<DocumentIntelligenceResponse> = {}): Docu
   content: { text: MARKER_TEXT },
   pages: [{ pageNumber: 1, width: 612, height: 792, elements: [] }],
   metadata: {
-    processor: 'marker',
-    processorVersion: '2.1.0',
+    processor: 'tesseract',
+    processorVersion: '5.5.0',
     processingTimeMs: 10,
     contractVersion: '1.0',
   },
@@ -133,8 +133,8 @@ describe('análise com fallback para o Marker (F1.2)', () => {
     expect(parsePdf).toHaveBeenCalledTimes(1)
     expect(result.status).toBe('completed')
     expect(result.provenance).toMatchObject({
-      provider: 'marker',
-      markerVersion: '2.1.0',
+      provider: 'tesseract',
+      processorVersion: '5.5.0',
       pages: 1,
       processingTimeMs: 10,
     })
@@ -224,7 +224,7 @@ describe('análise com fallback para o Marker (F1.2)', () => {
       documentId: NF3E_KEY,
       method: 'qr_code',
     })
-    expect(result.provenance).toMatchObject({ provider: 'marker' })
+    expect(result.provenance).toMatchObject({ provider: 'tesseract' })
   })
 
   it('complementa campos ausentes do texto com tabelas do Marker', async () => {
@@ -261,7 +261,7 @@ describe('análise com fallback para o Marker (F1.2)', () => {
 
     expect(result.status).toBe('completed')
     expect(result.address.status).toBe('not_extracted')
-    expect(result.provenance).toMatchObject({ provider: 'marker' })
+    expect(result.provenance).toMatchObject({ provider: 'tesseract' })
   })
 
   it('texto local acima do mínimo sem titular/endereço aciona o Marker', async () => {

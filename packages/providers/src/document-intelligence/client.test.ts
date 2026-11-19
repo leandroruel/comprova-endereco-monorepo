@@ -31,8 +31,8 @@ const validPayload = (overrides: Record<string, unknown> = {}): Record<string, u
   content: { text: 'abc', markdown: 'abc' },
   pages: [{ pageNumber: 1, elements: [], width: 612, height: 792 }],
   metadata: {
-    processor: 'marker',
-    processorVersion: '2.1.0',
+    processor: 'tesseract',
+    processorVersion: '5.5.0',
     processingTimeMs: 5,
     contractVersion: '1.0',
   },
@@ -95,7 +95,7 @@ describe('document intelligence client', () => {
     expect(capturedForm?.get('document_id')).toBe('doc-1')
     expect(capturedForm?.get('file')).toBeInstanceOf(Blob)
     expect(result.document.pageCount).toBe(1)
-    expect(result.metadata.processor).toBe('marker')
+    expect(result.metadata.processor).toBe('tesseract')
   })
 
   it('normaliza barra final da URL', async () => {

@@ -105,9 +105,10 @@ const emitAnalysisResult = (trace: DebugTraceSink | undefined, result: DocumentA
  * Constrói o objeto de proveniência para o resultado da análise.
  */
 const buildProvenance = (
-  provider: 'local' | 'marker',
+  provider: 'local' | 'marker' | 'tesseract',
   overrides?: {
     readonly markerVersion?: string
+    readonly processorVersion?: string
     readonly pages?: number
     readonly processingTimeMs?: number
     readonly fallback?: boolean
@@ -115,6 +116,7 @@ const buildProvenance = (
 ): DocumentAnalysisProvenance => ({
   provider,
   ...(overrides?.markerVersion === undefined ? {} : { markerVersion: overrides.markerVersion }),
+  ...(overrides?.processorVersion === undefined ? {} : { processorVersion: overrides.processorVersion }),
   ...(overrides?.pages === undefined ? {} : { pages: overrides.pages }),
   ...(overrides?.processingTimeMs === undefined ? {} : { processingTimeMs: overrides.processingTimeMs }),
   ...(overrides?.fallback === undefined ? {} : { fallback: overrides.fallback }),
@@ -227,7 +229,10 @@ interface MergedFields {
  * fontes vira ausência + limitação observável.
  */
 const mergeFieldCandidates = (
-  textFields: readonly { readonly source: 'local' | 'marker'; readonly fields: PdfFields | null }[],
+  textFields: readonly {
+    readonly source: 'local' | 'marker' | 'tesseract'
+    readonly fields: PdfFields | null
+  }[],
   tables: readonly TableCandidate[],
 ): MergedFields => {
   const addressCandidates: SourcedAddress[] = []
@@ -276,7 +281,7 @@ const mergeFieldCandidates = (
  */
 const fieldSourcesOf = (
   merged: MergedFields,
-  provider: 'local' | 'marker',
+  provider: 'local' | 'marker' | 'tesseract',
 ): DocumentAnalysisFieldSources | undefined => {
   const address =
     merged.addressSource !== null && merged.addressSource !== provider ? merged.addressSource : null
@@ -514,12 +519,13 @@ const analyzePdf = async (
     // Texto-base: a camada local utilizável continua sendo a base (o Marker só
     // complementa); o texto do Marker só vira base quando a camada local não
     // serve.
-    const provider: 'local' | 'marker' = !localUsable && markerTextUsable ? 'marker' : 'local'
-    const bestText = provider === 'marker' ? markerText : normalizedLocal
+    const provider: 'local' | 'marker' | 'tesseract' =
+      !localUsable && markerTextUsable ? 'tesseract' : 'local'
+    const bestText = provider === 'tesseract' ? markerText : normalizedLocal
 
-    if (provider === 'marker' && markerResult !== null) {
-      provenance = buildProvenance('marker', {
-        markerVersion: markerResult.markerVersion,
+    if (provider === 'tesseract' && markerResult !== null) {
+      provenance = buildProvenance('tesseract', {
+        processorVersion: markerResult.markerVersion,
         pages: markerResult.pages,
         processingTimeMs: markerResult.processingTimeMs,
       })
@@ -563,13 +569,21 @@ const analyzePdf = async (
     // e tabelas do Marker) antes de decidir o status. A comparação é explícita:
     // valores equivalentes são mantidos, divergentes não são escolhidos.
     const markerFields = markerTextUsable ? fieldsFromPdfText(markerText) : null
-    const textFields: { readonly source: 'local' | 'marker'; readonly fields: PdfFields | null }[] = []
+    const textFields: {
+      readonly source: 'local' | 'marker' | 'tesseract'
+      readonly fields: PdfFields | null
+    }[] = []
     if (localFields !== null) textFields.push({ source: 'local', fields: localFields })
-    if (markerFields !== null) textFields.push({ source: 'marker', fields: markerFields })
+    if (markerFields !== null) {
+      // Quando o provider e 'tesseract', os campos do texto-base vem do Tesseract
+      // e devem ser registrados com essa origem, nao com 'marker'.
+      const markerSource = provider === 'tesseract' ? 'tesseract' : 'marker'
+      textFields.push({ source: markerSource, fields: markerFields })
+    }
     const tableCandidates = markerResult === null ? [] : extractTableCandidates(markerResult.tables)
     const merged = mergeFieldCandidates(textFields, tableCandidates)
 
-    const baseFields = provider === 'marker' ? markerFields : localFields
+    const baseFields = provider === 'tesseract' ? markerFields : localFields
     const limitations = [...(baseFields?.limitations ?? []), ...merged.limitations]
     // Uma falha do Marker permanece observável mesmo quando a análise conclui
     // com a camada local.

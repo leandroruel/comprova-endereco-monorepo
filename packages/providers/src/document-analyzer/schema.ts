@@ -89,8 +89,9 @@ export const documentAnalysisResultSchema = z
     analyzedAt: z.iso.datetime(),
     provenance: z
       .object({
-        provider: z.enum(['local', 'marker']),
+        provider: z.enum(['local', 'marker', 'tesseract']),
         markerVersion: z.string().min(1).optional(),
+        processorVersion: z.string().optional(),
         pages: z.number().int().nonnegative().optional(),
         processingTimeMs: z.number().int().nonnegative().optional(),
         fallback: z.boolean().optional(),

@@ -39,8 +39,8 @@ const validPayload = (overrides: Record<string, unknown> = {}): Record<string, u
     },
   ],
   metadata: {
-    processor: 'marker',
-    processorVersion: '2.1.0',
+    processor: 'tesseract',
+    processorVersion: '5.5.0',
     processingTimeMs: 12,
     contractVersion: '1.0',
   },
@@ -79,7 +79,7 @@ describe('MarkerAdapter', () => {
 
     expect(result.text).toBe('Titular: Maria da Silva')
     expect(result.pages).toBe(1)
-    expect(result.markerVersion).toBe('2.1.0')
+    expect(result.markerVersion).toBe('5.5.0')
     expect(result.processingTimeMs).toBe(12)
     expect(result.tables).toEqual([])
   })
