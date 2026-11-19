@@ -47,5 +47,5 @@ def test_defaults_de_admissao_e_imagens(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert settings.max_concurrency == 1
     assert settings.max_queue == 2
-    assert settings.include_images is True
+    assert settings.include_images is False
     assert settings.max_image_bytes < settings.max_total_image_bytes

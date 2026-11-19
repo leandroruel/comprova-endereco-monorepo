@@ -1,10 +1,9 @@
 [project]
 name = "document-intelligence"
 version = "0.1.0"
-description = "Serviço independente de processamento documental com Marker (OCR + layout, sem LLM)"
+description = "Serviço independente de processamento documental com Tesseract (OCR, sem VLM, sem LLM)"
 requires-python = ">=3.10,<4"
 dependencies = [
-    "marker-pdf==2.1.0",
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
     "pydantic>=2.4,<3",
@@ -16,6 +15,9 @@ dependencies = [
     "structlog>=24.1,<28",
     "beautifulsoup4>=4.12,<5",
     "pypdfium2>=4,<6",
+    "Pillow>=10,<12",
+    "opencv-python-headless>=4.8,<5",
+    "pytesseract>=0.3,<1",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +36,7 @@ packages = ["src/document_intelligence"]
 
 [tool.pytest.ini_options]
 markers = [
-    "integration: teste de integracao (exige modelos do Marker)",
+    "integration: teste de integracao (exige Tesseract instalado)",
 ]
 testpaths = ["src/document_intelligence/tests"]
 asyncio_mode = "auto"

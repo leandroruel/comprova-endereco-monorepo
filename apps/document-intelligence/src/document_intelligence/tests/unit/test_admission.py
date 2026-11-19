@@ -1,9 +1,9 @@
 """Testes do controle de admissão (capacidade) do endpoint de parsing.
 
-Não carregam modelos: ``parser.parse`` é substituído por um stub controlado
-por ``threading.Event``. O que se valida aqui é o ciclo de vida do slot —
-antes da leitura do upload, em erros, no timeout, no cancelamento e na falha
-inesperada — e não a inferência do Marker.
+Não carregam o Tesseract: ``build_parse_response`` é substituído por um stub
+controlado por ``threading.Event``. O que se valida aqui é o ciclo de vida do
+slot — antes da leitura do upload, em erros, no timeout, no cancelamento e na
+falha inesperada — e não o OCR do Tesseract.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _fake_response(document_id: str, pages: int = 1) -> ParseResponse:
         content={"text": "ok", "markdown": "ok"},
         pages=[],
         metadata=ProcessingMetadata(
-            processor_version="2.1.0", processing_time_ms=1
+            processor_version="5.3.4", processing_time_ms=1
         ),
     )
 
@@ -51,7 +51,7 @@ def _env(
     max_concurrency: int = 1,
     max_queue: int = 0,
 ) -> Iterator[ProcessingQueue]:
-    """Instala fila e executor isolados (sem modelos) para o teste."""
+    """Instala fila e executor isolados (sem Tesseract) para o teste."""
     fila = ProcessingQueue(
         max_concurrency=max_concurrency, max_queue=max_queue
     )
@@ -115,7 +115,7 @@ def test_concorrencia_respeita_capacidade_e_excedente_recebe_429(
     max_running = 0
     calls: list[str] = []
 
-    def fake_parse(path, document_id, size_bytes=0):
+    def fake_build(path, document_id, size_bytes=0):
         nonlocal running, max_running
         with lock:
             running += 1
@@ -127,7 +127,7 @@ def test_concorrencia_respeita_capacidade_e_excedente_recebe_429(
             running -= 1
         return _fake_response(document_id)
 
-    monkeypatch.setattr(main.parser, "parse", fake_parse)
+    monkeypatch.setattr(main, "build_parse_response", fake_build)
 
     with _env(monkeypatch, max_concurrency=1, max_queue=1) as fila:
         results: dict[str, httpx.Response] = {}
@@ -213,12 +213,12 @@ def test_slot_ocupado_enquanto_inferencia_continua_apos_timeout(
     started = threading.Event()
     release = threading.Event()
 
-    def fake_parse(path, document_id, size_bytes=0):
+    def fake_build(path, document_id, size_bytes=0):
         started.set()
         release.wait(15)
         return _fake_response(document_id)
 
-    monkeypatch.setattr(main.parser, "parse", fake_parse)
+    monkeypatch.setattr(main, "build_parse_response", fake_build)
     monkeypatch.setattr(main.settings, "timeout_s", 1)
 
     with _env(monkeypatch, max_concurrency=1, max_queue=0) as fila:
@@ -253,12 +253,12 @@ async def test_cancelamento_do_cliente_nao_libera_slot_antes(
     started = threading.Event()
     release = threading.Event()
 
-    def fake_parse(path, document_id, size_bytes=0):
+    def fake_build(path, document_id, size_bytes=0):
         started.set()
         release.wait(15)
         return _fake_response(document_id)
 
-    monkeypatch.setattr(main.parser, "parse", fake_parse)
+    monkeypatch.setattr(main, "build_parse_response", fake_build)
 
     with _env(monkeypatch, max_concurrency=1, max_queue=0) as fila:
         transport = httpx.ASGITransport(app=main.app)
@@ -300,7 +300,7 @@ def test_sem_slots_presos_apos_excecao_inesperada(
     def boom(path, document_id, size_bytes=0):
         raise RuntimeError("falha simulada no worker")
 
-    monkeypatch.setattr(main.parser, "parse", boom)
+    monkeypatch.setattr(main, "build_parse_response", boom)
 
     with _env(monkeypatch, max_concurrency=1, max_queue=0) as fila:
         client = TestClient(main.app, raise_server_exceptions=False)

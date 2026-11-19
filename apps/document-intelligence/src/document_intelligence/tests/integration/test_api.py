@@ -1,4 +1,4 @@
-"""Testes de API rápidos (não carregam modelos)."""
+"""Testes de API rápidos (não carregam Tesseract)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from document_intelligence.schemas import (
 
 
 def _fake_response(document_id: str) -> ParseResponse:
-    """Resposta mínima compatível com o contrato (sem Marker)."""
+    """Resposta mínima compatível com o contrato (sem Tesseract)."""
     return ParseResponse(
         document_id=document_id,
         status="completed",
@@ -22,7 +22,7 @@ def _fake_response(document_id: str) -> ParseResponse:
         ),
         content={"text": "ok", "markdown": "ok"},
         metadata=ProcessingMetadata(
-            processor_version="2.1.0", processing_time_ms=1
+            processor_version="5.3.4", processing_time_ms=1
         ),
     )
 
@@ -35,12 +35,12 @@ def test_health(client: TestClient) -> None:
     assert body["service"] == "document-intelligence"
 
 
-def test_health_200_durante_carregamento_de_modelos(
+def test_health_200_durante_verificacao_do_tesseract(
     client: TestClient, monkeypatch
 ) -> None:
-    """Liveness não depende de modelos carregados nem de warmup."""
-    monkeypatch.setattr(main.parser, "_loaded", False)
-    monkeypatch.setattr(main.parser, "_warm", False)
+    """Liveness não depende do Tesseract estar disponível nem de warmup."""
+    monkeypatch.setattr(main, "parser_ready", False)
+    monkeypatch.setattr(main, "parser_warmed", False)
 
     response = client.get("/health")
 
@@ -55,14 +55,14 @@ def test_ready_reflete_prontidao(client: TestClient) -> None:
 
     assert body["status"] in {"ready", "not_ready"}
     assert response.status_code == (200 if body["status"] == "ready" else 503)
-    assert "marker_modelos" in body["checks"]
+    assert "tesseract" in body["checks"]
     assert body["checks"]["max_paginas"] == str(main.settings.max_pages)
 
 
-def test_ready_503_antes_de_carregar_modelos(
+def test_ready_503_antes_de_verificar_tesseract(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setattr(main.parser, "_loaded", False)
+    monkeypatch.setattr(main, "parser_ready", False)
 
     response = client.get("/ready")
 
@@ -72,8 +72,8 @@ def test_ready_503_antes_de_carregar_modelos(
 
 
 def test_ready_503_durante_warmup(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr(main.parser, "_loaded", True)
-    monkeypatch.setattr(main.parser, "_warm", False)
+    monkeypatch.setattr(main, "parser_ready", True)
+    monkeypatch.setattr(main, "parser_warmed", False)
     monkeypatch.setattr(main.settings, "warmup", True)
 
     response = client.get("/ready")
@@ -85,7 +85,7 @@ def test_ready_503_durante_warmup(client: TestClient, monkeypatch) -> None:
 def test_ready_503_com_memoria_insuficiente(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setattr(main.parser, "_loaded", True)
+    monkeypatch.setattr(main, "parser_ready", True)
     monkeypatch.setattr(main.settings, "warmup", False)
     monkeypatch.setattr(main.settings, "min_free_memory_mb", 10**9)
 
@@ -97,8 +97,8 @@ def test_ready_503_com_memoria_insuficiente(
 
 
 def test_ready_200_quando_tudo_esta_pronto(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr(main.parser, "_loaded", True)
-    monkeypatch.setattr(main.parser, "_warm", True)
+    monkeypatch.setattr(main, "parser_ready", True)
+    monkeypatch.setattr(main, "parser_warmed", True)
     monkeypatch.setattr(main.settings, "warmup", False)
     monkeypatch.setattr(main.settings, "min_free_memory_mb", 0)
 
@@ -111,10 +111,11 @@ def test_ready_200_quando_tudo_esta_pronto(client: TestClient, monkeypatch) -> N
 def test_pdf_dentro_do_limite_de_paginas_e_aceito(
     client: TestClient, sample_text_pdf, monkeypatch
 ) -> None:
-    """PDF de 2 páginas com limite 3 → segue para a inferência."""
+    """PDF de 2 páginas com limite 3 → segue para o processamento."""
     monkeypatch.setattr(main.settings, "max_pages", 3)
     monkeypatch.setattr(
-        main.parser, "parse", lambda path, document_id, size_bytes=0: _fake_response(document_id)
+        main, "build_parse_response",
+        lambda path, document_id, size_bytes=0: _fake_response(document_id),
     )
 
     response = client.post(
@@ -132,7 +133,8 @@ def test_pdf_exatamente_no_limite_de_paginas_e_aceito(
     """PDF de 2 páginas com limite 2 → aceito (limite é inclusivo)."""
     monkeypatch.setattr(main.settings, "max_pages", 2)
     monkeypatch.setattr(
-        main.parser, "parse", lambda path, document_id, size_bytes=0: _fake_response(document_id)
+        main, "build_parse_response",
+        lambda path, document_id, size_bytes=0: _fake_response(document_id),
     )
 
     response = client.post(
@@ -143,18 +145,18 @@ def test_pdf_exatamente_no_limite_de_paginas_e_aceito(
     assert response.status_code == 200
 
 
-def test_pdf_acima_do_limite_responde_422_sem_chamar_o_parser(
+def test_pdf_acima_do_limite_responde_422_sem_chamar_o_processador(
     client: TestClient, sample_text_pdf, monkeypatch
 ) -> None:
-    """O limite é aplicado na inspeção prévia: o Marker nem é chamado."""
+    """O limite é aplicado na inspeção prévia: o processador nem é chamado."""
     monkeypatch.setattr(main.settings, "max_pages", 1)
     chamadas: list[str] = []
 
-    def fake_parse(path, document_id, size_bytes=0):
+    def fake_build(path, document_id, size_bytes=0):
         chamadas.append(document_id)
         return _fake_response(document_id)
 
-    monkeypatch.setattr(main.parser, "parse", fake_parse)
+    monkeypatch.setattr(main, "build_parse_response", fake_build)
 
     response = client.post(
         "/documents/parse",
@@ -163,7 +165,7 @@ def test_pdf_acima_do_limite_responde_422_sem_chamar_o_parser(
 
     assert response.status_code == 422
     assert "páginas" in response.json()["detail"]
-    assert chamadas == [], "parser.parse foi chamado antes de aplicar o limite"
+    assert chamadas == [], "processador foi chamado antes de aplicar o limite"
 
 
 def test_rejeita_nao_pdf(client: TestClient) -> None:
@@ -234,7 +236,10 @@ def test_timeout_responde_504(client: TestClient, sample_text_pdf, monkeypatch) 
     from document_intelligence import main
 
     monkeypatch.setattr(main.settings, "timeout_s", 1)
-    monkeypatch.setattr(main.parser, "parse", lambda *args, **kwargs: time.sleep(2))
+    monkeypatch.setattr(
+        main, "build_parse_response",
+        lambda *args, **kwargs: time.sleep(2),
+    )
 
     conteudo = sample_text_pdf.read_bytes()
     response = client.post(

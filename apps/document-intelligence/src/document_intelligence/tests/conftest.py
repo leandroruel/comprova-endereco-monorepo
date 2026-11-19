@@ -6,9 +6,8 @@ import os
 from pathlib import Path
 
 # Desativa o pré-carregamento/aquecimento no ciclo de vida do app durante os
-# testes, para que o TestClient não baixe/carregue modelos. Os testes de
-# integração que realmente precisam do Marker o fazem explicitamente.
-os.environ.setdefault("DI_PRELOAD_MODELS", "false")
+# testes, para que o TestClient não tente verificar o Tesseract. Os testes de
+# integração que realmente precisam do Tesseract o fazem explicitamente.
 os.environ.setdefault("DI_WARMUP", "false")
 
 import pytest  # noqa: E402
@@ -17,25 +16,25 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
-        "markers", "integration: teste de integracao (exige modelos do Marker)"
+        "markers", "integration: teste de integracao (exige Tesseract instalado)"
     )
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def marker_available() -> bool:
-    """True se o pacote Marker pode ser importado neste ambiente."""
+def tesseract_available() -> bool:
+    """True se o Tesseract pode ser executado neste ambiente com o idioma 'por'."""
     try:
-        import marker  # noqa: F401
+        from document_intelligence.ocr import is_tesseract_available
 
-        return True
+        return is_tesseract_available()
     except Exception:
         return False
 
 
-requires_marker = pytest.mark.skipif(
-    not marker_available(), reason="Marker não instalado neste ambiente"
+requires_tesseract = pytest.mark.skipif(
+    not tesseract_available(), reason="Tesseract não instalado neste ambiente"
 )
 
 

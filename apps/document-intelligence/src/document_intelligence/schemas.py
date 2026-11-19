@@ -103,7 +103,7 @@ class DocumentInfo(CamelModel):
 class ProcessingMetadata(CamelModel):
     """Metadados do processamento."""
 
-    processor: str = "marker"
+    processor: str = "tesseract"
     processor_version: str
     processing_time_ms: int
     contract_version: str = "1.0"
@@ -132,7 +132,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     service: str = "document-intelligence"
     version: str = "0.1.0"
-    marker_available: bool = False
+    tesseract_available: bool = False
 
 
 class ReadyResponse(BaseModel):
