@@ -1,7 +1,7 @@
 {
   "total_documentos": 10,
   "documentos_com_sucesso": 10,
-  "media_taxa_acerto": 0.5866,
+  "media_taxa_acerto": 0.6174,
   "por_campo": {
     "titular": {
       "total": 10,
@@ -55,8 +55,8 @@
     },
     "consumo_kwh": {
       "total": 5,
-      "acertos": 3,
-      "taxa_acerto": 0.6
+      "acertos": 5,
+      "taxa_acerto": 1.0
     },
     "valor_energia": {
       "total": 5,
@@ -70,8 +70,8 @@
     },
     "consumo_m3": {
       "total": 5,
-      "acertos": 1,
-      "taxa_acerto": 0.2
+      "acertos": 3,
+      "taxa_acerto": 0.6
     },
     "valor_agua": {
       "total": 5,
@@ -88,8 +88,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1718,
-      "taxa_acerto": 0.9231,
-      "acertos": 12,
+      "taxa_acerto": 1.0,
+      "acertos": 13,
       "total": 13,
       "campos": [
         {
@@ -155,8 +155,8 @@
         {
           "campo": "consumo_kwh",
           "esperado": "387",
-          "extraido": null,
-          "correto": false
+          "extraido": "387",
+          "correto": true
         },
         {
           "campo": "valor_energia",
@@ -352,8 +352,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1710,
-      "taxa_acerto": 0.9231,
-      "acertos": 12,
+      "taxa_acerto": 1.0,
+      "acertos": 13,
       "total": 13,
       "campos": [
         {
@@ -419,8 +419,8 @@
         {
           "campo": "consumo_kwh",
           "esperado": "220",
-          "extraido": null,
-          "correto": false
+          "extraido": "220",
+          "correto": true
         },
         {
           "campo": "valor_energia",
@@ -616,8 +616,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1720,
-      "taxa_acerto": 0.9231,
-      "acertos": 12,
+      "taxa_acerto": 1.0,
+      "acertos": 13,
       "total": 13,
       "campos": [
         {
@@ -683,8 +683,8 @@
         {
           "campo": "consumo_m3",
           "esperado": "36",
-          "extraido": null,
-          "correto": false
+          "extraido": "36",
+          "correto": true
         },
         {
           "campo": "valor_agua",
@@ -800,8 +800,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1707,
-      "taxa_acerto": 0.9231,
-      "acertos": 12,
+      "taxa_acerto": 1.0,
+      "acertos": 13,
       "total": 13,
       "campos": [
         {
@@ -867,8 +867,8 @@
         {
           "campo": "consumo_m3",
           "esperado": "69",
-          "extraido": null,
-          "correto": false
+          "extraido": "69",
+          "correto": true
         },
         {
           "campo": "valor_agua",

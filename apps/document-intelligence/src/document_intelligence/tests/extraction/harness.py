@@ -51,9 +51,11 @@ _RE_VALOR_LABEL = re.compile(
 # Aceita espaços ao redor da barra e nomes de cidade com caracteres acentuados.
 # Usa re.IGNORECASE porque a busca é feita no texto lowercase (tl).
 _RE_CIDADE_UF = re.compile(r"([A-Za-zÀ-ÿ\s]+?)\s*/\s*([A-Z]{2})", re.IGNORECASE)
-_RE_KWH = re.compile(r"consumo\s*[:.]\s*(\d{2,4})\s*kWh", re.IGNORECASE)
-# m³ aceita superscript (m³) ou ASCII normalizado (m3).
-_RE_M3 = re.compile(r"consumo\s*[:.]\s*(\d{1,4})\s*m³?", re.IGNORECASE)
+# kWh aceita (kWh) ou (kWh) entre parênteses ou diretamente após os dois pontos.
+_RE_KWH = re.compile(r"consumo\s*(?:\(kWh\)|\(kwh\))?\s*[:.]\s*(\d{2,4})", re.IGNORECASE)
+# m³ aceita superscript (m³) ou ASCII normalizado (m3), opcionalmente entre
+# parênteses (ex: "Consumo (m³):69").
+_RE_M3 = re.compile(r"consumo\s*(?:\(m³\)|\(m3\))?\s*[:.]\s*(\d{1,4})", re.IGNORECASE)
 
 
 def _carregar_json(caminho: str) -> dict:
