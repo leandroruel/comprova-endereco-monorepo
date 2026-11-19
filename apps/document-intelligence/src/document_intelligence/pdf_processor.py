@@ -74,9 +74,14 @@ def _normalize_text(text: str) -> str:
 
 
 def _page_size_points(document: pdfium.PdfDocument, page_index: int) -> tuple[float, float]:
-    """Devolve (largura, altura) da página em pontos PDF."""
+    """Devolve (largura, altura) da página em pontos PDF.
+
+    Usa ``get_mediabox()`` (em vez de ``get_bbox()``) para que as dimensões
+    coincidam com o frame usado por ``page.render()``, evitando desalinhamento
+    em páginas rotacionadas (90º, 270º).
+    """
     page = document[page_index]
-    bbox = page.get_bbox()
+    bbox = page.get_mediabox()
     width = float(bbox[2] - bbox[0])
     height = float(bbox[3] - bbox[1])
     return width, height
@@ -169,10 +174,13 @@ def _ocr_page(
     )
     os.close(fd)
 
+    # Inicializa antes do try para que o finally possa limpar mesmo se
+    # pil_image.save() falhar.
+    preprocessed_image_path = original_image_path
+
     try:
         pil_image.save(original_image_path, format="PNG")
 
-        preprocessed_image_path = original_image_path
         if getattr(settings, "ocr_preprocess", False):
             try:
                 from .ocr import preprocess_image_for_ocr

@@ -114,7 +114,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
             error_type=type(exc).__name__,
             error=str(exc),
         )
-    if settings.warmup and settings.preload_models:
+    if settings.warmup:
         # Aquecimento em background: /health responde imediatamente e /ready
         # sinaliza "não pronto" até o aquecimento concluir.
         asyncio.create_task(_run_warmup())
@@ -155,8 +155,12 @@ def _warmup() -> None:
 
     O primeiro processamento pode carregar recursos adicionais do Tesseract.
     Rodar isto no startup evita que a primeira requisição real estoure o
-    timeout.
+    timeout. Exercita tanto a camada textual quanto o caminho de OCR do
+    Tesseract para garantir que o binário e o idioma estejam prontos.
     """
+    import os
+
+    from .ocr import ocr_image, render_page_to_image
     from .security import temporary_pdf_path
     from .warmup import build_warmup_pdf
 
@@ -167,6 +171,16 @@ def _warmup() -> None:
             build_warmup_pdf(), prefix="di-warmup-", dir=settings.temp_dir
         ) as path:
             response = build_parse_response(path, "warmup", size_bytes=0)
+            # Exercita o caminho de OCR do Tesseract: renderiza a página e
+            # executa OCR para garantir que o binário e o idioma estejam prontos.
+            img_path, _, _ = render_page_to_image(path, 1, dpi=settings.ocr_dpi)
+            try:
+                ocr_image(img_path, lang=settings.ocr_lang)
+            finally:
+                try:
+                    os.unlink(img_path)
+                except FileNotFoundError:
+                    pass
         if response.status != "completed":
             raise RuntimeError(
                 f"aquecimento falhou: {response.error_code}"

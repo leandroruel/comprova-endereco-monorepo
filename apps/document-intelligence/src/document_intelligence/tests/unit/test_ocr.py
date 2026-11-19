@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from document_intelligence.ocr import OcrWord, _words_to_lines, is_tesseract_available
+from document_intelligence.tests.conftest import requires_tesseract
 
 
 def test_conversao_dpi_200_equivale_a_pontos_pdf() -> None:
@@ -122,6 +125,7 @@ def test_mesma_posicao_fisica_produz_mesmos_pontos_pdf() -> None:
     assert lines_200[0].y2 == lines_300[0].y2
 
 
+@requires_tesseract
 def test_idioma_disponivel_retorna_true() -> None:
     """Idioma instalado ('por') deve retornar True."""
     assert is_tesseract_available("por") is True
@@ -132,6 +136,8 @@ def test_idioma_inexistente_retorna_false() -> None:
     assert is_tesseract_available("idioma_que_nao_existe") is False
 
 
+
+@requires_tesseract
 def test_idioma_default_e_por() -> None:
     """O idioma default deve ser 'por' e disponível."""
     assert is_tesseract_available() is True
