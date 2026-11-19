@@ -370,7 +370,14 @@ def layout_energia_coluna_esquerda(img: Image.Image, draw: ImageDraw.ImageDraw, 
     draw_text(draw, (180, yy), "DADOS DO CONTRATO", font(14, bold=True)); yy += 24
     draw_text(draw, (180, yy), f"Titular: {holder.nome}", fnt_dado); yy += 24
     draw_text(draw, (180, yy), f"CPF: {holder.cpf}", fnt_dado); yy += 24
-    draw_text(draw, (180, yy), f"Endereço: {holder.endereco}", fnt_dado); yy += 24
+    # Endereço: quebra em duas linhas se exceder o espaço disponível.
+    endereco_texto = f"Endereço: {holder.endereco}"
+    if fnt_dado.getlength(endereco_texto) > w - 180 - MARGIN:
+        partes = holder.endereco.split(", ")
+        draw_text(draw, (180, yy), f"Endereço: {partes[0]}", fnt_dado); yy += 22
+        draw_text(draw, (180, yy), f"  {', '.join(partes[1:])}", fnt_dado); yy += 22
+    else:
+        draw_text(draw, (180, yy), endereco_texto, fnt_dado); yy += 24
     draw_text(draw, (180, yy), f"{holder.cidade}/{holder.uf} - CEP {holder.cep}", fnt_dado); yy += 34
 
     # Consumo e valores.
@@ -381,14 +388,14 @@ def layout_energia_coluna_esquerda(img: Image.Image, draw: ImageDraw.ImageDraw, 
     draw_text(draw, (180, yy), f"Tarifa: {cons['tarifa']}", fnt_dado); yy += 24
     draw_text(draw, (180, yy), f"Valor da energia: {cons['valor_energia']}", fnt_dado); yy += 34
 
-    # Coluna direita com datas e código cliente.
-    rx = 450
+    # Coluna direita com datas e código cliente (deslocada para evitar sobreposição).
+    rx = 420
     draw_text(draw, (rx, 190), "PAGAMENTO", font(14, bold=True))
-    draw_text(draw, (rx, 214), f"Vencimento: {dat['vencimento']}", fnt_dado)
-    draw_text(draw, (rx, 238), f"Emissão: {dat['emissao']}", fnt_dado)
-    draw_text(draw, (rx, 262), f"Referência: {dat['referencia']}", fnt_dado)
-    draw_text(draw, (rx, 286), f"Instalação: {holder.instalacao}", fnt_dado)
-    draw_text(draw, (rx, 310), f"Código do cliente: {holder.codigo_cliente}", fnt_dado)
+    draw_text(draw, (rx, 214), f"Vencimento: {dat['vencimento']}", fnt_pequeno)
+    draw_text(draw, (rx, 234), f"Emissão: {dat['emissao']}", fnt_pequeno)
+    draw_text(draw, (rx, 254), f"Referência: {dat['referencia']}", fnt_pequeno)
+    draw_text(draw, (rx, 274), f"Instalação: {holder.instalacao}", fnt_pequeno)
+    draw_text(draw, (rx, 294), f"Código do cliente: {holder.codigo_cliente}", fnt_pequeno)
 
     # Rodapé com linha fina.
     draw_line(draw, (180, h - 60), (w - MARGIN, h - 60), width=1)
@@ -689,10 +696,13 @@ def preparar_imagem_final(img: Image.Image, rng: random.Random, modo: str) -> Im
 # ===========================================================================
 
 def montar_pdf_digital(conteudo_paginas: list[list[tuple[str, float, float, int, bool]]],
-                       path: str) -> None:
+                       path: str,
+                       marca_dagua: bool = True) -> None:
     """Constrói um PDF com camada de texto (PDF digital) usando reportlab.
 
     Cada página é uma lista de tuplas (texto, x, y, tamanho, negrito).
+    Quando ``marca_dagua`` é True, desenha a marca d'água visível
+    "DOCUMENTO FICTÍCIO - TESTE" em cada página.
     """
     from reportlab.pdfgen import canvas
     from reportlab.lib.pagesizes import letter
@@ -703,8 +713,26 @@ def montar_pdf_digital(conteudo_paginas: list[list[tuple[str, float, float, int,
         for texto, x, y, tamanho, negrito in linhas:
             c.setFont("Helvetica-Bold" if negrito else "Helvetica", tamanho)
             c.drawString(x, ht - y, texto)
+        if marca_dagua:
+            _desenhar_marca_dagua_reportlab(c, wd, ht)
         c.showPage()
     c.save()
+
+
+def _desenhar_marca_dagua_reportlab(c: Any, wd: float, ht: float) -> None:
+    """Desenha marca d'água diagonal em PDF gerado por reportlab."""
+    c.setFont("Helvetica-Bold", 22)
+    c.setFillColorRGB(0.667, 0.667, 0.667)  # cinza (170,170,170)
+    c.saveState()
+    step = 220
+    for dy in range(-int(ht), int(ht), step):
+        for dx in range(-int(wd), int(wd), step):
+            c.saveState()
+            c.translate(dx, dy)
+            c.rotate(45)
+            c.drawString(0, 0, "DOCUMENTO FICTÍCIO - TESTE")
+            c.restoreState()
+    c.restoreState()
 
 
 def montar_pdf_escaneado(img: Image.Image, path: str, dpi: int = 150) -> None:
@@ -743,7 +771,7 @@ def gerar_documento(tipo: str, emissor: Emitter, layout_fn: Callable,
     if formato == "digital":
         # Gera PDF com camada de texto (digital), sem imagem raster.
         conteudo = _conteudo_texto_digital(emissor, holder, cons, dat, tipo)
-        montar_pdf_digital(conteudo, saida)
+        montar_pdf_digital(conteudo, saida, marca_dagua=True)
     else:
         img = _emitir_layout(layout_fn, emissor, holder, cons, dat, rng)
         img = preparar_imagem_final(img, rng, modo_qualidade)

@@ -34,13 +34,13 @@ REPORT_PATH = os.path.join(FIXTURES_ROOT, "evaluation_report.json")
 _RE_CPF = re.compile(r"\d{3}\.\d{3}\.\d{3}-\d{2}")
 _RE_CNPJ = re.compile(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}")
 _RE_CEP = re.compile(r"\d{5}-\d{3}")
-# Data seguida do label Emissão ou Vencimento (ex: "Emissão: 10/05/2025").
-_RE_DATA_LABEL = re.compile(r"(?:emissão|vencimento)\s*[:.]\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
-# Data solta (fallback, ordem de ocorrência).
-_RE_DATA = re.compile(r"\d{2}/\d{2}/\d{4}")
-# Valor monetário seguido ou precedido por label (ex: "Valor da energia: R$ 150,00").
-_RE_VALOR = re.compile(
-    r"(?:valor\s*(?:da\s*energia|da\s*agua)?\s*[:.]\s*)?(R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
+# Data seguida do rótulo Emissão (ex: "Emissão: 10/05/2025").
+_RE_DATA_EMISSAO = re.compile(r"emissão\s*[:.]\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
+# Data seguida do rótulo Vencimento (ex: "Vencimento: 20/05/2025").
+_RE_DATA_VENCIMENTO = re.compile(r"vencimento\s*[:.]\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
+# Valor monetário precedido por rótulo específico (ex: "Valor da água: R$ 213,99").
+_RE_VALOR_LABEL = re.compile(
+    r"(?:valor\s*(?:da\s*energia|da\s*agua|total|a\s*pagar)?\s*[:.]\s*)(R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
     re.IGNORECASE,
 )
 _RE_KWH = re.compile(r"consumo\s*[:.]\s*(\d{2,4})\s*kWh", re.IGNORECASE)
@@ -75,26 +75,27 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
         m = _RE_CEP.search(t)
         return m.group(0) if m else None
     if campo == "data_emissao":
-        m = _RE_DATA_LABEL.search(tl)
+        # Identifica apenas pelo rótulo "Emissão", nunca por ordem de ocorrência.
+        m = _RE_DATA_EMISSAO.search(tl)
         return m.group(1) if m else None
     if campo == "data_vencimento":
-        # Busca a segunda ocorrência de data após label de vencimento.
-        matches = list(_RE_DATA_LABEL.finditer(tl))
-        if len(matches) >= 2:
-            return matches[1].group(1)
-        return matches[0].group(1) if matches else None
+        # Identifica apenas pelo rótulo "Vencimento", nunca por ordem de ocorrência.
+        m = _RE_DATA_VENCIMENTO.search(tl)
+        return m.group(1) if m else None
     if campo in ("valor_energia", "valor_agua"):
-        # Busca o valor associado ao label específico do campo.
-        label = "valor da energia" if campo == "valor_energia" else "valor da agua"
+        # Identifica apenas pelo rótulo semântico correspondente.
+        # Não faz fallback para o primeiro valor monetário encontrado, pois
+        # esse pode ser tarifa, imposto, multa ou outro componente.
+        label = (
+            "valor da energia"
+            if campo == "valor_energia"
+            else "valor da agua"
+        )
         pattern = re.compile(
             rf"{re.escape(label)}\s*[:.]\s*(R\$\s*\d{{1,3}}(?:\.\d{{3}})*(?:,\d{{2}})?)",
             re.IGNORECASE,
         )
         m = pattern.search(tl)
-        if m:
-            return m.group(1)
-        # Fallback: primeiro valor monetário no texto.
-        m = _RE_VALOR.search(t)
         return m.group(1) if m else None
     if campo == "consumo_kwh":
         m = _RE_KWH.search(tl)
@@ -107,9 +108,9 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
         m = re.search(r"(?:ref(?:erência)?)\s*[:.]\s*(\d{2}/\d{4})", tl)
         return m.group(1) if m else None
 
-    # Campos por rótulo: busca a linha que contém o rótulo e pega o restante,
-    # parando antes do próximo rótulo conhecido para não capturar campos
-    # adjacentes.
+    # Campos por rótulo: busca a linha que contém o rótulo em posição de
+    # destaque (início de linha ou após espaço), evitando corresponder a
+    # substrings dentro de nomes (ex: "uf" dentro de "Rufino").
     rotulos = {
         "titular": ["titular", "nome"],
         "endereco": ["endereço", "endereco"],
@@ -134,6 +135,19 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
         for i, linha in enumerate(linhas):
             l = linha.lower()
             if any(rot in l for rot in rotulos[campo]):
+                # Verifica que o rótulo aparece em posição válida (início da
+                # linha ou precedido por espaço), evitando substrings dentro de
+                # nomes como "uf" em "Rufino".
+                posicao_valida = False
+                for rot in rotulos[campo]:
+                    idx = l.find(rot)
+                    if idx >= 0:
+                        # Posição válida: início da linha ou caractere anterior é espaço.
+                        if idx == 0 or l[idx - 1] in " \t":
+                            posicao_valida = True
+                            break
+                if not posicao_valida:
+                    continue
                 # Remove o rótulo e pontuação, devolve o restante da linha.
                 restante = linha
                 for rot in rotulos[campo]:

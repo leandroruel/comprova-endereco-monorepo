@@ -81,14 +81,14 @@ def test_todos_documentos_processam_com_sucesso() -> None:
 
 
 def test_geracao_relatorio_avaliacao(tmp_path) -> None:
-    """Executa o harness e gera o relatório de avaliação."""
+    """Executa o harness e gera o relatório de avaliação com validações fortes."""
     rel = executar_avaliacao()
     caminho_relatorio = tmp_path / "evaluation_report.json"
     salvar_relatorio(rel, caminho=str(caminho_relatorio))
 
-    assert rel.total_documentos == len(_manifestos())
-    assert rel.documentos_com_sucesso == rel.total_documentos
-    assert rel.media_taxa_acerto >= 0.0
+    manifestos = _manifestos()
+    assert rel.total_documentos == len(manifestos)
+    assert rel.documentos_com_sucesso == len(manifestos)
 
     # Todo documento deve ter ao menos um campo esperado avaliado.
     for d in rel.documentos:
@@ -97,8 +97,38 @@ def test_geracao_relatorio_avaliacao(tmp_path) -> None:
     # Relatório salvo em disco temporário.
     assert caminho_relatorio.exists()
 
+    # Valida o cálculo da taxa média de acerto.
+    total_campos = sum(d.total for d in rel.documentos)
+    total_acertos = sum(d.acertos for d in rel.documentos)
+    taxa_esperada = round(total_acertos / total_campos, 4) if total_campos else 0.0
+    taxa_documentos_esperada = (
+        round(sum(d.taxa_acerto for d in rel.documentos) / len(rel.documentos), 4)
+        if rel.documentos else 0.0
+    )
+    assert round(rel.media_taxa_acerto, 4) == taxa_documentos_esperada
+
+    # Valida consistência entre por_campo e resultados individuais.
+    for campo, agg in rel.por_campo.items():
+        assert agg["total"] > 0
+        assert agg["acertos"] <= agg["total"]
+        assert agg["taxa_acerto"] == round(agg["acertos"] / agg["total"], 4)
+
+    # Valida que todo campo esperado tem correspondência entre esperado e extraído.
+    for d in rel.documentos:
+        for c in d.campos:
+            if c.correto:
+                assert c.extraido is not None
+                assert c.esperado is not None
+                assert c.extraido.replace(" ", "").lower() == c.esperado.replace(" ", "").lower()
+            else:
+                # Se não está correto, ou extraído é None ou diferem.
+                if c.extraido is not None and c.esperado is not None:
+                    assert c.extraido.replace(" ", "").lower() != c.esperado.replace(" ", "").lower()
+
     print("\n=== RELATÓRIO DE AVALIAÇÃO ===")
     print(f"Documentos: {rel.documentos_com_sucesso}/{rel.total_documentos}")
+    print(f"Total de campos avaliados: {total_campos}")
+    print(f"Total de acertos: {total_acertos}")
     print(f"Taxa média de acerto: {rel.media_taxa_acerto:.2%}")
     for campo, agg in rel.por_campo.items():
         print(f"  {campo}: {agg['acertos']}/{agg['total']} = {agg['taxa_acerto']:.0%}")

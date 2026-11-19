@@ -80,7 +80,7 @@ def expected_for(i, tipo, em_idx, layout_idx, modo):
 
 def main():
     os.makedirs(EXPECTED_DIR, exist_ok=True)
-    for i, (rel, tipo, em_idx, layout_idx, modo) in enumerate(FIXTURES):
+    for i, (rel, tipo, em_idx, layout_idx, modo, formato) in enumerate(FIXTURES):
         doc_id = os.path.basename(rel).replace(".pdf", "")
         dados = expected_for(i, tipo, em_idx, layout_idx, modo)
         out = os.path.join(EXPECTED_DIR, f"{doc_id}.json")
