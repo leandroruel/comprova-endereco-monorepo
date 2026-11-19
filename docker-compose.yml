@@ -93,7 +93,6 @@ services:
       # Recortes de imagem (Picture/Figure/Diagram) embutidos como data URL,
       # com tetos por imagem (256 KiB) e por documento (2 MiB).
       DI_INCLUDE_IMAGES: 'true'
-      DI_PRELOAD_MODELS: 'true'
       DI_WARMUP: 'true'
       DI_LOG_LEVEL: 'info'
     ports:

@@ -40,8 +40,6 @@ class Settings(BaseSettings):
     max_total_image_bytes: int = Field(default=2_097_152, ge=1)
 
     # OCR / processamento
-    # Carrega/verifica dependências no startup (recomendado).
-    preload_models: bool = Field(default=True)
     # Executa um documento sintético no startup para verificar o pipeline.
     warmup: bool = Field(default=True)
     # Idioma do Tesseract (padrão: português).

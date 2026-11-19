@@ -1,7 +1,7 @@
 """Ponto de entrada: ``python -m document_intelligence``.
 
-Os modelos são carregados pelo ``lifespan`` da aplicação (controlado por
-``DI_PRELOAD_MODELS``); não carregamos aqui para evitar duplicação.
+O warmup é executado pelo ``lifespan`` da aplicação (controlado por
+``DI_WARMUP``); não carregamos nada aqui para evitar duplicação.
 """
 
 from __future__ import annotations

@@ -47,6 +47,15 @@ logger = get_logger("document-intelligence.pdf_processor")
 # "utilizável". Abaixo disso, a página é tratada como escaneada e passa por OCR.
 _MIN_USABLE_TEXT_CHARS = 10
 
+# Mantido para compatibilidade com testes existentes. A detecção de páginas
+# mistas agora usa _MIN_IMAGE_AREA_RATIO em vez do tamanho do texto.
+_MIN_TEXT_LAYER_FOR_FULL_PAGE = 100
+
+# Fração mínima da área da página que uma imagem deve ocupar para ser
+# considerada conteúdo relevante (não decorativa). Imagens maiores que esse
+# limiar disparam OCR mesmo quando a camada textual é extensa.
+_MIN_IMAGE_AREA_RATIO = 0.15
+
 # Espaços em branco colapsados.
 _WS_RE = re.compile(r"\s+")
 
@@ -76,14 +85,17 @@ def _normalize_text(text: str) -> str:
 def _page_size_points(document: pdfium.PdfDocument, page_index: int) -> tuple[float, float]:
     """Devolve (largura, altura) da página em pontos PDF.
 
-    Usa ``get_mediabox()`` (em vez de ``get_bbox()``) para que as dimensões
-    coincidam com o frame usado por ``page.render()``, evitando desalinhamento
-    em páginas rotacionadas (90º, 270º).
+    Usa ``get_mediabox()`` como base e considera a rotação da página
+    (``/Rotate`` de 90, 180 ou 270 graus) para que as dimensões coincidam
+    com o frame efetivamente renderizado por ``page.render()``.
     """
     page = document[page_index]
     bbox = page.get_mediabox()
     width = float(bbox[2] - bbox[0])
     height = float(bbox[3] - bbox[1])
+    rotation = page.get_rotation() or 0
+    if rotation in (90, 270):
+        width, height = height, width
     return width, height
 
 
@@ -148,6 +160,38 @@ def _page_has_images(document: pdfium.PdfDocument, page_index: int) -> bool:
     page = document[page_index]
     images = list(page.get_objects(filter=[pdfium_raw.FPDF_PAGEOBJ_IMAGE]))
     return len(images) > 0
+
+
+def _page_image_area_ratio(
+    document: pdfium.PdfDocument, page_index: int
+) -> float:
+    """Devolve a fração da área da página ocupada por imagens (0.0 a 1.0).
+
+    Usa ``get_bounds()`` de cada objeto de imagem para calcular a área e
+    compara com a área da mediabox da página. Retorna 0.0 quando não há
+    imagens ou não é possível obter as dimensões.
+    """
+    page = document[page_index]
+    mediabox = page.get_mediabox()
+    page_width = float(mediabox[2] - mediabox[0])
+    page_height = float(mediabox[3] - mediabox[1])
+    if page_width <= 0 or page_height <= 0:
+        return 0.0
+
+    page_area = page_width * page_height
+    image_area = 0.0
+
+    for obj in page.get_objects(filter=[pdfium_raw.FPDF_PAGEOBJ_IMAGE]):
+        try:
+            bounds = obj.get_bounds()
+            img_width = float(bounds[2] - bounds[0])
+            img_height = float(bounds[3] - bounds[1])
+            if img_width > 0 and img_height > 0:
+                image_area += img_width * img_height
+        except Exception:  # pragma: no cover - falha de leitura de objeto
+            continue
+
+    return min(image_area / page_area, 1.0) if page_area > 0 else 0.0
 
 
 def _ocr_page(
@@ -272,14 +316,10 @@ def _process_pdf_pages(
 
             if layer_result is not None:
                 # Camada textual utilizável. Verifica se há imagens que podem
-                # conter conteúdo não capturado pelo texto (página mista:
-                # cabeçalho textual + conteúdo escaneado em imagem).
-                has_images = _page_has_images(document, page_index)
-                if (
-                    has_images
-                    and len(layer_result.text) < _MIN_TEXT_LAYER_FOR_FULL_PAGE
-                ):
-                    # Página mista: texto curto + imagens → também OCR para
+                # conter conteúdo não capturado pelo texto (página mista).
+                image_ratio = _page_image_area_ratio(document, page_index)
+                if image_ratio >= _MIN_IMAGE_AREA_RATIO:
+                    # Página mista: texto + imagem relevante → também OCR para
                     # não perder conteúdo nas imagens. Mantém o texto da camada
                     # e acrescenta o do OCR sem descartar nenhum dos dois.
                     any_ocr = True
@@ -298,7 +338,7 @@ def _process_pdf_pages(
                     )
                 else:
                     # Página totalmente digital: camada textual suficiente,
-                    # imagens (se houver) são decorativas.
+                    # imagens (se houver) são pequenas/decorativas.
                     results.append(layer_result)
                 continue
 

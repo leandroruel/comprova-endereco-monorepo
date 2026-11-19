@@ -1,10 +1,18 @@
-"""Testes de OCR: conversao de DPI e verificacao de idioma (sem carregar Tesseract)."""
+"""Testes de OCR: conversao de DPI e verificacao de idioma."""
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
-from document_intelligence.ocr import OcrWord, _words_to_lines, is_tesseract_available
+from document_intelligence.ocr import (
+    OcrWord,
+    TesseractNotAvailableError,
+    _words_to_lines,
+    is_tesseract_available,
+    ocr_image,
+)
 from document_intelligence.tests.conftest import requires_tesseract
 
 
@@ -26,9 +34,7 @@ def test_conversao_dpi_200_equivale_a_pontos_pdf() -> None:
     ]
     lines = _words_to_lines(words, page_width_px=612, page_height_px=792, dpi=200)
     assert len(lines) == 1
-    # x1 = 100 * 72 / 200 = 36.0
     assert lines[0].x1 == 36.0
-    # x2 = (100 + 50) * 72 / 200 = 54.0
     assert lines[0].x2 == 54.0
 
 
@@ -50,9 +56,7 @@ def test_conversao_dpi_300_equivale_a_pontos_pdf() -> None:
     ]
     lines = _words_to_lines(words, page_width_px=612, page_height_px=792, dpi=300)
     assert len(lines) == 1
-    # x1 = 100 * 72 / 300 = 24.0
     assert lines[0].x1 == 24.0
-    # x2 = (100 + 50) * 72 / 300 = 36.0
     assert lines[0].x2 == 36.0
 
 
@@ -74,17 +78,13 @@ def test_conversao_dpi_400_equivale_a_pontos_pdf() -> None:
     ]
     lines = _words_to_lines(words, page_width_px=612, page_height_px=792, dpi=400)
     assert len(lines) == 1
-    # x1 = 100 * 72 / 400 = 18.0
     assert lines[0].x1 == 18.0
-    # x2 = (100 + 50) * 72 / 400 = 27.0
     assert lines[0].x2 == 27.0
 
 
 def test_mesma_posicao_fisica_produz_mesmos_pontos_pdf() -> None:
     """Mesma posicao física da página produz coordenadas PDF equivalentes
     independentemente do DPI usado na renderização."""
-    # Altura da página em pontos PDF: 792 pt.
-    # Em pixels: 792 * dpi / 72.
     page_height_px_200 = int(792 * 200 / 72)  # 2200
     page_height_px_300 = int(792 * 300 / 72)  # 3300
 
@@ -105,10 +105,10 @@ def test_mesma_posicao_fisica_produz_mesmos_pontos_pdf() -> None:
     words_300 = [
         OcrWord(
             text="x",
-            left=300,  # mesmo ponto físico: 300 px a 300 DPI = 200 px a 200 DPI
-            top=150,   # mesmo ponto físico: 150 px a 300 DPI = 100 px a 200 DPI
-            width=15,  # 15 px a 300 DPI = 10 px a 200 DPI
-            height=15, # 15 px a 300 DPI = 10 px a 200 DPI
+            left=300,
+            top=150,
+            width=15,
+            height=15,
             confidence=90,
             block_num=1,
             par_num=1,
@@ -136,8 +136,76 @@ def test_idioma_inexistente_retorna_false() -> None:
     assert is_tesseract_available("idioma_que_nao_existe") is False
 
 
-
 @requires_tesseract
 def test_idioma_default_e_por() -> None:
     """O idioma default deve ser 'por' e disponível."""
     assert is_tesseract_available() is True
+
+
+@requires_tesseract
+def test_ocr_image_verifica_idioma_solicitado() -> None:
+    """ocr_image deve verificar o idioma exato passado, não apenas o default.
+
+    Verifica que o idioma passado para ocr_image() é exatamente o utilizado
+    tanto na validação de disponibilidade quanto na execução do Tesseract.
+    """
+    chamados_validacao = []
+    chamados_execucao = []
+
+    def fake_available(lang="por"):
+        chamados_validacao.append(lang)
+        return True
+
+    def fake_tsv(image_path, lang="por", **kwargs):
+        chamados_execucao.append(lang)
+        return (
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
+            "left\ttop\twidth\theight\tconf\ttext\n"
+            "5\t1\t1\t1\t1\t1\t100\t100\t50\t20\t90\thello\n"
+        )
+
+    with patch(
+        "document_intelligence.ocr.is_tesseract_available", side_effect=fake_available
+    ), patch(
+        "document_intelligence.ocr._run_tesseract_tsv", side_effect=fake_tsv
+    ), patch(
+        "document_intelligence.ocr._tesseract_binary",
+        return_value="/usr/bin/tesseract",
+    ):
+        lines = ocr_image("/fake/path.png", lang="eng")
+        assert "eng" in chamados_validacao
+        assert "eng" in chamados_execucao
+        assert len(lines) == 1
+
+    chamados_validacao.clear()
+    chamados_execucao.clear()
+    with patch(
+        "document_intelligence.ocr.is_tesseract_available", side_effect=fake_available
+    ), patch(
+        "document_intelligence.ocr._run_tesseract_tsv", side_effect=fake_tsv
+    ), patch(
+        "document_intelligence.ocr._tesseract_binary",
+        return_value="/usr/bin/tesseract",
+    ):
+        lines = ocr_image("/fake/path.png", lang="por")
+        assert "por" in chamados_validacao
+        assert "por" in chamados_execucao
+
+
+@requires_tesseract
+def test_ocr_image_idioma_indisponivel_erro() -> None:
+    """ocr_image deve levantar TesseractNotAvailableError quando idioma não instalado.
+
+    A mensagem de erro deve identificar o idioma solicitado.
+    """
+    with patch(
+        "document_intelligence.ocr.is_tesseract_available", return_value=False
+    ), patch(
+        "document_intelligence.ocr._tesseract_binary",
+        return_value="/usr/bin/tesseract",
+    ):
+        try:
+            ocr_image("/fake/path.png", lang="idioma_inexistente")
+            assert False, "Deveria ter levantado TesseractNotAvailableError"
+        except TesseractNotAvailableError as exc:
+            assert "idioma_inexistente" in str(exc)

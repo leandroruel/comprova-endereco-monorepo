@@ -281,9 +281,9 @@ def ocr_image(
     Se ``page_width_px``/``page_height_px`` forem fornecidos, as coordenadas
     são convertidas para pontos PDF; caso contrário, permanecem em pixels.
     """
-    if not is_tesseract_available():
+    if not is_tesseract_available(lang):
         raise TesseractNotAvailableError(
-            "tesseract ou o idioma 'por' não estão disponíveis"
+            f"tesseract ou o idioma '{lang}' não estão disponíveis"
         )
 
     tsv_output = _run_tesseract_tsv(image_path, lang=lang)

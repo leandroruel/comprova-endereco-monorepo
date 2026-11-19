@@ -8,7 +8,6 @@ from pathlib import Path
 # Desativa o pré-carregamento/aquecimento no ciclo de vida do app durante os
 # testes, para que o TestClient não tente verificar o Tesseract. Os testes de
 # integração que realmente precisam do Tesseract o fazem explicitamente.
-os.environ.setdefault("DI_PRELOAD_MODELS", "false")
 os.environ.setdefault("DI_WARMUP", "false")
 
 import pytest  # noqa: E402

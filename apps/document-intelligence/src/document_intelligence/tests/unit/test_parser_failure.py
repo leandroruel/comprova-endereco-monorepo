@@ -125,9 +125,10 @@ def test_pagina_mista_texto_curto_com_imagem_executa_ocr(
 ) -> None:
     """Pagina com texto curto (< 100 chars) e imagem deve executar OCR (caminho misto).
 
-    Monkeypatch _page_has_images para retornar True e _ocr_page para evitar
-    chamada real ao Tesseract. Verifica que o resultado combina texto da camada
-    com texto do OCR, preservando a fonte 'mixed'.
+    Monkeypatch _page_image_area_ratio para retornar um valor acima do
+    limiar e _ocr_page para evitar chamada real ao Tesseract. Verifica que o
+    resultado combina texto da camada com texto do OCR, preservando a fonte
+    'mixed'.
     """
     from document_intelligence.tests.fixtures.generate_fixtures import build_pdf
     from document_intelligence import pdf_processor
@@ -138,8 +139,10 @@ def test_pagina_mista_texto_curto_com_imagem_executa_ocr(
     short_pdf = tmp_path / "curto.pdf"
     short_pdf.write_bytes(short_pdf_bytes)
 
-    # Monkeypatch _page_has_images para simular imagem na pagina.
-    monkeypatch.setattr(pdf_processor, "_page_has_images", lambda doc, idx: True)
+    # Monkeypatch _page_image_area_ratio para simular imagem relevante na pagina.
+    monkeypatch.setattr(
+        pdf_processor, "_page_image_area_ratio", lambda doc, idx: 0.5
+    )
 
     # Monkeypatch _ocr_page para evitar chamada real ao Tesseract.
     ocr_calls = []
@@ -161,7 +164,7 @@ def test_pagina_mista_texto_curto_com_imagem_executa_ocr(
 
     assert page_count == 1
     assert any_ocr is True
-    # OCR deve ser chamado (texto curto + imagem).
+    # OCR deve ser chamado (texto curto + imagem relevante).
     assert len(ocr_calls) == 1
     # O resultado deve ter fonte "mixed" e conter texto do OCR.
     assert results[0].source == "mixed"
@@ -272,4 +275,123 @@ def test_temp_arquivos_removidos_em_falha_ocr(monkeypatch, tmp_path) -> None:
         assert not os.path.exists(path), f"arquivo temporario nao removido apos falha: {path}"
     preprocessed = created_paths[0].replace(".png", "_preprocessed.png")
     assert not os.path.exists(preprocessed), "arquivo preprocessado nao removido apos falha"
+
+
+def test_pagina_mista_texto_longo_com_imagem_relevante_executa_ocr(
+    monkeypatch, tmp_path
+) -> None:
+    """Pagina com texto longo (> 100 chars) + imagem relevante deve executar OCR.
+
+    Este teste e especialmente importante: demonstra que dados existentes
+    exclusivamente na imagem sao recuperados mesmo quando a camada textual
+    ultrapassa 100 caracteres. A detecção antiga (baseada apenas no tamanho
+    do texto) ignoraria OCR neste caso.
+    """
+    from document_intelligence.tests.fixtures.generate_fixtures import build_pdf
+    from document_intelligence import pdf_processor
+    from document_intelligence.pdf_processor import _PageTextResult
+
+    # Texto longo (mais de 100 chars) na camada digital.
+    long_text_pdf_bytes = build_pdf(
+        [
+            [
+                "COMPROVANTE DE RESIDENCIA - DISTRIBUIDORA DE ENERGIA DEMO",
+                "CNPJ: 00.000.000/0001-00",
+                "Titular: Maria da Silva",
+                "Endereco: RUA DAS FLORES, 123, Centro, Sao Paulo, SP",
+                "CEP: 01001-000",
+                "Vencimento: 10/11/2026",
+                "Valor: R$ 150,00",
+                "Este e um texto longo na camada digital para simular um "
+                "documento com cabeçalho e informacoes institucionais "
+                "selecionaveis, mas com dados relevantes apenas na imagem.",
+            ]
+        ]
+    )
+    long_text_pdf = tmp_path / "texto_longo.pdf"
+    long_text_pdf.write_bytes(long_text_pdf_bytes)
+
+    ocr_calls = []
+    ocr_text_from_image = "Titular: Maria da Silva Endereco: RUA DAS FLORES, 123 CEP: 01001-000"
+
+    def fake_ocr_page(document, page_index, page_number):
+        ocr_calls.append((page_index, page_number))
+        return _PageTextResult(
+            page_number=page_number,
+            text=ocr_text_from_image,
+            elements=[],
+            width=612,
+            height=792,
+            source="ocr",
+        )
+
+    monkeypatch.setattr(pdf_processor, "_page_image_area_ratio", lambda doc, idx: 0.5)
+    monkeypatch.setattr(pdf_processor, "_ocr_page", fake_ocr_page)
+
+    results, page_count, any_ocr = _process_pdf_pages(str(long_text_pdf))
+
+    assert page_count == 1
+    assert any_ocr is True
+    assert len(ocr_calls) == 1
+    assert results[0].source == "mixed"
+    # Dados da imagem devem aparecer no resultado final.
+    assert ocr_text_from_image in results[0].text
+    # Texto da camada digital tambem deve ser preservado.
+    assert "DISTRIBUIDORA DE ENERGIA DEMO" in results[0].text
+
+
+def test_pdf_digital_imagem_decorativa_preserva_caminho_rapido(
+    monkeypatch, tmp_path
+) -> None:
+    """PDF digital com imagem pequena/decorativa deve usar apenas a camada textual.
+
+    Quando a imagem ocupa menos que _MIN_IMAGE_AREA_RATIO (15%) da pagina,
+    ela e considerada decorativa e o OCR nao e executado.
+    """
+    from document_intelligence.tests.fixtures.generate_fixtures import build_pdf
+    from document_intelligence import pdf_processor
+
+    # Texto longo na camada digital.
+    long_text_pdf_bytes = build_pdf(
+        [
+            [
+                "COMPROVANTE DE RESIDENCIA",
+                "Titular: Usuario Teste",
+                "Endereco: RUA X, 100",
+                "CEP: 01001-000",
+            ]
+        ]
+    )
+    long_text_pdf = tmp_path / "decorativa.pdf"
+    long_text_pdf.write_bytes(long_text_pdf_bytes)
+
+    ocr_called = False
+
+    def fake_ocr_page(document, page_index, page_number):
+        nonlocal ocr_called
+        ocr_called = True
+        from document_intelligence.pdf_processor import _PageTextResult
+
+        return _PageTextResult(
+            page_number=page_number,
+            text="texto do OCR",
+            elements=[],
+            width=612,
+            height=792,
+            source="ocr",
+        )
+
+    # Imagem pequena (5% da area) - considerada decorativa.
+    monkeypatch.setattr(pdf_processor, "_page_image_area_ratio", lambda doc, idx: 0.05)
+    monkeypatch.setattr(pdf_processor, "_ocr_page", fake_ocr_page)
+
+    results, page_count, any_ocr = _process_pdf_pages(str(long_text_pdf))
+
+    assert page_count == 1
+    assert any_ocr is False
+    assert ocr_called is False
+    assert results[0].source == "text_layer"
+    # Texto da camada digital deve estar presente.
+    assert "COMPROVANTE DE RESIDENCIA" in results[0].text
+
 

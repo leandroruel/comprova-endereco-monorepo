@@ -96,7 +96,6 @@ async def lifespan(app: FastAPI):  # noqa: ARG001 - app usado implicitamente
         timeout_s=settings.timeout_s,
         max_arquivo_mb=settings.max_file_size_mb,
         max_paginas=settings.max_pages,
-        preload_models=settings.preload_models,
         warmup=settings.warmup,
         ocr_lang=settings.ocr_lang,
     )
@@ -155,8 +154,9 @@ def _warmup() -> None:
 
     O primeiro processamento pode carregar recursos adicionais do Tesseract.
     Rodar isto no startup evita que a primeira requisição real estoure o
-    timeout. Exercita tanto a camada textual quanto o caminho de OCR do
-    Tesseract para garantir que o binário e o idioma estejam prontos.
+    timeout. O PDF de warmup e gerado sem camada textual, forçando o uso
+    do Tesseract; o warmup só eh considerado concluido se o OCR retornar
+    texto reconhecido.
     """
     import os
 
@@ -171,20 +171,33 @@ def _warmup() -> None:
             build_warmup_pdf(), prefix="di-warmup-", dir=settings.temp_dir
         ) as path:
             response = build_parse_response(path, "warmup", size_bytes=0)
-            # Exercita o caminho de OCR do Tesseract: renderiza a página e
-            # executa OCR para garantir que o binário e o idioma estejam prontos.
-            img_path, _, _ = render_page_to_image(path, 1, dpi=settings.ocr_dpi)
+            if response.status != "completed":
+                raise RuntimeError(
+                    f"aquecimento falhou: {response.error_code}"
+                )
+
+            # Exercita o caminho de OCR do Tesseract: renderiza a pagina e
+            # executa OCR para garantir que o binario e o idioma estejam prontos.
+            img_path, width_px, height_px = render_page_to_image(
+                path, 1, dpi=settings.ocr_dpi
+            )
             try:
-                ocr_image(img_path, lang=settings.ocr_lang)
+                lines = ocr_image(
+                    img_path,
+                    lang=settings.ocr_lang,
+                    page_width_px=width_px,
+                    page_height_px=height_px,
+                    dpi=settings.ocr_dpi,
+                )
+                if not lines:
+                    raise RuntimeError(
+                        "aquecimento falhou: OCR nao retornou texto reconhecido"
+                    )
             finally:
                 try:
                     os.unlink(img_path)
                 except FileNotFoundError:
                     pass
-        if response.status != "completed":
-            raise RuntimeError(
-                f"aquecimento falhou: {response.error_code}"
-            )
         logger.info(
             "pipeline_ocr_aquecido",
             duracao_ms=int((time.perf_counter() - start) * 1000),
