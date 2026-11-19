@@ -132,3 +132,54 @@ def test_geracao_relatorio_avaliacao(tmp_path) -> None:
     print(f"Taxa média de acerto: {rel.media_taxa_acerto:.2%}")
     for campo, agg in rel.por_campo.items():
         print(f"  {campo}: {agg['acertos']}/{agg['total']} = {agg['taxa_acerto']:.0%}")
+
+
+# ---------------------------------------------------------------------------
+# Testes específicos de extração de campos (harness)
+# ---------------------------------------------------------------------------
+
+from document_intelligence.tests.extraction.harness import _extrair_campo  # noqa: E402
+
+
+def test_extrair_titular_nome_com_uf_dentro():
+    """Titular com nome contendo sequência que parece rótulo 'uf' (ex: 'Rufino')."""
+    texto = "Titular: Ana Rufino"
+    assert _extrair_campo(texto, "titular") == "Ana Rufino"
+
+
+def test_extrair_titular_nome_com_cpf_apos():
+    """Titular seguido de CPF na mesma linha."""
+    texto = "Titular: Ana Rufino CPF: 123.456.789-00"
+    assert _extrair_campo(texto, "titular") == "Ana Rufino"
+
+
+def test_extrair_titular_nome_com_endereco_apos():
+    """Titular seguido de endereço na mesma linha."""
+    texto = "Titular: João da Silva Endereço: Rua X, 100"
+    assert _extrair_campo(texto, "titular") == "João da Silva"
+
+
+def test_extrair_titular_linha_seguinte():
+    """Titular com rótulo em uma linha e valor na linha seguinte."""
+    texto = "Titular:\nJuliana Beatriz Lima"
+    assert _extrair_campo(texto, "titular") == "Juliana Beatriz Lima"
+
+
+def test_extrair_valor_agua_com_acento():
+    """Valor da água com rótulo usando 'água' (com acento)."""
+    texto = "Tarifa: R$ 4,35\nValor da água: R$ 213,99"
+    assert _extrair_campo(texto, "valor_agua") == "R$ 213,99"
+
+
+def test_extrair_valor_agua_sem_acento():
+    """Valor da água com rótulo usando 'agua' (sem acento)."""
+    texto = "Tarifa: R$ 4,35\nValor da agua: R$ 213,99"
+    assert _extrair_campo(texto, "valor_agua") == "R$ 213,99"
+
+
+def test_extrair_valor_agua_ignora_tarifa():
+    """Valor da água ignora a tarifa que aparece antes."""
+    texto = "Tarifa: R$ 4,35\nValor da água: R$ 213,99"
+    resultado = _extrair_campo(texto, "valor_agua")
+    assert resultado == "R$ 213,99"
+    assert resultado != "R$ 4,35"

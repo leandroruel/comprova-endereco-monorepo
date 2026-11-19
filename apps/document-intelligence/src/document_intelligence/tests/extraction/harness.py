@@ -39,8 +39,10 @@ _RE_DATA_EMISSAO = re.compile(r"emissão\s*[:.]\s*(\d{2}/\d{2}/\d{4})", re.IGNOR
 # Data seguida do rótulo Vencimento (ex: "Vencimento: 20/05/2025").
 _RE_DATA_VENCIMENTO = re.compile(r"vencimento\s*[:.]\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
 # Valor monetário precedido por rótulo específico (ex: "Valor da água: R$ 213,99").
+# Aceita tanto "agua" quanto "água".
+# Usa \\x24 em vez de \\$ para evitar problemas de escape em alguns engines de regex.
 _RE_VALOR_LABEL = re.compile(
-    r"(?:valor\s*(?:da\s*energia|da\s*agua|total|a\s*pagar)?\s*[:.]\s*)(R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
+    r"(?:valor\s*(?:da\s*energia|da\s*água|da\s*agua|total|a\s*pagar)?\s*[:.]\s*)([Rr]\x24\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
     re.IGNORECASE,
 )
 _RE_KWH = re.compile(r"consumo\s*[:.]\s*(\d{2,4})\s*kWh", re.IGNORECASE)
@@ -86,17 +88,24 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
         # Identifica apenas pelo rótulo semântico correspondente.
         # Não faz fallback para o primeiro valor monetário encontrado, pois
         # esse pode ser tarifa, imposto, multa ou outro componente.
-        label = (
-            "valor da energia"
-            if campo == "valor_energia"
-            else "valor da agua"
-        )
+        # Usa \\x24 em vez de \\$ para evitar problemas de escape em regex.
+        # Usa \\s+ entre palavras do rótulo (em vez de re.escape, que escapa
+        # espaços e impede a correspondência).
+        # Aceita tanto "agua" quanto "água" no rótulo.
+        if campo == "valor_energia":
+            label_pattern = r"valor\s+da\s+energia"
+        else:
+            label_pattern = r"valor\s+da\s*[áa]gua"
         pattern = re.compile(
-            rf"{re.escape(label)}\s*[:.]\s*(R\$\s*\d{{1,3}}(?:\.\d{{3}})*(?:,\d{{2}})?)",
+            rf"(?:{label_pattern})\s*[:.]\s*([Rr]\x24\s*\d{{1,3}}(?:\.\d{{3}})*(?:,\d{{2}}))?",
             re.IGNORECASE,
         )
         m = pattern.search(tl)
-        return m.group(1) if m else None
+        if m:
+            valor = m.group(1)
+            # Normaliza para "R$" maiúsculo, pois o texto pode vir em minúsculo.
+            return valor[0].upper() + valor[1:]
+        return None
     if campo == "consumo_kwh":
         m = _RE_KWH.search(tl)
         return m.group(1) if m else None
@@ -108,9 +117,9 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
         m = re.search(r"(?:ref(?:erência)?)\s*[:.]\s*(\d{2}/\d{4})", tl)
         return m.group(1) if m else None
 
-    # Campos por rótulo: busca a linha que contém o rótulo em posição de
-    # destaque (início de linha ou após espaço), evitando corresponder a
-    # substrings dentro de nomes (ex: "uf" dentro de "Rufino").
+    # Campos por rótulo: busca a linha que contém o rótulo como palavra
+    # completa (word boundary), evitando corresponder a substrings dentro de
+    # nomes (ex: "uf" dentro de "Rufino").
     rotulos = {
         "titular": ["titular", "nome"],
         "endereco": ["endereço", "endereco"],
@@ -131,39 +140,45 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
              "ref:", "referência:", "consumo", "leitura anterior", "leitura atual",
              "valor da energia", "valor da agua", "tarifa"]
         )
+        # Compila regex com word boundary para cada rótulo do campo.
+        rotulo_regexes = [
+            re.compile(r"\b" + re.escape(rot) + r"\b", re.IGNORECASE)
+            for rot in rotulos[campo]
+        ]
         linhas = t.splitlines()
         for i, linha in enumerate(linhas):
             l = linha.lower()
-            if any(rot in l for rot in rotulos[campo]):
-                # Verifica que o rótulo aparece em posição válida (início da
-                # linha ou precedido por espaço), evitando substrings dentro de
-                # nomes como "uf" em "Rufino".
-                posicao_valida = False
-                for rot in rotulos[campo]:
-                    idx = l.find(rot)
-                    if idx >= 0:
-                        # Posição válida: início da linha ou caractere anterior é espaço.
-                        if idx == 0 or l[idx - 1] in " \t":
-                            posicao_valida = True
-                            break
-                if not posicao_valida:
-                    continue
-                # Remove o rótulo e pontuação, devolve o restante da linha.
-                restante = linha
-                for rot in rotulos[campo]:
-                    idx = restante.lower().find(rot)
-                    if idx >= 0:
-                        restante = restante[idx + len(rot):]
-                restante = restante.strip(" :\t-|")
-                if restante:
-                    # Se houver outro rótulo conhecido na mesma linha, corta.
-                    for rot_conhecido in rotulos_conhecidos:
-                        idx = restante.lower().find(rot_conhecido)
-                        if idx >= 0:
-                            restante = restante[:idx].strip(" :\t-|")
-                            break
-                    if restante:
-                        return restante
+            # Verifica se algum rótulo aparece como palavra completa na linha.
+            if not any(rx.search(l) for rx in rotulo_regexes):
+                continue
+            # Remove o rótulo e pontuação, devolve o restante da linha.
+            restante = linha
+            for rx in rotulo_regexes:
+                restante = rx.sub("", restante, count=1)
+            restante = restante.strip(" :\t-|")
+            if not restante:
+                # Rótulo está sozinho na linha; tenta pegar o valor na próxima linha.
+                if i + 1 < len(linhas):
+                    proxima = linhas[i + 1].strip(" :\t-|")
+                    # Não aceita se a próxima linha também começa com um rótulo conhecido.
+                    proxima_lower = proxima.lower()
+                    if any(
+                        re.compile(r"\b" + re.escape(rot) + r"\b", re.IGNORECASE).search(proxima_lower)
+                        for rot in rotulos_conhecidos
+                    ):
+                        continue
+                    return proxima
+                continue
+            # Se houver outro rótulo conhecido na mesma linha, corta.
+            for rot_conhecido in rotulos_conhecidos:
+                # Rótulos conhecidos também usam word boundary.
+                rx_conhecido = re.compile(r"\b" + re.escape(rot_conhecido) + r"\b", re.IGNORECASE)
+                m = rx_conhecido.search(restante.lower())
+                if m:
+                    restante = restante[:m.start()].strip(" :\t-|")
+                    break
+            if restante:
+                return restante
     return None
 
 

@@ -1,27 +1,27 @@
 {
   "total_documentos": 10,
   "documentos_com_sucesso": 10,
-  "media_taxa_acerto": 0.2537,
+  "media_taxa_acerto": 0.491,
   "por_campo": {
     "titular": {
       "total": 10,
-      "acertos": 2,
-      "taxa_acerto": 0.2
+      "acertos": 5,
+      "taxa_acerto": 0.5
     },
     "cpf": {
       "total": 9,
-      "acertos": 6,
-      "taxa_acerto": 0.6667
+      "acertos": 7,
+      "taxa_acerto": 0.7778
     },
     "endereco": {
       "total": 10,
-      "acertos": 2,
-      "taxa_acerto": 0.2
+      "acertos": 4,
+      "taxa_acerto": 0.4
     },
     "cep": {
       "total": 6,
-      "acertos": 4,
-      "taxa_acerto": 0.6667
+      "acertos": 5,
+      "taxa_acerto": 0.8333
     },
     "cidade": {
       "total": 10,
@@ -35,38 +35,38 @@
     },
     "instalacao": {
       "total": 10,
-      "acertos": 3,
-      "taxa_acerto": 0.3
+      "acertos": 5,
+      "taxa_acerto": 0.5
     },
     "codigo_cliente": {
-      "total": 10,
-      "acertos": 3,
-      "taxa_acerto": 0.3
-    },
-    "data_emissao": {
-      "total": 10,
-      "acertos": 3,
-      "taxa_acerto": 0.3
-    },
-    "data_vencimento": {
       "total": 10,
       "acertos": 4,
       "taxa_acerto": 0.4
     },
+    "data_emissao": {
+      "total": 10,
+      "acertos": 6,
+      "taxa_acerto": 0.6
+    },
+    "data_vencimento": {
+      "total": 10,
+      "acertos": 8,
+      "taxa_acerto": 0.8
+    },
     "consumo_kwh": {
       "total": 5,
-      "acertos": 2,
-      "taxa_acerto": 0.4
+      "acertos": 3,
+      "taxa_acerto": 0.6
     },
     "valor_energia": {
       "total": 5,
-      "acertos": 2,
-      "taxa_acerto": 0.4
+      "acertos": 4,
+      "taxa_acerto": 0.8
     },
     "referencia": {
       "total": 10,
-      "acertos": 0,
-      "taxa_acerto": 0.0
+      "acertos": 7,
+      "taxa_acerto": 0.7
     },
     "consumo_m3": {
       "total": 5,
@@ -75,8 +75,8 @@
     },
     "valor_agua": {
       "total": 5,
-      "acertos": 0,
-      "taxa_acerto": 0.0
+      "acertos": 3,
+      "taxa_acerto": 0.6
     }
   },
   "documentos": [
@@ -87,9 +87,9 @@
       "uf": "MG",
       "qualidade": "limpo",
       "status": "completed",
-      "chars_extraidos": 498,
-      "taxa_acerto": 0.6923,
-      "acertos": 9,
+      "chars_extraidos": 1718,
+      "taxa_acerto": 0.7692,
+      "acertos": 10,
       "total": 13,
       "campos": [
         {
@@ -131,8 +131,8 @@
         {
           "campo": "instalacao",
           "esperado": "843262-39",
-          "extraido": "843262-39 Código do cliente: DEMG-2773402",
-          "correto": false
+          "extraido": "843262-39",
+          "correto": true
         },
         {
           "campo": "codigo_cliente",
@@ -155,8 +155,8 @@
         {
           "campo": "consumo_kwh",
           "esperado": "387",
-          "extraido": "387",
-          "correto": true
+          "extraido": null,
+          "correto": false
         },
         {
           "campo": "valor_energia",
@@ -167,8 +167,8 @@
         {
           "campo": "referencia",
           "esperado": "08/2025",
-          "extraido": null,
-          "correto": false
+          "extraido": "08/2025",
+          "correto": true
         }
       ]
     },
@@ -179,27 +179,27 @@
       "uf": "RJ",
       "qualidade": "escaneado",
       "status": "completed",
-      "chars_extraidos": 512,
-      "taxa_acerto": 0.0,
-      "acertos": 0,
+      "chars_extraidos": 562,
+      "taxa_acerto": 0.3077,
+      "acertos": 4,
       "total": 13,
       "campos": [
         {
           "campo": "titular",
           "esperado": "Ana Pereira Silva",
-          "extraido": "Ana Pereira Silva \"Vencimento: 28/12/2025",
+          "extraido": ". : Ana Pereira Silva Vêncimento: 28/12/2025",
           "correto": false
         },
         {
           "campo": "cpf",
           "esperado": "979.678.406-89",
-          "extraido": null,
-          "correto": false
+          "extraido": "979.678.406-89",
+          "correto": true
         },
         {
           "campo": "endereco",
           "esperado": "Av. Paulista, 1500, conj. 12",
-          "extraido": "Av. Paulista, 15G8farmmicih? 12/2025",
+          "extraido": "Av: Paulista, 1500, Cop 2, josma)s",
           "correto": false
         },
         {
@@ -235,32 +235,32 @@
         {
           "campo": "data_emissao",
           "esperado": "26/12/2025",
-          "extraido": "28/12/2025",
+          "extraido": null,
           "correto": false
         },
         {
           "campo": "data_vencimento",
           "esperado": "28/12/2025",
-          "extraido": "26/12/2025",
+          "extraido": null,
           "correto": false
         },
         {
           "campo": "consumo_kwh",
           "esperado": "381",
-          "extraido": "846",
-          "correto": false
+          "extraido": "381",
+          "correto": true
         },
         {
           "campo": "valor_energia",
           "esperado": "R$ 269,65",
-          "extraido": "R$ 0,78",
-          "correto": false
+          "extraido": "R$ 269,65",
+          "correto": true
         },
         {
           "campo": "referencia",
           "esperado": "12/2025",
-          "extraido": null,
-          "correto": false
+          "extraido": "12/2025",
+          "correto": true
         }
       ]
     },
@@ -271,21 +271,21 @@
       "uf": "RJ",
       "qualidade": "manchado",
       "status": "completed",
-      "chars_extraidos": 402,
-      "taxa_acerto": 0.3636,
-      "acertos": 4,
+      "chars_extraidos": 398,
+      "taxa_acerto": 0.4545,
+      "acertos": 5,
       "total": 11,
       "campos": [
         {
           "campo": "titular",
           "esperado": "Fernanda Oliveira Costa",
-          "extraido": "Fi la Oliveira Costa",
+          "extraido": "Fe ja Oliveira Costa",
           "correto": false
         },
         {
           "campo": "endereco",
           "esperado": "Av. Paulista, 1500, conj. 12",
-          "extraido": "À , 1500, conj. 12",
+          "extraido": "Av + 1500, conj. 12",
           "correto": false
         },
         {
@@ -303,13 +303,13 @@
         {
           "campo": "instalacao",
           "esperado": "610176-54",
-          "extraido": "610176-54 Código do cliente: DER]-1178856",
-          "correto": false
+          "extraido": "610176-54",
+          "correto": true
         },
         {
           "campo": "codigo_cliente",
           "esperado": "DERJ-1178856",
-          "extraido": "DER]-1178856",
+          "extraido": null,
           "correto": false
         },
         {
@@ -333,14 +333,14 @@
         {
           "campo": "valor_energia",
           "esperado": "R$ 380,28",
-          "extraido": "R$380,28",
-          "correto": true
+          "extraido": null,
+          "correto": false
         },
         {
           "campo": "referencia",
           "esperado": "11/2025",
-          "extraido": null,
-          "correto": false
+          "extraido": "11/2025",
+          "correto": true
         }
       ]
     },
@@ -351,16 +351,16 @@
       "uf": "SP",
       "qualidade": "limpo",
       "status": "completed",
-      "chars_extraidos": 634,
-      "taxa_acerto": 0.3077,
-      "acertos": 4,
+      "chars_extraidos": 1710,
+      "taxa_acerto": 0.7692,
+      "acertos": 10,
       "total": 13,
       "campos": [
         {
           "campo": "titular",
           "esperado": "Juliana Beatriz Lima",
-          "extraido": "RESUMO DA FATURA",
-          "correto": false
+          "extraido": "Juliana Beatriz Lima",
+          "correto": true
         },
         {
           "campo": "cpf",
@@ -371,8 +371,8 @@
         {
           "campo": "endereco",
           "esperado": "Alameda Santos, 450, sala 8",
-          "extraido": "Alameda Santos, 450, sala 8.50: 27/07/2025",
-          "correto": false
+          "extraido": "Alameda Santos, 450, sala 8",
+          "correto": true
         },
         {
           "campo": "cep",
@@ -407,14 +407,14 @@
         {
           "campo": "data_emissao",
           "esperado": "27/07/2025",
-          "extraido": "28/07/2025",
-          "correto": false
+          "extraido": "27/07/2025",
+          "correto": true
         },
         {
           "campo": "data_vencimento",
           "esperado": "28/07/2025",
-          "extraido": "27/07/2025",
-          "correto": false
+          "extraido": "28/07/2025",
+          "correto": true
         },
         {
           "campo": "consumo_kwh",
@@ -425,14 +425,14 @@
         {
           "campo": "valor_energia",
           "esperado": "R$ 338,45",
-          "extraido": "R$ 227,02",
-          "correto": false
+          "extraido": "R$ 338,45",
+          "correto": true
         },
         {
           "campo": "referencia",
           "esperado": "07/2025",
-          "extraido": null,
-          "correto": false
+          "extraido": "07/2025",
+          "correto": true
         }
       ]
     },
@@ -443,16 +443,16 @@
       "uf": "SP",
       "qualidade": "baixo_contraste",
       "status": "completed",
-      "chars_extraidos": 507,
-      "taxa_acerto": 0.0833,
-      "acertos": 1,
+      "chars_extraidos": 526,
+      "taxa_acerto": 0.4167,
+      "acertos": 5,
       "total": 12,
       "campos": [
         {
           "campo": "titular",
           "esperado": "Ricardo Alves Souza",
-          "extraido": "Ricardo Alves Souzdencimento: 17/10/2025",
-          "correto": false
+          "extraido": "Ricardo Alves Souza",
+          "correto": true
         },
         {
           "campo": "cpf",
@@ -463,7 +463,7 @@
         {
           "campo": "endereco",
           "esperado": "Rua das Flores, 123, Apto 101",
-          "extraido": "Rua das Flores, Rey êmtia:1DA/2025",
+          "extraido": "Rua das Flores, 123, Apto ii",
           "correto": false
         },
         {
@@ -493,26 +493,26 @@
         {
           "campo": "data_emissao",
           "esperado": "07/10/2025",
-          "extraido": "17/10/2025",
+          "extraido": null,
           "correto": false
         },
         {
           "campo": "data_vencimento",
           "esperado": "17/10/2025",
-          "extraido": "07/10/2025",
-          "correto": false
+          "extraido": "17/10/2025",
+          "correto": true
         },
         {
           "campo": "consumo_kwh",
           "esperado": "513",
-          "extraido": "568",
-          "correto": false
+          "extraido": "513",
+          "correto": true
         },
         {
           "campo": "valor_energia",
           "esperado": "R$ 387,74",
-          "extraido": "R$ 0,78",
-          "correto": false
+          "extraido": "R$ 387,74",
+          "correto": true
         },
         {
           "campo": "referencia",
@@ -529,15 +529,15 @@
       "uf": "ES",
       "qualidade": "baixa_resolucao",
       "status": "completed",
-      "chars_extraidos": 543,
-      "taxa_acerto": 0.1667,
-      "acertos": 2,
+      "chars_extraidos": 531,
+      "taxa_acerto": 0.5,
+      "acertos": 6,
       "total": 12,
       "campos": [
         {
           "campo": "titular",
           "esperado": "André Luiz Ferreira",
-          "extraido": "Vencimento: 28/10/2025",
+          "extraido": "DADOS DO",
           "correto": false
         },
         {
@@ -549,7 +549,7 @@
         {
           "campo": "endereco",
           "esperado": "Rua das Flores, 123, Apto 101",
-          "extraido": "Rua das Flores, 123, Apto 10Matrícula: 632335-95",
+          "extraido": "Rua das Flores, 123, Apto 10IMatrícuia: 632335-95",
           "correto": false
         },
         {
@@ -567,44 +567,44 @@
         {
           "campo": "instalacao",
           "esperado": "632335-95",
-          "extraido": "632335-95",
-          "correto": true
+          "extraido": null,
+          "correto": false
         },
         {
           "campo": "codigo_cliente",
           "esperado": "CADES-9305454",
-          "extraido": "CADES-93054!",
+          "extraido": null,
           "correto": false
         },
         {
           "campo": "data_emissao",
           "esperado": "21/10/2025",
-          "extraido": "28/10/2025",
-          "correto": false
+          "extraido": "21/10/2025",
+          "correto": true
         },
         {
           "campo": "data_vencimento",
           "esperado": "28/10/2025",
-          "extraido": "21/10/2025",
-          "correto": false
+          "extraido": "28/10/2025",
+          "correto": true
         },
         {
           "campo": "consumo_m3",
           "esperado": "21",
-          "extraido": null,
-          "correto": false
+          "extraido": "21",
+          "correto": true
         },
         {
           "campo": "valor_agua",
           "esperado": "R$ 134,51",
-          "extraido": "R$ 4,35",
-          "correto": false
+          "extraido": "R$ 134,51",
+          "correto": true
         },
         {
           "campo": "referencia",
           "esperado": "10/2025",
-          "extraido": null,
-          "correto": false
+          "extraido": "10/2025",
+          "correto": true
         }
       ]
     },
@@ -615,9 +615,9 @@
       "uf": "MG",
       "qualidade": "limpo",
       "status": "completed",
-      "chars_extraidos": 515,
-      "taxa_acerto": 0.5385,
-      "acertos": 7,
+      "chars_extraidos": 1720,
+      "taxa_acerto": 0.7692,
+      "acertos": 10,
       "total": 13,
       "campos": [
         {
@@ -659,8 +659,8 @@
         {
           "campo": "instalacao",
           "esperado": "535282-27",
-          "extraido": "535282-27 | Código do cliente: SMSDMG-3589809",
-          "correto": false
+          "extraido": "535282-27",
+          "correto": true
         },
         {
           "campo": "codigo_cliente",
@@ -689,14 +689,14 @@
         {
           "campo": "valor_agua",
           "esperado": "R$ 164,80",
-          "extraido": "R$ 95,18",
-          "correto": false
+          "extraido": "R$ 164,80",
+          "correto": true
         },
         {
           "campo": "referencia",
           "esperado": "10/2025",
-          "extraido": null,
-          "correto": false
+          "extraido": "10/2025",
+          "correto": true
         }
       ]
     },
@@ -707,7 +707,7 @@
       "uf": "RJ",
       "qualidade": "escaneado",
       "status": "completed",
-      "chars_extraidos": 477,
+      "chars_extraidos": 473,
       "taxa_acerto": 0.1538,
       "acertos": 2,
       "total": 13,
@@ -715,7 +715,7 @@
         {
           "campo": "titular",
           "esperado": "Ana Pereira Silva",
-          "extraido": "consimo.",
+          "extraido": null,
           "correto": false
         },
         {
@@ -751,7 +751,7 @@
         {
           "campo": "instalacao",
           "esperado": "829076-61",
-          "extraido": "829076-61, E Vencimento: 21/04/2025",
+          "extraido": "829076-61 E",
           "correto": false
         },
         {
@@ -763,7 +763,7 @@
         {
           "campo": "data_emissao",
           "esperado": "11/04/2025",
-          "extraido": "21/04/2025",
+          "extraido": null,
           "correto": false
         },
         {
@@ -781,7 +781,7 @@
         {
           "campo": "valor_agua",
           "esperado": "R$ 212,26",
-          "extraido": "R$ 212",
+          "extraido": null,
           "correto": false
         },
         {
@@ -799,16 +799,16 @@
       "uf": "SP",
       "qualidade": "limpo",
       "status": "completed",
-      "chars_extraidos": 573,
-      "taxa_acerto": 0.2308,
-      "acertos": 3,
+      "chars_extraidos": 1707,
+      "taxa_acerto": 0.7692,
+      "acertos": 10,
       "total": 13,
       "campos": [
         {
           "campo": "titular",
           "esperado": "André Luiz Ferreira",
-          "extraido": "Vencimento: 19/12/2025",
-          "correto": false
+          "extraido": "André Luiz Ferreira",
+          "correto": true
         },
         {
           "campo": "cpf",
@@ -819,14 +819,14 @@
         {
           "campo": "endereco",
           "esperado": "Rua Haddock Lobo, 300",
-          "extraido": "Rua Haddock Lobo, 300 Matrícula: 185908-75",
-          "correto": false
+          "extraido": "Rua Haddock Lobo, 300",
+          "correto": true
         },
         {
           "campo": "cep",
           "esperado": "97274-795",
-          "extraido": null,
-          "correto": false
+          "extraido": "97274-795",
+          "correto": true
         },
         {
           "campo": "cidade",
@@ -849,38 +849,38 @@
         {
           "campo": "codigo_cliente",
           "esperado": "CADSP-7045178",
-          "extraido": null,
-          "correto": false
+          "extraido": "CADSP-7045178",
+          "correto": true
         },
         {
           "campo": "data_emissao",
           "esperado": "09/12/2025",
-          "extraido": "19/12/2025",
-          "correto": false
+          "extraido": "09/12/2025",
+          "correto": true
         },
         {
           "campo": "data_vencimento",
           "esperado": "19/12/2025",
-          "extraido": "09/12/2025",
-          "correto": false
+          "extraido": "19/12/2025",
+          "correto": true
         },
         {
           "campo": "consumo_m3",
           "esperado": "69",
-          "extraido": "69",
-          "correto": true
+          "extraido": null,
+          "correto": false
         },
         {
           "campo": "valor_agua",
           "esperado": "R$ 213,99",
-          "extraido": "R$ 4,35",
-          "correto": false
+          "extraido": "R$ 213,99",
+          "correto": true
         },
         {
           "campo": "referencia",
           "esperado": "12/2025",
-          "extraido": null,
-          "correto": false
+          "extraido": "12/2025",
+          "correto": true
         }
       ]
     },
@@ -891,7 +891,7 @@
       "uf": "SP",
       "qualidade": "desfocado",
       "status": "completed",
-      "chars_extraidos": 296,
+      "chars_extraidos": 90,
       "taxa_acerto": 0.0,
       "acertos": 0,
       "total": 12,
