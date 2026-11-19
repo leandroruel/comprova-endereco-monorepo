@@ -152,6 +152,7 @@ export interface DocumentAnalysisFieldSources {
 export interface DocumentAnalysisProvenance {
   readonly provider: 'local' | 'marker' | 'tesseract'
   readonly markerVersion?: string
+  readonly processorVersion?: string
   readonly pages?: number
   readonly processingTimeMs?: number
   readonly fallback?: boolean
