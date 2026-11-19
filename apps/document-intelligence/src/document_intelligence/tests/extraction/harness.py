@@ -34,10 +34,18 @@ REPORT_PATH = os.path.join(FIXTURES_ROOT, "evaluation_report.json")
 _RE_CPF = re.compile(r"\d{3}\.\d{3}\.\d{3}-\d{2}")
 _RE_CNPJ = re.compile(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}")
 _RE_CEP = re.compile(r"\d{5}-\d{3}")
+# Data seguida do label Emissão ou Vencimento (ex: "Emissão: 10/05/2025").
+_RE_DATA_LABEL = re.compile(r"(?:emissão|vencimento)\s*[:.]\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
+# Data solta (fallback, ordem de ocorrência).
 _RE_DATA = re.compile(r"\d{2}/\d{2}/\d{4}")
-_RE_VALOR = re.compile(r"R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?")
-_RE_KWH = re.compile(r"(\d{2,4})\s*kWh", re.IGNORECASE)
-_RE_M3 = re.compile(r"(\d{1,4})\s*m.?3", re.IGNORECASE)
+# Valor monetário seguido ou precedido por label (ex: "Valor da energia: R$ 150,00").
+_RE_VALOR = re.compile(
+    r"(?:valor\s*(?:da\s*energia|da\s*agua)?\s*[:.]\s*)?(R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
+    re.IGNORECASE,
+)
+_RE_KWH = re.compile(r"consumo\s*[:.]\s*(\d{2,4})\s*kWh", re.IGNORECASE)
+# m³ aceita superscript (m³) ou ASCII normalizado (m3).
+_RE_M3 = re.compile(r"consumo\s*[:.]\s*(\d{1,4})\s*m³?", re.IGNORECASE)
 
 
 def _carregar_json(caminho: str) -> dict:
@@ -66,24 +74,42 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
     if campo == "cep":
         m = _RE_CEP.search(t)
         return m.group(0) if m else None
-    if campo in ("data_emissao", "data_vencimento"):
-        datas = _RE_DATA.findall(t)
-        if campo == "data_emissao" and len(datas) >= 1:
-            return datas[0]
-        if campo == "data_vencimento" and len(datas) >= 2:
-            return datas[1]
-        return datas[-1] if datas else None
-    if campo == "valor_energia" or campo == "valor_agua":
+    if campo == "data_emissao":
+        m = _RE_DATA_LABEL.search(tl)
+        return m.group(1) if m else None
+    if campo == "data_vencimento":
+        # Busca a segunda ocorrência de data após label de vencimento.
+        matches = list(_RE_DATA_LABEL.finditer(tl))
+        if len(matches) >= 2:
+            return matches[1].group(1)
+        return matches[0].group(1) if matches else None
+    if campo in ("valor_energia", "valor_agua"):
+        # Busca o valor associado ao label específico do campo.
+        label = "valor da energia" if campo == "valor_energia" else "valor da agua"
+        pattern = re.compile(
+            rf"{re.escape(label)}\s*[:.]\s*(R\$\s*\d{{1,3}}(?:\.\d{{3}})*(?:,\d{{2}})?)",
+            re.IGNORECASE,
+        )
+        m = pattern.search(tl)
+        if m:
+            return m.group(1)
+        # Fallback: primeiro valor monetário no texto.
         m = _RE_VALOR.search(t)
-        return m.group(0) if m else None
+        return m.group(1) if m else None
     if campo == "consumo_kwh":
-        m = _RE_KWH.search(t)
+        m = _RE_KWH.search(tl)
         return m.group(1) if m else None
     if campo == "consumo_m3":
-        m = _RE_M3.search(t)
+        m = _RE_M3.search(tl)
+        return m.group(1) if m else None
+    if campo == "referencia":
+        # Busca após label "Ref:" ou "Referência:".
+        m = re.search(r"(?:ref(?:erência)?)\s*[:.]\s*(\d{2}/\d{4})", tl)
         return m.group(1) if m else None
 
-    # Campos por rótulo: busca a linha que contém o rótulo e pega o restante.
+    # Campos por rótulo: busca a linha que contém o rótulo e pega o restante,
+    # parando antes do próximo rótulo conhecido para não capturar campos
+    # adjacentes.
     rotulos = {
         "titular": ["titular", "nome"],
         "endereco": ["endereço", "endereco"],
@@ -93,7 +119,19 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
         "uf": ["uf"],
     }
     if campo in rotulos:
-        for linha in t.splitlines():
+        rotulos_conhecidos = set()
+        for rots in rotulos.values():
+            rotulos_conhecidos.update(rots)
+        # Adiciona labels de outros campos para delimitar o restante.
+        rotulos_conhecidos.update(
+            ["cpf", "endereço", "endereco", "cep", "cidade", "uf",
+             "instalação", "instalacao", "matrícula", "matricula",
+             "código do cliente", "codigo do cliente", "emissão", "vencimento",
+             "ref:", "referência:", "consumo", "leitura anterior", "leitura atual",
+             "valor da energia", "valor da agua", "tarifa"]
+        )
+        linhas = t.splitlines()
+        for i, linha in enumerate(linhas):
             l = linha.lower()
             if any(rot in l for rot in rotulos[campo]):
                 # Remove o rótulo e pontuação, devolve o restante da linha.
@@ -104,7 +142,14 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
                         restante = restante[idx + len(rot):]
                 restante = restante.strip(" :\t-|")
                 if restante:
-                    return restante
+                    # Se houver outro rótulo conhecido na mesma linha, corta.
+                    for rot_conhecido in rotulos_conhecidos:
+                        idx = restante.lower().find(rot_conhecido)
+                        if idx >= 0:
+                            restante = restante[:idx].strip(" :\t-|")
+                            break
+                    if restante:
+                        return restante
     return None
 
 

@@ -30,8 +30,8 @@ Formato (exemplo):
     "codigo_cliente",
     "data_emissao",
     "data_vencimento",
-    "consumo",
-    "valor"
+    "consumo_kwh",
+    "valor_energia"
   ],
   "criado_em": "2026-05-18"
 }

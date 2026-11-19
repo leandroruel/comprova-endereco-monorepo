@@ -80,10 +80,11 @@ def test_todos_documentos_processam_com_sucesso() -> None:
         assert response.document.page_count >= 1
 
 
-def test_geracao_relatorio_avaliacao() -> None:
+def test_geracao_relatorio_avaliacao(tmp_path) -> None:
     """Executa o harness e gera o relatório de avaliação."""
     rel = executar_avaliacao()
-    salvar_relatorio(rel)
+    caminho_relatorio = tmp_path / "evaluation_report.json"
+    salvar_relatorio(rel, caminho=str(caminho_relatorio))
 
     assert rel.total_documentos == len(_manifestos())
     assert rel.documentos_com_sucesso == rel.total_documentos
@@ -93,10 +94,8 @@ def test_geracao_relatorio_avaliacao() -> None:
     for d in rel.documentos:
         assert d.total > 0, f"{d.id} sem campos avaliados"
 
-    # Relatório salvo em disco.
-    assert os.path.exists(os.path.join(FIXTURES_ROOT := os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "fixtures"
-    ), "evaluation_report.json"))
+    # Relatório salvo em disco temporário.
+    assert caminho_relatorio.exists()
 
     print("\n=== RELATÓRIO DE AVALIAÇÃO ===")
     print(f"Documentos: {rel.documentos_com_sucesso}/{rel.total_documentos}")

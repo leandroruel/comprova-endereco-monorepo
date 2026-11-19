@@ -382,7 +382,7 @@ def layout_energia_coluna_esquerda(img: Image.Image, draw: ImageDraw.ImageDraw, 
     draw_text(draw, (180, yy), f"Valor da energia: {cons['valor_energia']}", fnt_dado); yy += 34
 
     # Coluna direita com datas e código cliente.
-    rx = 380
+    rx = 450
     draw_text(draw, (rx, 190), "PAGAMENTO", font(14, bold=True))
     draw_text(draw, (rx, 214), f"Vencimento: {dat['vencimento']}", fnt_dado)
     draw_text(draw, (rx, 238), f"Emissão: {dat['emissao']}", fnt_dado)
@@ -588,7 +588,7 @@ def layout_agua_conta_detalhada(img: Image.Image, draw: ImageDraw.ImageDraw, w: 
         yy += 24
     draw_line(draw, (MARGIN, yy), (col_x[-1] + 100, yy), width=1)
     yy += 26
-    total = f"R$ {rng.randint(80, 350)},{rng.randint(0,99):02d}"
+    total = cons["valor_agua"]
     draw_text(draw, (col_x[0], yy), f"TOTAL: {total}", font(16, bold=True))
 
     # Datas e códigos abaixo da tabela.
@@ -727,19 +727,75 @@ def _emitir_layout(layout_fn: Callable, emissor: Emitter, holder: Holder,
 
 def gerar_documento(tipo: str, emissor: Emitter, layout_fn: Callable,
                     indice: int, em_idx: int, layout_idx: int,
-                    modo_qualidade: str, saida: str) -> Holder:
-    """Gera um único documento sintético e salva em `saida`."""
+                    modo_qualidade: str, saida: str,
+                    formato: str = "escaneado") -> Holder:
+    """Gera um único documento sintético e salva em `saida`.
+
+    Quando ``formato`` é ``"digital"``, gera um PDF com camada de texto via
+    ``montar_pdf_digital`` (reportlab). Quando é ``"escaneado"``, renderiza a
+    imagem como PDF raster via ``montar_pdf_escaneado``.
+    """
     rng = random.Random(SEED + indice * 1000 + (em_idx * 100 + layout_idx * 10))
     holder = titular(emissor, rng)
     cons = consumo_energia(rng) if tipo == "energia" else consumo_agua(rng)
     dat = datas(rng)
 
-    img = _emitir_layout(layout_fn, emissor, holder, cons, dat, rng)
-    img = preparar_imagem_final(img, rng, modo_qualidade)
-
-    montar_pdf_escaneado(img, saida, dpi=200)
+    if formato == "digital":
+        # Gera PDF com camada de texto (digital), sem imagem raster.
+        conteudo = _conteudo_texto_digital(emissor, holder, cons, dat, tipo)
+        montar_pdf_digital(conteudo, saida)
+    else:
+        img = _emitir_layout(layout_fn, emissor, holder, cons, dat, rng)
+        img = preparar_imagem_final(img, rng, modo_qualidade)
+        montar_pdf_escaneado(img, saida, dpi=200)
 
     return holder
+
+
+def _conteudo_texto_digital(emissor: Emitter, holder: Holder,
+                            cons: dict, dat: dict, tipo: str) -> list[list[tuple]]:
+    """Constrói o conteúdo de texto para um PDF digital (camada de texto).
+
+    Devolve uma lista de páginas, cada uma uma lista de tuplas
+    (texto, x, y, tamanho, negrito) compatível com ``montar_pdf_digital``.
+    """
+    is_energia = tipo == "energia"
+    consumo_val = cons.get("consumo_kwh", cons.get("consumo_m3", "0"))
+    consumo_label = "Consumo (kWh):" if is_energia else "Consumo (m³):"
+    valor_label = "Valor da energia:" if is_energia else "Valor da água:"
+    valor_val = cons.get("valor_energia", cons.get("valor_agua", "R$ 0,00"))
+
+    linhas = [
+        (emissor.nome, 54, 70, 26, True),
+        ("CONTA DE " + ("ENERGIA ELÉTRICA" if is_energia else "ÁGUA E SANEAMENTO"), 54, 92, 14, True),
+        (f"CNPJ {emissor.cnpj}  |  {emissor.cidade}/{emissor.uf}", 54, 114, 12, False),
+        ("", 54, 130, 12, False),
+        ("Titular:", 54, 160, 16, False),
+        (holder.nome, 54, 182, 16, False),
+        (f"CPF: {holder.cpf}", 54, 204, 16, False),
+        (f"Endereço: {holder.endereco}", 54, 226, 16, False),
+        (f"{holder.cidade}/{holder.uf}  CEP {holder.cep}", 54, 248, 16, False),
+        ("", 54, 272, 16, False),
+        ("Leitura anterior:", 54, 300, 16, False),
+        (cons.get("leitura_anterior", "0"), 200, 300, 16, False),
+        ("Leitura atual:", 54, 322, 16, False),
+        (cons.get("leitura_atual", "0"), 200, 322, 16, False),
+        (consumo_label, 54, 344, 16, False),
+        (consumo_val, 160, 344, 16, False),
+        (valor_label, 54, 366, 16, False),
+        (valor_val, 190, 366, 16, False),
+        ("Vencimento:", 54, 388, 16, False),
+        (dat.get("vencimento", ""), 150, 388, 16, False),
+        ("Emissão:", 54, 410, 16, False),
+        (dat.get("emissao", ""), 130, 410, 16, False),
+        ("Referência:", 54, 432, 16, False),
+        (dat.get("referencia", ""), 140, 432, 16, False),
+        ("Instalação:", 54, 454, 16, False),
+        (holder.instalacao, 150, 454, 16, False),
+        ("Código do cliente:", 54, 476, 16, False),
+        (holder.codigo_cliente, 190, 476, 16, False),
+    ]
+    return [linhas]
 
 
 # ---------------------------------------------------------------------------
@@ -747,17 +803,17 @@ def gerar_documento(tipo: str, emissor: Emitter, layout_fn: Callable,
 # ---------------------------------------------------------------------------
 
 FIXTURES = [
-    # (arquivo_relativo, tipo, emissor_idx, layout_idx, modo_qualidade)
-    ("energy/sp/energy-sp-001.pdf", "energia", 0, 0, "limpo"),           # SP, layout A, digital
-    ("energy/rj/energy-rj-002.pdf", "energia", 1, 1, "escaneado"),       # RJ, layout B, escaneado
-    ("energy/mg/energy-mg-003.pdf", "energia", 2, 2, "limpo"),           # MG, layout C, digital
-    ("energy/sp/energy-sp-004.pdf", "energia", 0, 1, "baixo_contraste"), # SP, layout B, baixo contraste
-    ("energy/rj/energy-rj-005.pdf", "energia", 1, 2, "manchado"),        # RJ, layout C, manchado
-    ("water/sp/water-sp-001.pdf", "agua", 3, 0, "limpo"),                # SP, layout A, digital
-    ("water/rj/water-rj-002.pdf", "agua", 4, 1, "escaneado"),            # RJ, layout B, escaneado
-    ("water/mg/water-mg-003.pdf", "agua", 5, 2, "limpo"),                # MG, layout C, digital
-    ("water/es/water-es-004.pdf", "agua", 6, 0, "baixa_resolucao"),      # ES, layout A, baixa resolução
-    ("water/sp/water-sp-005.pdf", "agua", 3, 2, "desfocado"),            # SP, layout C, desfocado
+    # (arquivo_relativo, tipo, emissor_idx, layout_idx, modo_qualidade, formato)
+    ("energy/sp/energy-sp-001.pdf", "energia", 0, 0, "limpo", "digital"),           # SP, layout A, digital
+    ("energy/rj/energy-rj-002.pdf", "energia", 1, 1, "escaneado", "escaneado"),       # RJ, layout B, escaneado
+    ("energy/mg/energy-mg-003.pdf", "energia", 2, 2, "limpo", "digital"),           # MG, layout C, digital
+    ("energy/sp/energy-sp-004.pdf", "energia", 0, 1, "baixo_contraste", "escaneado"), # SP, layout B, escaneado
+    ("energy/rj/energy-rj-005.pdf", "energia", 1, 2, "manchado", "escaneado"),        # RJ, layout C, escaneado
+    ("water/sp/water-sp-001.pdf", "agua", 3, 0, "limpo", "digital"),                # SP, layout A, digital
+    ("water/rj/water-rj-002.pdf", "agua", 4, 1, "escaneado", "escaneado"),            # RJ, layout B, escaneado
+    ("water/mg/water-mg-003.pdf", "agua", 5, 2, "limpo", "digital"),                # MG, layout C, digital
+    ("water/es/water-es-004.pdf", "agua", 6, 0, "baixa_resolucao", "escaneado"),      # ES, layout A, escaneado
+    ("water/sp/water-sp-005.pdf", "agua", 3, 2, "desfocado", "escaneado"),            # SP, layout C, escaneado
 ]
 
 
@@ -768,12 +824,12 @@ def main() -> None:
     layouts_agua = LAYOUTS_AGUA
 
     gerados: list[dict] = []
-    for i, (rel, tipo, em_idx, layout_idx, modo) in enumerate(FIXTURES):
+    for i, (rel, tipo, em_idx, layout_idx, modo, formato) in enumerate(FIXTURES):
         emissor = emissores_lista[em_idx]
         layout_fn = layouts_energia[layout_idx] if tipo == "energia" else layouts_agua[layout_idx]
         saida = os.path.join(ROOT, rel)
         os.makedirs(os.path.dirname(saida), exist_ok=True)
-        holder = gerar_documento(tipo, emissor, layout_fn, i, em_idx, layout_idx, modo, saida)
+        holder = gerar_documento(tipo, emissor, layout_fn, i, em_idx, layout_idx, modo, saida, formato)
         gerados.append({
             "arquivo": rel,
             "tipo": tipo,
