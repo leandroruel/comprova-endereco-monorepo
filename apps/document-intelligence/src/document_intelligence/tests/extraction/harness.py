@@ -41,10 +41,16 @@ _RE_DATA_VENCIMENTO = re.compile(r"vencimento\s*[:.]\s*(\d{2}/\d{2}/\d{4})", re.
 # Valor monetário precedido por rótulo específico (ex: "Valor da água: R$ 213,99").
 # Aceita tanto "agua" quanto "água".
 # Usa \\x24 em vez de \\$ para evitar problemas de escape em alguns engines de regex.
+# O grupo de captura do valor é OBRIGATÓRIO: se o rótulo existir mas não houver
+# valor, não há match, evitando retorno de string vazia ou IndexError.
 _RE_VALOR_LABEL = re.compile(
-    r"(?:valor\s*(?:da\s*energia|da\s*água|da\s*agua|total|a\s*pagar)?\s*[:.]\s*)([Rr]\x24\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?)",
+    r"(?:valor\s*(?:da\s*energia|da\s*água|da\s*agua|total|a\s*pagar)?\s*[:.]\s*)([Rr]\x24\s*\d{1,3}(?:\.\d{3})*(?:,\d{2}))",
     re.IGNORECASE,
 )
+# Cidade/UF no formato "São Paulo/SP" (ex: "Guarulhos/SP CEP 01000-000").
+# Aceita espaços ao redor da barra e nomes de cidade com caracteres acentuados.
+# Usa re.IGNORECASE porque a busca é feita no texto lowercase (tl).
+_RE_CIDADE_UF = re.compile(r"([A-Za-zÀ-ÿ\s]+?)\s*/\s*([A-Z]{2})", re.IGNORECASE)
 _RE_KWH = re.compile(r"consumo\s*[:.]\s*(\d{2,4})\s*kWh", re.IGNORECASE)
 # m³ aceita superscript (m³) ou ASCII normalizado (m3).
 _RE_M3 = re.compile(r"consumo\s*[:.]\s*(\d{1,4})\s*m³?", re.IGNORECASE)
@@ -92,12 +98,14 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
         # Usa \\s+ entre palavras do rótulo (em vez de re.escape, que escapa
         # espaços e impede a correspondência).
         # Aceita tanto "agua" quanto "água" no rótulo.
+        # O grupo de captura do valor é OBRIGATÓRIO: se o rótulo existir mas
+        # não houver valor, não há match, evitando retorno de string vazia.
         if campo == "valor_energia":
             label_pattern = r"valor\s+da\s+energia"
         else:
             label_pattern = r"valor\s+da\s*[áa]gua"
         pattern = re.compile(
-            rf"(?:{label_pattern})\s*[:.]\s*([Rr]\x24\s*\d{{1,3}}(?:\.\d{{3}})*(?:,\d{{2}}))?",
+            rf"(?:{label_pattern})\s*[:.]\s*([Rr]\x24\s*\d{{1,3}}(?:\.\d{{3}})*(?:,\d{{2}}))",
             re.IGNORECASE,
         )
         m = pattern.search(tl)
@@ -112,6 +120,18 @@ def _extrair_campo(texto: str, campo: str) -> str | None:
     if campo == "consumo_m3":
         m = _RE_M3.search(tl)
         return m.group(1) if m else None
+    if campo == "cidade":
+        # Cidade/UF no formato "São Paulo/SP".
+        m = _RE_CIDADE_UF.search(t)
+        if m:
+            return m.group(1).strip()
+        return None
+    if campo == "uf":
+        # Cidade/UF no formato "São Paulo/SP".
+        m = _RE_CIDADE_UF.search(t)
+        if m:
+            return m.group(2).upper()
+        return None
     if campo == "referencia":
         # Busca após label "Ref:" ou "Referência:".
         m = re.search(r"(?:ref(?:erência)?)\s*[:.]\s*(\d{2}/\d{4})", tl)

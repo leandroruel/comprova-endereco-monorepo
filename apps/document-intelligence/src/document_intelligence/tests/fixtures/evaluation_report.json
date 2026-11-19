@@ -1,7 +1,7 @@
 {
   "total_documentos": 10,
   "documentos_com_sucesso": 10,
-  "media_taxa_acerto": 0.491,
+  "media_taxa_acerto": 0.5866,
   "por_campo": {
     "titular": {
       "total": 10,
@@ -25,13 +25,13 @@
     },
     "cidade": {
       "total": 10,
-      "acertos": 0,
-      "taxa_acerto": 0.0
+      "acertos": 6,
+      "taxa_acerto": 0.6
     },
     "uf": {
       "total": 10,
-      "acertos": 0,
-      "taxa_acerto": 0.0
+      "acertos": 6,
+      "taxa_acerto": 0.6
     },
     "instalacao": {
       "total": 10,
@@ -88,8 +88,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1718,
-      "taxa_acerto": 0.7692,
-      "acertos": 10,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
       "total": 13,
       "campos": [
         {
@@ -119,14 +119,14 @@
         {
           "campo": "cidade",
           "esperado": "Belo Horizonte",
-          "extraido": null,
-          "correto": false
+          "extraido": "Belo Horizonte",
+          "correto": true
         },
         {
           "campo": "uf",
           "esperado": "MG",
-          "extraido": null,
-          "correto": false
+          "extraido": "MG",
+          "correto": true
         },
         {
           "campo": "instalacao",
@@ -211,13 +211,13 @@
         {
           "campo": "cidade",
           "esperado": "Rio de Janeiro",
-          "extraido": null,
+          "extraido": "",
           "correto": false
         },
         {
           "campo": "uf",
           "esperado": "RJ",
-          "extraido": null,
+          "extraido": "KW",
           "correto": false
         },
         {
@@ -272,8 +272,8 @@
       "qualidade": "manchado",
       "status": "completed",
       "chars_extraidos": 398,
-      "taxa_acerto": 0.4545,
-      "acertos": 5,
+      "taxa_acerto": 0.5455,
+      "acertos": 6,
       "total": 11,
       "campos": [
         {
@@ -291,13 +291,13 @@
         {
           "campo": "cidade",
           "esperado": "Rio de Janeiro",
-          "extraido": null,
-          "correto": false
+          "extraido": "Rio de Janeiro",
+          "correto": true
         },
         {
           "campo": "uf",
           "esperado": "RJ",
-          "extraido": null,
+          "extraido": "RY",
           "correto": false
         },
         {
@@ -352,8 +352,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1710,
-      "taxa_acerto": 0.7692,
-      "acertos": 10,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
       "total": 13,
       "campos": [
         {
@@ -383,14 +383,14 @@
         {
           "campo": "cidade",
           "esperado": "São Paulo",
-          "extraido": null,
-          "correto": false
+          "extraido": "São Paulo",
+          "correto": true
         },
         {
           "campo": "uf",
           "esperado": "SP",
-          "extraido": null,
-          "correto": false
+          "extraido": "SP",
+          "correto": true
         },
         {
           "campo": "instalacao",
@@ -444,8 +444,8 @@
       "qualidade": "baixo_contraste",
       "status": "completed",
       "chars_extraidos": 526,
-      "taxa_acerto": 0.4167,
-      "acertos": 5,
+      "taxa_acerto": 0.5833,
+      "acertos": 7,
       "total": 12,
       "campos": [
         {
@@ -469,14 +469,14 @@
         {
           "campo": "cidade",
           "esperado": "São Paulo",
-          "extraido": null,
-          "correto": false
+          "extraido": "São Paulo",
+          "correto": true
         },
         {
           "campo": "uf",
           "esperado": "SP",
-          "extraido": null,
-          "correto": false
+          "extraido": "SP",
+          "correto": true
         },
         {
           "campo": "instalacao",
@@ -530,8 +530,8 @@
       "qualidade": "baixa_resolucao",
       "status": "completed",
       "chars_extraidos": 531,
-      "taxa_acerto": 0.5,
-      "acertos": 6,
+      "taxa_acerto": 0.5833,
+      "acertos": 7,
       "total": 12,
       "campos": [
         {
@@ -555,14 +555,14 @@
         {
           "campo": "cidade",
           "esperado": "Vitória",
-          "extraido": null,
+          "extraido": "Cariacica",
           "correto": false
         },
         {
           "campo": "uf",
           "esperado": "ES",
-          "extraido": null,
-          "correto": false
+          "extraido": "ES",
+          "correto": true
         },
         {
           "campo": "instalacao",
@@ -616,8 +616,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1720,
-      "taxa_acerto": 0.7692,
-      "acertos": 10,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
       "total": 13,
       "campos": [
         {
@@ -647,14 +647,14 @@
         {
           "campo": "cidade",
           "esperado": "Belo Horizonte",
-          "extraido": null,
-          "correto": false
+          "extraido": "Belo Horizonte",
+          "correto": true
         },
         {
           "campo": "uf",
           "esperado": "MG",
-          "extraido": null,
-          "correto": false
+          "extraido": "MG",
+          "correto": true
         },
         {
           "campo": "instalacao",
@@ -800,8 +800,8 @@
       "qualidade": "limpo",
       "status": "completed",
       "chars_extraidos": 1707,
-      "taxa_acerto": 0.7692,
-      "acertos": 10,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
       "total": 13,
       "campos": [
         {
@@ -831,14 +831,14 @@
         {
           "campo": "cidade",
           "esperado": "São Paulo",
-          "extraido": null,
-          "correto": false
+          "extraido": "São Paulo",
+          "correto": true
         },
         {
           "campo": "uf",
           "esperado": "SP",
-          "extraido": null,
-          "correto": false
+          "extraido": "SP",
+          "correto": true
         },
         {
           "campo": "instalacao",

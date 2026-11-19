@@ -183,3 +183,86 @@ def test_extrair_valor_agua_ignora_tarifa():
     resultado = _extrair_campo(texto, "valor_agua")
     assert resultado == "R$ 213,99"
     assert resultado != "R$ 4,35"
+
+
+# ---------------------------------------------------------------------------
+# Testes de extração de cidade/UF
+# ---------------------------------------------------------------------------
+
+
+def test_extrair_cidade_uf_sao_paulo_sp():
+    """Cidade e UF extraídas de 'São Paulo/SP'."""
+    texto = "São Paulo/SP  CEP 01000-000"
+    assert _extrair_campo(texto, "cidade") == "São Paulo"
+    assert _extrair_campo(texto, "uf") == "SP"
+
+
+def test_extrair_cidade_uf_belo_horizonte_mg():
+    """Cidade e UF extraídas de 'Belo Horizonte/MG'."""
+    texto = "Belo Horizonte/MG CEP 30000-000"
+    assert _extrair_campo(texto, "cidade") == "Belo Horizonte"
+    assert _extrair_campo(texto, "uf") == "MG"
+
+
+def test_extrair_cidade_uf_vitoria_es():
+    """Cidade e UF extraídas de 'Vitória/ES'."""
+    texto = "Vitória/ES CEP 29000-000"
+    assert _extrair_campo(texto, "cidade") == "Vitória"
+    assert _extrair_campo(texto, "uf") == "ES"
+
+
+def test_extrair_cidade_uf_espacos_ao_redor_da_barra():
+    """Cidade e UF extraídas mesmo com espaços ao redor da barra."""
+    texto = "São Paulo  /  SP"
+    assert _extrair_campo(texto, "cidade") == "São Paulo"
+    assert _extrair_campo(texto, "uf") == "SP"
+
+
+def test_extrair_cidade_uf_sem_barra_nao_extrai():
+    """Sem a barra, não há match para cidade/UF."""
+    texto = "São Paulo SP"
+    assert _extrair_campo(texto, "cidade") is None
+    assert _extrair_campo(texto, "uf") is None
+
+
+# ---------------------------------------------------------------------------
+# Testes de valor monetário sem valor
+# ---------------------------------------------------------------------------
+
+
+def test_extrair_valor_agua_sem_valor():
+    """Rótulo 'Valor da água:' sem valor deve retornar None."""
+    texto = "Tarifa: R$ 4,35\nValor da água:"
+    assert _extrair_campo(texto, "valor_agua") is None
+
+
+def test_extrair_valor_agua_sem_valor_sem_acento():
+    """Rótulo 'Valor da agua:' sem valor deve retornar None."""
+    texto = "Tarifa: R$ 4,35\nValor da agua:"
+    assert _extrair_campo(texto, "valor_agua") is None
+
+
+def test_extrair_valor_energia_sem_valor():
+    """Rótulo 'Valor da energia:' sem valor deve retornar None."""
+    texto = "Tarifa: R$ 4,35\nValor da energia:"
+    assert _extrair_campo(texto, "valor_energia") is None
+
+
+def test_extrair_valor_texto_que_nao_eh_valor_monetario():
+    """Rótulo seguido de texto que não é valor monetário deve retornar None."""
+    texto = "Valor da água: não informado"
+    assert _extrair_campo(texto, "valor_agua") is None
+
+
+def test_extrair_valor_valido_continua_funcionando():
+    """Valor válido continua sendo extraído normalmente."""
+    texto = "Tarifa: R$ 4,35\nValor da água: R$ 213,99"
+    assert _extrair_campo(texto, "valor_agua") == "R$ 213,99"
+
+
+def test_extrair_valor_agua_ignora_tarifa_antes():
+    """Uma tarifa anterior ao valor total não deve ser confundida com o valor da água."""
+    texto = "Tarifa: R$ 4,35\nValor da água: R$ 213,99"
+    resultado = _extrair_campo(texto, "valor_agua")
+    assert resultado == "R$ 213,99"
+    assert resultado != "R$ 4,35"
