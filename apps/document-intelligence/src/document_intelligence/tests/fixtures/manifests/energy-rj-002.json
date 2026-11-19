@@ -1,0 +1,29 @@
+{
+  "id": "energy-rj-002",
+  "arquivo": "documents/energy/rj/energy-rj-002.pdf",
+  "tipo": "energia",
+  "emissor": "Distribuidora Energia Demo RJ",
+  "uf": "RJ",
+  "cidade": "Rio de Janeiro",
+  "versao_layout": "v1.1",
+  "variante": "coluna_esquerda",
+  "qualidade": "escaneado",
+  "formato": "escaneado",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "cpf",
+    "endereco",
+    "cep",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_kwh",
+    "valor_energia",
+    "referencia"
+  ],
+  "criado_em": "2026-05-18"
+}

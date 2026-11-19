@@ -1,0 +1,28 @@
+{
+  "id": "energy-rj-005",
+  "arquivo": "documents/energy/rj/energy-rj-005.pdf",
+  "tipo": "energia",
+  "emissor": "Distribuidora Energia Demo RJ",
+  "uf": "RJ",
+  "cidade": "Rio de Janeiro",
+  "versao_layout": "v1.1",
+  "variante": "tabela_simples",
+  "qualidade": "manchado",
+  "formato": "escaneado",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "endereco",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_kwh",
+    "valor_energia",
+    "referencia"
+  ],
+  "nota": "Documento manchado: cpf e cep podem não ser OCRizados com confiança.",
+  "criado_em": "2026-05-18"
+}

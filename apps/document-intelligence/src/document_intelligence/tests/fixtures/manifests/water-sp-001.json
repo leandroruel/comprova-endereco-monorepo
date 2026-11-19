@@ -1,0 +1,29 @@
+{
+  "id": "water-sp-001",
+  "arquivo": "documents/water/sp/water-sp-001.pdf",
+  "tipo": "agua",
+  "emissor": "Companhia de Água Demo SP",
+  "uf": "SP",
+  "cidade": "São Paulo",
+  "versao_layout": "v1.0",
+  "variante": "bloco_conta",
+  "qualidade": "limpo",
+  "formato": "digital",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "cpf",
+    "endereco",
+    "cep",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_m3",
+    "valor_agua",
+    "referencia"
+  ],
+  "criado_em": "2026-05-18"
+}

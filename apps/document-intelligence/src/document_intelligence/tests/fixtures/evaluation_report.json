@@ -1,0 +1,974 @@
+{
+  "total_documentos": 10,
+  "documentos_com_sucesso": 10,
+  "media_taxa_acerto": 0.5866,
+  "por_campo": {
+    "titular": {
+      "total": 10,
+      "acertos": 5,
+      "taxa_acerto": 0.5
+    },
+    "cpf": {
+      "total": 9,
+      "acertos": 7,
+      "taxa_acerto": 0.7778
+    },
+    "endereco": {
+      "total": 10,
+      "acertos": 4,
+      "taxa_acerto": 0.4
+    },
+    "cep": {
+      "total": 6,
+      "acertos": 5,
+      "taxa_acerto": 0.8333
+    },
+    "cidade": {
+      "total": 10,
+      "acertos": 6,
+      "taxa_acerto": 0.6
+    },
+    "uf": {
+      "total": 10,
+      "acertos": 6,
+      "taxa_acerto": 0.6
+    },
+    "instalacao": {
+      "total": 10,
+      "acertos": 5,
+      "taxa_acerto": 0.5
+    },
+    "codigo_cliente": {
+      "total": 10,
+      "acertos": 4,
+      "taxa_acerto": 0.4
+    },
+    "data_emissao": {
+      "total": 10,
+      "acertos": 6,
+      "taxa_acerto": 0.6
+    },
+    "data_vencimento": {
+      "total": 10,
+      "acertos": 8,
+      "taxa_acerto": 0.8
+    },
+    "consumo_kwh": {
+      "total": 5,
+      "acertos": 3,
+      "taxa_acerto": 0.6
+    },
+    "valor_energia": {
+      "total": 5,
+      "acertos": 4,
+      "taxa_acerto": 0.8
+    },
+    "referencia": {
+      "total": 10,
+      "acertos": 7,
+      "taxa_acerto": 0.7
+    },
+    "consumo_m3": {
+      "total": 5,
+      "acertos": 1,
+      "taxa_acerto": 0.2
+    },
+    "valor_agua": {
+      "total": 5,
+      "acertos": 3,
+      "taxa_acerto": 0.6
+    }
+  },
+  "documentos": [
+    {
+      "id": "energy-mg-003",
+      "arquivo": "documents/energy/mg/energy-mg-003.pdf",
+      "tipo": "energia",
+      "uf": "MG",
+      "qualidade": "limpo",
+      "status": "completed",
+      "chars_extraidos": 1718,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
+      "total": 13,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Marcos Vinícius Rocha",
+          "extraido": "Marcos Vinícius Rocha",
+          "correto": true
+        },
+        {
+          "campo": "cpf",
+          "esperado": "691.283.566-11",
+          "extraido": "691.283.566-11",
+          "correto": true
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Rua das Flores, 123, Apto 101",
+          "extraido": "Rua das Flores, 123, Apto 101",
+          "correto": true
+        },
+        {
+          "campo": "cep",
+          "esperado": "81094-560",
+          "extraido": "81094-560",
+          "correto": true
+        },
+        {
+          "campo": "cidade",
+          "esperado": "Belo Horizonte",
+          "extraido": "Belo Horizonte",
+          "correto": true
+        },
+        {
+          "campo": "uf",
+          "esperado": "MG",
+          "extraido": "MG",
+          "correto": true
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "843262-39",
+          "extraido": "843262-39",
+          "correto": true
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "DEMG-2773402",
+          "extraido": "DEMG-2773402",
+          "correto": true
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "11/08/2025",
+          "extraido": "11/08/2025",
+          "correto": true
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "21/08/2025",
+          "extraido": "21/08/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_kwh",
+          "esperado": "387",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "valor_energia",
+          "esperado": "R$ 151,00",
+          "extraido": "R$ 151,00",
+          "correto": true
+        },
+        {
+          "campo": "referencia",
+          "esperado": "08/2025",
+          "extraido": "08/2025",
+          "correto": true
+        }
+      ]
+    },
+    {
+      "id": "energy-rj-002",
+      "arquivo": "documents/energy/rj/energy-rj-002.pdf",
+      "tipo": "energia",
+      "uf": "RJ",
+      "qualidade": "escaneado",
+      "status": "completed",
+      "chars_extraidos": 562,
+      "taxa_acerto": 0.3077,
+      "acertos": 4,
+      "total": 13,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Ana Pereira Silva",
+          "extraido": ". : Ana Pereira Silva Vêncimento: 28/12/2025",
+          "correto": false
+        },
+        {
+          "campo": "cpf",
+          "esperado": "979.678.406-89",
+          "extraido": "979.678.406-89",
+          "correto": true
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Av. Paulista, 1500, conj. 12",
+          "extraido": "Av: Paulista, 1500, Cop 2, josma)s",
+          "correto": false
+        },
+        {
+          "campo": "cep",
+          "esperado": "99762-284",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "cidade",
+          "esperado": "Rio de Janeiro",
+          "extraido": "",
+          "correto": false
+        },
+        {
+          "campo": "uf",
+          "esperado": "RJ",
+          "extraido": "KW",
+          "correto": false
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "704214-73",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "DERJ-3727732",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "26/12/2025",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "28/12/2025",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "consumo_kwh",
+          "esperado": "381",
+          "extraido": "381",
+          "correto": true
+        },
+        {
+          "campo": "valor_energia",
+          "esperado": "R$ 269,65",
+          "extraido": "R$ 269,65",
+          "correto": true
+        },
+        {
+          "campo": "referencia",
+          "esperado": "12/2025",
+          "extraido": "12/2025",
+          "correto": true
+        }
+      ]
+    },
+    {
+      "id": "energy-rj-005",
+      "arquivo": "documents/energy/rj/energy-rj-005.pdf",
+      "tipo": "energia",
+      "uf": "RJ",
+      "qualidade": "manchado",
+      "status": "completed",
+      "chars_extraidos": 398,
+      "taxa_acerto": 0.5455,
+      "acertos": 6,
+      "total": 11,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Fernanda Oliveira Costa",
+          "extraido": "Fe ja Oliveira Costa",
+          "correto": false
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Av. Paulista, 1500, conj. 12",
+          "extraido": "Av + 1500, conj. 12",
+          "correto": false
+        },
+        {
+          "campo": "cidade",
+          "esperado": "Rio de Janeiro",
+          "extraido": "Rio de Janeiro",
+          "correto": true
+        },
+        {
+          "campo": "uf",
+          "esperado": "RJ",
+          "extraido": "RY",
+          "correto": false
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "610176-54",
+          "extraido": "610176-54",
+          "correto": true
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "DERJ-1178856",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "01/11/2025",
+          "extraido": "01/11/2025",
+          "correto": true
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "11/11/2025",
+          "extraido": "11/11/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_kwh",
+          "esperado": "330",
+          "extraido": "330",
+          "correto": true
+        },
+        {
+          "campo": "valor_energia",
+          "esperado": "R$ 380,28",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "referencia",
+          "esperado": "11/2025",
+          "extraido": "11/2025",
+          "correto": true
+        }
+      ]
+    },
+    {
+      "id": "energy-sp-001",
+      "arquivo": "documents/energy/sp/energy-sp-001.pdf",
+      "tipo": "energia",
+      "uf": "SP",
+      "qualidade": "limpo",
+      "status": "completed",
+      "chars_extraidos": 1710,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
+      "total": 13,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Juliana Beatriz Lima",
+          "extraido": "Juliana Beatriz Lima",
+          "correto": true
+        },
+        {
+          "campo": "cpf",
+          "esperado": "563.040.931-50",
+          "extraido": "563.040.931-50",
+          "correto": true
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Alameda Santos, 450, sala 8",
+          "extraido": "Alameda Santos, 450, sala 8",
+          "correto": true
+        },
+        {
+          "campo": "cep",
+          "esperado": "43295-018",
+          "extraido": "43295-018",
+          "correto": true
+        },
+        {
+          "campo": "cidade",
+          "esperado": "São Paulo",
+          "extraido": "São Paulo",
+          "correto": true
+        },
+        {
+          "campo": "uf",
+          "esperado": "SP",
+          "extraido": "SP",
+          "correto": true
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "822515-93",
+          "extraido": "822515-93",
+          "correto": true
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "DESP-6476653",
+          "extraido": "DESP-6476653",
+          "correto": true
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "27/07/2025",
+          "extraido": "27/07/2025",
+          "correto": true
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "28/07/2025",
+          "extraido": "28/07/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_kwh",
+          "esperado": "220",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "valor_energia",
+          "esperado": "R$ 338,45",
+          "extraido": "R$ 338,45",
+          "correto": true
+        },
+        {
+          "campo": "referencia",
+          "esperado": "07/2025",
+          "extraido": "07/2025",
+          "correto": true
+        }
+      ]
+    },
+    {
+      "id": "energy-sp-004",
+      "arquivo": "documents/energy/sp/energy-sp-004.pdf",
+      "tipo": "energia",
+      "uf": "SP",
+      "qualidade": "baixo_contraste",
+      "status": "completed",
+      "chars_extraidos": 526,
+      "taxa_acerto": 0.5833,
+      "acertos": 7,
+      "total": 12,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Ricardo Alves Souza",
+          "extraido": "Ricardo Alves Souza",
+          "correto": true
+        },
+        {
+          "campo": "cpf",
+          "esperado": "328.422.938-20",
+          "extraido": "328.422.938-20",
+          "correto": true
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Rua das Flores, 123, Apto 101",
+          "extraido": "Rua das Flores, 123, Apto ii",
+          "correto": false
+        },
+        {
+          "campo": "cidade",
+          "esperado": "São Paulo",
+          "extraido": "São Paulo",
+          "correto": true
+        },
+        {
+          "campo": "uf",
+          "esperado": "SP",
+          "extraido": "SP",
+          "correto": true
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "604630-82",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "DESP-1857174",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "07/10/2025",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "17/10/2025",
+          "extraido": "17/10/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_kwh",
+          "esperado": "513",
+          "extraido": "513",
+          "correto": true
+        },
+        {
+          "campo": "valor_energia",
+          "esperado": "R$ 387,74",
+          "extraido": "R$ 387,74",
+          "correto": true
+        },
+        {
+          "campo": "referencia",
+          "esperado": "10/2025",
+          "extraido": null,
+          "correto": false
+        }
+      ]
+    },
+    {
+      "id": "water-es-004",
+      "arquivo": "documents/water/es/water-es-004.pdf",
+      "tipo": "agua",
+      "uf": "ES",
+      "qualidade": "baixa_resolucao",
+      "status": "completed",
+      "chars_extraidos": 531,
+      "taxa_acerto": 0.5833,
+      "acertos": 7,
+      "total": 12,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "André Luiz Ferreira",
+          "extraido": "DADOS DO",
+          "correto": false
+        },
+        {
+          "campo": "cpf",
+          "esperado": "166.257.714-34",
+          "extraido": "166.257.714-34",
+          "correto": true
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Rua das Flores, 123, Apto 101",
+          "extraido": "Rua das Flores, 123, Apto 10IMatrícuia: 632335-95",
+          "correto": false
+        },
+        {
+          "campo": "cidade",
+          "esperado": "Vitória",
+          "extraido": "Cariacica",
+          "correto": false
+        },
+        {
+          "campo": "uf",
+          "esperado": "ES",
+          "extraido": "ES",
+          "correto": true
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "632335-95",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "CADES-9305454",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "21/10/2025",
+          "extraido": "21/10/2025",
+          "correto": true
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "28/10/2025",
+          "extraido": "28/10/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_m3",
+          "esperado": "21",
+          "extraido": "21",
+          "correto": true
+        },
+        {
+          "campo": "valor_agua",
+          "esperado": "R$ 134,51",
+          "extraido": "R$ 134,51",
+          "correto": true
+        },
+        {
+          "campo": "referencia",
+          "esperado": "10/2025",
+          "extraido": "10/2025",
+          "correto": true
+        }
+      ]
+    },
+    {
+      "id": "water-mg-003",
+      "arquivo": "documents/water/mg/water-mg-003.pdf",
+      "tipo": "agua",
+      "uf": "MG",
+      "qualidade": "limpo",
+      "status": "completed",
+      "chars_extraidos": 1720,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
+      "total": 13,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Luiz Henrique Nunes",
+          "extraido": "Luiz Henrique Nunes",
+          "correto": true
+        },
+        {
+          "campo": "cpf",
+          "esperado": "268.958.405-23",
+          "extraido": "268.958.405-23",
+          "correto": true
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Rua Oscar Freire, 500",
+          "extraido": "Rua Oscar Freire, 500",
+          "correto": true
+        },
+        {
+          "campo": "cep",
+          "esperado": "26885-422",
+          "extraido": "26885-422",
+          "correto": true
+        },
+        {
+          "campo": "cidade",
+          "esperado": "Belo Horizonte",
+          "extraido": "Belo Horizonte",
+          "correto": true
+        },
+        {
+          "campo": "uf",
+          "esperado": "MG",
+          "extraido": "MG",
+          "correto": true
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "535282-27",
+          "extraido": "535282-27",
+          "correto": true
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "SMSDMG-3589809",
+          "extraido": "SMSDMG-3589809",
+          "correto": true
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "24/10/2025",
+          "extraido": "24/10/2025",
+          "correto": true
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "28/10/2025",
+          "extraido": "28/10/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_m3",
+          "esperado": "36",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "valor_agua",
+          "esperado": "R$ 164,80",
+          "extraido": "R$ 164,80",
+          "correto": true
+        },
+        {
+          "campo": "referencia",
+          "esperado": "10/2025",
+          "extraido": "10/2025",
+          "correto": true
+        }
+      ]
+    },
+    {
+      "id": "water-rj-002",
+      "arquivo": "documents/water/rj/water-rj-002.pdf",
+      "tipo": "agua",
+      "uf": "RJ",
+      "qualidade": "escaneado",
+      "status": "completed",
+      "chars_extraidos": 473,
+      "taxa_acerto": 0.1538,
+      "acertos": 2,
+      "total": 13,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Ana Pereira Silva",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "cpf",
+          "esperado": "505.243.098-59",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Rua Augusta, 890",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "cep",
+          "esperado": "77687-697",
+          "extraido": "77687-697",
+          "correto": true
+        },
+        {
+          "campo": "cidade",
+          "esperado": "Rio de Janeiro",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "uf",
+          "esperado": "RJ",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "829076-61",
+          "extraido": "829076-61 E",
+          "correto": false
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "CADRJ-6444943",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "11/04/2025",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "21/04/2025",
+          "extraido": "21/04/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_m3",
+          "esperado": "18",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "valor_agua",
+          "esperado": "R$ 212,26",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "referencia",
+          "esperado": "04/2025",
+          "extraido": null,
+          "correto": false
+        }
+      ]
+    },
+    {
+      "id": "water-sp-001",
+      "arquivo": "documents/water/sp/water-sp-001.pdf",
+      "tipo": "agua",
+      "uf": "SP",
+      "qualidade": "limpo",
+      "status": "completed",
+      "chars_extraidos": 1707,
+      "taxa_acerto": 0.9231,
+      "acertos": 12,
+      "total": 13,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "André Luiz Ferreira",
+          "extraido": "André Luiz Ferreira",
+          "correto": true
+        },
+        {
+          "campo": "cpf",
+          "esperado": "194.141.277-77",
+          "extraido": "194.141.277-77",
+          "correto": true
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Rua Haddock Lobo, 300",
+          "extraido": "Rua Haddock Lobo, 300",
+          "correto": true
+        },
+        {
+          "campo": "cep",
+          "esperado": "97274-795",
+          "extraido": "97274-795",
+          "correto": true
+        },
+        {
+          "campo": "cidade",
+          "esperado": "São Paulo",
+          "extraido": "São Paulo",
+          "correto": true
+        },
+        {
+          "campo": "uf",
+          "esperado": "SP",
+          "extraido": "SP",
+          "correto": true
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "185908-75",
+          "extraido": "185908-75",
+          "correto": true
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "CADSP-7045178",
+          "extraido": "CADSP-7045178",
+          "correto": true
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "09/12/2025",
+          "extraido": "09/12/2025",
+          "correto": true
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "19/12/2025",
+          "extraido": "19/12/2025",
+          "correto": true
+        },
+        {
+          "campo": "consumo_m3",
+          "esperado": "69",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "valor_agua",
+          "esperado": "R$ 213,99",
+          "extraido": "R$ 213,99",
+          "correto": true
+        },
+        {
+          "campo": "referencia",
+          "esperado": "12/2025",
+          "extraido": "12/2025",
+          "correto": true
+        }
+      ]
+    },
+    {
+      "id": "water-sp-005",
+      "arquivo": "documents/water/sp/water-sp-005.pdf",
+      "tipo": "agua",
+      "uf": "SP",
+      "qualidade": "desfocado",
+      "status": "completed",
+      "chars_extraidos": 90,
+      "taxa_acerto": 0.0,
+      "acertos": 0,
+      "total": 12,
+      "campos": [
+        {
+          "campo": "titular",
+          "esperado": "Marcos Vinícius Rocha",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "cpf",
+          "esperado": "367.626.191-23",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "endereco",
+          "esperado": "Av. Brigadeiro Luís Antônio, 900",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "cidade",
+          "esperado": "São Paulo",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "uf",
+          "esperado": "SP",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "instalacao",
+          "esperado": "197849-44",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "codigo_cliente",
+          "esperado": "CADSP-1644080",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_emissao",
+          "esperado": "05/11/2025",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "data_vencimento",
+          "esperado": "15/11/2025",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "consumo_m3",
+          "esperado": "61",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "valor_agua",
+          "esperado": "R$ 135,81",
+          "extraido": null,
+          "correto": false
+        },
+        {
+          "campo": "referencia",
+          "esperado": "11/2025",
+          "extraido": null,
+          "correto": false
+        }
+      ]
+    }
+  ]
+}

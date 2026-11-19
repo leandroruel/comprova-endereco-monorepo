@@ -1,0 +1,29 @@
+{
+  "id": "water-rj-002",
+  "arquivo": "documents/water/rj/water-rj-002.pdf",
+  "tipo": "agua",
+  "emissor": "Companhia de Água Demo RJ",
+  "uf": "RJ",
+  "cidade": "Rio de Janeiro",
+  "versao_layout": "v1.2",
+  "variante": "dois_colunas",
+  "qualidade": "escaneado",
+  "formato": "escaneado",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "cpf",
+    "endereco",
+    "cep",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_m3",
+    "valor_agua",
+    "referencia"
+  ],
+  "criado_em": "2026-05-18"
+}

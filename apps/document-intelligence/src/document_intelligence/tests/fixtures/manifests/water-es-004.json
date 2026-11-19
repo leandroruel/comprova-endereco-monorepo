@@ -1,0 +1,29 @@
+{
+  "id": "water-es-004",
+  "arquivo": "documents/water/es/water-es-004.pdf",
+  "tipo": "agua",
+  "emissor": "Companhia de Água Demo ES",
+  "uf": "ES",
+  "cidade": "Vitória",
+  "versao_layout": "v1.0",
+  "variante": "bloco_conta",
+  "qualidade": "baixa_resolucao",
+  "formato": "escaneado",
+  "paginas": 1,
+  "campos_esperados": [
+    "titular",
+    "cpf",
+    "endereco",
+    "cidade",
+    "uf",
+    "instalacao",
+    "codigo_cliente",
+    "data_emissao",
+    "data_vencimento",
+    "consumo_m3",
+    "valor_agua",
+    "referencia"
+  ],
+  "nota": "Documento de baixa resolução: cep pode não ser OCRizado com confiança.",
+  "criado_em": "2026-05-18"
+}
