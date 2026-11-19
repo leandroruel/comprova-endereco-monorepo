@@ -343,9 +343,9 @@ def test_pagina_mista_texto_longo_com_imagem_relevante_executa_ocr(
 def test_pdf_digital_imagem_decorativa_preserva_caminho_rapido(
     monkeypatch, tmp_path
 ) -> None:
-    """PDF digital com imagem pequena/decorativa deve usar apenas a camada textual.
+    """PDF digital com imagem muito pequena (< 1%) usa apenas a camada textual.
 
-    Quando a imagem ocupa menos que _MIN_IMAGE_AREA_RATIO (15%) da pagina,
+    Quando a imagem ocupa menos que _MIN_IMAGE_AREA_RATIO (1%) da pagina,
     ela e considerada decorativa e o OCR nao e executado.
     """
     from document_intelligence.tests.fixtures.generate_fixtures import build_pdf
@@ -381,8 +381,8 @@ def test_pdf_digital_imagem_decorativa_preserva_caminho_rapido(
             source="ocr",
         )
 
-    # Imagem pequena (5% da area) - considerada decorativa.
-    monkeypatch.setattr(pdf_processor, "_page_image_area_ratio", lambda doc, idx: 0.05)
+    # Imagem muito pequena (0.5% da area) - abaixo do limiar de 1%.
+    monkeypatch.setattr(pdf_processor, "_page_image_area_ratio", lambda doc, idx: 0.005)
     monkeypatch.setattr(pdf_processor, "_ocr_page", fake_ocr_page)
 
     results, page_count, any_ocr = _process_pdf_pages(str(long_text_pdf))
@@ -393,5 +393,65 @@ def test_pdf_digital_imagem_decorativa_preserva_caminho_rapido(
     assert results[0].source == "text_layer"
     # Texto da camada digital deve estar presente.
     assert "COMPROVANTE DE RESIDENCIA" in results[0].text
+
+
+def test_pagina_mista_imagem_pequena_mas_relevante_executa_ocr(
+    monkeypatch, tmp_path
+) -> None:
+    """Pagina com imagem pequena (0.5% da area) mas conteudo relevante deve executar OCR.
+
+    Com o limiar reduzido para 1%, imagens pequenas que podem conter
+    endereço ou titular nao são descartadas silenciosamente.
+    """
+    from document_intelligence.tests.fixtures.generate_fixtures import build_pdf
+    from document_intelligence import pdf_processor
+    from document_intelligence.pdf_processor import _PageTextResult
+
+    # Texto longo na camada digital.
+    long_text_pdf_bytes = build_pdf(
+        [
+            [
+                "COMPROVANTE DE RESIDENCIA - DISTRIBUIDORA DE ENERGIA DEMO",
+                "CNPJ: 00.000.000/0001-00",
+                "Titular: Maria da Silva",
+                "Endereco: RUA DAS FLORES, 123, Centro, Sao Paulo, SP",
+                "CEP: 01001-000",
+                "Vencimento: 10/11/2026",
+                "Valor: R$ 150,00",
+            ]
+        ]
+    )
+    long_text_pdf = tmp_path / "texto_longo_imagem_pequena.pdf"
+    long_text_pdf.write_bytes(long_text_pdf_bytes)
+
+    ocr_calls = []
+    ocr_text_from_image = "Titular: Maria da Silva Endereco: RUA DAS FLORES, 123 CEP: 01001-000"
+
+    def fake_ocr_page(document, page_index, page_number):
+        ocr_calls.append((page_index, page_number))
+        return _PageTextResult(
+            page_number=page_number,
+            text=ocr_text_from_image,
+            elements=[],
+            width=612,
+            height=792,
+            source="ocr",
+        )
+
+    # Imagem pequena (0.5% da area) mas acima do limiar de 1%? Não, 0.5% < 1%.
+    # Para este teste, usamos 0.02 (2%) que está acima do limiar de 1%.
+    monkeypatch.setattr(pdf_processor, "_page_image_area_ratio", lambda doc, idx: 0.02)
+    monkeypatch.setattr(pdf_processor, "_ocr_page", fake_ocr_page)
+
+    results, page_count, any_ocr = _process_pdf_pages(str(long_text_pdf))
+
+    assert page_count == 1
+    assert any_ocr is True
+    assert len(ocr_calls) == 1
+    assert results[0].source == "mixed"
+    # Dados da imagem devem aparecer no resultado final.
+    assert ocr_text_from_image in results[0].text
+    # Texto da camada digital tambem deve ser preservado.
+    assert "DISTRIBUIDORA DE ENERGIA DEMO" in results[0].text
 
 

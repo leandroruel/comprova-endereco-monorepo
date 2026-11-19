@@ -51,10 +51,12 @@ _MIN_USABLE_TEXT_CHARS = 10
 # mistas agora usa _MIN_IMAGE_AREA_RATIO em vez do tamanho do texto.
 _MIN_TEXT_LAYER_FOR_FULL_PAGE = 100
 
-# Fração mínima da área da página que uma imagem deve ocupar para ser
-# considerada conteúdo relevante (não decorativa). Imagens maiores que esse
-# limiar disparam OCR mesmo quando a camada textual é extensa.
-_MIN_IMAGE_AREA_RATIO = 0.15
+# Fração mínima da área da página ocupada por imagens para disparar OCR.
+# Um limiar baixo (1%) evita descartar silenciosamente imagens pequenas que
+# podem conter conteúdo documental relevante (endereço, titular, etc.), mesmo
+# quando a camada textual é extensa. Páginas sem imagem seguem o caminho
+# rápido de camada textual.
+_MIN_IMAGE_AREA_RATIO = 0.01
 
 # Espaços em branco colapsados.
 _WS_RE = re.compile(r"\s+")
@@ -85,17 +87,15 @@ def _normalize_text(text: str) -> str:
 def _page_size_points(document: pdfium.PdfDocument, page_index: int) -> tuple[float, float]:
     """Devolve (largura, altura) da página em pontos PDF.
 
-    Usa ``get_mediabox()`` como base e considera a rotação da página
-    (``/Rotate`` de 90, 180 ou 270 graus) para que as dimensões coincidam
-    com o frame efetivamente renderizado por ``page.render()``.
+    Usa ``page.get_size()`` que respeita CropBox e rotação, garantindo que as
+    dimensões coincidam com o frame efetivamente renderizado por
+    ``page.render()``. Em PDFs com CropBox menor que MediaBox, evita que as
+    bounding boxes do OCR fiquem inconsistentes com as dimensões reportadas.
     """
     page = document[page_index]
-    bbox = page.get_mediabox()
-    width = float(bbox[2] - bbox[0])
-    height = float(bbox[3] - bbox[1])
-    rotation = page.get_rotation() or 0
-    if rotation in (90, 270):
-        width, height = height, width
+    size = page.get_size()
+    width = float(size[0])
+    height = float(size[1])
     return width, height
 
 
@@ -167,14 +167,15 @@ def _page_image_area_ratio(
 ) -> float:
     """Devolve a fração da área da página ocupada por imagens (0.0 a 1.0).
 
-    Usa ``get_bounds()`` de cada objeto de imagem para calcular a área e
-    compara com a área da mediabox da página. Retorna 0.0 quando não há
-    imagens ou não é possível obter as dimensões.
+    Usa ``get_bounds()`` (pypdfium2 >= 5) com fallback para ``get_pos()``
+    (pypdfium2 4.x) para calcular a área de cada objeto de imagem e compara
+    com a área da página. Retorna 0.0 quando não há imagens ou não é possível
+    obter as dimensões.
     """
     page = document[page_index]
-    mediabox = page.get_mediabox()
-    page_width = float(mediabox[2] - mediabox[0])
-    page_height = float(mediabox[3] - mediabox[1])
+    size = page.get_size()
+    page_width = float(size[0])
+    page_height = float(size[1])
     if page_width <= 0 or page_height <= 0:
         return 0.0
 
@@ -182,13 +183,22 @@ def _page_image_area_ratio(
     image_area = 0.0
 
     for obj in page.get_objects(filter=[pdfium_raw.FPDF_PAGEOBJ_IMAGE]):
+        bounds = None
         try:
-            bounds = obj.get_bounds()
+            bounds = obj.get_bounds()  # pypdfium2 >= 5
+        except AttributeError:
+            try:
+                bounds = obj.get_pos()  # pypdfium2 4.x
+            except AttributeError:  # pragma: no cover - versão não suportada
+                bounds = None
+        if bounds is None:
+            continue
+        try:
             img_width = float(bounds[2] - bounds[0])
             img_height = float(bounds[3] - bounds[1])
             if img_width > 0 and img_height > 0:
                 image_area += img_width * img_height
-        except Exception:  # pragma: no cover - falha de leitura de objeto
+        except (TypeError, ValueError, IndexError):  # pragma: no cover
             continue
 
     return min(image_area / page_area, 1.0) if page_area > 0 else 0.0
