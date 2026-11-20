@@ -306,9 +306,10 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 3. **Checklist de produção concluído** para issuer origin definitivo, KMS por
    tenant, restore de backup, alarmes e capacidade. Itens documentados em
    `PROGRESS.md` com status de conclusão; `docs/runbooks/restore-backup.md`
-   documenta o runbook de backup/restore. Algumas validações operacionais
-   (alarmes em produção, teste de restore em ambiente prod-like) estão como
-   débito técnico conhecido e não bloqueiam o lançamento da vertical F4.1.
+   documenta o runbook de backup/restore. Validações operacionais não comprovadas
+   por execução (teste de restore em ambiente semelhante à produção, validação de
+   alarmes de produção) estão como **débito técnico conhecido** e não bloqueiam o
+   lançamento da vertical F4.1.
 
 ### Escopo
 
@@ -517,36 +518,36 @@ de produto; elas não bloqueiam o vertical slice atual.
 
 ### Ainda falta para concluir a Fase 1
 
-- OCR de imagem isolada (JPEG/PNG): pendente. A recomendação é Tesseract 5
-  (open source Apache 2.0, suporte a português, leve, binário do sistema) para
-  reconhecer o texto da imagem primeiro, gerando um PDF com camada de texto
-  pesquisável; esse PDF com camada de texto é então enviado ao
-  `DocumentAnalyzer` (via `pypdfium2`) para extração de campos. Alternativamente,
-  é possível converter a imagem para PDF com PIL (já disponível no ambiente) e
-  depois processar com o parser de texto, mas sem OCR o resultado será limitado.
-  Requer instalação de pacote do sistema (Tesseract) e não foi avaliada em
-  profundidade neste ambiente. Não bloqueia o vertical slice atual.
+- OCR de imagem isolada (JPEG/PNG): **implementado** com Tesseract 5
+  (open source Apache 2.0, suporte a português) integrado via `pypdfium2` para
+  renderização de PDF. O fluxo converte a imagem em PDF com camada de texto
+  pesquisável (OCR reconhecendo a imagem primeiro) e então envia ao
+  `DocumentAnalyzer` para extração de campos. A qualidade e cobertura de
+  layouts específicos de documentos (ex: concessionárias) seguem como melhoria
+  adiada, fora do escopo desta versão.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
   contrato, mas a decisão de produto é F1.3/F3.
 
 ### Estado atual comprovado
 
-| Item                           | Evidência                                                                                      | Situação                                                                                                                               |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant                                                                |
-| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming                                                                          |
-| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                                                                                     |
-| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local (unpdf/PDF.js); imagem `unsupported` (OCR de imagem isolada pendente, Tesseract 5 + pypdfium2) |
-| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência                                                                           |
-| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                                                                              |
-| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score                                                                   |
-| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única                                                                    |
-| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência                                                               |
+| Item                           | Evidência                                                                                      | Situação                                                                                                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant                                                                                                 |
+| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming                                                                                                           |
+| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                                                                                                                      |
+| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local (unpdf/PDF.js); OCR de imagem via Tesseract 5 + `pypdfium2` entregue; qualidade de layout específica segue como melhoria adiada |
+| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência                                                                                                            |
+| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                                                                                                               |
+| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score                                                                                                    |
+| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única                                                                                                     |
+| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência                                                                                                |
 
 ### Lacunas
 
-1. **OCR de imagem e formatos complexos:** o MVP cobre apenas PDF textual; não
-   há provider/limites/consentimento definidos para OCR/VLM.
+1. **OCR de imagem e formatos complexos:** OCR de imagem via Tesseract 5 +
+   `pypdfium2` entregue; qualidade e cobertura de layouts específicos de
+   documentos seguem como melhoria adiada. Não há provider/limites/consentimento
+   definidos para VLM.
 2. **Independência de score:** `weightedScore` é aditivo e ainda não deduplica
    por fonte/grupo; a F3 decide `SCORER_VERSION=2` quando houver a segunda fonte
    externa.

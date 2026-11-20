@@ -337,9 +337,24 @@ export const makeHolderInformationRequestService = (deps: {
           .from(t.holderInformationRequest)
           .where(eq(t.holderInformationRequest.id, requestId))
           .limit(1)
+
+        if (!nowRow || nowRow.length === 0) {
+          throw new Error('falha ao consultar o relógio do banco')
+        }
+
         const nowRaw = nowRow[0]?.now
         const now = nowRaw instanceof Date ? nowRaw : new Date(nowRaw as string)
-        if (!now || new Date(create.expiresAt).getTime() <= now.getTime()) {
+
+        if (!now || Number.isNaN(now.getTime())) {
+          throw new Error('falha ao consultar o relógio do banco')
+        }
+
+        const expiresAt = new Date(create.expiresAt as string)
+        if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+          throw new Error('prazo inválido: expires_at deve estar no futuro')
+        }
+
+        if (expiresAt.getTime() <= now.getTime()) {
           throw new Error('prazo inválido: expires_at deve estar no futuro')
         }
       }

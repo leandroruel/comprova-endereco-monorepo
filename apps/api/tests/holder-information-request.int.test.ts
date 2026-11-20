@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto'
-import { and, eq, withTenant, createDbPool, runMigrations } from '@comprova/db'
+import { hashHolderAccessToken } from '../src/modules/holder/holder-token.js'
+import { and, count, eq, sql, withTenant, createDbPool, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
@@ -2161,19 +2162,28 @@ describe('HolderInformationRequest Integration', () => {
       const tokenPlaintext = body.token
 
       // O token em texto claro deve aparecer apenas na resposta, nunca em logs/auditoria
-      // Verifica que não existe o token em texto claro na tabela de tokens
+      // Verifica que o hash persistido corresponde ao HMAC-SHA256 do token com pepper.
       const tokens = await withTenant(appPool.db, tenantId, async (tx) => {
         return tx
-          .select({ tokenId: t.holderAccessToken.tokenId, tokenPrefix: t.holderAccessToken.tokenPrefix })
+          .select({
+            tokenId: t.holderAccessToken.tokenId,
+            tokenPrefix: t.holderAccessToken.tokenPrefix,
+            tokenHash: t.holderAccessToken.tokenHash,
+          })
           .from(t.holderAccessToken)
           .where(eq(t.holderAccessToken.holderInformationRequestId, body.request.id))
       })
 
       expect(tokens.length).toBe(1)
       expect(tokens[0]!.tokenId).toBe(body.tokenId)
-      // O token em texto claro não é persistido: não deve corresponder ao prefixo/hash
+
+      // O token em texto claro não é persistido: o prefixo não é o token completo.
       expect(tokens[0]!.tokenPrefix).not.toBe(tokenPlaintext)
       expect(tokens[0]!.tokenPrefix).not.toBe(body.token)
+
+      // O hash persistido deve coincidir com o HMAC-SHA256 do token em texto claro + pepper.
+      const expectedHash = hashHolderAccessToken(tokenPlaintext, PEPPER)
+      expect(Buffer.from(tokens[0]!.tokenHash as Buffer).toString('hex')).toBe(expectedHash.toString('hex'))
     })
 
     it('deve retornar Cache-Control no-store na resposta de emissão de token', async () => {
@@ -2273,6 +2283,218 @@ describe('HolderInformationRequest Integration', () => {
       const detailsJson = events.map((e) => e.details).join(',')
       // O token em texto claro não deve aparecer em nenhum evento de auditoria
       expect(detailsJson).not.toContain(tokenPlaintext)
+    })
+
+    it('deve desfazer completamente a criação quando a emissão do token falhar', async () => {
+      const tenantId = await createOrganization(ownerSessionCookie, 'Org Rollback Token', 'owner@exemplo.com')
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Rollback Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-rollback-token', true)
+
+      // Conta registros antes da operação com falha
+      const requestsBefore = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequest.id).as('total') })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const tokensBefore = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderAccessToken.tokenId).as('total') })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const eventsBefore = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequestEvent.id).as('total') })
+          .from(t.holderInformationRequestEvent)
+          .where(eq(t.holderInformationRequestEvent.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+
+      // Prazo expirado: a validação inicial rejeita antes da transação
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt: '2020-01-01T00:00:00Z' }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(400)
+
+      // Após a falha, nenhum registro novo deve ter sido criado
+      const requestsAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequest.id).as('total') })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const tokensAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderAccessToken.tokenId).as('total') })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const eventsAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequestEvent.id).as('total') })
+          .from(t.holderInformationRequestEvent)
+          .where(eq(t.holderInformationRequestEvent.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+
+      expect(requestsAfter).toBe(requestsBefore)
+      expect(tokensAfter).toBe(tokensBefore)
+      expect(eventsAfter).toBe(eventsBefore)
+    })
+
+    it('deve criar solicitação e token atomicamente quando a emissão for bem-sucedida', async () => {
+      const tenantId = await createOrganization(ownerSessionCookie, 'Org Atomico Token', 'owner@exemplo.com')
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Atomico Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-atomico-token', true)
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(201)
+      const body = res.json()
+
+      // A solicitação deve existir no banco
+      const requests = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ id: t.holderInformationRequest.id })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.id, body.request.id))
+      })
+      expect(requests.length).toBe(1)
+
+      // O token deve existir no banco (apenas o hash)
+      const tokens = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ tokenId: t.holderAccessToken.tokenId })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.holderInformationRequestId, body.request.id))
+      })
+      expect(tokens.length).toBe(1)
+      expect(tokens[0]!.tokenId).toBe(body.tokenId)
+
+      // O evento de criação deve existir
+      const events = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ id: t.holderInformationRequestEvent.id })
+          .from(t.holderInformationRequestEvent)
+          .where(eq(t.holderInformationRequestEvent.holderInformationRequestId, body.request.id))
+      })
+      expect(events.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('deve rejeitar quando o prazo expira durante a espera por lock', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Lock Expire Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Lock Expire Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+        'validate:write',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-lock-expire', true)
+      const validationId = await createValidation(tenantId)
+
+      // Obtém o subjectId da validation para travar o mesmo lock que o serviço adquire.
+      // Ordem de locks do serviço: subject (FOR UPDATE) → validation (FOR UPDATE).
+      let validationSubjectId: string | null = null
+      await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ subjectId: t.validation.subjectId })
+          .from(t.validation)
+          .where(eq(t.validation.validationId, validationId))
+          .limit(1)
+        validationSubjectId = row?.subjectId ?? null
+      })
+      expect(validationSubjectId).not.toBeNull()
+
+      // Transação bloqueadora: segura o lock de subject por ~2 segundos com pg_sleep.
+      // O serviço define lock_timeout = '3s', então aguardará até adquirir o lock
+      // antes que o timeout estoure.
+      const blockingPromise = appPool.db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`)
+        await tx.execute(sql`SET LOCAL lock_timeout = '3s'`)
+        await tx
+          .select({ subjectId: t.subject.subjectId })
+          .from(t.subject)
+          .where(and(eq(t.subject.subjectId, validationSubjectId!), eq(t.subject.tenantId, tenantId)))
+          .for('update')
+          .limit(1)
+        // Segura o lock por tempo suficiente para o expiresAt expirar durante a espera.
+        await tx.execute(sql`SELECT pg_sleep(2)`)
+      })
+
+      // expiresAt 1 segundo no futuro: passa na validação inicial (fora da transação),
+      // mas expira durante a espera pelo lock (2 segundos de pg_sleep).
+      const expiresAt = new Date(Date.now() + 1000).toISOString()
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt, validationId }),
+        },
+        key.secret,
+      )
+
+      // Aguarda a transação bloqueadora terminar (libera o lock).
+      await blockingPromise
+
+      // A operação deve ser rejeitada porque o prazo expirou durante a espera pelo lock.
+      expect(res.statusCode).toBe(400)
+      expect(res.json().code).toBe('INVALID_EXPIRES_AT')
+
+      // Nenhum registro parcial deve ter sido persistido: nem solicitação, nem token,
+      // nem evento de auditoria para este holder.
+      const requestsWithToken = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ id: t.holderInformationRequest.id })
+          .from(t.holderInformationRequest)
+          .innerJoin(
+            t.holderAccessToken,
+            eq(t.holderAccessToken.holderInformationRequestId, t.holderInformationRequest.id),
+          )
+          .where(eq(t.holderInformationRequest.holderId, holderId))
+      })
+      expect(requestsWithToken.length).toBe(0)
     })
   })
 })
