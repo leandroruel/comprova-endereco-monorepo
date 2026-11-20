@@ -390,6 +390,11 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
           logger: deps.logger,
           metrics: deps.metrics,
           maxDocumentBytes: evidenceMaxBytes,
+          terms: {
+            version: termsVersion,
+            approved: termsApproved,
+            documentHash: termsDocumentHash,
+          },
           processingService: makeHolderSubmissionProcessingService({
             db: deps.db,
             store: objectStore,

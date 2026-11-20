@@ -18,8 +18,9 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
 - **Entregues:** F0.1/F0.2; F1.1/F1.2a/F1.2b/F1.3; F2.1; F2.2a e a
   primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
   o vertical slice F3.2 pelo dashboard; F3.3 (medição de uso, cotas e
-  reconciliação); F4.1 (link/token seguro público, consentimento do titular,
-  upload com consent prévio, dashboard com holder e consentimento); F4.2/F4.3
+  reconciliação); F4.1 (link/token seguro público, interface pública do titular
+  com consentimento validado no servidor, upload com consent prévio, dados
+  reais do Holder no dashboard do Verifier); F4.2/F4.3
   (intake do Holder, token de acesso público, processamento de submissão e
   vínculo ao pipeline F1.1/F1.2/F1.3).
 - **Em andamento:** F0 (checklist de produção concluído), F1 (OCR de imagem
@@ -931,7 +932,9 @@ original e o histórico é imutável.
 
 | Item                    | Evidência                                                                                         | Situação                                                                                                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Consentimento           | `packages/db/migrations/0073_holder_consent.sql` + `holder-access.service.ts` (`registerConsent`) | **Entregue (F4.1)**: entidade `holder_consent` dedicada (versão dos termos, `accepted_at` do relógio do banco, estado, evento de auditoria), UNIQUE por solicitação; upload bloqueado sem consentimento |
+| Consentimento           | `packages/db/migrations/0073_holder_consent.sql` + `holder-access.service.ts` (`registerConsent`) | **Entregue (F4.1)**: entidade `holder_consent` dedicada (versão dos termos, `accepted_at` do relógio do banco, estado, evento de auditoria), UNIQUE por solicitação; upload bloqueado sem consentimento. A versão é validada no servidor contra `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`; conteúdo não aprovado bloqueia o aceite (nada é inventado) |
+| Interface pública       | `apps/verifier-dashboard/src/pages/HolderAccess.tsx` + `src/api/holder-access.ts`                          | **Entregue (F4.1, PR #83)**: rota pública `/holder/:token` fora do gate de sessão do Verifier; token via `X-Holder-Token` só em memória, removido da URL, `no-store`/`no-referrer`, sem `localStorage`; termos do servidor, consentimento explícito, itens, upload, envio e acompanhamento de processamento com estados expirada/cancelada/concluída |
+| Dashboard do Verifier    | `GET /v1/validations` + `apps/verifier-dashboard/src/pages/validations.tsx`                      | **Entregue (F4.1, PR #83)**: colunas com dados reais de `holder_information_request` (estado, criação, expiração), consentimento, documentos recebidos e estado de `holder_submission_processing`; sem token/hash/segredos e restrito ao tenant |
 | Token/link seguro       | `apps/api/src/modules/holder/holder-token.ts` + `holder-access.controller.ts`                     | **Entregue**: token opaco `hlt_` + HMAC-SHA256 com pepper, expiração, revogação, single-use, rate limit; endpoint público sem auth do titular                                                           |
 | Histórico de validações | `validation` (imutável, nova linha por pedido) + `validation_customer_document` (migração 0067)   | Existe como log; vínculo explícito 1:1 Validation ↔ documento (migração 0067); `supersedes_validation_id` pendente (F4.2+)                                                                              |
 | Superação de credencial | `credential-issuance` / deep path                                                                 | Existe para credencial, **não** para o resultado de negócio                                                                                                                                             |
@@ -958,11 +961,17 @@ original e o histórico é imutável.
 1. ✅ Criar solicitação para uma Validation (Verifier autenticado).
 2. ✅ Gerar e persistir token seguro (opaco, single-use, expiração, vinculado a
    tenant + subject + Validation).
-3. ✅ Disponibilizar acesso público por link (sem conta do titular).
-4. ✅ Registrar consentimento (versão do texto, timestamp, referência à solicitação).
+3. ✅ Disponibilizar acesso público por link (sem conta do titular):
+   interface pública em `/holder/:token` no `apps/verifier-dashboard`,
+   visualização de solicitação, termos de consentimento, upload de documentos
+   e acompanhamento de processamento.
+4. ✅ Registrar consentimento com validação server-side da versão dos termos
+   (`TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`); conteúdo não
+   aprovado bloqueia o aceite (nada é inventado).
 5. ✅ Receber documento do titular (reuso do intake F1.1).
 6. ✅ Encaminhar ao pipeline existente (F1.2/F1.3).
-7. ✅ Exibir o estado da solicitação ao Verifier.
+7. ✅ Exibir o estado da solicitação ao Verifier (dados reais de
+   `holder_information_request` na listagem e no detalhe da validação).
 
 **F4.2+ (etapas posteriores):**
 
@@ -984,6 +993,9 @@ original e o histórico é imutável.
 
 - Token não funciona cross-tenant, expirado ou reutilizado.
 - Consentimento registrado com versão, timestamp e referência à solicitação.
+- Consentimento validado server-side contra `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`;
+  versão divergente ou conteúdo não aprovado rejeitados; nada é persistido sem aprovação.
+- Interface pública em `/holder/:token` sem dependência de login, sessão ou organização ativa.
 - Auditoria registra quem pediu, quem acessou, quem respondeu e quando.
 - Teste de concorrência no consumo do token.
 - Nenhum PII na URL; logs sem conteúdo do documento nem token.

@@ -9,6 +9,16 @@ import * as t from '@comprova/db'
 import { encryptSecret } from '../../shared/secretbox.js'
 import { buildValidationProgress, type ValidationProgressVerification } from './validation-progress.js'
 
+/** Normaliza valores de `jsonb_build_object` para string ISO (ou null). */
+const jsonText = (value: unknown): string | null => {
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'string') {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString()
+  }
+  return null
+}
+
 const evidenceSummaryForClaim = async (
   tx: DbTx,
   claimId: string,
@@ -298,6 +308,13 @@ export interface ValidationListItem {
   readonly holderExternalReference: string | null
   /** Indica se o consentimento do Holder foi registrado para a solicitação vinculada. */
   readonly consentGranted: boolean
+  readonly holderRequestId: string | null
+  readonly holderRequestState: string | null
+  readonly holderRequestCreatedAt: string | null
+  readonly holderRequestExpiresAt: string | null
+  readonly holderConsentAcceptedAt: string | null
+  readonly holderDocumentsReceived: boolean
+  readonly holderDocumentProcessingState: string | null
   readonly createdAt: Date
   readonly expiresAt: Date
 }
@@ -366,15 +383,52 @@ export const listValidations = async (
             AND ce.source = ${CUSTOMER_DOCUMENT_INTAKE_SOURCE}
             AND ea.status IN ('pending', 'analyzing')
         )`,
-        holderRequest: sql<{ externalReference: string | null; consentGranted: boolean } | null>`(
+        holderRequest: sql<{
+          externalReference: string | null
+          requestId: string
+          state: string
+          createdAt: string
+          expiresAt: string | null
+          consentGranted: boolean
+          consentAcceptedAt: string | null
+          documentsReceived: boolean
+          documentProcessingState: string | null
+        } | null>`(
           SELECT jsonb_build_object(
             'externalReference', h.external_reference,
+            'requestId', hir.id,
+            'state', hir.state,
+            'createdAt', hir.created_at,
+            'expiresAt', hir.expires_at,
             'consentGranted', EXISTS (
               SELECT 1
               FROM holder_consent hc
               WHERE hc.holder_information_request_id = hir.id
                 AND hc.tenant_id = hir.tenant_id
                 AND hc.state = 'granted'
+            ),
+            'consentAcceptedAt', (
+              SELECT hc.accepted_at
+              FROM holder_consent hc
+              WHERE hc.holder_information_request_id = hir.id
+                AND hc.tenant_id = hir.tenant_id
+                AND hc.state = 'granted'
+              LIMIT 1
+            ),
+            'documentsReceived', EXISTS (
+              SELECT 1
+              FROM holder_information_request_document d
+              WHERE d.holder_information_request_id = hir.id
+                AND d.tenant_id = hir.tenant_id
+                AND d.upload_state = 'stored'
+                AND d.deleted_at IS NULL
+            ),
+            'documentProcessingState', (
+              SELECT hsp.state
+              FROM holder_submission_processing hsp
+              WHERE hsp.holder_information_request_id = hir.id
+                AND hsp.tenant_id = hir.tenant_id
+              LIMIT 1
             )
           )
           FROM holder_information_request hir
@@ -415,6 +469,13 @@ export const listValidations = async (
             documentProcessing: row.documentProcessing,
             holderExternalReference: holderRequest?.externalReference ?? null,
             consentGranted: holderRequest?.consentGranted ?? false,
+            holderRequestId: holderRequest?.requestId ?? null,
+            holderRequestState: holderRequest?.state ?? null,
+            holderRequestCreatedAt: jsonText(holderRequest?.createdAt),
+            holderRequestExpiresAt: jsonText(holderRequest?.expiresAt),
+            holderConsentAcceptedAt: jsonText(holderRequest?.consentAcceptedAt),
+            holderDocumentsReceived: holderRequest?.documentsReceived ?? false,
+            holderDocumentProcessingState: holderRequest?.documentProcessingState ?? null,
             createdAt: row.createdAt,
             expiresAt: row.expiresAt,
           }

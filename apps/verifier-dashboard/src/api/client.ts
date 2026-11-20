@@ -263,6 +263,13 @@ export interface ValidationListItem {
   document_processing: boolean
   holder_external_reference: string | null
   consent_granted: boolean
+  holder_request_id: string | null
+  holder_request_state: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'expired' | null
+  holder_request_created_at: string | null
+  holder_request_expires_at: string | null
+  holder_consent_accepted_at: string | null
+  holder_documents_received: boolean
+  holder_document_processing_state: 'awaiting' | 'processing' | 'processed' | 'partial' | 'failed' | null
   created_at: string
   expires_at: string
 }

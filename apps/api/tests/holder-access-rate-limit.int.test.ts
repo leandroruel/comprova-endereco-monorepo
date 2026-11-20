@@ -43,6 +43,9 @@ const appConfig = {
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
   POLICY_VERSION: '2026.11.1',
+  TERMS_VERSION: '1.0.0',
+  TERMS_APPROVED: 'true',
+  TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
   WORKER_LOOPS: false,
 } as const
 

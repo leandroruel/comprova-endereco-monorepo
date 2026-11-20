@@ -12,7 +12,7 @@ import {
   HolderSaveItemBody,
   type HolderAccessRoutesDeps,
 } from './holder-access.schema.js'
-import { HolderConsentRequestSchema } from '@comprova/contracts'
+import { HolderConsentRequestSchema, HolderConsentResponseSchema } from '@comprova/contracts'
 import { isHolderTokenFormat } from './holder-token.js'
 import type { HolderTokenContext } from './holder-access.service.js'
 import { type HolderRateLimits } from '../../plugins/holder-rate-limit.js'
@@ -212,11 +212,7 @@ export const registerHolderAccessRoutes = (
       schema: {
         body: HolderConsentRequestSchema,
         response: {
-          200: z.object({
-            granted: z.boolean(),
-            termsVersion: z.string().nullable(),
-            acceptedAt: z.string().nullable(),
-          }),
+          200: HolderConsentResponseSchema,
         },
       },
     },

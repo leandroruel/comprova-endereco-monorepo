@@ -6,6 +6,7 @@ import type {
   HolderConsentStatus,
   HolderInformationRequestItem,
   HolderInformationRequestState,
+  HolderTerms,
 } from '@comprova/contracts'
 import type { Logger, Metrics } from '@comprova/observability'
 import { sha256Of, type ObjectStore } from '@comprova/providers'
@@ -65,6 +66,8 @@ export type HolderConsentResult =
   | { readonly kind: 'expired' }
   | { readonly kind: 'cancelled' }
   | { readonly kind: 'invalid_state'; readonly state: HolderInformationRequestState }
+  | { readonly kind: 'terms_not_approved' }
+  | { readonly kind: 'terms_version_mismatch' }
   | { readonly kind: 'already_consented'; readonly consent: HolderConsentStatus }
 
 export interface HolderAccessDeps {
@@ -74,6 +77,11 @@ export interface HolderAccessDeps {
   readonly logger: Logger
   readonly metrics?: Metrics
   readonly maxDocumentBytes: number
+  /**
+   * Versão vigente dos termos definida pelo servidor (mesma fonte do
+   * onboarding: `TERMS_VERSION`, `TERMS_APPROVED`, `TERMS_DOCUMENT_HASH`).
+   */
+  readonly terms: HolderTerms
 }
 
 const MUTABLE_STATES: ReadonlySet<HolderInformationRequestState> = new Set(['pending', 'in_progress'])
@@ -196,6 +204,7 @@ const loadView = async (
   tenantId: string,
   request: HolderInformationRequestRow,
   state: HolderInformationRequestState,
+  terms: HolderTerms,
 ): Promise<HolderAccessRequest> => {
   const responses = await tx
     .select({
@@ -290,6 +299,7 @@ const loadView = async (
     state,
     status,
     consent,
+    terms,
     expiresAt: request.expiresAt?.toISOString() ?? null,
     completedAt: request.completedAt?.toISOString() ?? null,
     items,
@@ -300,9 +310,10 @@ const toViewResult = async (
   tx: DbTx,
   context: HolderTokenContext,
   authorized: Authorized,
+  terms: HolderTerms,
 ): Promise<HolderAccessResult> => ({
   kind: 'ok',
-  view: await loadView(tx, context.tenantId, authorized.request, authorized.state),
+  view: await loadView(tx, context.tenantId, authorized.request, authorized.state, terms),
 })
 
 const mapAuthorize = (outcome: AuthorizeOutcome): HolderAccessResult | null => {
@@ -332,7 +343,7 @@ const findItem = (
  * transação tenant-scoped e revalida a associação antes de ler ou escrever.
  */
 export const makeHolderAccessService = (deps: HolderAccessDeps) => {
-  const { db, store, pepper, logger, metrics } = deps
+  const { db, store, pepper, logger, metrics, terms } = deps
 
   const logError = (operation: string, tenantId: string | null, error: unknown): void => {
     logger.error(
@@ -370,7 +381,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       if (authorized.kind !== 'ok') {
         return mapAuthorize(authorized) as HolderAccessResult
       }
-      return toViewResult(tx, context, authorized)
+      return toViewResult(tx, context, authorized, terms)
     })
 
   /**
@@ -418,6 +429,17 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       return mapAuthorize(authorized) as HolderConsentResult
     }
 
+    // A versão aceita é determinada pelo servidor, na mesma fonte de verdade
+    // do onboarding (`TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`).
+    // Sem conteúdo aprovado, o aceite é bloqueado em vez de simular um
+    // consentimento válido.
+    if (terms.version === null || !terms.approved || terms.documentHash === null) {
+      return { kind: 'terms_not_approved' }
+    }
+    if (termsVersion !== terms.version) {
+      return { kind: 'terms_version_mismatch' }
+    }
+
     const existing = await hasConsentInTx(tx, context.tenantId, context.requestId)
     if (existing) {
       const [consentRow] = await tx
@@ -450,7 +472,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       id: consentId,
       tenantId: context.tenantId,
       holderInformationRequestId: context.requestId,
-      termsVersion,
+      termsVersion: terms.version,
       state: 'granted',
       acceptedAt: sql`clock_timestamp()`,
     })
@@ -461,14 +483,14 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       fromState: authorized.state,
       toState: authorized.state,
       actor,
-      details: JSON.stringify({ consentId, termsVersion }),
+      details: JSON.stringify({ consentId, termsVersion: terms.version }),
     })
 
     return {
       kind: 'ok',
       consent: {
         granted: true,
-        termsVersion,
+        termsVersion: terms.version,
         acceptedAt: null, // preenchido pelo caller após leitura do relógio, se necessário
       },
     }
@@ -557,7 +579,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         details: JSON.stringify({ itemId }),
       })
 
-      return toViewResult(tx, context, authorized)
+      return toViewResult(tx, context, authorized, terms)
     })
   }
 
@@ -692,7 +714,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         metrics?.holderDocumentUploads.inc({ outcome: 'stored' })
         return {
           kind: 'done',
-          result: await toViewResult(tx, context, authorized),
+          result: await toViewResult(tx, context, authorized, terms),
         } as const
       })
 
@@ -1150,7 +1172,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
 
       if (authorized.state === 'completed') {
         // Idempotente: um novo submit não cria um segundo evento terminal.
-        return toViewResult(tx, context, authorized)
+        return toViewResult(tx, context, authorized, terms)
       }
       if (!isMutable(authorized.state)) {
         return { kind: 'invalid_state', state: authorized.state }
@@ -1230,7 +1252,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         if (reloadedState === 'completed') {
           return {
             kind: 'ok',
-            view: await loadView(tx, context.tenantId, reloaded, reloadedState),
+            view: await loadView(tx, context.tenantId, reloaded, reloadedState, terms),
           }
         }
         return { kind: 'invalid_state', state: reloadedState }
@@ -1260,7 +1282,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
 
       return {
         kind: 'ok',
-        view: await loadView(tx, context.tenantId, completed, 'completed'),
+        view: await loadView(tx, context.tenantId, completed, 'completed', terms),
       }
     })
 

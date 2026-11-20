@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { HolderInformationRequestStateSchema } from './holder-information-request.js'
-import { HolderConsentStatusSchema } from './holder-consent.js'
+import { HolderConsentStatusSchema, HolderTermsSchema } from './holder-consent.js'
 
 /**
  * F4.2 — visão do Holder sobre a própria solicitação.
@@ -43,6 +43,11 @@ export const HolderAccessRequestSchema = z.object({
   status: z.string(),
   /** Status do consentimento do titular (F4.1). */
   consent: HolderConsentStatusSchema,
+  /**
+   * Versão vigente dos termos definida pelo servidor. A interface pública
+   * apresenta exatamente esta versão e o servidor a revalida no aceite.
+   */
+  terms: HolderTermsSchema,
   expiresAt: z.string().nullable(),
   completedAt: z.string().nullable(),
   items: z.array(HolderAccessItemSchema),

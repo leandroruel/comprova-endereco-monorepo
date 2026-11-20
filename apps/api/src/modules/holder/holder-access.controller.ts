@@ -62,6 +62,7 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
     pepper: deps.pepper,
     logger: deps.logger,
     maxDocumentBytes: deps.maxDocumentBytes,
+    terms: deps.terms,
     ...(deps.metrics !== undefined ? { metrics: deps.metrics } : {}),
   })
 
@@ -245,6 +246,28 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
                 409,
                 'HOLDER_INFORMATION_REQUEST_STATE',
                 `Solicitação não aceita esta operação no estado '${result.state}'`,
+              ),
+            )
+        case 'terms_not_approved':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                409,
+                'HOLDER_TERMS_NOT_APPROVED',
+                'O conteúdo dos termos ainda não foi aprovado; o aceite está indisponível',
+              ),
+            )
+        case 'terms_version_mismatch':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                409,
+                'HOLDER_TERMS_VERSION_MISMATCH',
+                'A versão dos termos aceita não corresponde à versão vigente',
               ),
             )
       }

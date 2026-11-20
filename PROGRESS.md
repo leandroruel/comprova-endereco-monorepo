@@ -23,7 +23,13 @@ Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entreg
 ### Fluxo do titular F4 (2026-11-20)
 
 - **F4.2/F4.3 já entregues:** `holder-information-request` (criação/listagem/cancelamento), `holder-access` (token opaco `hlt_`, view, saveItem, uploadDocument, deleteDocument, submit), `holder-token` (geração/hash com pepper), `holder-submission-processing` (worker que vincula ao pipeline F1.1/F1.2/F1.3), migrations `0057`/`0062`/`0066`/`0067`
-- **F4.1 entregue:** consentimento do Holder antes do upload (`POST /v1/holder-access/consent`), tabela `holder_consent` (migration `0073`), upload bloqueado sem consentimento, `status` computado na visão do Holder (`aguardando_consentimento` / `aguardando_documentos` / `documento_recebido` / `processando` / `concluída` / `expirada` / `encerrada`), dashboard do Verifier exibe `holder_external_reference` e `consent_granted` na listagem de validações, OpenAPI documentado, testes de integração (`holder-consent.int.test.ts`).
+- **F4.1 totalmente entregue (PR #83):**
+  - Interface pública do Holder em `/holder/:token` no `apps/verifier-dashboard`: rota independente do shell autenticado, captura e remoção do token da URL, `X-Holder-Token` apenas em memória, `no-store`/`no-referrer`, sem `localStorage`/`sessionStorage`
+  - Consentimento validado server-side: `POST /v1/holder-access/consent` compara `termsVersion` contra `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`; versão divergente ou conteúdo não aprovado rejeitados com erro de domínio (`HOLDER_TERMS_VERSION_MISMATCH`, `HOLDER_TERMS_NOT_APPROVED`); versão persistida é sempre a do servidor
+  - Upload de documentos apenas após consentimento válido; pipeline existente (F1.1/F1.2/F1.3) reutilizado sem alterações
+  - Acompanhamento de processamento via polling no endpoint existente (`/v1/holder-access/items/:requestId/processing`)
+  - Dashboard do Verifier exibe dados reais de `holder_information_request` na listagem de validações: estado, criação, expiração, consentimento, documentos recebidos e estado do processamento; sem token/hash/segredos
+  - Testes: API Node (consentimento, listagem, acesso, rate limit), browser (página pública do Holder), node (estado da solicitação no dashboard)
 
 ## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
 

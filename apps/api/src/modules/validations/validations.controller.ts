@@ -8,6 +8,8 @@ import {
   problem,
   problems,
   type CreateValidationRequest,
+  type HolderInformationRequestState,
+  type HolderSubmissionProcessingState,
   type ValidationsListDto,
   type ValidationDto,
 } from '@comprova/contracts'
@@ -162,6 +164,14 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
         document_processing: item.documentProcessing,
         holder_external_reference: item.holderExternalReference,
         consent_granted: item.consentGranted,
+        holder_request_id: item.holderRequestId,
+        holder_request_state: item.holderRequestState as HolderInformationRequestState | null,
+        holder_request_created_at: item.holderRequestCreatedAt,
+        holder_request_expires_at: item.holderRequestExpiresAt,
+        holder_consent_accepted_at: item.holderConsentAcceptedAt,
+        holder_documents_received: item.holderDocumentsReceived,
+        holder_document_processing_state:
+          item.holderDocumentProcessingState as HolderSubmissionProcessingState | null,
         created_at: item.createdAt.toISOString(),
         expires_at: item.expiresAt.toISOString(),
       })),

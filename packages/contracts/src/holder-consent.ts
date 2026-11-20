@@ -9,7 +9,28 @@ import { z } from 'zod'
  * responsabilidade do produto (pendente de conteúdo aprovado).
  */
 
-/** Requisição de registro de consentimento (pública, com X-Holder-Token). */
+/**
+ * Versão vigente dos termos, definida exclusivamente pelo servidor.
+ *
+ * O Holder não escolhe a versão: ele deve aceitar exatamente a versão
+ * apresentada aqui. `approved` é `false` enquanto o conteúdo jurídico não
+ * estiver formalmente aprovado, e nesse caso o aceite é bloqueado.
+ */
+export const HolderTermsSchema = z.object({
+  version: z.string().nullable(),
+  approved: z.boolean(),
+  documentHash: z.string().nullable(),
+})
+
+export type HolderTerms = z.infer<typeof HolderTermsSchema>
+
+/**
+ * Requisição de registro de consentimento (pública, com X-Holder-Token).
+ *
+ * `termsVersion` é a versão efetivamente apresentada ao Holder. O servidor
+ * compara com a versão vigente e rejeita divergências; a versão persistida é
+ * sempre a do servidor.
+ */
 export const HolderConsentRequestSchema = z.object({
   termsVersion: z.string().min(1).max(100),
 })

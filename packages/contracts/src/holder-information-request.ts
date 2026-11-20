@@ -19,6 +19,22 @@ export const HolderInformationRequestStateSchema = z.enum([
 export type HolderInformationRequestState = z.infer<typeof HolderInformationRequestStateSchema>
 
 /**
+ * Estados do processamento documental da submissão do Holder (F4.3).
+ *
+ * São distintos do estado da solicitação: `completed` significa que o Holder
+ * terminou de enviar; o processamento é a etapa seguinte.
+ */
+export const HolderSubmissionProcessingStateSchema = z.enum([
+  'awaiting',
+  'processing',
+  'processed',
+  'partial',
+  'failed',
+])
+
+export type HolderSubmissionProcessingState = z.infer<typeof HolderSubmissionProcessingStateSchema>
+
+/**
  * Item individual de uma solicitação de informações.
  *
  * `itemId` deve ser estável e único dentro da solicitação. `description` é

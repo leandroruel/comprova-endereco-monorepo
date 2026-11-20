@@ -36,29 +36,48 @@ const fakeStore = {
   },
 }
 
-const app = await buildApp({
-  config: {
-    DATABASE_URL: db.appUrl,
-    REDIS_URL: testRedis.url,
-    API_KEY_PEPPER: PEPPER,
-    CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
-    CREDENTIAL_SIGNING_KEYS: '[]',
-    SIGNING_KEY_PROVIDER: 'local',
-    PORT: 3000,
-    HOST: '127.0.0.1',
-    LOG_LEVEL: 'silent',
-    POLICY_VERSION: '2026.11.1',
-    TERMS_VERSION: '1.0.0',
-    TERMS_APPROVED: 'true',
-    TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
-    WORKER_LOOPS: false,
-  },
-  db: appPool.db,
-  redis,
-  logger: createLogger({ level: 'silent' }),
-  metrics: createMetrics(),
-  objectStore: fakeStore,
-})
+const baseConfig = {
+  DATABASE_URL: db.appUrl,
+  REDIS_URL: testRedis.url,
+  API_KEY_PEPPER: PEPPER,
+  CREDENTIAL_ISSUER_ORIGIN: 'https://issuer.test',
+  CREDENTIAL_SIGNING_KEYS: '[]',
+  SIGNING_KEY_PROVIDER: 'local',
+  PORT: 3000,
+  HOST: '127.0.0.1',
+  LOG_LEVEL: 'silent',
+  POLICY_VERSION: '2026.11.1',
+  TERMS_VERSION: '1.0.0',
+  TERMS_APPROVED: 'true',
+  TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
+  WORKER_LOOPS: false,
+} as const
+
+const testLogger = createLogger({ level: 'silent' })
+const testMetrics = createMetrics()
+
+const buildTestApp = (terms: {
+  TERMS_VERSION?: string
+  TERMS_APPROVED?: string
+  TERMS_DOCUMENT_HASH?: string
+}) =>
+  buildApp({
+    config: { ...baseConfig, ...terms },
+    db: appPool.db,
+    redis,
+    logger: testLogger,
+    metrics: testMetrics,
+    objectStore: fakeStore,
+  })
+
+const app = await buildTestApp({})
+
+/**
+ * Instância com o conteúdo jurídico ainda NÃO aprovado. O aceite do Holder
+ * precisa ser bloqueado sem persistir consentimento — nunca simular um aceite
+ * válido quando não existe texto aprovado.
+ */
+const appTermsNotApproved = await buildTestApp({ TERMS_APPROVED: 'false' })
 
 let ownerSessionCookie: string
 let tenantId: string
@@ -285,6 +304,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close()
+  await appTermsNotApproved.close()
   redis.disconnect()
   await adminSql.end()
   await appPool.end()
@@ -346,6 +366,87 @@ describe('F4.1 — consentimento do Holder', () => {
       headers: { 'content-type': 'application/json' },
     })
     expect(missing.statusCode).toBe(400)
+  })
+
+  it('versão divergente da vigente → 409 e nenhum consentimento persistido', async () => {
+    const { requestId } = await createRequest('consent-version-mismatch')
+    const issued = await issueTokenOk(requestId)
+
+    const res = await injectAsHolder('POST', '/v1/holder-access/consent', issued.token, {
+      payload: JSON.stringify({ termsVersion: '2.0.0' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('HOLDER_TERMS_VERSION_MISMATCH')
+
+    // Nada é persistido: nem consentimento, nem evento de auditoria.
+    expect(await consentRowsOf(requestId)).toHaveLength(0)
+    expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
+
+    // Upload continua bloqueado: o Holder não pode contornar o aceite.
+    const part = multipartPayload(PNG_BYTES)
+    const upload = await injectAsHolder(
+      'POST',
+      '/v1/holder-access/items/address-proof/documents',
+      issued.token,
+      { payload: part.payload, headers: part.headers },
+    )
+    expect(upload.statusCode).toBe(403)
+  })
+
+  it('versão arbitrária nunca é aceita como se fosse a vigente', async () => {
+    const { requestId } = await createRequest('consent-version-arbitrary')
+    const issued = await issueTokenOk(requestId)
+
+    for (const termsVersion of ['0.0.1', 'v1.0', '1.0.0-beta', 'qualquer-coisa']) {
+      const res = await injectAsHolder('POST', '/v1/holder-access/consent', issued.token, {
+        payload: JSON.stringify({ termsVersion }),
+        headers: { 'content-type': 'application/json' },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json().code).toBe('HOLDER_TERMS_VERSION_MISMATCH')
+    }
+
+    expect(await consentRowsOf(requestId)).toHaveLength(0)
+  })
+
+  it('conteúdo jurídico não aprovado → 409 e nenhum consentimento persistido', async () => {
+    const { requestId } = await createRequest('consent-not-approved')
+    const issued = await issueTokenOk(requestId)
+
+    holderIpCounter = (holderIpCounter + 1) % 250
+    const res = await appTermsNotApproved.inject({
+      method: 'POST',
+      url: '/v1/holder-access/consent',
+      headers: {
+        'x-holder-token': issued.token,
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify({ termsVersion: '1.0.0' }),
+      remoteAddress: `10.9.0.${holderIpCounter + 1}`,
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('HOLDER_TERMS_NOT_APPROVED')
+
+    // A visão pública informa que o conteúdo não está aprovado, sem expor
+    // detalhes internos; o frontend bloqueia o aceite com essa informação.
+    holderIpCounter = (holderIpCounter + 1) % 250
+    const view = await appTermsNotApproved.inject({
+      method: 'GET',
+      url: '/v1/holder-access',
+      headers: { 'x-holder-token': issued.token },
+      remoteAddress: `10.9.0.${holderIpCounter + 1}`,
+    })
+    expect(view.statusCode).toBe(200)
+    expect(view.json().terms).toEqual({
+      version: '1.0.0',
+      approved: false,
+      documentHash: 'sha256:abc123def456',
+    })
+
+    // Sem texto aprovado, o servidor não inventa consentimento.
+    expect(await consentRowsOf(requestId)).toHaveLength(0)
+    expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
   })
 
   it('token ausente → 401 (não exige Better Auth)', async () => {
@@ -481,6 +582,13 @@ describe('F4.1 — consentimento do Holder', () => {
     expect(view.json().consent.granted).toBe(false)
     expect(view.json().consent.termsVersion).toBeNull()
     expect(view.json().consent.acceptedAt).toBeNull()
+
+    // A versão vigente dos termos é do servidor, não escolhida pelo cliente.
+    expect(view.json().terms).toEqual({
+      version: '1.0.0',
+      approved: true,
+      documentHash: 'sha256:abc123def456',
+    })
 
     // Após consentimento: aguardando_documentos
     await injectAsHolder('POST', '/v1/holder-access/consent', issued.token, {

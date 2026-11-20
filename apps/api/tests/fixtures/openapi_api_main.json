@@ -1754,6 +1754,22 @@
                       },
                       "required": ["granted", "termsVersion", "acceptedAt"],
                       "additionalProperties": false
+                    },
+                    "terms": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": ["string", "null"]
+                        },
+                        "approved": {
+                          "type": "boolean"
+                        },
+                        "documentHash": {
+                          "type": ["string", "null"]
+                        }
+                      },
+                      "required": ["version", "approved", "documentHash"],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -1765,7 +1781,8 @@
                     "completedAt",
                     "items",
                     "status",
-                    "consent"
+                    "consent",
+                    "terms"
                   ],
                   "additionalProperties": false
                 }
@@ -7427,6 +7444,37 @@
                           "consent_granted": {
                             "type": "boolean",
                             "description": "Indica se o consentimento do Holder foi registrado para a solicitação vinculada (F4.1)."
+                          },
+                          "holder_request_id": {
+                            "type": ["string", "null"],
+                            "format": "uuid",
+                            "description": "Identificador da solicitação real do Holder vinculada à validation. Não é token nem segredo."
+                          },
+                          "holder_request_state": {
+                            "type": ["string", "null"],
+                            "enum": ["pending", "in_progress", "completed", "cancelled", "expired", null],
+                            "description": "Estado da solicitação do Holder no banco."
+                          },
+                          "holder_request_created_at": {
+                            "type": ["string", "null"],
+                            "description": "Data de criação da solicitação do Holder (ISO 8601)."
+                          },
+                          "holder_request_expires_at": {
+                            "type": ["string", "null"],
+                            "description": "Data de expiração da solicitação do Holder (ISO 8601)."
+                          },
+                          "holder_consent_accepted_at": {
+                            "type": ["string", "null"],
+                            "description": "Timestamp do aceite do consentimento (ISO 8601)."
+                          },
+                          "holder_documents_received": {
+                            "type": "boolean",
+                            "description": "Indica se há documentos armazenados para a solicitação."
+                          },
+                          "holder_document_processing_state": {
+                            "type": ["string", "null"],
+                            "enum": ["awaiting", "processing", "processed", "partial", "failed", null],
+                            "description": "Estado do processamento documental da submissão do Holder."
                           }
                         },
                         "required": [
@@ -7440,7 +7488,14 @@
                           "created_at",
                           "expires_at",
                           "holder_external_reference",
-                          "consent_granted"
+                          "consent_granted",
+                          "holder_request_id",
+                          "holder_request_state",
+                          "holder_request_created_at",
+                          "holder_request_expires_at",
+                          "holder_consent_accepted_at",
+                          "holder_documents_received",
+                          "holder_document_processing_state"
                         ],
                         "additionalProperties": false
                       }

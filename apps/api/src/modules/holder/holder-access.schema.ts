@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   CreateHolderAccessTokenResponseSchema,
   HolderAccessRequestSchema,
+  HolderTermsSchema,
   PROBLEM_CONTENT_TYPE,
   problem,
   SaveHolderItemResponseRequestSchema,
@@ -80,6 +81,8 @@ export interface HolderAccessRoutesDeps {
   readonly metrics?: Metrics
   readonly maxDocumentBytes: number
   readonly processingService: HolderSubmissionProcessingService
+  /** Versão vigente dos termos definida pelo servidor. */
+  readonly terms: z.infer<typeof HolderTermsSchema>
 }
 
 export interface HolderAccessTokenRoutesDeps {
