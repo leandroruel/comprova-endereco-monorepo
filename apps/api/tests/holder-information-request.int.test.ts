@@ -2446,9 +2446,13 @@ describe('HolderInformationRequest Integration', () => {
       })
       expect(validationSubjectId).not.toBeNull()
 
-      // Transação bloqueadora: segura o lock de subject por ~2 segundos com pg_sleep.
-      // O serviço define lock_timeout = '3s', então aguardará até adquirir o lock
-      // antes que o timeout estoure.
+      // Promise resolvida quando a transação bloqueadora adquire o lock.
+      let resolveLockAcquired: (() => void) | null = null
+      const lockAcquiredPromise = new Promise<void>((resolve) => {
+        resolveLockAcquired = resolve
+      })
+
+      // Transação bloqueadora: segura o lock de subject e mantém aberta com pg_sleep(2).
       const blockingPromise = appPool.db.transaction(async (tx) => {
         await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`)
         await tx.execute(sql`SET LOCAL lock_timeout = '3s'`)
@@ -2458,13 +2462,23 @@ describe('HolderInformationRequest Integration', () => {
           .where(and(eq(t.subject.subjectId, validationSubjectId!), eq(t.subject.tenantId, tenantId)))
           .for('update')
           .limit(1)
-        // Segura o lock por tempo suficiente para o expiresAt expirar durante a espera.
+        // Sinaliza que o lock foi adquirido antes de iniciar a espera.
+        resolveLockAcquired?.()
+        // Mantém o lock ativo por tempo suficiente para o expiresAt expirar durante a espera.
         await tx.execute(sql`SELECT pg_sleep(2)`)
       })
 
-      // expiresAt 1 segundo no futuro: passa na validação inicial (fora da transação),
-      // mas expira durante a espera pelo lock (2 segundos de pg_sleep).
-      const expiresAt = new Date(Date.now() + 1000).toISOString()
+      // Aguarda a sinalização de que o lock foi adquirido, com race contra falha na transação.
+      await Promise.race([
+        lockAcquiredPromise,
+        blockingPromise.then(() => {
+          throw new Error('transação bloqueadora finalizou antes do esperado')
+        }),
+      ])
+
+      // expiresAt curto: passa na validação inicial (fora da transação) mas expira
+      // durante a espera pelo lock mantida pela transação bloqueadora.
+      const expiresAt = new Date(Date.now() + 500).toISOString()
 
       const res = await injectWithM2M(
         'POST',
@@ -2475,26 +2489,44 @@ describe('HolderInformationRequest Integration', () => {
         key.secret,
       )
 
-      // Aguarda a transação bloqueadora terminar (libera o lock).
+      // Libera a transação bloqueadora (aguarda o pg_sleep terminar).
       await blockingPromise
 
       // A operação deve ser rejeitada porque o prazo expirou durante a espera pelo lock.
       expect(res.statusCode).toBe(400)
       expect(res.json().code).toBe('INVALID_EXPIRES_AT')
 
-      // Nenhum registro parcial deve ter sido persistido: nem solicitação, nem token,
-      // nem evento de auditoria para este holder.
-      const requestsWithToken = await withTenant(appPool.db, tenantId, async (tx) => {
+      // Nenhum registro parcial deve ter sido persistido.
+      const requestsAfter = await withTenant(appPool.db, tenantId, async (tx) => {
         return tx
           .select({ id: t.holderInformationRequest.id })
           .from(t.holderInformationRequest)
-          .innerJoin(
-            t.holderAccessToken,
-            eq(t.holderAccessToken.holderInformationRequestId, t.holderInformationRequest.id),
-          )
           .where(eq(t.holderInformationRequest.holderId, holderId))
       })
-      expect(requestsWithToken.length).toBe(0)
+      expect(requestsAfter.length).toBe(0)
+
+      const tokensAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ tokenId: t.holderAccessToken.tokenId })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.holderId, holderId))
+      })
+      expect(tokensAfter.length).toBe(0)
+
+      // Verifica que não existem eventos de auditoria associados a solicitações
+      // deste holder (usando subconsulta via SQL bruto, não INNER JOIN, para não
+      // ocultar solicitação persistida sem evento ou evento sem solicitação).
+      const eventsByHolder = await withTenant(appPool.db, tenantId, async (tx) => {
+        const result = await tx.execute(sql`
+          SELECT id FROM holder_information_request_event
+          WHERE holder_information_request_id IN (
+            SELECT id FROM holder_information_request
+            WHERE holder_id = ${holderId} AND tenant_id = ${tenantId}
+          )
+        `)
+        return result
+      })
+      expect(eventsByHolder.length).toBe(0)
     })
   })
 })
