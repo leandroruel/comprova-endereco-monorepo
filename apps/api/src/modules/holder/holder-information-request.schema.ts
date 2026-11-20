@@ -105,6 +105,7 @@ export type HolderInformationRequestTransitionBodyType = z.infer<
 
 export interface HolderInformationRequestRoutesDeps {
   readonly db: Db
+  readonly pepper: string
   readonly logger: Logger
 }
 

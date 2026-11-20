@@ -384,12 +384,7 @@
                       "maximum": 9007199254740991
                     }
                   },
-                  "required": [
-                    "validations",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
+                  "required": ["validations", "total", "limit", "offset"],
                   "additionalProperties": false
                 }
               }
@@ -412,10 +407,7 @@
                     "properties": {
                       "type": {
                         "type": "string",
-                        "enum": [
-                          "CPF",
-                          "CNPJ"
-                        ]
+                        "enum": ["CPF", "CNPJ"]
                       },
                       "value": {
                         "type": "string",
@@ -423,10 +415,7 @@
                         "maxLength": 20
                       }
                     },
-                    "required": [
-                      "type",
-                      "value"
-                    ]
+                    "required": ["type", "value"]
                   },
                   "address": {
                     "default": null,
@@ -473,9 +462,7 @@
                             "maxLength": 2
                           }
                         },
-                        "required": [
-                          "logradouro"
-                        ]
+                        "required": ["logradouro"]
                       },
                       {
                         "type": "null"
@@ -484,11 +471,7 @@
                   },
                   "legal_basis": {
                     "type": "string",
-                    "enum": [
-                      "FRAUD_PREVENTION",
-                      "CONTRACT_EXECUTION",
-                      "CONSENT"
-                    ]
+                    "enum": ["FRAUD_PREVENTION", "CONTRACT_EXECUTION", "CONSENT"]
                   },
                   "consent_ref": {
                     "default": null,
@@ -534,10 +517,7 @@
                     }
                   }
                 },
-                "required": [
-                  "document",
-                  "legal_basis"
-                ]
+                "required": ["document", "legal_basis"]
               }
             }
           }
@@ -624,10 +604,7 @@
                       ]
                     },
                     "policy_version": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "address": {
                       "anyOf": [
@@ -665,12 +642,7 @@
                               ]
                             }
                           },
-                          "required": [
-                            "building_key",
-                            "country",
-                            "uf",
-                            "geo_precision"
-                          ],
+                          "required": ["building_key", "country", "uf", "geo_precision"],
                           "additionalProperties": false
                         },
                         {
@@ -691,12 +663,7 @@
                           },
                           "stance": {
                             "type": "string",
-                            "enum": [
-                              "supports",
-                              "contradicts",
-                              "neutral",
-                              "unknown"
-                            ]
+                            "enum": ["supports", "contradicts", "neutral", "unknown"]
                           },
                           "strength": {
                             "type": "number",
@@ -767,29 +734,20 @@
                             },
                             "type": {
                               "type": "string",
-                              "enum": [
-                                "business_registered_address",
-                                "address_exists"
-                              ]
+                              "enum": ["business_registered_address", "address_exists"]
                             },
                             "subject": {
                               "type": "object",
                               "properties": {
                                 "type": {
                                   "type": "string",
-                                  "enum": [
-                                    "organization",
-                                    "person"
-                                  ]
+                                  "enum": ["organization", "person"]
                                 },
                                 "id": {
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "type",
-                                "id"
-                              ],
+                              "required": ["type", "id"],
                               "additionalProperties": false
                             },
                             "target": {
@@ -797,30 +755,17 @@
                               "properties": {
                                 "type": {
                                   "type": "string",
-                                  "enum": [
-                                    "address"
-                                  ]
+                                  "enum": ["address"]
                                 },
                                 "id": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 }
                               },
-                              "required": [
-                                "type",
-                                "id"
-                              ],
+                              "required": ["type", "id"],
                               "additionalProperties": false
                             }
                           },
-                          "required": [
-                            "id",
-                            "type",
-                            "subject",
-                            "target"
-                          ],
+                          "required": ["id", "type", "subject", "target"],
                           "additionalProperties": false
                         },
                         {
@@ -849,11 +794,7 @@
                               "maximum": 9007199254740991
                             }
                           },
-                          "required": [
-                            "supporting",
-                            "contradicting",
-                            "unknown"
-                          ],
+                          "required": ["supporting", "contradicting", "unknown"],
                           "additionalProperties": false
                         },
                         {
@@ -868,13 +809,7 @@
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": [
-                                "completed",
-                                "invalid",
-                                "inconclusive",
-                                "unsupported",
-                                "unavailable"
-                              ]
+                              "enum": ["completed", "invalid", "inconclusive", "unsupported", "unavailable"]
                             },
                             "method": {
                               "type": "string",
@@ -901,26 +836,14 @@
                                   "type": "string"
                                 },
                                 "authority": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 },
                                 "environment": {
                                   "type": "string",
-                                  "enum": [
-                                    "production",
-                                    "homologation",
-                                    "local"
-                                  ]
+                                  "enum": ["production", "homologation", "local"]
                                 }
                               },
-                              "required": [
-                                "kind",
-                                "id",
-                                "authority",
-                                "environment"
-                              ],
+                              "required": ["kind", "id", "authority", "environment"],
                               "additionalProperties": false
                             },
                             "document": {
@@ -936,19 +859,11 @@
                             },
                             "address": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "holder": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "analysis_id": {
                               "type": "string",
@@ -965,10 +880,7 @@
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "id",
-                                "version"
-                              ],
+                              "required": ["id", "version"],
                               "additionalProperties": false
                             },
                             "contract_version": {
@@ -1019,10 +931,7 @@
                                       }
                                     }
                                   },
-                                  "required": [
-                                    "compared_fields",
-                                    "reason_codes"
-                                  ],
+                                  "required": ["compared_fields", "reason_codes"],
                                   "additionalProperties": false
                                 },
                                 "holder": {
@@ -1030,11 +939,7 @@
                                   "properties": {
                                     "reference": {
                                       "type": "string",
-                                      "enum": [
-                                        "legal_name",
-                                        "trade_name",
-                                        "none"
-                                      ]
+                                      "enum": ["legal_name", "trade_name", "none"]
                                     },
                                     "reason_codes": {
                                       "type": "array",
@@ -1043,17 +948,11 @@
                                       }
                                     }
                                   },
-                                  "required": [
-                                    "reference",
-                                    "reason_codes"
-                                  ],
+                                  "required": ["reference", "reason_codes"],
                                   "additionalProperties": false
                                 }
                               },
-                              "required": [
-                                "address",
-                                "holder"
-                              ],
+                              "required": ["address", "holder"],
                               "additionalProperties": false
                             }
                           },
@@ -1120,26 +1019,14 @@
                                   "type": "string"
                                 },
                                 "authority": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 },
                                 "environment": {
                                   "type": "string",
-                                  "enum": [
-                                    "production",
-                                    "homologation",
-                                    "local"
-                                  ]
+                                  "enum": ["production", "homologation", "local"]
                                 }
                               },
-                              "required": [
-                                "kind",
-                                "id",
-                                "authority",
-                                "environment"
-                              ],
+                              "required": ["kind", "id", "authority", "environment"],
                               "additionalProperties": false
                             },
                             "document": {
@@ -1155,19 +1042,11 @@
                             },
                             "address": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "holder": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "adapter_version": {
                               "type": "string"
@@ -1217,12 +1096,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "enum": [
-                            "found",
-                            "not_found",
-                            "inconclusive",
-                            "unsupported"
-                          ]
+                          "enum": ["found", "not_found", "inconclusive", "unsupported"]
                         },
                         {
                           "type": "null"
@@ -1233,10 +1107,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "enum": [
-                            "pending",
-                            "completed"
-                          ]
+                          "enum": ["pending", "completed"]
                         },
                         {
                           "type": "null"
@@ -1250,11 +1121,7 @@
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": [
-                                "in_progress",
-                                "completed",
-                                "failed"
-                              ]
+                              "enum": ["in_progress", "completed", "failed"]
                             },
                             "steps": {
                               "type": "array",
@@ -1273,27 +1140,15 @@
                                   },
                                   "status": {
                                     "type": "string",
-                                    "enum": [
-                                      "pending",
-                                      "in_progress",
-                                      "completed",
-                                      "failed",
-                                      "skipped"
-                                    ]
+                                    "enum": ["pending", "in_progress", "completed", "failed", "skipped"]
                                   }
                                 },
-                                "required": [
-                                  "stage",
-                                  "status"
-                                ],
+                                "required": ["stage", "status"],
                                 "additionalProperties": false
                               }
                             }
                           },
-                          "required": [
-                            "status",
-                            "steps"
-                          ],
+                          "required": ["status", "steps"],
                           "additionalProperties": false
                         },
                         {
@@ -1302,10 +1157,7 @@
                       ]
                     },
                     "explanation": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "explanation_detail": {
                       "anyOf": [
@@ -1335,12 +1187,7 @@
                               }
                             }
                           },
-                          "required": [
-                            "code",
-                            "message",
-                            "supporting_evidence",
-                            "contradicting_evidence"
-                          ],
+                          "required": ["code", "message", "supporting_evidence", "contradicting_evidence"],
                           "additionalProperties": false
                         },
                         {
@@ -1404,12 +1251,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -1504,10 +1346,7 @@
                       ]
                     },
                     "policy_version": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "address": {
                       "anyOf": [
@@ -1545,12 +1384,7 @@
                               ]
                             }
                           },
-                          "required": [
-                            "building_key",
-                            "country",
-                            "uf",
-                            "geo_precision"
-                          ],
+                          "required": ["building_key", "country", "uf", "geo_precision"],
                           "additionalProperties": false
                         },
                         {
@@ -1571,12 +1405,7 @@
                           },
                           "stance": {
                             "type": "string",
-                            "enum": [
-                              "supports",
-                              "contradicts",
-                              "neutral",
-                              "unknown"
-                            ]
+                            "enum": ["supports", "contradicts", "neutral", "unknown"]
                           },
                           "strength": {
                             "type": "number",
@@ -1647,29 +1476,20 @@
                             },
                             "type": {
                               "type": "string",
-                              "enum": [
-                                "business_registered_address",
-                                "address_exists"
-                              ]
+                              "enum": ["business_registered_address", "address_exists"]
                             },
                             "subject": {
                               "type": "object",
                               "properties": {
                                 "type": {
                                   "type": "string",
-                                  "enum": [
-                                    "organization",
-                                    "person"
-                                  ]
+                                  "enum": ["organization", "person"]
                                 },
                                 "id": {
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "type",
-                                "id"
-                              ],
+                              "required": ["type", "id"],
                               "additionalProperties": false
                             },
                             "target": {
@@ -1677,30 +1497,17 @@
                               "properties": {
                                 "type": {
                                   "type": "string",
-                                  "enum": [
-                                    "address"
-                                  ]
+                                  "enum": ["address"]
                                 },
                                 "id": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 }
                               },
-                              "required": [
-                                "type",
-                                "id"
-                              ],
+                              "required": ["type", "id"],
                               "additionalProperties": false
                             }
                           },
-                          "required": [
-                            "id",
-                            "type",
-                            "subject",
-                            "target"
-                          ],
+                          "required": ["id", "type", "subject", "target"],
                           "additionalProperties": false
                         },
                         {
@@ -1729,11 +1536,7 @@
                               "maximum": 9007199254740991
                             }
                           },
-                          "required": [
-                            "supporting",
-                            "contradicting",
-                            "unknown"
-                          ],
+                          "required": ["supporting", "contradicting", "unknown"],
                           "additionalProperties": false
                         },
                         {
@@ -1748,13 +1551,7 @@
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": [
-                                "completed",
-                                "invalid",
-                                "inconclusive",
-                                "unsupported",
-                                "unavailable"
-                              ]
+                              "enum": ["completed", "invalid", "inconclusive", "unsupported", "unavailable"]
                             },
                             "method": {
                               "type": "string",
@@ -1781,26 +1578,14 @@
                                   "type": "string"
                                 },
                                 "authority": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 },
                                 "environment": {
                                   "type": "string",
-                                  "enum": [
-                                    "production",
-                                    "homologation",
-                                    "local"
-                                  ]
+                                  "enum": ["production", "homologation", "local"]
                                 }
                               },
-                              "required": [
-                                "kind",
-                                "id",
-                                "authority",
-                                "environment"
-                              ],
+                              "required": ["kind", "id", "authority", "environment"],
                               "additionalProperties": false
                             },
                             "document": {
@@ -1816,19 +1601,11 @@
                             },
                             "address": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "holder": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "analysis_id": {
                               "type": "string",
@@ -1845,10 +1622,7 @@
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "id",
-                                "version"
-                              ],
+                              "required": ["id", "version"],
                               "additionalProperties": false
                             },
                             "contract_version": {
@@ -1899,10 +1673,7 @@
                                       }
                                     }
                                   },
-                                  "required": [
-                                    "compared_fields",
-                                    "reason_codes"
-                                  ],
+                                  "required": ["compared_fields", "reason_codes"],
                                   "additionalProperties": false
                                 },
                                 "holder": {
@@ -1910,11 +1681,7 @@
                                   "properties": {
                                     "reference": {
                                       "type": "string",
-                                      "enum": [
-                                        "legal_name",
-                                        "trade_name",
-                                        "none"
-                                      ]
+                                      "enum": ["legal_name", "trade_name", "none"]
                                     },
                                     "reason_codes": {
                                       "type": "array",
@@ -1923,17 +1690,11 @@
                                       }
                                     }
                                   },
-                                  "required": [
-                                    "reference",
-                                    "reason_codes"
-                                  ],
+                                  "required": ["reference", "reason_codes"],
                                   "additionalProperties": false
                                 }
                               },
-                              "required": [
-                                "address",
-                                "holder"
-                              ],
+                              "required": ["address", "holder"],
                               "additionalProperties": false
                             }
                           },
@@ -2000,26 +1761,14 @@
                                   "type": "string"
                                 },
                                 "authority": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 },
                                 "environment": {
                                   "type": "string",
-                                  "enum": [
-                                    "production",
-                                    "homologation",
-                                    "local"
-                                  ]
+                                  "enum": ["production", "homologation", "local"]
                                 }
                               },
-                              "required": [
-                                "kind",
-                                "id",
-                                "authority",
-                                "environment"
-                              ],
+                              "required": ["kind", "id", "authority", "environment"],
                               "additionalProperties": false
                             },
                             "document": {
@@ -2035,19 +1784,11 @@
                             },
                             "address": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "holder": {
                               "type": "string",
-                              "enum": [
-                                "matches",
-                                "differs",
-                                "not_extracted"
-                              ]
+                              "enum": ["matches", "differs", "not_extracted"]
                             },
                             "adapter_version": {
                               "type": "string"
@@ -2097,12 +1838,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "enum": [
-                            "found",
-                            "not_found",
-                            "inconclusive",
-                            "unsupported"
-                          ]
+                          "enum": ["found", "not_found", "inconclusive", "unsupported"]
                         },
                         {
                           "type": "null"
@@ -2113,10 +1849,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "enum": [
-                            "pending",
-                            "completed"
-                          ]
+                          "enum": ["pending", "completed"]
                         },
                         {
                           "type": "null"
@@ -2130,11 +1863,7 @@
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": [
-                                "in_progress",
-                                "completed",
-                                "failed"
-                              ]
+                              "enum": ["in_progress", "completed", "failed"]
                             },
                             "steps": {
                               "type": "array",
@@ -2153,27 +1882,15 @@
                                   },
                                   "status": {
                                     "type": "string",
-                                    "enum": [
-                                      "pending",
-                                      "in_progress",
-                                      "completed",
-                                      "failed",
-                                      "skipped"
-                                    ]
+                                    "enum": ["pending", "in_progress", "completed", "failed", "skipped"]
                                   }
                                 },
-                                "required": [
-                                  "stage",
-                                  "status"
-                                ],
+                                "required": ["stage", "status"],
                                 "additionalProperties": false
                               }
                             }
                           },
-                          "required": [
-                            "status",
-                            "steps"
-                          ],
+                          "required": ["status", "steps"],
                           "additionalProperties": false
                         },
                         {
@@ -2182,10 +1899,7 @@
                       ]
                     },
                     "explanation": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "explanation_detail": {
                       "anyOf": [
@@ -2215,12 +1929,7 @@
                               }
                             }
                           },
-                          "required": [
-                            "code",
-                            "message",
-                            "supporting_evidence",
-                            "contradicting_evidence"
-                          ],
+                          "required": ["code", "message", "supporting_evidence", "contradicting_evidence"],
                           "additionalProperties": false
                         },
                         {
@@ -2287,12 +1996,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -2318,9 +2022,7 @@
                     "maxLength": 2000
                   }
                 },
-                "required": [
-                  "reason"
-                ]
+                "required": ["reason"]
               }
             }
           }
@@ -2354,10 +2056,7 @@
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     }
                   },
-                  "required": [
-                    "contested",
-                    "validation_id"
-                  ],
+                  "required": ["contested", "validation_id"],
                   "additionalProperties": false
                 }
               }
@@ -2391,12 +2090,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -2481,15 +2175,10 @@
                         },
                         "type": {
                           "type": "string",
-                          "enum": [
-                            "comprova:CredentialStatus"
-                          ]
+                          "enum": ["comprova:CredentialStatus"]
                         }
                       },
-                      "required": [
-                        "id",
-                        "type"
-                      ],
+                      "required": ["id", "type"],
                       "additionalProperties": false
                     },
                     "credentialSubject": {
@@ -2508,10 +2197,7 @@
                         },
                         "comprova:docType": {
                           "type": "string",
-                          "enum": [
-                            "CPF",
-                            "CNPJ"
-                          ]
+                          "enum": ["CPF", "CNPJ"]
                         },
                         "comprova:claim": {
                           "type": "object",
@@ -2529,23 +2215,15 @@
                             },
                             "comprova:claimType": {
                               "type": "string",
-                              "enum": [
-                                "business_registered_address",
-                                "address_exists"
-                              ]
+                              "enum": ["business_registered_address", "address_exists"]
                             },
                             "comprova:subjectType": {
                               "type": "string",
-                              "enum": [
-                                "organization",
-                                "person"
-                              ]
+                              "enum": ["organization", "person"]
                             },
                             "comprova:targetType": {
                               "type": "string",
-                              "enum": [
-                                "address"
-                              ]
+                              "enum": ["address"]
                             },
                             "comprova:address": {
                               "type": "object",
@@ -2573,12 +2251,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": [
-                        "id",
-                        "type",
-                        "comprova:docType",
-                        "comprova:claim"
-                      ],
+                      "required": ["id", "type", "comprova:docType", "comprova:claim"],
                       "additionalProperties": false
                     },
                     "evidence": {
@@ -2608,11 +2281,7 @@
                           },
                           "comprova:stance": {
                             "type": "string",
-                            "enum": [
-                              "supports",
-                              "contradicts",
-                              "unknown"
-                            ]
+                            "enum": ["supports", "contradicts", "unknown"]
                           },
                           "comprova:strength": {
                             "type": "number"
@@ -2705,11 +2374,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": [
-                        "comprova:verdict",
-                        "comprova:score",
-                        "comprova:confidence"
-                      ],
+                      "required": ["comprova:verdict", "comprova:score", "comprova:confidence"],
                       "additionalProperties": false
                     },
                     "comprova:policy": {
@@ -2724,10 +2389,7 @@
                           "pattern": "^[0-9a-f]{64}$"
                         }
                       },
-                      "required": [
-                        "comprova:version",
-                        "comprova:hash"
-                      ],
+                      "required": ["comprova:version", "comprova:hash"],
                       "additionalProperties": false
                     },
                     "comprova:algorithm": {
@@ -2738,9 +2400,7 @@
                           "minLength": 1
                         }
                       },
-                      "required": [
-                        "comprova:scorerVersion"
-                      ],
+                      "required": ["comprova:scorerVersion"],
                       "additionalProperties": false
                     },
                     "assertionAuthority": {
@@ -2753,9 +2413,7 @@
                           }
                         }
                       },
-                      "required": [
-                        "scopes"
-                      ],
+                      "required": ["scopes"],
                       "additionalProperties": false
                     },
                     "comprova:authorization": {
@@ -2768,9 +2426,7 @@
                           }
                         }
                       },
-                      "required": [
-                        "comprova:scopes"
-                      ],
+                      "required": ["comprova:scopes"],
                       "additionalProperties": false
                     },
                     "comprova:legalBasis": {
@@ -2807,13 +2463,7 @@
                           "minLength": 1
                         }
                       },
-                      "required": [
-                        "type",
-                        "cryptosuite",
-                        "verificationMethod",
-                        "proofPurpose",
-                        "proofValue"
-                      ],
+                      "required": ["type", "cryptosuite", "verificationMethod", "proofPurpose", "proofValue"],
                       "additionalProperties": {}
                     }
                   },
@@ -2864,12 +2514,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -2903,12 +2548,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -2963,16 +2603,10 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "pending"
-                      ]
+                      "enum": ["pending"]
                     }
                   },
-                  "required": [
-                    "evidence_id",
-                    "artifact_id",
-                    "status"
-                  ],
+                  "required": ["evidence_id", "artifact_id", "status"],
                   "additionalProperties": false
                 }
               }
@@ -2997,16 +2631,10 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "pending"
-                      ]
+                      "enum": ["pending"]
                     }
                   },
-                  "required": [
-                    "evidence_id",
-                    "artifact_id",
-                    "status"
-                  ],
+                  "required": ["evidence_id", "artifact_id", "status"],
                   "additionalProperties": false
                 }
               }
@@ -3040,12 +2668,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3079,12 +2702,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3118,12 +2736,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3157,12 +2770,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3196,12 +2804,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3235,12 +2838,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3274,12 +2872,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3313,12 +2906,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -3356,19 +2944,14 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "completed",
-                        "failed"
-                      ]
+                      "enum": ["completed", "failed"]
                     },
                     "document": {
                       "type": "object",
                       "properties": {
                         "mimeType": {
                           "type": "string",
-                          "enum": [
-                            "application/pdf"
-                          ]
+                          "enum": ["application/pdf"]
                         },
                         "pageCount": {
                           "type": "integer",
@@ -3381,11 +2964,7 @@
                           "maximum": 9007199254740991
                         }
                       },
-                      "required": [
-                        "mimeType",
-                        "pageCount",
-                        "sizeBytes"
-                      ],
+                      "required": ["mimeType", "pageCount", "sizeBytes"],
                       "additionalProperties": false
                     },
                     "content": {
@@ -3437,10 +3016,7 @@
                                   ]
                                 },
                                 "text": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 },
                                 "bbox": {
                                   "anyOf": [
@@ -3460,12 +3036,7 @@
                                           "type": "number"
                                         }
                                       },
-                                      "required": [
-                                        "x1",
-                                        "y1",
-                                        "x2",
-                                        "y2"
-                                      ],
+                                      "required": ["x1", "y1", "x2", "y2"],
                                       "additionalProperties": false
                                     },
                                     {
@@ -3474,10 +3045,7 @@
                                   ]
                                 },
                                 "confidence": {
-                                  "type": [
-                                    "number",
-                                    "null"
-                                  ]
+                                  "type": ["number", "null"]
                                 },
                                 "table": {
                                   "anyOf": [
@@ -3528,13 +3096,7 @@
                                                 "maximum": 9007199254740991
                                               }
                                             },
-                                            "required": [
-                                              "text",
-                                              "row",
-                                              "column",
-                                              "rowspan",
-                                              "colspan"
-                                            ],
+                                            "required": ["text", "row", "column", "rowspan", "colspan"],
                                             "additionalProperties": false
                                           }
                                         },
@@ -3556,12 +3118,7 @@
                                                   "type": "number"
                                                 }
                                               },
-                                              "required": [
-                                                "x1",
-                                                "y1",
-                                                "x2",
-                                                "y2"
-                                              ],
+                                              "required": ["x1", "y1", "x2", "y2"],
                                               "additionalProperties": false
                                             },
                                             {
@@ -3570,12 +3127,7 @@
                                           ]
                                         }
                                       },
-                                      "required": [
-                                        "headers",
-                                        "rows",
-                                        "cells",
-                                        "bbox"
-                                      ],
+                                      "required": ["headers", "rows", "cells", "bbox"],
                                       "additionalProperties": false
                                     },
                                     {
@@ -3584,10 +3136,7 @@
                                   ]
                                 },
                                 "imageRef": {
-                                  "type": [
-                                    "string",
-                                    "null"
-                                  ]
+                                  "type": ["string", "null"]
                                 },
                                 "metadata": {
                                   "type": "object",
@@ -3611,24 +3160,13 @@
                             }
                           },
                           "width": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
+                            "type": ["number", "null"]
                           },
                           "height": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
+                            "type": ["number", "null"]
                           }
                         },
-                        "required": [
-                          "pageNumber",
-                          "elements",
-                          "width",
-                          "height"
-                        ],
+                        "required": ["pageNumber", "elements", "width", "height"],
                         "additionalProperties": false
                       }
                     },
@@ -3653,12 +3191,7 @@
                           "minLength": 1
                         }
                       },
-                      "required": [
-                        "processor",
-                        "processorVersion",
-                        "processingTimeMs",
-                        "contractVersion"
-                      ],
+                      "required": ["processor", "processorVersion", "processingTimeMs", "contractVersion"],
                       "additionalProperties": false
                     },
                     "warnings": {
@@ -3668,16 +3201,10 @@
                       }
                     },
                     "errorCode": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "errorMessage": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     }
                   },
                   "required": [
@@ -3748,10 +3275,7 @@
                     "maxLength": 10
                   }
                 },
-                "required": [
-                  "name",
-                  "termsVersion"
-                ]
+                "required": ["name", "termsVersion"]
               }
             }
           }
@@ -3773,16 +3297,10 @@
                       "type": "string"
                     },
                     "legalName": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "document": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "type": {
                       "type": "string"
@@ -3794,28 +3312,16 @@
                       "type": "string"
                     },
                     "termsAcceptedAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsAcceptedBy": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsVersion": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsDocumentHash": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "dataRegion": {
                       "type": "string"
@@ -3827,10 +3333,7 @@
                       "type": "number"
                     },
                     "monthlyQuota": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
+                      "type": ["number", "null"]
                     },
                     "createdAt": {
                       "type": "string"
@@ -3883,16 +3386,10 @@
                         "type": "string"
                       },
                       "legalName": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": ["string", "null"]
                       },
                       "document": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": ["string", "null"]
                       },
                       "type": {
                         "type": "string"
@@ -3904,28 +3401,16 @@
                         "type": "string"
                       },
                       "termsAcceptedAt": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": ["string", "null"]
                       },
                       "termsAcceptedBy": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": ["string", "null"]
                       },
                       "termsVersion": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": ["string", "null"]
                       },
                       "termsDocumentHash": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": ["string", "null"]
                       },
                       "dataRegion": {
                         "type": "string"
@@ -3937,10 +3422,7 @@
                         "type": "number"
                       },
                       "monthlyQuota": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
+                        "type": ["number", "null"]
                       },
                       "createdAt": {
                         "type": "string"
@@ -3986,26 +3468,16 @@
                   "type": "object",
                   "properties": {
                     "version": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "approved": {
                       "type": "boolean"
                     },
                     "documentHash": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     }
                   },
-                  "required": [
-                    "version",
-                    "approved",
-                    "documentHash"
-                  ],
+                  "required": ["version", "approved", "documentHash"],
                   "additionalProperties": false
                 }
               }
@@ -4047,16 +3519,10 @@
                       "type": "string"
                     },
                     "legalName": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "document": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "type": {
                       "type": "string"
@@ -4068,28 +3534,16 @@
                       "type": "string"
                     },
                     "termsAcceptedAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsAcceptedBy": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsVersion": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsDocumentHash": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "dataRegion": {
                       "type": "string"
@@ -4101,10 +3555,7 @@
                       "type": "number"
                     },
                     "monthlyQuota": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
+                      "type": ["number", "null"]
                     },
                     "createdAt": {
                       "type": "string"
@@ -4153,9 +3604,7 @@
                     "maxLength": 100
                   }
                 },
-                "required": [
-                  "termsVersion"
-                ]
+                "required": ["termsVersion"]
               }
             }
           }
@@ -4189,16 +3638,10 @@
                       "type": "string"
                     },
                     "legalName": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "document": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "type": {
                       "type": "string"
@@ -4210,28 +3653,16 @@
                       "type": "string"
                     },
                     "termsAcceptedAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsAcceptedBy": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsVersion": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "termsDocumentHash": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "dataRegion": {
                       "type": "string"
@@ -4243,10 +3674,7 @@
                       "type": "number"
                     },
                     "monthlyQuota": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
+                      "type": ["number", "null"]
                     },
                     "createdAt": {
                       "type": "string"
@@ -4297,16 +3725,10 @@
                   "role": {
                     "default": "member",
                     "type": "string",
-                    "enum": [
-                      "owner",
-                      "admin",
-                      "member"
-                    ]
+                    "enum": ["owner", "admin", "member"]
                   }
                 },
-                "required": [
-                  "email"
-                ]
+                "required": ["email"]
               }
             }
           }
@@ -4357,10 +3779,7 @@
                       "type": "string"
                     },
                     "invitedBy": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     }
                   },
                   "required": [
@@ -4406,12 +3825,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -4445,12 +3859,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -4484,12 +3893,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -4548,10 +3952,7 @@
                         "type": "string"
                       },
                       "invitedBy": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": ["string", "null"]
                       }
                     },
                     "required": [
@@ -4592,11 +3993,7 @@
                   "role": {
                     "default": "member",
                     "type": "string",
-                    "enum": [
-                      "owner",
-                      "admin",
-                      "member"
-                    ]
+                    "enum": ["owner", "admin", "member"]
                   },
                   "expiresInDays": {
                     "default": 7,
@@ -4605,9 +4002,7 @@
                     "maximum": 3650
                   }
                 },
-                "required": [
-                  "email"
-                ]
+                "required": ["email"]
               }
             }
           }
@@ -4700,12 +4095,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -4739,12 +4129,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -4770,9 +4155,7 @@
                     "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   }
                 },
-                "required": [
-                  "token"
-                ]
+                "required": ["token"]
               }
             }
           }
@@ -4811,10 +4194,7 @@
                       "type": "string"
                     },
                     "invitedBy": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     }
                   },
                   "required": [
@@ -4857,10 +4237,7 @@
                     "maxLength": 100
                   },
                   "scopes": {
-                    "default": [
-                      "validate:read",
-                      "validate:write"
-                    ],
+                    "default": ["validate:read", "validate:write"],
                     "type": "array",
                     "items": {
                       "type": "string"
@@ -4869,10 +4246,7 @@
                   "keyType": {
                     "default": "m2m",
                     "type": "string",
-                    "enum": [
-                      "user",
-                      "m2m"
-                    ]
+                    "enum": ["user", "m2m"]
                   },
                   "expiresInDays": {
                     "type": "integer",
@@ -4880,9 +4254,7 @@
                     "maximum": 3650
                   }
                 },
-                "required": [
-                  "name"
-                ]
+                "required": ["name"]
               }
             }
           }
@@ -4936,16 +4308,10 @@
                           "type": "string"
                         },
                         "revokedAt": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "type": ["string", "null"]
                         },
                         "lastUsedAt": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "type": ["string", "null"]
                         },
                         "createdAt": {
                           "type": "string"
@@ -4967,10 +4333,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "apiKey",
-                    "secret"
-                  ],
+                  "required": ["apiKey", "secret"],
                   "additionalProperties": false
                 }
               }
@@ -5032,16 +4395,10 @@
                             "type": "string"
                           },
                           "revokedAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "lastUsedAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "createdAt": {
                             "type": "string"
@@ -5061,9 +4418,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "apiKeys"
-                  ],
+                  "required": ["apiKeys"],
                   "additionalProperties": false
                 }
               }
@@ -5135,9 +4490,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": [
-                    "revoked"
-                  ],
+                  "required": ["revoked"],
                   "additionalProperties": false
                 }
               }
@@ -5171,12 +4524,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5210,12 +4558,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5252,17 +4595,10 @@
                   "documentType": {
                     "default": "CPF",
                     "type": "string",
-                    "enum": [
-                      "CPF",
-                      "CNPJ"
-                    ]
+                    "enum": ["CPF", "CNPJ"]
                   }
                 },
-                "required": [
-                  "externalReference",
-                  "name",
-                  "documentHash"
-                ]
+                "required": ["externalReference", "name", "documentHash"]
               }
             }
           }
@@ -5443,12 +4779,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "holders",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
+                  "required": ["holders", "total", "limit", "offset"],
                   "additionalProperties": false
                 }
               }
@@ -5567,12 +4898,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5601,10 +4927,7 @@
                   },
                   "documentType": {
                     "type": "string",
-                    "enum": [
-                      "CPF",
-                      "CNPJ"
-                    ]
+                    "enum": ["CPF", "CNPJ"]
                   }
                 }
               }
@@ -5717,12 +5040,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5753,9 +5071,7 @@
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                   }
                 },
-                "required": [
-                  "legalBasis"
-                ]
+                "required": ["legalBasis"]
               }
             }
           }
@@ -5890,13 +5206,7 @@
           {
             "schema": {
               "type": "string",
-              "enum": [
-                "pending",
-                "in_progress",
-                "approved",
-                "rejected",
-                "expired"
-              ]
+              "enum": ["pending", "in_progress", "approved", "rejected", "expired"]
             },
             "in": "query",
             "name": "state",
@@ -5993,12 +5303,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "processes",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
+                  "required": ["processes", "total", "limit", "offset"],
                   "additionalProperties": false
                 }
               }
@@ -6135,12 +5440,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -6162,13 +5462,7 @@
                 "properties": {
                   "toState": {
                     "type": "string",
-                    "enum": [
-                      "pending",
-                      "in_progress",
-                      "approved",
-                      "rejected",
-                      "expired"
-                    ]
+                    "enum": ["pending", "in_progress", "approved", "rejected", "expired"]
                   },
                   "reason": {
                     "type": "string",
@@ -6176,9 +5470,7 @@
                     "maxLength": 500
                   }
                 },
-                "required": [
-                  "toState"
-                ]
+                "required": ["toState"]
               }
             }
           }
@@ -6375,10 +5667,7 @@
                             "type": "string"
                           },
                           "fromState": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "toState": {
                             "type": "string"
@@ -6423,12 +5712,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "events",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
+                  "required": ["events", "total", "limit", "offset"],
                   "additionalProperties": false
                 }
               }
@@ -6485,10 +5769,7 @@
                           "maxLength": 100
                         }
                       },
-                      "required": [
-                        "itemId",
-                        "description"
-                      ]
+                      "required": ["itemId", "description"]
                     }
                   },
                   "expiresAt": {
@@ -6502,11 +5783,7 @@
                     "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   }
                 },
-                "required": [
-                  "type",
-                  "purpose",
-                  "items"
-                ]
+                "required": ["type", "purpose", "items"]
               }
             }
           }
@@ -6580,11 +5857,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "itemId",
-                          "description",
-                          "required"
-                        ],
+                        "required": ["itemId", "description", "required"],
                         "additionalProperties": false
                       }
                     },
@@ -6592,10 +5865,7 @@
                       "type": "string"
                     },
                     "expiresAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "validationId": {
                       "anyOf": [
@@ -6732,13 +6002,7 @@
           {
             "schema": {
               "type": "string",
-              "enum": [
-                "pending",
-                "in_progress",
-                "completed",
-                "cancelled",
-                "expired"
-              ]
+              "enum": ["pending", "in_progress", "completed", "cancelled", "expired"]
             },
             "in": "query",
             "name": "state",
@@ -6837,11 +6101,7 @@
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "itemId",
-                                "description",
-                                "required"
-                              ],
+                              "required": ["itemId", "description", "required"],
                               "additionalProperties": false
                             }
                           },
@@ -6849,10 +6109,7 @@
                             "type": "string"
                           },
                           "expiresAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "validationId": {
                             "anyOf": [
@@ -6946,12 +6203,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "requests",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
+                  "required": ["requests", "total", "limit", "offset"],
                   "additionalProperties": false
                 }
               }
@@ -7010,13 +6262,7 @@
           {
             "schema": {
               "type": "string",
-              "enum": [
-                "pending",
-                "in_progress",
-                "completed",
-                "cancelled",
-                "expired"
-              ]
+              "enum": ["pending", "in_progress", "completed", "cancelled", "expired"]
             },
             "in": "query",
             "name": "state",
@@ -7105,11 +6351,7 @@
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "itemId",
-                                "description",
-                                "required"
-                              ],
+                              "required": ["itemId", "description", "required"],
                               "additionalProperties": false
                             }
                           },
@@ -7117,10 +6359,7 @@
                             "type": "string"
                           },
                           "expiresAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "validationId": {
                             "anyOf": [
@@ -7214,12 +6453,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "requests",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
+                  "required": ["requests", "total", "limit", "offset"],
                   "additionalProperties": false
                 }
               }
@@ -7301,11 +6535,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "itemId",
-                          "description",
-                          "required"
-                        ],
+                        "required": ["itemId", "description", "required"],
                         "additionalProperties": false
                       }
                     },
@@ -7313,10 +6543,7 @@
                       "type": "string"
                     },
                     "expiresAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "validationId": {
                       "anyOf": [
@@ -7427,12 +6654,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -7454,9 +6676,7 @@
                 "properties": {
                   "toState": {
                     "type": "string",
-                    "enum": [
-                      "cancelled"
-                    ]
+                    "enum": ["cancelled"]
                   },
                   "reason": {
                     "type": "string",
@@ -7464,9 +6684,7 @@
                     "maxLength": 500
                   }
                 },
-                "required": [
-                  "toState"
-                ]
+                "required": ["toState"]
               }
             }
           }
@@ -7540,11 +6758,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "itemId",
-                          "description",
-                          "required"
-                        ],
+                        "required": ["itemId", "description", "required"],
                         "additionalProperties": false
                       }
                     },
@@ -7552,10 +6766,7 @@
                       "type": "string"
                     },
                     "expiresAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "validationId": {
                       "anyOf": [
@@ -7666,12 +6877,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -7702,12 +6908,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -7765,12 +6966,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "tokenId",
-                    "token",
-                    "expiresAt",
-                    "createdAt"
-                  ],
+                  "required": ["tokenId", "token", "expiresAt", "createdAt"],
                   "additionalProperties": false
                 }
               }
@@ -7847,25 +7043,13 @@
                     },
                     "state": {
                       "type": "string",
-                      "enum": [
-                        "pending",
-                        "in_progress",
-                        "completed",
-                        "cancelled",
-                        "expired"
-                      ]
+                      "enum": ["pending", "in_progress", "completed", "cancelled", "expired"]
                     },
                     "expiresAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "completedAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "items": {
                       "type": "array",
@@ -7885,10 +7069,7 @@
                             "type": "string"
                           },
                           "value": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "documents": {
                             "type": "array",
@@ -7926,26 +7107,12 @@
                             }
                           }
                         },
-                        "required": [
-                          "itemId",
-                          "description",
-                          "required",
-                          "value",
-                          "documents"
-                        ],
+                        "required": ["itemId", "description", "required", "value", "documents"],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": [
-                    "requestId",
-                    "type",
-                    "purpose",
-                    "state",
-                    "expiresAt",
-                    "completedAt",
-                    "items"
-                  ],
+                  "required": ["requestId", "type", "purpose", "state", "expiresAt", "completedAt", "items"],
                   "additionalProperties": false
                 }
               }
@@ -7971,9 +7138,7 @@
                     "maxLength": 5000
                   }
                 },
-                "required": [
-                  "value"
-                ]
+                "required": ["value"]
               }
             }
           }
@@ -8011,25 +7176,13 @@
                     },
                     "state": {
                       "type": "string",
-                      "enum": [
-                        "pending",
-                        "in_progress",
-                        "completed",
-                        "cancelled",
-                        "expired"
-                      ]
+                      "enum": ["pending", "in_progress", "completed", "cancelled", "expired"]
                     },
                     "expiresAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "completedAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "items": {
                       "type": "array",
@@ -8049,10 +7202,7 @@
                             "type": "string"
                           },
                           "value": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "documents": {
                             "type": "array",
@@ -8090,26 +7240,12 @@
                             }
                           }
                         },
-                        "required": [
-                          "itemId",
-                          "description",
-                          "required",
-                          "value",
-                          "documents"
-                        ],
+                        "required": ["itemId", "description", "required", "value", "documents"],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": [
-                    "requestId",
-                    "type",
-                    "purpose",
-                    "state",
-                    "expiresAt",
-                    "completedAt",
-                    "items"
-                  ],
+                  "required": ["requestId", "type", "purpose", "state", "expiresAt", "completedAt", "items"],
                   "additionalProperties": false
                 }
               }
@@ -8199,25 +7335,13 @@
                     },
                     "state": {
                       "type": "string",
-                      "enum": [
-                        "pending",
-                        "in_progress",
-                        "completed",
-                        "cancelled",
-                        "expired"
-                      ]
+                      "enum": ["pending", "in_progress", "completed", "cancelled", "expired"]
                     },
                     "expiresAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "completedAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "items": {
                       "type": "array",
@@ -8237,10 +7361,7 @@
                             "type": "string"
                           },
                           "value": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "documents": {
                             "type": "array",
@@ -8278,26 +7399,12 @@
                             }
                           }
                         },
-                        "required": [
-                          "itemId",
-                          "description",
-                          "required",
-                          "value",
-                          "documents"
-                        ],
+                        "required": ["itemId", "description", "required", "value", "documents"],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": [
-                    "requestId",
-                    "type",
-                    "purpose",
-                    "state",
-                    "expiresAt",
-                    "completedAt",
-                    "items"
-                  ],
+                  "required": ["requestId", "type", "purpose", "state", "expiresAt", "completedAt", "items"],
                   "additionalProperties": false
                 }
               }
@@ -8347,13 +7454,7 @@
                     },
                     "state": {
                       "type": "string",
-                      "enum": [
-                        "awaiting",
-                        "processing",
-                        "processed",
-                        "partial",
-                        "failed"
-                      ]
+                      "enum": ["awaiting", "processing", "processed", "partial", "failed"]
                     },
                     "attempts": {
                       "type": "integer",
@@ -8361,10 +7462,7 @@
                       "maximum": 9007199254740991
                     },
                     "lastError": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     },
                     "createdAt": {
                       "type": "string"
@@ -8373,10 +7471,7 @@
                       "type": "string"
                     },
                     "processedAt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": ["string", "null"]
                     }
                   },
                   "required": [
@@ -8417,12 +7512,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -8456,15 +7546,10 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "ACTIVE",
-                        "REVOKED"
-                      ]
+                      "enum": ["ACTIVE", "REVOKED"]
                     }
                   },
-                  "required": [
-                    "status"
-                  ],
+                  "required": ["status"],
                   "additionalProperties": false
                 }
               }
@@ -8498,12 +7583,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -8554,10 +7634,7 @@
                       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                     }
                   },
-                  "required": [
-                    "key_id",
-                    "revoked_at"
-                  ],
+                  "required": ["key_id", "revoked_at"],
                   "additionalProperties": false
                 }
               }
@@ -8591,12 +7668,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -8621,9 +7693,7 @@
                     "format": "uri"
                   },
                   "events": {
-                    "default": [
-                      "validation.completed"
-                    ],
+                    "default": ["validation.completed"],
                     "minItems": 1,
                     "type": "array",
                     "items": {
@@ -8636,9 +7706,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "url"
-                ]
+                "required": ["url"]
               }
             }
           }
@@ -8660,10 +7728,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "endpoint_id",
-                    "secret"
-                  ],
+                  "required": ["endpoint_id", "secret"],
                   "additionalProperties": false
                 }
               }
@@ -8697,12 +7762,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -8744,19 +7804,12 @@
                             "type": "boolean"
                           }
                         },
-                        "required": [
-                          "endpoint_id",
-                          "url",
-                          "events",
-                          "active"
-                        ],
+                        "required": ["endpoint_id", "url", "events", "active"],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": [
-                    "endpoints"
-                  ],
+                  "required": ["endpoints"],
                   "additionalProperties": false
                 }
               }
@@ -8793,9 +7846,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": [
-                    "deleted"
-                  ],
+                  "required": ["deleted"],
                   "additionalProperties": false
                 }
               }
@@ -8829,12 +7880,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -8863,10 +7909,7 @@
                       "properties": {
                         "type": {
                           "type": "string",
-                          "enum": [
-                            "CPF",
-                            "CNPJ"
-                          ]
+                          "enum": ["CPF", "CNPJ"]
                         },
                         "value": {
                           "type": "string",
@@ -8874,25 +7917,15 @@
                           "maxLength": 20
                         }
                       },
-                      "required": [
-                        "type",
-                        "value"
-                      ]
+                      "required": ["type", "value"]
                     }
                   },
                   "legal_basis": {
                     "type": "string",
-                    "enum": [
-                      "FRAUD_PREVENTION",
-                      "CONTRACT_EXECUTION",
-                      "CONSENT"
-                    ]
+                    "enum": ["FRAUD_PREVENTION", "CONTRACT_EXECUTION", "CONSENT"]
                   }
                 },
-                "required": [
-                  "documents",
-                  "legal_basis"
-                ]
+                "required": ["documents", "legal_basis"]
               }
             }
           }
@@ -8917,11 +7950,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "batch_id",
-                    "total_items",
-                    "status"
-                  ],
+                  "required": ["batch_id", "total_items", "status"],
                   "additionalProperties": false
                 }
               }
@@ -8955,12 +7984,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -9009,10 +8033,7 @@
                             "type": "string"
                           },
                           "completed_at": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           }
                         },
                         "required": [
@@ -9028,9 +8049,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "batches"
-                  ],
+                  "required": ["batches"],
                   "additionalProperties": false
                 }
               }
@@ -9089,34 +8108,19 @@
                             "type": "string"
                           },
                           "validation_id": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "error_code": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "verdict": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "confidence": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
+                            "type": ["number", "null"]
                           },
                           "explanation": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           }
                         },
                         "required": [
@@ -9133,12 +8137,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "batch_id",
-                    "status",
-                    "total_items",
-                    "items"
-                  ],
+                  "required": ["batch_id", "status", "total_items", "items"],
                   "additionalProperties": false
                 }
               }
@@ -9172,12 +8171,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -9195,10 +8189,7 @@
             "schema": {
               "default": "csv",
               "type": "string",
-              "enum": [
-                "csv",
-                "json"
-              ]
+              "enum": ["csv", "json"]
             },
             "in": "query",
             "name": "format",
@@ -9382,10 +8373,7 @@
                       "maximum": 9007199254740991
                     },
                     "totalCostMicros": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
+                      "type": ["number", "null"]
                     },
                     "byEventType": {
                       "type": "object",
@@ -9447,10 +8435,7 @@
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
                     "monthlyQuota": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
+                      "type": ["number", "null"]
                     },
                     "consumedUnits": {
                       "type": "integer",
@@ -9458,19 +8443,13 @@
                       "maximum": 9007199254740991
                     },
                     "remainingUnits": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
+                      "type": ["number", "null"]
                     },
                     "hasHardLimit": {
                       "type": "boolean"
                     },
                     "softThresholdPercent": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
+                      "type": ["number", "null"]
                     },
                     "isSoftLimitReached": {
                       "type": "boolean"
@@ -9547,10 +8526,7 @@
           {
             "schema": {
               "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
+              "enum": ["true", "false"]
             },
             "in": "query",
             "name": "billable",
@@ -9616,11 +8592,7 @@
                           },
                           "eventType": {
                             "type": "string",
-                            "enum": [
-                              "technical_execution",
-                              "processing_attempt",
-                              "usage_event"
-                            ]
+                            "enum": ["technical_execution", "processing_attempt", "usage_event"]
                           },
                           "kind": {
                             "type": "string"
@@ -9631,10 +8603,7 @@
                             "maximum": 9007199254740991
                           },
                           "costMicros": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
+                            "type": ["number", "null"]
                           },
                           "validationId": {
                             "anyOf": [
@@ -9649,19 +8618,13 @@
                             ]
                           },
                           "idempotencyKey": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "billable": {
                             "type": "boolean"
                           },
                           "source": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           }
                         },
                         "required": [
@@ -9696,12 +8659,7 @@
                       "maximum": 9007199254740991
                     }
                   },
-                  "required": [
-                    "events",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
+                  "required": ["events", "total", "limit", "offset"],
                   "additionalProperties": false
                 }
               }
@@ -9815,11 +8773,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "type",
-                          "validationId",
-                          "description"
-                        ],
+                        "required": ["type", "validationId", "description"],
                         "additionalProperties": false
                       }
                     }
@@ -9860,45 +8814,30 @@
                           "type": "object",
                           "properties": {
                             "snapshot_month": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": ["string", "null"]
                             }
                           },
-                          "required": [
-                            "snapshot_month"
-                          ],
+                          "required": ["snapshot_month"],
                           "additionalProperties": false
                         },
                         "ref_receita_empresa": {
                           "type": "object",
                           "properties": {
                             "snapshot_month": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": ["string", "null"]
                             }
                           },
-                          "required": [
-                            "snapshot_month"
-                          ],
+                          "required": ["snapshot_month"],
                           "additionalProperties": false
                         },
                         "ref_receita_socio": {
                           "type": "object",
                           "properties": {
                             "snapshot_month": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": ["string", "null"]
                             }
                           },
-                          "required": [
-                            "snapshot_month"
-                          ],
+                          "required": ["snapshot_month"],
                           "additionalProperties": false
                         },
                         "ref_cnefe_address": {
@@ -9917,19 +8856,14 @@
                               ]
                             }
                           },
-                          "required": [
-                            "census_year"
-                          ],
+                          "required": ["census_year"],
                           "additionalProperties": false
                         },
                         "ref_cep": {
                           "type": "object",
                           "properties": {
                             "updated_at": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": ["string", "null"]
                             },
                             "sources": {
                               "type": "array",
@@ -9938,20 +8872,14 @@
                               }
                             }
                           },
-                          "required": [
-                            "updated_at",
-                            "sources"
-                          ],
+                          "required": ["updated_at", "sources"],
                           "additionalProperties": false
                         },
                         "ref_known_shared_address": {
                           "type": "object",
                           "properties": {
                             "created_at": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": ["string", "null"]
                             },
                             "sources": {
                               "type": "array",
@@ -9960,25 +8888,17 @@
                               }
                             }
                           },
-                          "required": [
-                            "created_at",
-                            "sources"
-                          ],
+                          "required": ["created_at", "sources"],
                           "additionalProperties": false
                         },
                         "address_profile": {
                           "type": "object",
                           "properties": {
                             "computed_from_snapshot": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": ["string", "null"]
                             }
                           },
-                          "required": [
-                            "computed_from_snapshot"
-                          ],
+                          "required": ["computed_from_snapshot"],
                           "additionalProperties": false
                         }
                       },
@@ -9994,9 +8914,7 @@
                       "additionalProperties": false
                     }
                   },
-                  "required": [
-                    "datasets"
-                  ],
+                  "required": ["datasets"],
                   "additionalProperties": false
                 }
               }
@@ -10048,10 +8966,7 @@
                             "type": "string"
                           },
                           "verdict": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           },
                           "created_at": {
                             "type": "string"
@@ -10063,10 +8978,7 @@
                             "type": "string"
                           },
                           "consent_ref": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": ["string", "null"]
                           }
                         },
                         "required": [
@@ -10082,10 +8994,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "subject_id",
-                    "validations"
-                  ],
+                  "required": ["subject_id", "validations"],
                   "additionalProperties": false
                 }
               }
@@ -10119,12 +9028,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10166,10 +9070,7 @@
                       "maximum": 9007199254740991
                     }
                   },
-                  "required": [
-                    "erased",
-                    "validations_removed"
-                  ],
+                  "required": ["erased", "validations_removed"],
                   "additionalProperties": false
                 }
               }
@@ -10203,12 +9104,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10278,9 +9174,7 @@
                           },
                           "type": {
                             "type": "string",
-                            "enum": [
-                              "Multikey"
-                            ]
+                            "enum": ["Multikey"]
                           },
                           "controller": {
                             "type": "string",
@@ -10291,20 +9185,12 @@
                             "minLength": 1
                           }
                         },
-                        "required": [
-                          "id",
-                          "type",
-                          "controller",
-                          "publicKeyMultibase"
-                        ],
+                        "required": ["id", "type", "controller", "publicKeyMultibase"],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": [
-                    "id",
-                    "verificationMethod"
-                  ],
+                  "required": ["id", "verificationMethod"],
                   "additionalProperties": false
                 }
               }
@@ -10338,12 +9224,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10391,9 +9272,7 @@
                           },
                           "type": {
                             "type": "string",
-                            "enum": [
-                              "Multikey"
-                            ]
+                            "enum": ["Multikey"]
                           },
                           "controller": {
                             "type": "string",
@@ -10404,20 +9283,12 @@
                             "minLength": 1
                           }
                         },
-                        "required": [
-                          "id",
-                          "type",
-                          "controller",
-                          "publicKeyMultibase"
-                        ],
+                        "required": ["id", "type", "controller", "publicKeyMultibase"],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": [
-                    "id",
-                    "verificationMethod"
-                  ],
+                  "required": ["id", "verificationMethod"],
                   "additionalProperties": false
                 }
               }
@@ -10451,12 +9322,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10530,9 +9396,7 @@
                           },
                           "type": {
                             "type": "string",
-                            "enum": [
-                              "Multikey"
-                            ]
+                            "enum": ["Multikey"]
                           },
                           "controller": {
                             "type": "string",
@@ -10543,12 +9407,7 @@
                             "minLength": 1
                           }
                         },
-                        "required": [
-                          "id",
-                          "type",
-                          "controller",
-                          "publicKeyMultibase"
-                        ],
+                        "required": ["id", "type", "controller", "publicKeyMultibase"],
                         "additionalProperties": false
                       }
                     },
@@ -10561,13 +9420,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "@context",
-                    "id",
-                    "alsoKnownAs",
-                    "verificationMethod",
-                    "assertionMethod"
-                  ],
+                  "required": ["@context", "id", "alsoKnownAs", "verificationMethod", "assertionMethod"],
                   "additionalProperties": false
                 }
               }
@@ -10601,12 +9454,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10649,15 +9497,10 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "ACTIVE",
-                        "REVOKED"
-                      ]
+                      "enum": ["ACTIVE", "REVOKED"]
                     }
                   },
-                  "required": [
-                    "status"
-                  ],
+                  "required": ["status"],
                   "additionalProperties": false
                 }
               }
@@ -10691,12 +9534,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10742,9 +9580,7 @@
     },
     "/v1/auth/login": {
       "post": {
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "summary": "Login com email e senha",
         "description": "Autentica um usuário usando email e senha. Retorna um token de acesso e dados da sessão. Usado para obter credenciais de acesso à API.",
         "operationId": "login_v1_auth_login_post",
@@ -10769,10 +9605,7 @@
                     "description": "Senha do usuário"
                   }
                 },
-                "required": [
-                  "email",
-                  "password"
-                ],
+                "required": ["email", "password"],
                 "additionalProperties": false
               }
             }
@@ -10809,16 +9642,10 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "id",
-                        "email"
-                      ]
+                      "required": ["id", "email"]
                     }
                   },
-                  "required": [
-                    "accessToken",
-                    "user"
-                  ],
+                  "required": ["accessToken", "user"],
                   "additionalProperties": false
                 }
               }
@@ -10847,12 +9674,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10863,9 +9685,7 @@
     },
     "/v1/auth/signup": {
       "post": {
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "summary": "Cadastrar novo usuário",
         "description": "Cria uma nova conta de usuário com email e senha. Após o cadastro, o usuário pode fazer login normalmente.",
         "operationId": "signup_v1_auth_signup_post",
@@ -10895,10 +9715,7 @@
                     "description": "Nome completo do usuário (opcional)"
                   }
                 },
-                "required": [
-                  "email",
-                  "password"
-                ],
+                "required": ["email", "password"],
                 "additionalProperties": false
               }
             }
@@ -10928,11 +9745,7 @@
                       "format": "date-time"
                     }
                   },
-                  "required": [
-                    "id",
-                    "email",
-                    "createdAt"
-                  ],
+                  "required": ["id", "email", "createdAt"],
                   "additionalProperties": false
                 }
               }
@@ -10961,12 +9774,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code"
-                  ],
+                  "required": ["type", "title", "status", "code"],
                   "additionalProperties": false
                 }
               }
@@ -10977,9 +9785,7 @@
     },
     "/v1/auth/logout": {
       "post": {
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "summary": "Logout",
         "description": "Encerra a sessão do usuário autenticado, invalidando o token de acesso.",
         "operationId": "logout_v1_auth_logout_post",
@@ -11001,9 +9807,7 @@
                       "example": "Logout realizado com sucesso"
                     }
                   },
-                  "required": [
-                    "message"
-                  ],
+                  "required": ["message"],
                   "additionalProperties": false
                 }
               }
@@ -11011,6 +9815,283 @@
           },
           "401": {
             "description": "Não autenticado"
+          }
+        }
+      }
+    },
+    "/holders/{holderId}/information-requests/with-token": {
+      "post": {
+        "tags": ["holder", "auth"],
+        "summary": "Criar solicitação de titular com token de acesso",
+        "description": "Cria uma solicitação de informações vinculada a uma Validation e emite um token de acesso público opaco para o titular (Holder). O titular usa o token para acessar a página pública sem precisar de conta na plataforma. A operação é atômica: solicitação e token são criados na mesma transação.",
+        "operationId": "createHolderInformationRequestWithToken_holders_holderId_information-requests_with-token_post",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "holderId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "tenantId",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "items": {
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "itemId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "description": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "required": {
+                          "default": true,
+                          "type": "boolean"
+                        },
+                        "documentType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        }
+                      },
+                      "required": ["itemId", "description"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "validationId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
+                "required": ["type", "purpose", "items"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Solicitação criada e token emitido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "tenantId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "holderId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "purpose": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": ["pending", "in_progress", "completed", "cancelled", "expired"]
+                        },
+                        "expiresAt": {
+                          "type": ["string", "null"],
+                          "format": "date-time"
+                        },
+                        "validationId": {
+                          "type": ["string", "null"],
+                          "format": "uuid"
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "tenantId",
+                        "holderId",
+                        "type",
+                        "purpose",
+                        "state",
+                        "createdBy",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "token": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Token opaco em texto claro. Aparece apenas nesta resposta; não é persistido."
+                    },
+                    "tokenExpiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "tokenCreatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": ["request", "tokenId", "token", "tokenExpiresAt", "tokenCreatedAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Dados inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "title", "status", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Holder ou Validation não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "title", "status", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de tokens ativos atingido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "title", "status", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }

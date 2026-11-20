@@ -1,6 +1,29 @@
 # PROGRESS.md
 
-Estado: **Entrega do resultado ao Verifier (PR #74) em revisão + Documento do Holder no pipeline de evidências (PR #73) mergeado + F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado** (2026-11-15)
+Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado + OpenAPI com summaries e descrições em português para o Scalar + fluxo do titular F4.2/F4.3 (intake, token público, processamento, vínculo à Validation) entregue + P0 de prontidão para produção concluído** (2026-11-19)
+
+## Últimas entregas integradas
+
+### OpenAPI com descrições para o Scalar (2026-11-19)
+
+- `scalar/openapi.json` e `apps/api/tests/fixtures/openapi_api_main.json` sincronizados: summaries e descriptions em português adicionados a **todas as 84 operações** (64 paths), substituindo o genérico "Default Response"
+- Novos endpoints de auth documentados: `POST /v1/auth/login` (email + senha), `POST /v1/auth/signup` (email + senha + nome), `POST /v1/auth/logout`
+- Security scheme `bearerAuth` (JWT) adicionado ao OpenAPI
+
+### P0 — Prontidão mínima para produção (2026-11-19)
+
+| Item                     | Estado                                                | Resultado                          |
+| ------------------------ | ----------------------------------------------------- | ---------------------------------- |
+| Isolamento de artefatos  | Implementado (F0.1/ADR-0035) + testes cross-tenant    | Concluído                          |
+| Retenção/LGPD            | Implementado + docs alinhados (docs/lgpd/retencao.md) | Concluído                          |
+| Backup/restore           | Runbook `docs/runbooks/restore-backup.md`             | Concluído (RPO/RTO como alvo)      |
+| Configuração de produção | `.env.example` completo; segredos fora do git         | Concluído (VITE_API_KEY = item F6) |
+| Observabilidade mínima   | Métricas Prometheus + redação de PII                  | Concluído                          |
+
+### Fluxo do titular F4 (2026-11-19)
+
+- **F4.2/F4.3 já entregues:** `holder-information-request` (criação/listagem/cancelamento), `holder-access` (token opaco `hlt_`, view, saveItem, uploadDocument, deleteDocument, submit), `holder-token` (geração/hash com pepper), `holder-submission-processing` (worker que vincula ao pipeline F1.1/F1.2/F1.3), migrations `0057`/`0062`/`0066`/`0067`
+- **F4.1 iniciando:** link/token público para o titular, consentimento, integração com Validation original
 
 ## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
 

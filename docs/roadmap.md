@@ -17,17 +17,19 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
 
 - **Entregues:** F0.1/F0.2; F1.1/F1.2a/F1.2b/F1.3; F2.1; F2.2a e a
   primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
-  o vertical slice F3.2 pelo dashboard.
-- **Em andamento:** F0 (checklist de produção), F1 (documentos complexos via
-  Marker — integração entregue em ADR-0043 e **validada com serviço ao vivo**),
-  F2 (expansão/hardening da cobertura fiscal) e F6 (operação/segurança).
-- **Próximo passo:** o checklist de produção; a unidade de cobrança definitiva,
-  o tratamento comercial de indisponibilidade de fonte externa (hoje: não
-  faturável, política provisória do ADR-0044 §3b) e as regras de faturamento
-  continuam decisões comerciais abertas. A F3.3 (medição/cobrança) está
-  entregue (PR #63); resta apenas a decisão comercial sobre a unidade de
-  cobrança e a tabela de preços.
-- **Futuro:** F4 (fluxo do titular), F7 (NFAg-e/outras fontes) e F8 (SSI).
+  o vertical slice F3.2 pelo dashboard; F3.3 (medição de uso, cotas e
+  reconciliação); F4.2/F4.3 (intake do Holder, token de acesso público,
+  processamento de submissão e vínculo ao pipeline F1.1/F1.2/F1.3).
+- **Em andamento:** F0 (checklist de produção completo), F1 (OCR de imagem
+  isolada via Tesseract 5 e pypdfium2 — substitui Marker/Surya; pendente), F2
+  (expansão/hardening da cobertura fiscal) e F6 (operação/segurança).
+- **Próximo passo:** concluir o checklist de produção; a unidade de cobrança
+  definitiva, o tratamento comercial de indisponibilidade de fonte externa
+  (hoje: não faturável, política provisória do ADR-0044 §3b) e as regras de
+  faturamento continuam decisões comerciais abertas. A F4.1 (link/token seguro
+  público + consentimento do titular) inicia agora como vertical slice da F4.
+- **Futuro:** F4.2+ (atualização de evidência, comparação improved/unchanged/diverged,
+  supersedes_validation_id), F7 (NFAg-e/outras fontes) e F8 (SSI).
   F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda
   faltam decisões e o kit de verificação do produto.
 
@@ -280,12 +282,13 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Idempotência de validação | `apps/api/src/services/fastpath.ts` (`findExistingIdempotency`, `requestHashOf`) + `validation_idempotency`      | Funciona; replay não reescreve e não reemite `usage_event`                                                                               |
 | RLS multi-tenant          | `packages/db/migrations/0007_rls.sql`, `withTenant`                                                              | FORCE em `subject`, `validation`, `claim`, `claim_evidence`, `usage_event`, `audit_log`, `webhook_*`, `batch*`                           |
-| Retenção de validação     | `apps/worker/src/modules/retention/retention.service.ts` + loop em `apps/worker/src/loops.ts`                    | Job diário existe e apaga o grafo                                                                                                        |
+| Retenção de validação     | `apps/worker/src/modules/retention/retention.service.ts` + loop em `apps/worker/src/loops.ts`                    | Job diário existe e apaga o grafo (artefato do Holder incluído, PR #73)                                                                  |
 | Guarda de fetch externo   | `packages/providers/src/safe-fetch/`, [ADR-0036](adr/0036-guarda-de-fetch-externo.md)                            | **Entregue em F0.2**: HTTPS, DNS resolvido, todos os IPs validados e fixados, sem redirect, limites e content-type; webhook usa no envio |
-| `evidence` global         | `packages/db/migrations/0005_validation.sql`, `0007_rls.sql`, `0008_grants.sql`                                  | **Sem `tenant_id`/RLS**; único escritor hoje é o VLM de street view (`apps/worker/src/modules/evidence/evidence.service.ts`)             |
+| `evidence` global         | `packages/db/migrations/0005_validation.sql`, `0007_rls.sql`, `0008_grants.sql`                                  | **Sem `tenant_id`/RLS**; único escritor hoje é o street view/VLM (imagem pública de fachada), não PII de cliente                         |
 | Artefato de PII           | `packages/db/migrations/0039_evidence_artifact.sql`, [ADR-0035](adr/0035-artefato-de-evidencia-tenant-scoped.md) | **Entregue em F0.1**: `evidence_artifact` tenant-scoped, RLS FORCE, write-once; intake em F1.1 e análise em F1.2a/F1.2b                  |
 | Expiração de validação    | `fastpath.ts` (`expires_at = now + 30d`)                                                                         | 30 dias hardcoded, não vem da policy                                                                                                     |
-| Dashboard e API key       | `apps/dashboard/src/api/client.ts`                                                                               | Chave de tenant vai no bundle do browser; o próprio código marca como "facilidade de desenvolvimento"                                    |
+| Dashboard e API key       | `apps/dashboard/src/api/client.ts`                                                                               | Chave de tenant vai no bundle do browser; o próprio código marca como "facilidade de desenvolvimento" (item F6)                          |
+| Backup/restore            | `docs/runbooks/restore-backup.md`                                                                                | Runbook existente (pg_dump/psql dev; Aurora PITR + snapshot cross-region prod); RPO/RTO como alvo não aprovado                           |
 
 ### Lacunas
 
@@ -415,34 +418,20 @@ texto/estrutura/observações
 - MVP: PDF textual extraído localmente (streams simples/`FlateDecode`);
   imagem retorna `unsupported`/`OCR_NOT_IMPLEMENTED`. Nenhum provider externo,
   URL ou VLM é acionado nesta etapa.
-- O serviço Document Intelligence (apps/document-intelligence, FastAPI + Marker
-  2.x) foi integrado ao analyzer como fallback explícito (ADR-0043), mas **apenas
-  para PDFs**: PDFs escaneados ou com camada textual insuficiente são enviados ao
-  Marker para OCR/layout, com fallback para a camada local em caso de
-  indisponibilidade, timeout ou falha de parsing. Arquivos de imagem isolados
-  (JPEG/PNG) continuam retornando `unsupported`/`OCR_NOT_IMPLEMENTED`; o Marker
-  não é acionado para eles. O caminho determinístico de QR/referência fiscal não
-  passa pelo OCR.
-- **Bloqueador de segurança do MVP:** o Marker 2.1.0 utiliza o Surya OCR, que é
-  servido como um modelo VLM (vision-language model) via `llama.cpp` em CPU,
-  mesmo com `use_llm=False` (esta opção apenas desativa o LLM opcional de
-  aprimoramento, não o VLM do OCR). Isso conflita diretamente com a restrição do
-  MVP de "não utilizar LLM, VLM, RAG ou embeddings". Não há como desativar o VLM
-  no Marker sem substituir o serviço inteiro.
-- **Integração real validada:** o serviço Marker foi executado ao vivo
-  (perfil `document-intelligence` do Docker Compose) e testado ponta a ponta
-  com o pipeline TypeScript (`apps/api/tests/evidence-analysis-marker-real.int.test.ts`):
-  PDF textual (camada local, sem chamar Marker), PDF digitalizado (OCR real via
-  Marker/Surya VLM, extrai titular/endereço/CEP) e PDF multipágina. O upload
-  duplicado e o replay também foram validadas com o serviço ao vivo.
-- O parser PDF é conservador: PDFs escaneados, fontes CID/Type0 sem `ToUnicode`
-  ou layout complexo retornam `inconclusive`/`NO_TEXT_LAYER`.
+- O parsing de PDF usa `unpdf`/PDF.js (streams, fontes, encoding, compressão)
+  e o worker aplica limites (50 páginas, 1.000.000 caracteres). PDFs escaneados,
+  fontes CID/Type0 sem `ToUnicode` ou layout complexo retornam
+  `inconclusive`/`NO_TEXT_LAYER`.
+- Imagem isolada (JPEG/PNG) retorna `unsupported`/`OCR_NOT_IMPLEMENTED` nesta
+  etapa; o OCR direto de imagens está pendente (ver "Ainda falta para concluir a
+  Fase 1"). Nenhum provider externo, URL, VLM/LLM, Marker, Surya, PyTorch ou
+  llama.cpp é usado. A restrição do MVP de "não utilizar LLM, VLM, RAG nem
+  embeddings" é respeitada integralmente.
 - A saída é validada por schema e identidade do analisador. Saída inválida vira
   `failed`, não fica presa em `analyzing`.
 - **Isto é um adaptador técnico, não uma capacidade central do produto.** O
-  protocolo `DocumentAnalyzer` permite trocar por OCR/VLM/parser dedicado sem
-  mudar o contrato de entendimento. A alternativa não-VLM (ex.: Tesseract) não
-  está disponível no ambiente e não foi avaliada em profundidade.
+  protocolo `DocumentAnalyzer` permite trocar por OCR/parser dedicado sem mudar
+  o contrato de entendimento.
 
 ### F1.2b — Document understanding (entregue no MVP F1.2)
 
@@ -524,27 +513,28 @@ de produto; elas não bloqueiam o vertical slice atual.
 
 ### Ainda falta para concluir a Fase 1
 
-- OCR de imagem isolada (JPEG/PNG): o Marker não processa imagens isoladas,
-  apenas PDFs. Para suportar imagens isoladas, seria necessário converter a
-  imagem para PDF (PIL já disponível) e enviar ao Marker, ou adicionar um OCR
-  dedicado (ex.: Tesseract — ver recomendação na seção de débito técnico). Não
-  implementado nesta etapa.
+- OCR de imagem isolada (JPEG/PNG): pendente. A recomendação é Tesseract 5
+  (open source Apache 2.0, suporte a português, leve, binário do sistema) via
+  `pypdfium2` para renderizar a imagem em PDF e enviar ao `DocumentAnalyzer`,
+  ou conversão direta de imagem para PDF com PIL (já disponível no ambiente).
+  Requer instalação de pacote do sistema (Tesseract) e não foi avaliada em
+  profundidade neste ambiente. Não bloqueia o vertical slice atual.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
   contrato, mas a decisão de produto é F1.3/F3.
 
 ### Estado atual comprovado
 
-| Item                           | Evidência                                                                                      | Situação                                                                                                                                                |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant                                                                                 |
-| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming                                                                                           |
-| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                                                                                                      |
-| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local; imagem `unsupported` (OCR futuro); Marker como fallback para PDFs escaneados, **validado com serviço ao vivo** |
-| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência                                                                                            |
-| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                                                                                               |
-| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score                                                                                    |
-| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única                                                                                     |
-| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência                                                                                |
+| Item                           | Evidência                                                                                      | Situação                                                                                                                               |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Endpoint de upload             | `apps/api/src/modules/validations/validations.routes.ts` (`POST /v1/validations/:id/evidence`) | **Entregue em F1.1**: `validate:write`, tenant da key, 404 cross-tenant                                                                |
+| Multipart / parsing de arquivo | `@fastify/multipart` + `evidence-intake.multipart.ts`                                          | **Entregue em F1.1**: um arquivo, limite explícito, streaming                                                                          |
+| Identificação do tipo          | `evidence-intake.service.ts` (`detectEvidenceIntakeContentType`)                               | **Entregue em F1.1**: PDF/JPEG/PNG por magic bytes                                                                                     |
+| Extração (F1.2a)               | `packages/providers/src/document-analyzer/`, `pdf-text.ts`                                     | **Entregue em F1.2**: PDF textual local (unpdf/PDF.js); imagem `unsupported` (OCR de imagem isolada pendente, Tesseract 5 + pypdfium2) |
+| Entendimento (F1.2b)           | `document-analyzer/fields.ts`, `schema.ts`                                                     | **Entregue em F1.2**: endereço/titular/datas; sem inferência                                                                           |
+| Persistência de evidência      | `packages/db/migrations/0039`, `0040`, `0041_evidence_analysis.sql`                            | **Entregue em F1.1/F1.2**: artefato + análise append-only                                                                              |
+| Vínculo com claim              | `claim_evidence` (`stance`, `strength`, `confidence`, `detail`) + `evidence_analysis`          | **F1.1/F1.2**: intake `unknown`/pending; extração não entra no score                                                                   |
+| Análise idempotente            | `apps/worker/src/modules/evidence-analysis/`                                                   | **Entregue em F1.2**: fila no Postgres, lock de linha + chave única                                                                    |
+| Verificação (F1.3)             | `apps/worker/src/modules/evidence-verification/`                                               | **Entregue em 2026-10-23**: matching, materialização, GET e idempotência                                                               |
 
 ### Lacunas
 
@@ -928,53 +918,70 @@ original e o histórico é imutável.
 
 ### Estado atual comprovado
 
-| Item                    | Evidência                                                      | Situação                                                    |
-| ----------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- |
-| Consentimento           | `validation.consent_ref` (texto livre), `contracts/schemas.ts` | **Não é entidade**; não há captura, validade ou prova       |
-| Token/link seguro       | busca no repo                                                  | **Não existe**                                              |
-| Histórico de validações | `validation` (imutável, nova linha por pedido)                 | Existe como log, **sem vínculo explícito** de substituição  |
-| Superação de credencial | `credential-issuance` / deep path                              | Existe para credencial, **não** para o resultado de negócio |
+| Item                    | Evidência                                                                                       | Situação                                                                                                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Consentimento           | `apps/api/src/modules/holder/holder-access.service.ts` (`submit` transiciona para `completed`)  | **Entregue parcialmente**: evento `completed` auditado; `consent_ref` ainda é string opaca na validation (entidade de consentimento dedicada pendente para F4.1)     |
+| Token/link seguro       | `apps/api/src/modules/holder/holder-token.ts` + `holder-access.controller.ts`                   | **Entregue**: token opaco `hlt_` + HMAC-SHA256 com pepper, expiração, revogação, single-use, rate limit; endpoint público sem auth do titular                        |
+| Histórico de validações | `validation` (imutável, nova linha por pedido) + `validation_customer_document` (migração 0067) | Existe como log; vínculo explícito 1:1 Validation ↔ documento (migração 0067); `supersedes_validation_id` pendente (F4.2+)                                           |
+| Superação de credencial | `credential-issuance` / deep path                                                               | Existe para credencial, **não** para o resultado de negócio                                                                                                          |
+| Processamento do Holder | `apps/worker/src/modules/holder-submission-processing/`                                         | **Entregue (F4.3)**: worker consome outbox `holder_submission.processing_requested`, cria `evidence_artifact` + `evidence_analysis`, vincula ao recibo da Validation |
 
 ### Lacunas
 
-1. Não há fluxo de identidade do titular (quem recebe o link, como se autentica).
-2. `consent_ref` não prova consentimento: é string opaca.
-3. Não há como dizer "esta validação substitui aquela" nem "o resultado mudou
-   de X para Y".
-4. Não há comparação explícita entre evidência antiga e nova.
-5. Não há proteção contra link reutilizado, expirado ou usado por outro tenant.
-6. O fluxo inicial de coleta do titular não está separado do fluxo de
-   atualização.
+1. Fluxo inicial de coleta (F4.1): criar solicitação para uma Validation, gerar
+   link/token público, disponibilizar acesso sem conta do titular, registrar
+   consentimento e encaminhar ao pipeline existente. (inicia agora)
+2. `consent_ref` não prova consentimento: é string opaca; entidade de consentimento
+   dedicada pendente (captura de versão do texto, timestamp, referência à
+   solicitação/Validation).
+3. Não há como dizer "esta validação substitui aquela" nem "o resultado mudou de
+   X para Y" (`supersedes_validation_id`, F4.2+).
+4. Não há comparação explícita entre evidência antiga e nova
+   (`improved`, `unchanged`, `diverged`, `inconclusive`, F4.2+).
+5. Fluxo de atualização de evidência (substituição, reenvio) — separado do fluxo
+   inicial de coleta (F4.2+).
+6. Autenticação do titular (gov.br, OTP, magic link) — decisão de produto em
+   aberto; não é pré-requisito para o primeiro vertical slice (F4.1).
 
 ### Escopo
 
-- Token opaco, single-use, com expiração, vinculado a tenant + subject +
-  consulta/validation de origem; rate limit e auditoria.
-- Captura de consentimento (versão do texto, timestamp, IP/UA quando aplicável)
-  — entidade nova só se necessário.
-- Reuso do intake de F1, da análise F1.2a/F1.2b e da verificação F1.3/F2.
-- Resultado associado à consulta; histórico imutável; nunca sobrescrever
-  validação/credencial antiga.
-- Resultado de comparação explícito: `improved`, `unchanged`, `diverged`,
-  `inconclusive`.
-- Vínculo de substituição (provável coluna aditiva
-  `validation.supersedes_validation_id`, decidida só aqui).
-- Fluxo inicial (coleta) e de atualização compartilham o mesmo mecanismo, com
-  semântica distinta.
+**F4.1 — primeiro vertical slice (inicia agora):**
+
+1. Criar solicitação para uma Validation (Verifier autenticado).
+2. Gerar e persistir token seguro (opaco, single-use, expiração, vinculado a
+   tenant + subject + Validation).
+3. Disponibilizar acesso público por link (sem conta do titular).
+4. Registrar consentimento (versão do texto, timestamp, referência à solicitação).
+5. Receber documento do titular (reuso do intake F1.1).
+6. Encaminhar ao pipeline existente (F1.2/F1.3).
+7. Exibir o estado da solicitação ao Verifier.
+
+**F4.2+ (etapas posteriores):**
+
+- Atualização/substituição de evidência.
+- Comparação de validações (`improved`, `unchanged`, `diverged`, `inconclusive`).
+- `supersedes_validation_id`.
+- Fluxos avançados de contestação.
+- Autenticação gov.br / OTP / magic link do titular.
+- Portal completo do titular.
 
 ### Fora de escopo
 
 - Wallet, OID4VP, autenticação do titular por gov.br (avaliar depois).
 - Portal do titular como produto separado.
 - Credencial como pré-requisito para o link.
+- Emissão de credencial como parte deste trabalho.
 
-### Critérios de conclusão
+### Critérios de conclusão (F4.1)
 
 - Token não funciona cross-tenant, expirado ou reutilizado.
-- Divergência produz resultado explícito e não apaga o histórico.
-- Auditoria registra quem pediu, quem respondeu e quando.
+- Consentimento registrado com versão, timestamp e referência à solicitação.
+- Auditoria registra quem pediu, quem acessou, quem respondeu e quando.
 - Teste de concorrência no consumo do token.
-- Nenhum PII na URL; logs sem conteúdo do documento.
+- Nenhum PII na URL; logs sem conteúdo do documento nem token.
+- Upload válido/inválido por magic bytes; arquivo acima do limite rejeitado.
+- Isolamento de artefato por tenant; associação correta com Validation,
+  Subject e Holder.
 
 ### Riscos
 
@@ -982,7 +989,7 @@ original e o histórico é imutável.
 - Confundir "atualização" com "contestação" (já existe `contest`).
 - Autenticação do titular ser fraca e permitir que terceiro envie documento.
 
-### Decisões abertas
+### Decisões em aberto
 
 - Link é por consulta, validação ou caso? Existe entidade "caso"?
 - Quem é o titular: pessoa do `subject` ou quem recebe o link?
@@ -1226,18 +1233,18 @@ Não confundir "SSI" com "credencial":
 
 ### Adicionar / acompanhar
 
-| Item                                    | Fase    | Estado / por quê                                                                               |
-| --------------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                    |
-| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                             |
-| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                        |
-| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                      |
-| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial |
-| Fluxo do titular por link seguro        | F4      | Futuro; requisito de coleta/atualização                                                        |
-| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                |
-| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                              |
-| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial  |
-| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                        |
+| Item                                    | Fase    | Estado / por quê                                                                                                           |
+| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                                                |
+| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                                                         |
+| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                                                    |
+| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                                                  |
+| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial                             |
+| Fluxo do titular por link seguro        | F4      | F4.2/F4.3 entregues (intake, token, processamento, vínculo à Validation); F4.1 (link público + consentimento) inicia agora |
+| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                                            |
+| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                                                          |
+| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial                              |
+| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                                                    |
 
 ## Decisões de produto em aberto
 

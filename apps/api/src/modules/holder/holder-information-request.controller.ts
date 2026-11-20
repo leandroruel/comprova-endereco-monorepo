@@ -11,12 +11,14 @@ import { makeHolderInformationRequestService } from './holder-information-reques
 
 export interface HolderInformationRequestControllerDeps {
   readonly db: Db
+  readonly pepper: string
   readonly logger: Logger
 }
 
 export const makeHolderInformationRequestController = (deps: HolderInformationRequestControllerDeps) => {
   const service = makeHolderInformationRequestService({
     db: deps.db,
+    pepper: deps.pepper,
     logger: deps.logger,
   })
 
@@ -88,6 +90,86 @@ export const makeHolderInformationRequestController = (deps: HolderInformationRe
           .code(500)
           .type(PROBLEM_CONTENT_TYPE)
           .send(problem(500, 'INTERNAL_ERROR', 'Erro ao criar solicitação de informações'))
+      }
+    },
+
+    createHolderInformationRequestWithToken: async (
+      actor: string,
+      input: {
+        readonly tenantId: string
+        readonly holderId: string
+        readonly type: string
+        readonly purpose: string
+        readonly items: unknown
+        readonly expiresAt?: string
+        readonly validationId?: string
+      },
+      reply: FastifyReply,
+    ): Promise<FastifyReply> => {
+      try {
+        const result = await service.createHolderInformationRequestWithToken(actor, input.tenantId, {
+          holderId: input.holderId,
+          type: input.type,
+          purpose: input.purpose,
+          items: input.items as never,
+          expiresAt: input.expiresAt,
+          validationId: input.validationId,
+        })
+        return reply.code(201).send({
+          request: {
+            id: result.request.id,
+            tenantId: result.request.tenantId,
+            holderId: result.request.holderId,
+            type: result.request.type,
+            purpose: result.request.purpose,
+            state: result.request.state,
+            expiresAt: result.request.expiresAt,
+            validationId: result.request.validationId,
+            createdBy: result.request.createdBy,
+            createdAt: result.request.createdAt,
+            updatedAt: result.request.updatedAt,
+          },
+          tokenId: result.tokenId,
+          token: result.token,
+          tokenExpiresAt: result.tokenExpiresAt.toISOString(),
+          tokenCreatedAt: result.tokenCreatedAt.toISOString(),
+        })
+      } catch (error) {
+        if (error instanceof Error && error.message === 'holder not found') {
+          return reply
+            .code(404)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(404, 'HOLDER_NOT_FOUND', 'Holder não encontrado'))
+        }
+        if (error instanceof Error && error.message === 'validation not found') {
+          return reply
+            .code(404)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(404, 'VALIDATION_NOT_FOUND', 'Validation não encontrada'))
+        }
+        if (error instanceof Error && error.message.includes('prazo inválido')) {
+          return reply
+            .code(400)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(400, 'INVALID_EXPIRES_AT', error.message))
+        }
+        if (error instanceof Error && error.message === 'token limit reached for this request') {
+          return reply
+            .code(429)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                429,
+                'HOLDER_ACCESS_TOKEN_LIMIT',
+                'Limite de tokens ativos atingido para esta solicitação',
+              ),
+            )
+        }
+        logControllerError('createWithToken', input.tenantId, error)
+        return reply
+          .code(500)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(problem(500, 'INTERNAL_ERROR', 'Erro ao criar solicitação com token de acesso'))
       }
     },
 
