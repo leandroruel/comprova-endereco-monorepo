@@ -32,6 +32,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import settings
@@ -216,6 +217,16 @@ app = FastAPI(
     description="Processamento documental com Tesseract (OCR, sem VLM, sem LLM)",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# Habilita CORS para permitir que o frontend (ex: dashboard na porta 5173)
+# acesse a API em outra porta (ex: 8000).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Rota de trabalho pesado protegida por admissão.
