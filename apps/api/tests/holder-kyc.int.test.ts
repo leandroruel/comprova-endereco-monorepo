@@ -1712,7 +1712,7 @@ describe('M2M API Keys - compatibilidade tenantId body vs query', () => {
 
   const createKeyViaSession = async (
     cookie: string,
-    tenantId: string,
+    _tenantId: string,
     body: unknown,
     queryTenantId?: string,
   ) => {
@@ -1723,7 +1723,7 @@ describe('M2M API Keys - compatibilidade tenantId body vs query', () => {
 
   const revokeKeyViaSession = async (
     cookie: string,
-    tenantId: string,
+    _tenantId: string,
     apiKeyId: string,
     body: unknown,
     queryTenantId?: string,

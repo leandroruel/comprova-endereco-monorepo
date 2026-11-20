@@ -11,8 +11,6 @@ import {
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import { holderInformationRequest } from './holder-information-request.js'
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- usado indiretamente em FK references
-import { tenant } from './tenancy.js'
 
 /**
  * F4.3 — ciclo de vida do processamento documental de uma submissão do Holder.

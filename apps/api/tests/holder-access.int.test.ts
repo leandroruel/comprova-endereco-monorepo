@@ -164,7 +164,7 @@ const injectAsHolder = (
   })
 }
 
-const createOrganization = async (sessionCookie: string, name: string, email: string): Promise<string> => {
+const createOrganization = async (_sessionCookie: string, name: string, email: string): Promise<string> => {
   const res = await injectWithSession('POST', '/v1/organizations', {
     name,
     email,
@@ -175,7 +175,7 @@ const createOrganization = async (sessionCookie: string, name: string, email: st
 }
 
 const addMember = async (
-  sessionCookie: string,
+  _sessionCookie: string,
   tenantId: string,
   email: string,
   role: 'member' | 'admin' | 'owner',
@@ -183,7 +183,7 @@ const addMember = async (
   return injectWithSession('POST', `/v1/organizations/${tenantId}/members`, { email, role })
 }
 
-const createM2mApiKey = async (sessionCookie: string, tenantId: string, name: string, scopes: string[]) => {
+const createM2mApiKey = async (_sessionCookie: string, tenantId: string, name: string, scopes: string[]) => {
   const res = await injectWithSession('POST', `/v1/m2m/api-keys?tenantId=${tenantId}`, {
     name,
     scopes,

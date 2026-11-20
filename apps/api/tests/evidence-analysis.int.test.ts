@@ -545,7 +545,7 @@ describe('F1.2 — análise do comprovante', () => {
           return async (fn: (tx: any) => Promise<unknown>) => {
             return target.transaction(async (realTx: any) => {
               const wrappedTx = new Proxy(realTx, {
-                get(t: any, p: string, r: unknown) {
+                get(_t: any, p: string, r: unknown) {
                   if (p === 'update') {
                     return (_table: any) => {
                       if (shouldFailPersist) {

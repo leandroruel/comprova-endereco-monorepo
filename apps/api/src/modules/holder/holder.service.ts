@@ -27,7 +27,6 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   const { db } = deps
 
   const createHolder = async (
-    actor: string,
     tenantId: string,
     create: {
       readonly externalReference: string
@@ -108,7 +107,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     }
   }
 
-  const getHolder = async (actor: string, tenantId: string, holderId: string): Promise<HolderDto | null> => {
+  const getHolder = async (_actor: string, tenantId: string, holderId: string): Promise<HolderDto | null> => {
     const [holder] = await withTenant(db, tenantId, async (tx) => {
       return tx
         .select()
@@ -157,7 +156,6 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   }
 
   const listHolders = async (
-    actor: string,
     tenantId: string,
     opts: { readonly limit: number; readonly offset: number },
   ): Promise<{ holders: HolderDto[]; total: number; limit: number; offset: number }> => {
@@ -198,7 +196,6 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   }
 
   const updateHolder = async (
-    actor: string,
     tenantId: string,
     holderId: string,
     update: { readonly name?: string; readonly documentHash?: string; readonly documentType?: string },
@@ -241,7 +238,6 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   }
 
   const createKycProcess = async (
-    actor: string,
     tenantId: string,
     create: {
       readonly holderId: string
@@ -284,7 +280,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
         eventType: 'created' as KycEventType,
         fromState: null,
         toState: 'pending' as KycProcessState,
-        actor,
+        actor: 'sistema',
         details: JSON.stringify({ legalBasis: create.legalBasis }),
       })
 
@@ -306,7 +302,6 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   }
 
   const getKycProcess = async (
-    actor: string,
     tenantId: string,
     holderId: string,
     kycProcessId: string,
@@ -340,7 +335,6 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   }
 
   const listKycProcesses = async (
-    actor: string,
     tenantId: string,
     holderId: string,
     opts: { readonly limit: number; readonly offset: number; readonly state?: string },
@@ -391,14 +385,13 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   }
 
   const transitionKycProcess = async (
-    actor: string,
     tenantId: string,
     holderId: string,
     kycProcessId: string,
     transition: { readonly toState: KycProcessState; readonly reason?: string },
   ): Promise<KycProcessDto> => {
     // Obter estado atual com verificação de tenant e holder.
-    const current = await getKycProcess(actor, tenantId, holderId, kycProcessId)
+    const current = await getKycProcess(tenantId, holderId, kycProcessId)
     if (!current) throw new Error('KYC process not found')
 
     if (!isValidTransition(current.state as KycProcessState | null, transition.toState)) {
@@ -430,7 +423,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
         eventType: 'state_transitioned' as KycEventType,
         fromState: current.state as KycProcessState | null,
         toState: transition.toState,
-        actor,
+        actor: 'sistema',
         details: JSON.stringify({ reason: transition.reason }),
       })
 
@@ -452,7 +445,6 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
   }
 
   const listKycEvents = async (
-    actor: string,
     tenantId: string,
     holderId: string,
     kycProcessId: string,
@@ -464,7 +456,7 @@ export const makeHolderService = (deps: { readonly db: Db }) => {
     offset: number
   }> => {
     // Validar que o processo existe e pertence ao holder e tenant antes de listar eventos.
-    const process = await getKycProcess(actor, tenantId, holderId, kycProcessId)
+    const process = await getKycProcess(tenantId, holderId, kycProcessId)
     if (!process) throw new Error('KYC process not found')
 
     const [countRow] = await withTenant(db, tenantId, async (tx) => {
