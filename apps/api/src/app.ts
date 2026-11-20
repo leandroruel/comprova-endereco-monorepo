@@ -373,6 +373,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerHolderRoutes(v1, { db: deps.db })
       registerHolderInformationRequestRoutes(v1, {
         db: deps.db,
+        pepper: deps.config.API_KEY_PEPPER,
         logger: deps.logger,
       })
       registerHolderAccessTokenRoutes(v1, {

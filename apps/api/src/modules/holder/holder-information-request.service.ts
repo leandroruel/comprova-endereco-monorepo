@@ -15,6 +15,7 @@ import {
   insertHolderInformationRequestEvent,
   isExpirableState,
 } from './holder-information-request.shared.js'
+import { hashHolderAccessToken, holderTokenPrefixOf, newHolderAccessToken } from './holder-token.js'
 
 const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
 
@@ -25,8 +26,12 @@ const errorCodeOf = (error: unknown, depth = 0): string | null => {
   return errorCodeOf((error as { cause?: unknown }).cause, depth + 1)
 }
 
-export const makeHolderInformationRequestService = (deps: { readonly db: Db; readonly logger: Logger }) => {
-  const { db, logger } = deps
+export const makeHolderInformationRequestService = (deps: {
+  readonly db: Db
+  readonly logger: Logger
+  readonly pepper: string
+}) => {
+  const { db, logger, pepper } = deps
 
   const logServiceError = (operation: string, tenantId: string, error: unknown): void => {
     logger.error(
@@ -192,6 +197,234 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
     }
 
     return toDto(inserted)
+  }
+
+  /**
+   * F4.1 — cria uma solicitação vinculada a uma Validation e emite o token de
+   * acesso público do Holder em uma única transação atômica.
+   *
+   * O token é o único canal do titular para acessar a solicitação sem conta na
+   * plataforma. A emissão adquire o lock da solicitação antes de contar tokens
+   * ativos, garantindo que duas emissões concorrentes não ultrapassem o limite
+   * e que uma emissão concorrente com cancelamento/expiração nunca crie um
+   * token depois do estado terminal.
+   *
+   * Ordem de locks: validation (se informada) → solicitação → token.
+   */
+  const createHolderInformationRequestWithToken = async (
+    actor: string,
+    tenantId: string,
+    create: {
+      readonly holderId: string
+      readonly type: string
+      readonly purpose: string
+      readonly items: HolderInformationRequestItems
+      readonly expiresAt?: string
+      readonly validationId?: string
+    },
+  ): Promise<{
+    readonly request: HolderInformationRequestDto
+    readonly tokenId: string
+    readonly token: string
+    readonly tokenExpiresAt: Date
+    readonly tokenCreatedAt: Date
+  }> => {
+    // Validar que o holder pertence ao tenant informado (mesma transação).
+    const existingHolder = await withTenant(db, tenantId, async (tx) => {
+      return tx
+        .select({ holderId: t.holder.holderId, tenantId: t.holder.tenantId })
+        .from(t.holder)
+        .where(and(eq(t.holder.holderId, create.holderId), eq(t.holder.tenantId, tenantId)))
+        .limit(1)
+    })
+
+    if (existingHolder.length === 0) {
+      throw new Error('holder not found')
+    }
+
+    // Validar coerência do prazo: se informado, deve estar no futuro.
+    if (create.expiresAt !== undefined && create.expiresAt !== null) {
+      const expiresAt = new Date(create.expiresAt)
+      if (isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
+        throw new Error('prazo inválido: expires_at deve estar no futuro')
+      }
+    }
+
+    const requestId = randomUUID()
+    const createdAt = new Date()
+
+    // Gerar o token fora da transação; nada é persistido sem o lock.
+    const token = newHolderAccessToken()
+    const tokenPrefix = holderTokenPrefixOf(token)
+    const tokenHash = hashHolderAccessToken(token, pepper)
+
+    // PR 1: verificação e inserção em uma única transação com lock na validation
+    // para impedir exclusão concorrente durante a associação.
+    const [inserted, tokenResult] = await withTenant(db, tenantId, async (tx) => {
+      let validationLocked: { validationId: string; subjectId: string } | undefined
+
+      if (create.validationId !== undefined && create.validationId !== null) {
+        const validationId = create.validationId
+
+        const [validationRow] = await tx
+          .select({ validationId: t.validation.validationId, subjectId: t.validation.subjectId })
+          .from(t.validation)
+          .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
+          .limit(1)
+        if (!validationRow) {
+          throw new Error('validation not found')
+        }
+
+        // Locka o subject primeiro (mesma ordem que eraseSubject).
+        await tx
+          .select({ subjectId: t.subject.subjectId })
+          .from(t.subject)
+          .where(and(eq(t.subject.subjectId, validationRow.subjectId), eq(t.subject.tenantId, tenantId)))
+          .for('update')
+          .limit(1)
+
+        // Re-valida a validation com lock agora que o subject está protegido.
+        const [vl] = await tx
+          .select({ validationId: t.validation.validationId, subjectId: t.validation.subjectId })
+          .from(t.validation)
+          .where(and(eq(t.validation.validationId, validationId), eq(t.validation.tenantId, tenantId)))
+          .for('update')
+          .limit(1)
+        if (!vl) {
+          throw new Error('validation not found')
+        }
+        validationLocked = vl
+      }
+
+      // Inserir a solicitação.
+      const [row] = await tx
+        .insert(t.holderInformationRequest)
+        .values({
+          id: requestId,
+          tenantId,
+          holderId: create.holderId,
+          type: create.type,
+          purpose: create.purpose,
+          items: create.items,
+          state: 'pending' as HolderInformationRequestState,
+          expiresAt: create.expiresAt ? new Date(create.expiresAt) : null,
+          validationId: create.validationId ?? null,
+          createdBy: actor,
+          createdAt,
+          updatedAt: createdAt,
+        })
+        .returning()
+
+      if (!row) throw new Error('failed to create holder information request')
+
+      await insertEvent(tx, tenantId, {
+        holderInformationRequestId: requestId,
+        eventType: 'created',
+        fromState: null,
+        toState: 'pending',
+        actor,
+        details: JSON.stringify({ type: create.type, purpose: create.purpose }),
+      })
+
+      // Recheck do prazo após o lock: se o clock do banco já passou do
+      // prazo, rejeitar a emissão do token. O lock pode demorar e o prazo
+      // pode expirar entre a validação inicial e a inserção do token.
+      // A consulta ao relógio não depende de holder_access_token ter registros,
+      // usando a solicitação que acabamos de inserir como fonte de linha.
+      if (create.expiresAt !== undefined && create.expiresAt !== null) {
+        const nowRow = await tx
+          .select({ now: sql`clock_timestamp()` })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.id, requestId))
+          .limit(1)
+
+        if (!nowRow || nowRow.length === 0) {
+          throw new Error('falha ao consultar o relógio do banco')
+        }
+
+        const nowRaw = nowRow[0]?.now
+        const now = nowRaw instanceof Date ? nowRaw : new Date(nowRaw as string)
+
+        if (!now || Number.isNaN(now.getTime())) {
+          throw new Error('falha ao consultar o relógio do banco')
+        }
+
+        const expiresAt = new Date(create.expiresAt as string)
+        if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+          throw new Error('prazo inválido: expires_at deve estar no futuro')
+        }
+
+        if (expiresAt.getTime() <= now.getTime()) {
+          throw new Error('prazo inválido: expires_at deve estar no futuro')
+        }
+      }
+
+      // Emitir o token de acesso público na mesma transação.
+      // Contar tokens ativos (não revogados, não expirados) para esta solicitação.
+      const [active] = await tx
+        .select({ total: count(t.holderAccessToken.tokenId).as('total') })
+        .from(t.holderAccessToken)
+        .where(
+          and(
+            eq(t.holderAccessToken.tenantId, tenantId),
+            eq(t.holderAccessToken.holderInformationRequestId, requestId),
+            isNull(t.holderAccessToken.revokedAt),
+            sql`${t.holderAccessToken.expiresAt} > clock_timestamp()`,
+          ),
+        )
+
+      if (Number((active?.total as unknown as number) ?? 0) >= 5) {
+        throw new Error('token limit reached for this request')
+      }
+
+      const tokenId = randomUUID()
+      const tokenExpiresAt = new Date(
+        create.expiresAt ? new Date(create.expiresAt).getTime() : Date.now() + 7 * 24 * 60 * 60 * 1000,
+      )
+
+      const [tokenRow] = await tx
+        .insert(t.holderAccessToken)
+        .values({
+          tokenId,
+          tenantId,
+          holderId: create.holderId,
+          holderInformationRequestId: requestId,
+          tokenPrefix,
+          tokenHash,
+          createdBy: actor,
+          expiresAt: tokenExpiresAt,
+        })
+        .returning()
+
+      if (!tokenRow) throw new Error('failed to issue holder access token')
+
+      await insertEvent(tx, tenantId, {
+        holderInformationRequestId: requestId,
+        eventType: 'access_token_issued',
+        fromState: 'pending',
+        toState: 'pending',
+        actor,
+        details: JSON.stringify({ tokenId, prefix: tokenPrefix }),
+      })
+
+      return [row, { tokenId, tokenExpiresAt }] as const
+    })
+
+    if (!inserted) {
+      logServiceError('createWithToken', tenantId, new Error('insert returned no row'))
+      throw new Error('failed to create holder information request')
+    }
+
+    const requestDto = toDto(inserted)
+    const { tokenId, tokenExpiresAt } = tokenResult
+
+    return {
+      request: requestDto,
+      tokenId,
+      token,
+      tokenExpiresAt,
+      tokenCreatedAt: createdAt,
+    }
   }
 
   const getHolderInformationRequest = async (
@@ -423,6 +656,7 @@ export const makeHolderInformationRequestService = (deps: { readonly db: Db; rea
 
   return {
     createHolderInformationRequest,
+    createHolderInformationRequestWithToken,
     getHolderInformationRequest,
     listHolderInformationRequests,
     cancelHolderInformationRequest,

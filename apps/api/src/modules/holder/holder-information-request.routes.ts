@@ -1,5 +1,5 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { makeHolderInformationRequestController } from './holder-information-request.controller.js'
 import {
@@ -8,6 +8,7 @@ import {
   CreateHolderInformationRequestBody,
   HolderInformationRequestTransitionBody,
   HolderInformationRequestCreatedResponse,
+  HolderInformationRequestCreatedWithTokenResponse,
   HolderInformationRequestResponse,
   HolderInformationRequestListResponse,
   type HolderInformationRequestRoutesDeps,
@@ -18,6 +19,11 @@ import {
   requireTenantMatch,
   requireScope,
 } from '../../plugins/scope.js'
+
+const noStore = async (_request: FastifyRequest, reply: FastifyReply, payload: unknown): Promise<unknown> => {
+  reply.header('Cache-Control', 'no-store')
+  return payload
+}
 
 export const registerHolderInformationRequestRoutes = (
   instance: FastifyInstance,
@@ -71,6 +77,52 @@ export const registerHolderInformationRequestRoutes = (
           items: request.body.items,
           expiresAt: request.body.expiresAt,
           // PR 1: vinculação opcional à validation.
+          validationId: request.body.validationId,
+        },
+        reply,
+      )
+    },
+  )
+
+  /**
+   * F4.1 — cria uma solicitação vinculada a uma Validation e emite o token de
+   * acesso público do Holder em uma única operação atômica.
+   *
+   * O corpo aceita os mesmos campos de criação mais o `holderId` (repetido para
+   * clareza no corpo) e retorna o token opaco em texto claro (aparece apenas
+   * nesta resposta, nunca é persistido).
+   */
+  app.post(
+    '/holders/:holderId/information-requests/with-token',
+    {
+      preHandler: [
+        requireSessionOrM2MVerify(deps.db),
+        requireSessionOrM2M(deps.db),
+        requireTenantMatch,
+        requireScope('holders:write'),
+      ],
+      onSend: [noStore],
+      schema: {
+        params: z.object({
+          holderId: z.string().uuid(),
+        }),
+        querystring: z.object({ tenantId: z.string().uuid() }),
+        body: CreateHolderInformationRequestBody,
+        response: {
+          201: HolderInformationRequestCreatedWithTokenResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      return controller.createHolderInformationRequestWithToken(
+        getActor(request),
+        {
+          tenantId: getTenantId(request),
+          holderId: request.params.holderId,
+          type: request.body.type,
+          purpose: request.body.purpose,
+          items: request.body.items,
+          expiresAt: request.body.expiresAt,
           validationId: request.body.validationId,
         },
         reply,

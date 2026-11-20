@@ -1,5 +1,6 @@
-import { createHmac } from 'node:crypto'
-import { and, eq, withTenant, createDbPool, runMigrations } from '@comprova/db'
+import { createHmac, randomUUID } from 'node:crypto'
+import { hashHolderAccessToken } from '../src/modules/holder/holder-token.js'
+import { and, count, eq, sql, withTenant, createDbPool, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
@@ -1884,5 +1885,648 @@ describe('HolderInformationRequest Integration', () => {
     })
     const expiredEvents = events.filter((e) => e.eventType === 'expired')
     expect(expiredEvents.length).toBe(1)
+  })
+
+  describe('HolderInformationRequest With Token', () => {
+    const buildTokenPayload = (overrides?: {
+      expiresAt?: string
+      validationId?: string
+      items?: Array<{ itemId: string; description: string; required?: boolean; documentType?: string }>
+    }) => ({
+      type: 'documento_complementar',
+      purpose: 'Comprovante de residência atualizado',
+      items: [
+        {
+          itemId: 'address-proof',
+          description: 'Comprovante de residência atualizado',
+          required: true,
+          documentType: 'proof_of_address',
+        },
+      ],
+      ...overrides,
+    })
+
+    const createValidation = async (tenantId: string): Promise<string> => {
+      return withTenant(adminPool.db, tenantId, async (tx) => {
+        await tx
+          .insert(t.legalBasis)
+          .values({ code: 'CONSENT', description: 'Consentimento' })
+          .onConflictDoNothing()
+
+        const subjectId = randomUUID()
+        await tx.insert(t.subject).values({
+          subjectId,
+          tenantId,
+          docType: 'CPF',
+          docHmac: createHmac('sha256', PEPPER).update('test-subject').digest(),
+        })
+
+        const validationId = randomUUID()
+        await tx.insert(t.validation).values({
+          validationId,
+          tenantId,
+          subjectId,
+          mode: 'fast',
+          status: 'completed',
+          verdict: 'CONFIRMED_COMMERCIAL',
+          score: 0.9,
+          confidence: 0.95,
+          policyVersion: '2026.11.1',
+          legalBasis: 'CONSENT',
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 30 * 86_400_000),
+        })
+
+        return validationId
+      })
+    }
+
+    it('deve criar solicitação com token e retornar todos os campos esperados', async () => {
+      const tenantId = await createOrganization(ownerSessionCookie, 'Org Com Token', 'owner@exemplo.com')
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Com Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+        'validate:write',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-com-token', true)
+      const validationId = await createValidation(tenantId)
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt, validationId }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(201)
+      expect(res.headers['cache-control']).toContain('no-store')
+
+      const body = res.json()
+      expect(body.request.id).toBeDefined()
+      expect(body.request.tenantId).toBe(tenantId)
+      expect(body.request.holderId).toBe(holderId)
+      expect(body.request.validationId).toBe(validationId)
+      expect(body.request.state).toBe('pending')
+      expect(body.request.expiresAt).toBe(expiresAt)
+      expect(body.tokenId).toBeDefined()
+      expect(typeof body.token).toBe('string')
+      expect(body.token.length).toBeGreaterThan(0)
+      expect(body.tokenExpiresAt).toBeDefined()
+      expect(body.tokenCreatedAt).toBeDefined()
+    })
+
+    it('não deve criar token para holder inexistente', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Holder Inexistente Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Holder Inexistente Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/00000000-0000-4000-8000-000000000000/information-requests/with-token?tenantId=${tenantId}`,
+        buildTokenPayload(),
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(404)
+      expect(res.json().code).toBe('HOLDER_NOT_FOUND')
+    })
+
+    it('não deve criar token para validation inexistente', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Validation Inexistente Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Validation Inexistente Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-validation-inexistente', true)
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ validationId: '00000000-0000-4000-8000-000000000000' }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(404)
+      expect(res.json().code).toBe('VALIDATION_NOT_FOUND')
+    })
+
+    it('não deve criar token para holder de outro tenant', async () => {
+      const outroCookie = await loginAndGetCookie('outro@exemplo.com', 'SenhaForte123!')
+      const outroTenantId = await createOrganization(
+        outroCookie,
+        'Org Outro Tenant Token',
+        'outro@exemplo.com',
+      )
+      await addMember(outroCookie, outroTenantId, 'outro@exemplo.com', 'admin')
+
+      const outroKey = await createM2mApiKey(outroCookie, outroTenantId, 'Chave Outro Tenant Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(outroKey, outroTenantId, 'ext-ref-outro-token', true)
+
+      const ownerTenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Principal Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, ownerTenantId, 'owner@exemplo.com', 'admin')
+      const ownerKey = await createM2mApiKey(ownerSessionCookie, ownerTenantId, 'Chave Principal Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${ownerTenantId}`,
+        buildTokenPayload(),
+        ownerKey.secret,
+      )
+
+      expect(res.statusCode).toBe(404)
+    })
+
+    it('não deve aceitar itemId duplicado no corpo da requisição', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Item Duplicado Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Item Duplicado Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-item-duplicado-token', true)
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          type: 'documento_complementar',
+          purpose: 'Itens duplicados',
+          items: [
+            { itemId: 'address-proof', description: 'Primeiro', required: true },
+            { itemId: 'address-proof', description: 'Segundo', required: true },
+          ],
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(400)
+    })
+
+    it('não deve aceitar prazo expirado', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Prazo Expirado Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Prazo Expirado Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-prazo-expirado-token', true)
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt: '2020-01-01T00:00:00Z' }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().code).toBe('INVALID_EXPIRES_AT')
+    })
+
+    it('deve persistir apenas o hash do token, nunca o texto claro', async () => {
+      const tenantId = await createOrganization(ownerSessionCookie, 'Org Hash Token', 'owner@exemplo.com')
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Hash Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-hash-token', true)
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        buildTokenPayload(),
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(201)
+      const body = res.json()
+      const tokenPlaintext = body.token
+
+      // O token em texto claro deve aparecer apenas na resposta, nunca em logs/auditoria
+      // Verifica que o hash persistido corresponde ao HMAC-SHA256 do token com pepper.
+      const tokens = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({
+            tokenId: t.holderAccessToken.tokenId,
+            tokenPrefix: t.holderAccessToken.tokenPrefix,
+            tokenHash: t.holderAccessToken.tokenHash,
+          })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.holderInformationRequestId, body.request.id))
+      })
+
+      expect(tokens.length).toBe(1)
+      expect(tokens[0]!.tokenId).toBe(body.tokenId)
+
+      // O token em texto claro não é persistido: o prefixo não é o token completo.
+      expect(tokens[0]!.tokenPrefix).not.toBe(tokenPlaintext)
+      expect(tokens[0]!.tokenPrefix).not.toBe(body.token)
+
+      // O hash persistido deve coincidir com o HMAC-SHA256 do token em texto claro + pepper.
+      const expectedHash = hashHolderAccessToken(tokenPlaintext, PEPPER)
+      expect(Buffer.from(tokens[0]!.tokenHash as Buffer).toString('hex')).toBe(expectedHash.toString('hex'))
+    })
+
+    it('deve retornar Cache-Control no-store na resposta de emissão de token', async () => {
+      const tenantId = await createOrganization(ownerSessionCookie, 'Org No Store Token', 'owner@exemplo.com')
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave No Store Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-no-store-token', true)
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        buildTokenPayload(),
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(201)
+      expect(res.headers['cache-control']).toBe('no-store')
+    })
+
+    it('deve funcionar mesmo quando holder_access_token está vazia (consulta ao relógio sem depender da tabela)', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Tabela Vazia Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Tabela Vazia Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-tabela-vazia', true)
+
+      // Garante que não existem tokens para este holder/request (tabela pode estar vazia globalmente)
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(201)
+      expect(res.json().tokenId).toBeDefined()
+      expect(res.json().token).toBeDefined()
+    })
+
+    it('não deve incluir o token em texto claro em eventos de auditoria', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Auditoria Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Auditoria Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-auditoria-token', true)
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        buildTokenPayload(),
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(201)
+      const body = res.json()
+      const tokenPlaintext = body.token
+
+      // Busca eventos de auditoria da solicitação
+      const events = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ details: t.holderInformationRequestEvent.details })
+          .from(t.holderInformationRequestEvent)
+          .where(
+            and(
+              eq(t.holderInformationRequestEvent.holderInformationRequestId, body.request.id),
+              eq(t.holderInformationRequestEvent.tenantId, tenantId),
+            ),
+          )
+      })
+
+      const detailsJson = events.map((e) => e.details).join(',')
+      // O token em texto claro não deve aparecer em nenhum evento de auditoria
+      expect(detailsJson).not.toContain(tokenPlaintext)
+    })
+
+    it('deve desfazer completamente a criação quando a emissão do token falhar', async () => {
+      const tenantId = await createOrganization(ownerSessionCookie, 'Org Rollback Token', 'owner@exemplo.com')
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Rollback Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-rollback-token', true)
+
+      // Conta registros antes da operação com falha
+      const requestsBefore = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequest.id).as('total') })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const tokensBefore = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderAccessToken.tokenId).as('total') })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const eventsBefore = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequestEvent.id).as('total') })
+          .from(t.holderInformationRequestEvent)
+          .where(eq(t.holderInformationRequestEvent.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+
+      // Prazo expirado: a validação inicial rejeita antes da transação
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt: '2020-01-01T00:00:00Z' }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(400)
+
+      // Após a falha, nenhum registro novo deve ter sido criado
+      const requestsAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequest.id).as('total') })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const tokensAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderAccessToken.tokenId).as('total') })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+      const eventsAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ total: count(t.holderInformationRequestEvent.id).as('total') })
+          .from(t.holderInformationRequestEvent)
+          .where(eq(t.holderInformationRequestEvent.tenantId, tenantId))
+        return Number(row?.total ?? 0)
+      })
+
+      expect(requestsAfter).toBe(requestsBefore)
+      expect(tokensAfter).toBe(tokensBefore)
+      expect(eventsAfter).toBe(eventsBefore)
+    })
+
+    it('deve criar solicitação e token atomicamente quando a emissão for bem-sucedida', async () => {
+      const tenantId = await createOrganization(ownerSessionCookie, 'Org Atomico Token', 'owner@exemplo.com')
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Atomico Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-atomico-token', true)
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt }),
+        },
+        key.secret,
+      )
+
+      expect(res.statusCode).toBe(201)
+      const body = res.json()
+
+      // A solicitação deve existir no banco
+      const requests = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ id: t.holderInformationRequest.id })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.id, body.request.id))
+      })
+      expect(requests.length).toBe(1)
+
+      // O token deve existir no banco (apenas o hash)
+      const tokens = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ tokenId: t.holderAccessToken.tokenId })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.holderInformationRequestId, body.request.id))
+      })
+      expect(tokens.length).toBe(1)
+      expect(tokens[0]!.tokenId).toBe(body.tokenId)
+
+      // O evento de criação deve existir
+      const events = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ id: t.holderInformationRequestEvent.id })
+          .from(t.holderInformationRequestEvent)
+          .where(eq(t.holderInformationRequestEvent.holderInformationRequestId, body.request.id))
+      })
+      expect(events.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('deve rejeitar quando o prazo expira durante a espera por lock', async () => {
+      const tenantId = await createOrganization(
+        ownerSessionCookie,
+        'Org Lock Expire Token',
+        'owner@exemplo.com',
+      )
+      await addMember(ownerSessionCookie, tenantId, 'owner@exemplo.com', 'admin')
+
+      const key = await createM2mApiKey(ownerSessionCookie, tenantId, 'Chave Lock Expire Token', [
+        'holders:read',
+        'holders:write',
+        'verify:m2m',
+        'validate:write',
+      ])
+
+      const holderId = await createHolder(key, tenantId, 'ext-ref-lock-expire', true)
+      const validationId = await createValidation(tenantId)
+
+      // Obtém o subjectId da validation para travar o mesmo lock que o serviço adquire.
+      // Ordem de locks do serviço: subject (FOR UPDATE) → validation (FOR UPDATE).
+      let validationSubjectId: string | null = null
+      await withTenant(appPool.db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ subjectId: t.validation.subjectId })
+          .from(t.validation)
+          .where(eq(t.validation.validationId, validationId))
+          .limit(1)
+        validationSubjectId = row?.subjectId ?? null
+      })
+      expect(validationSubjectId).not.toBeNull()
+
+      // Promise resolvida quando a transação bloqueadora adquire o lock.
+      let resolveLockAcquired: (() => void) | null = null
+      const lockAcquiredPromise = new Promise<void>((resolve) => {
+        resolveLockAcquired = resolve
+      })
+
+      // Transação bloqueadora: segura o lock de subject e mantém aberta com pg_sleep(2).
+      const blockingPromise = appPool.db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`)
+        await tx.execute(sql`SET LOCAL lock_timeout = '3s'`)
+        await tx
+          .select({ subjectId: t.subject.subjectId })
+          .from(t.subject)
+          .where(and(eq(t.subject.subjectId, validationSubjectId!), eq(t.subject.tenantId, tenantId)))
+          .for('update')
+          .limit(1)
+        // Sinaliza que o lock foi adquirido antes de iniciar a espera.
+        resolveLockAcquired?.()
+        // Mantém o lock ativo por tempo suficiente para o expiresAt expirar durante a espera.
+        await tx.execute(sql`SELECT pg_sleep(2)`)
+      })
+
+      // Aguarda a sinalização de que o lock foi adquirido, com race contra falha na transação.
+      await Promise.race([
+        lockAcquiredPromise,
+        blockingPromise.then(() => {
+          throw new Error('transação bloqueadora finalizou antes do esperado')
+        }),
+      ])
+
+      // expiresAt curto: passa na validação inicial (fora da transação) mas expira
+      // durante a espera pelo lock mantida pela transação bloqueadora.
+      const expiresAt = new Date(Date.now() + 500).toISOString()
+
+      const res = await injectWithM2M(
+        'POST',
+        `/v1/holders/${holderId}/information-requests/with-token?tenantId=${tenantId}`,
+        {
+          ...buildTokenPayload({ expiresAt, validationId }),
+        },
+        key.secret,
+      )
+
+      // Libera a transação bloqueadora (aguarda o pg_sleep terminar).
+      await blockingPromise
+
+      // A operação deve ser rejeitada porque o prazo expirou durante a espera pelo lock.
+      expect(res.statusCode).toBe(400)
+      expect(res.json().code).toBe('INVALID_EXPIRES_AT')
+
+      // Nenhum registro parcial deve ter sido persistido.
+      const requestsAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ id: t.holderInformationRequest.id })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.holderId, holderId))
+      })
+      expect(requestsAfter.length).toBe(0)
+
+      const tokensAfter = await withTenant(appPool.db, tenantId, async (tx) => {
+        return tx
+          .select({ tokenId: t.holderAccessToken.tokenId })
+          .from(t.holderAccessToken)
+          .where(eq(t.holderAccessToken.holderId, holderId))
+      })
+      expect(tokensAfter.length).toBe(0)
+
+      // Verifica que não existem eventos de auditoria associados a solicitações
+      // deste holder (usando subconsulta via SQL bruto, não INNER JOIN, para não
+      // ocultar solicitação persistida sem evento ou evento sem solicitação).
+      const eventsByHolder = await withTenant(appPool.db, tenantId, async (tx) => {
+        const result = await tx.execute(sql`
+          SELECT id FROM holder_information_request_event
+          WHERE holder_information_request_id IN (
+            SELECT id FROM holder_information_request
+            WHERE holder_id = ${holderId} AND tenant_id = ${tenantId}
+          )
+        `)
+        return result
+      })
+      expect(eventsByHolder.length).toBe(0)
+    })
   })
 })
