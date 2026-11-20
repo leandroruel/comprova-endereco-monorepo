@@ -2,13 +2,13 @@ import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { makeHolderInformationRequestController } from './holder-information-request.controller.js'
-import { makeHolderInformationRequestService } from './holder-information-request.service.js'
 import {
   HolderInformationRequestIdParams,
   HolderInformationRequestListQuery,
   CreateHolderInformationRequestBody,
   HolderInformationRequestTransitionBody,
   HolderInformationRequestCreatedResponse,
+  HolderInformationRequestCreatedWithTokenResponse,
   HolderInformationRequestResponse,
   HolderInformationRequestListResponse,
   type HolderInformationRequestRoutesDeps,
@@ -109,7 +109,7 @@ export const registerHolderInformationRequestRoutes = (
         querystring: z.object({ tenantId: z.string().uuid() }),
         body: CreateHolderInformationRequestBody,
         response: {
-          201: HolderInformationRequestCreatedResponse,
+          201: HolderInformationRequestCreatedWithTokenResponse,
         },
       },
     },

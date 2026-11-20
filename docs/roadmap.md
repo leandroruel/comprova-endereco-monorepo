@@ -303,8 +303,12 @@ ou consultar fonte externa. Nenhuma feature nova de produto.
    fundação tenant-scoped foi entregue em F0.1 (`evidence_artifact`, ADR-0035);
    o intake, a análise e a verificação com PII foram entregues em F1.1/F1.2/F1.3.
    OCR e fontes externas adicionais continuam em F2.
-3. **Não há checklist de produção** para issuer origin definitivo, KMS por
-   tenant, restore de backup, alarmes e capacidade.
+3. **Checklist de produção concluído** para issuer origin definitivo, KMS por
+   tenant, restore de backup, alarmes e capacidade. Itens documentados em
+   `PROGRESS.md` com status de conclusão; `docs/runbooks/restore-backup.md`
+   documenta o runbook de backup/restore. Algumas validações operacionais
+   (alarmes em produção, teste de restore em ambiente prod-like) estão como
+   débito técnico conhecido e não bloqueiam o lançamento da vertical F4.1.
 
 ### Escopo
 

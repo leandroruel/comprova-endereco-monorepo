@@ -87,6 +87,18 @@ export const HolderInformationRequestResponse = HolderInformationRequestCreatedR
 
 export type HolderInformationRequestResponseType = z.infer<typeof HolderInformationRequestResponse>
 
+export const HolderInformationRequestCreatedWithTokenResponse = z.object({
+  request: HolderInformationRequestCreatedResponse,
+  tokenId: z.string().uuid(),
+  token: z.string().min(1),
+  tokenExpiresAt: z.string().datetime(),
+  tokenCreatedAt: z.string().datetime(),
+})
+
+export type HolderInformationRequestCreatedWithTokenResponseType = z.infer<
+  typeof HolderInformationRequestCreatedWithTokenResponse
+>
+
 export const HolderInformationRequestListResponse = z.object({
   requests: z.array(HolderInformationRequestCreatedResponse),
   total: z.number(),

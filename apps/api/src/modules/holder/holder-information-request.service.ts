@@ -329,14 +329,17 @@ export const makeHolderInformationRequestService = (deps: {
       // Recheck do prazo após o lock: se o clock do banco já passou do
       // prazo, rejeitar a emissão do token. O lock pode demorar e o prazo
       // pode expirar entre a validação inicial e a inserção do token.
+      // A consulta ao relógio não depende de holder_access_token ter registros,
+      // usando a solicitação que acabamos de inserir como fonte de linha.
       if (create.expiresAt !== undefined && create.expiresAt !== null) {
-        const now = (
-          await tx
-            .select({ now: sql`clock_timestamp()` })
-            .from(t.holderAccessToken)
-            .limit(1)
-        )[0]?.now as Date | undefined
-        if (now && new Date(create.expiresAt).getTime() <= now.getTime()) {
+        const nowRow = await tx
+          .select({ now: sql`clock_timestamp()` })
+          .from(t.holderInformationRequest)
+          .where(eq(t.holderInformationRequest.id, requestId))
+          .limit(1)
+        const nowRaw = nowRow[0]?.now
+        const now = nowRaw instanceof Date ? nowRaw : new Date(nowRaw as string)
+        if (!now || new Date(create.expiresAt).getTime() <= now.getTime()) {
           throw new Error('prazo inválido: expires_at deve estar no futuro')
         }
       }
