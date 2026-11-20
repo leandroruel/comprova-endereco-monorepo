@@ -326,6 +326,21 @@ export const makeHolderInformationRequestService = (deps: {
         details: JSON.stringify({ type: create.type, purpose: create.purpose }),
       })
 
+      // Recheck do prazo após o lock: se o clock do banco já passou do
+      // prazo, rejeitar a emissão do token. O lock pode demorar e o prazo
+      // pode expirar entre a validação inicial e a inserção do token.
+      if (create.expiresAt !== undefined && create.expiresAt !== null) {
+        const now = (
+          await tx
+            .select({ now: sql`clock_timestamp()` })
+            .from(t.holderAccessToken)
+            .limit(1)
+        )[0]?.now as Date | undefined
+        if (now && new Date(create.expiresAt).getTime() <= now.getTime()) {
+          throw new Error('prazo inválido: expires_at deve estar no futuro')
+        }
+      }
+
       // Emitir o token de acesso público na mesma transação.
       // Contar tokens ativos (não revogados, não expirados) para esta solicitação.
       const [active] = await tx
@@ -374,7 +389,7 @@ export const makeHolderInformationRequestService = (deps: {
         details: JSON.stringify({ tokenId, prefix: tokenPrefix }),
       })
 
-      return [row, { tokenId, tokenExpiresAt }]
+      return [row, { tokenId, tokenExpiresAt }] as const
     })
 
     if (!inserted) {

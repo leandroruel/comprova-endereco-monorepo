@@ -9819,7 +9819,7 @@
         }
       }
     },
-    "/holders/{holderId}/information-requests/with-token": {
+    "/v1/holders/{holderId}/information-requests/with-token": {
       "post": {
         "tags": ["holder", "auth"],
         "summary": "Criar solicitação de titular com token de acesso",

@@ -1,5 +1,5 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { makeHolderInformationRequestController } from './holder-information-request.controller.js'
 import { makeHolderInformationRequestService } from './holder-information-request.service.js'
@@ -19,6 +19,11 @@ import {
   requireTenantMatch,
   requireScope,
 } from '../../plugins/scope.js'
+
+const noStore = async (_request: FastifyRequest, reply: FastifyReply, payload: unknown): Promise<unknown> => {
+  reply.header('Cache-Control', 'no-store')
+  return payload
+}
 
 export const registerHolderInformationRequestRoutes = (
   instance: FastifyInstance,
@@ -96,61 +101,23 @@ export const registerHolderInformationRequestRoutes = (
         requireTenantMatch,
         requireScope('holders:write'),
       ],
+      onSend: [noStore],
       schema: {
         params: z.object({
           holderId: z.string().uuid(),
         }),
         querystring: z.object({ tenantId: z.string().uuid() }),
-        body: z.object({
-          type: z.string().min(1).max(100),
-          purpose: z.string().min(1).max(1000),
-          items: z
-            .array(
-              z.object({
-                itemId: z.string().min(1).max(100),
-                description: z.string().min(1).max(500),
-                required: z.boolean().default(true),
-                documentType: z.string().min(1).max(100).optional(),
-              }),
-            )
-            .min(1, 'Pelo menos um item deve ser informado')
-            .max(50, 'Número máximo de itens excedido'),
-          expiresAt: z.string().datetime().optional(),
-          validationId: z.string().uuid().optional(),
-        }),
+        body: CreateHolderInformationRequestBody,
         response: {
-          201: z.object({
-            request: z.object({
-              id: z.string().uuid(),
-              tenantId: z.string().uuid(),
-              holderId: z.string().uuid(),
-              type: z.string(),
-              purpose: z.string(),
-              state: z.string(),
-              expiresAt: z.string().nullable(),
-              validationId: z.string().uuid().nullable(),
-              createdBy: z.string(),
-              createdAt: z.string(),
-              updatedAt: z.string(),
-            }),
-            tokenId: z.string().uuid(),
-            token: z.string(),
-            tokenExpiresAt: z.string(),
-            tokenCreatedAt: z.string(),
-          }),
+          201: HolderInformationRequestCreatedResponse,
         },
       },
     },
     async (request, reply) => {
-      const service = makeHolderInformationRequestService({
-        db: deps.db,
-        pepper: deps.pepper,
-        logger: deps.logger,
-      })
-      const result = await service.createHolderInformationRequestWithToken(
+      return controller.createHolderInformationRequestWithToken(
         getActor(request),
-        getTenantId(request),
         {
+          tenantId: getTenantId(request),
           holderId: request.params.holderId,
           type: request.body.type,
           purpose: request.body.purpose,
@@ -158,27 +125,8 @@ export const registerHolderInformationRequestRoutes = (
           expiresAt: request.body.expiresAt,
           validationId: request.body.validationId,
         },
+        reply,
       )
-
-      return reply.code(201).send({
-        request: {
-          id: result.request.id,
-          tenantId: result.request.tenantId,
-          holderId: result.request.holderId,
-          type: result.request.type,
-          purpose: result.request.purpose,
-          state: result.request.state,
-          expiresAt: result.request.expiresAt,
-          validationId: result.request.validationId,
-          createdBy: result.request.createdBy,
-          createdAt: result.request.createdAt,
-          updatedAt: result.request.updatedAt,
-        },
-        tokenId: result.tokenId,
-        token: result.token,
-        tokenExpiresAt: result.tokenExpiresAt.toISOString(),
-        tokenCreatedAt: result.tokenCreatedAt.toISOString(),
-      })
     },
   )
 

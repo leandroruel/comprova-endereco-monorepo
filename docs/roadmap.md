@@ -20,14 +20,14 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
   o vertical slice F3.2 pelo dashboard; F3.3 (medição de uso, cotas e
   reconciliação); F4.2/F4.3 (intake do Holder, token de acesso público,
   processamento de submissão e vínculo ao pipeline F1.1/F1.2/F1.3).
-- **Em andamento:** F0 (checklist de produção completo), F1 (OCR de imagem
+- **Em andamento:** F0 (checklist de produção concluído), F1 (OCR de imagem
   isolada via Tesseract 5 e pypdfium2 — substitui Marker/Surya; pendente), F2
   (expansão/hardening da cobertura fiscal) e F6 (operação/segurança).
-- **Próximo passo:** concluir o checklist de produção; a unidade de cobrança
-  definitiva, o tratamento comercial de indisponibilidade de fonte externa
-  (hoje: não faturável, política provisória do ADR-0044 §3b) e as regras de
-  faturamento continuam decisões comerciais abertas. A F4.1 (link/token seguro
-  público + consentimento do titular) inicia agora como vertical slice da F4.
+- **Próximo passo:** a unidade de cobrança definitiva, o tratamento comercial de
+  indisponibilidade de fonte externa (hoje: não faturável, política provisória
+  do ADR-0044 §3b) e as regras de faturamento continuam decisões comerciais
+  abertas. A F4.1 (link/token seguro público + consentimento do titular) inicia
+  agora como vertical slice da F4.
 - **Futuro:** F4.2+ (atualização de evidência, comparação improved/unchanged/diverged,
   supersedes_validation_id), F7 (NFAg-e/outras fontes) e F8 (SSI).
   F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda
@@ -514,9 +514,12 @@ de produto; elas não bloqueiam o vertical slice atual.
 ### Ainda falta para concluir a Fase 1
 
 - OCR de imagem isolada (JPEG/PNG): pendente. A recomendação é Tesseract 5
-  (open source Apache 2.0, suporte a português, leve, binário do sistema) via
-  `pypdfium2` para renderizar a imagem em PDF e enviar ao `DocumentAnalyzer`,
-  ou conversão direta de imagem para PDF com PIL (já disponível no ambiente).
+  (open source Apache 2.0, suporte a português, leve, binário do sistema) para
+  reconhecer o texto da imagem primeiro, gerando um PDF com camada de texto
+  pesquisável; esse PDF com camada de texto é então enviado ao
+  `DocumentAnalyzer` (via `pypdfium2`) para extração de campos. Alternativamente,
+  é possível converter a imagem para PDF com PIL (já disponível no ambiente) e
+  depois processar com o parser de texto, mas sem OCR o resultado será limitado.
   Requer instalação de pacote do sistema (Tesseract) e não foi avaliada em
   profundidade neste ambiente. Não bloqueia o vertical slice atual.
 - Política de "documento autêntico ≠ titular mora aqui"; a separação existe no
@@ -1299,5 +1302,4 @@ entendimento do comprovante, com `evidence_analysis` append-only e idempotente
 consulta real NF3-e SVRS para RS/SP entregues; cobertura adicional, cache,
 métricas e hardening continuam no backlog.
 
-**Próximo passo:** fechar o checklist de produção; a decisão comercial sobre a
-unidade de cobrança e a tabela de preços permanece aberta (ADR-0044).
+**Próximo passo:** a decisão comercial sobre a unidade de cobrança e a tabela de preços permanece aberta (ADR-0044). O checklist de produção do P0 está concluído.
