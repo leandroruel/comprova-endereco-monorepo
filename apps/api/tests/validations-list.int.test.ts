@@ -9,7 +9,7 @@ import {
   TEST_APP_DB_PASSWORD,
 } from '@comprova/testing'
 import { createLogger, createMetrics } from '@comprova/observability'
-import { createDbPool, eq, runMigrations } from '@comprova/db'
+import { createDbPool, and, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
 import Redis from 'ioredis'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -219,6 +219,99 @@ describe('GET /v1/validations (PR #74)', () => {
     expect(byId.get(failedValidation)?.status).toBe('failed')
   })
 
+  it('reporta holder_external_reference e consent_granted por validação', async () => {
+    // Duas validações no tenant principal.
+    const valWithConsent = await createValidation(adminPool.db, tenantMain, subjectMain, {
+      status: 'running',
+    })
+    const valWithoutConsent = await createValidation(adminPool.db, tenantMain, subjectMain, {
+      status: 'running',
+    })
+
+    // Holder do tenant principal.
+    const holderId = randomUUID()
+    await adminPool.db.insert(t.holder).values({
+      holderId,
+      tenantId: tenantMain,
+      externalReference: 'holder-external-ref',
+      name: 'Titular Teste',
+      documentHash: '0000000000000000000000000000000000000000000000000000000000000000',
+      documentType: 'CPF',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    // Duas solicitações Holder vinculadas a validações diferentes.
+    await adminPool.db.insert(t.holderInformationRequest).values({
+      id: randomUUID(),
+      tenantId: tenantMain,
+      holderId,
+      type: 'documento_complementar',
+      purpose: 'Comprovante',
+      items: [],
+      state: 'pending',
+      validationId: valWithConsent,
+      createdBy: 'system',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    await adminPool.db.insert(t.holderInformationRequest).values({
+      id: randomUUID(),
+      tenantId: tenantMain,
+      holderId,
+      type: 'documento_complementar',
+      purpose: 'Comprovante',
+      items: [],
+      state: 'pending',
+      validationId: valWithoutConsent,
+      createdBy: 'system',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    // Consentimento apenas na validação com consentimento.
+    const [consentRequest] = await adminPool.db
+      .select({ id: t.holderInformationRequest.id })
+      .from(t.holderInformationRequest)
+      .where(
+        and(
+          eq(t.holderInformationRequest.validationId, valWithConsent),
+          eq(t.holderInformationRequest.tenantId, tenantMain),
+        ),
+      )
+      .limit(1)
+
+    await adminPool.db.insert(t.holderConsent).values({
+      id: randomUUID(),
+      tenantId: tenantMain,
+      holderInformationRequestId: consentRequest!.id,
+      termsVersion: '1.0.0',
+      state: 'granted',
+      acceptedAt: new Date(),
+      createdAt: new Date(),
+    })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/validations',
+      headers: { Authorization: `Bearer ${keyMain}` },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as {
+      validations: Record<string, unknown>[]
+      total: number
+    }
+    const byId = new Map(body.validations.map((v) => [v.validation_id as string, v]))
+
+    const withConsent = byId.get(valWithConsent)!
+    expect(withConsent.holder_external_reference).toBe('holder-external-ref')
+    expect(withConsent.consent_granted).toBe(true)
+
+    const withoutConsent = byId.get(valWithoutConsent)!
+    expect(withoutConsent.holder_external_reference).toBe('holder-external-ref')
+    expect(withoutConsent.consent_granted).toBe(false)
+  })
+
   it('pagina com limit/offset e ordenação estável por criação desc', async () => {
     const page1 = await app.inject({
       method: 'GET',
@@ -232,7 +325,8 @@ describe('GET /v1/validations (PR #74)', () => {
       limit: number
       offset: number
     }
-    expect(body1.total).toBe(mainValidationIds.length + 1)
+    // 5 validações principais + 1 com documento + 2 do teste de consentimento.
+    expect(body1.total).toBe(mainValidationIds.length + 3)
     expect(body1.validations).toHaveLength(2)
     expect(body1.limit).toBe(2)
     expect(body1.offset).toBe(0)

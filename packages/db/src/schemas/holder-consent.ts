@@ -14,7 +14,7 @@ import { holderInformationRequest } from './holder-information-request.js'
 export const holderConsent = pgTable(
   'holder_consent',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: uuid('id').primaryKey(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),

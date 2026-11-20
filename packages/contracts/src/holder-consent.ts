@@ -16,22 +16,16 @@ export const HolderConsentRequestSchema = z.object({
 
 export type HolderConsentRequest = z.infer<typeof HolderConsentRequestSchema>
 
-/** Resposta do registro de consentimento. */
+/** Resposta do registro de consentimento (mesma forma do status na visão). */
 export const HolderConsentResponseSchema = z.object({
-  consentId: z.uuid(),
-  holderInformationRequestId: z.uuid(),
-  termsVersion: z.string(),
-  state: z.enum(['granted', 'withdrawn']),
-  acceptedAt: z.string(),
+  granted: z.boolean(),
+  termsVersion: z.string().nullable(),
+  acceptedAt: z.string().nullable(),
 })
 
 export type HolderConsentResponse = z.infer<typeof HolderConsentResponseSchema>
 
 /** Status de consentimento incluído na visão do Holder. */
-export const HolderConsentStatusSchema = z.object({
-  granted: z.boolean(),
-  termsVersion: z.string().nullable(),
-  acceptedAt: z.string().nullable(),
-})
+export const HolderConsentStatusSchema = HolderConsentResponseSchema
 
 export type HolderConsentStatus = z.infer<typeof HolderConsentStatusSchema>

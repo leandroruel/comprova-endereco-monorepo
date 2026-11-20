@@ -929,43 +929,40 @@ original e o histórico é imutável.
 
 ### Estado atual comprovado
 
-| Item                    | Evidência                                                                                       | Situação                                                                                                                                                             |
-| ----------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Consentimento           | `apps/api/src/modules/holder/holder-access.service.ts` (`submit` transiciona para `completed`)  | **Entregue parcialmente**: evento `completed` auditado; `consent_ref` ainda é string opaca na validation (entidade de consentimento dedicada pendente para F4.1)     |
-| Token/link seguro       | `apps/api/src/modules/holder/holder-token.ts` + `holder-access.controller.ts`                   | **Entregue**: token opaco `hlt_` + HMAC-SHA256 com pepper, expiração, revogação, single-use, rate limit; endpoint público sem auth do titular                        |
-| Histórico de validações | `validation` (imutável, nova linha por pedido) + `validation_customer_document` (migração 0067) | Existe como log; vínculo explícito 1:1 Validation ↔ documento (migração 0067); `supersedes_validation_id` pendente (F4.2+)                                           |
-| Superação de credencial | `credential-issuance` / deep path                                                               | Existe para credencial, **não** para o resultado de negócio                                                                                                          |
-| Processamento do Holder | `apps/worker/src/modules/holder-submission-processing/`                                         | **Entregue (F4.3)**: worker consome outbox `holder_submission.processing_requested`, cria `evidence_artifact` + `evidence_analysis`, vincula ao recibo da Validation |
+| Item                    | Evidência                                                                                         | Situação                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Consentimento           | `packages/db/migrations/0073_holder_consent.sql` + `holder-access.service.ts` (`registerConsent`) | **Entregue (F4.1)**: entidade `holder_consent` dedicada (versão dos termos, `accepted_at` do relógio do banco, estado, evento de auditoria), UNIQUE por solicitação; upload bloqueado sem consentimento |
+| Token/link seguro       | `apps/api/src/modules/holder/holder-token.ts` + `holder-access.controller.ts`                     | **Entregue**: token opaco `hlt_` + HMAC-SHA256 com pepper, expiração, revogação, single-use, rate limit; endpoint público sem auth do titular                                                           |
+| Histórico de validações | `validation` (imutável, nova linha por pedido) + `validation_customer_document` (migração 0067)   | Existe como log; vínculo explícito 1:1 Validation ↔ documento (migração 0067); `supersedes_validation_id` pendente (F4.2+)                                                                              |
+| Superação de credencial | `credential-issuance` / deep path                                                                 | Existe para credencial, **não** para o resultado de negócio                                                                                                                                             |
+| Processamento do Holder | `apps/worker/src/modules/holder-submission-processing/`                                           | **Entregue (F4.3)**: worker consome outbox `holder_submission.processing_requested`, cria `evidence_artifact` + `evidence_analysis`, vincula ao recibo da Validation                                    |
 
 ### Lacunas
 
-1. Fluxo inicial de coleta (F4.1): criar solicitação para uma Validation, gerar
-   link/token público, disponibilizar acesso sem conta do titular, registrar
-   consentimento e encaminhar ao pipeline existente. (inicia agora)
-2. `consent_ref` não prova consentimento: é string opaca; entidade de consentimento
-   dedicada pendente (captura de versão do texto, timestamp, referência à
-   solicitação/Validation).
-3. Não há como dizer "esta validação substitui aquela" nem "o resultado mudou de
+1. Conteúdo aprovado dos termos de consentimento (texto jurídico): a entidade
+   `holder_consent` registra versão + timestamp, mas o texto dos termos é de
+   responsabilidade do produto (pendente de conteúdo aprovado).
+2. Não há como dizer "esta validação substitui aquela" nem "o resultado mudou de
    X para Y" (`supersedes_validation_id`, F4.2+).
-4. Não há comparação explícita entre evidência antiga e nova
+3. Não há comparação explícita entre evidência antiga e nova
    (`improved`, `unchanged`, `diverged`, `inconclusive`, F4.2+).
-5. Fluxo de atualização de evidência (substituição, reenvio) — separado do fluxo
+4. Fluxo de atualização de evidência (substituição, reenvio) — separado do fluxo
    inicial de coleta (F4.2+).
-6. Autenticação do titular (gov.br, OTP, magic link) — decisão de produto em
+5. Autenticação do titular (gov.br, OTP, magic link) — decisão de produto em
    aberto; não é pré-requisito para o primeiro vertical slice (F4.1).
 
 ### Escopo
 
-**F4.1 — primeiro vertical slice (inicia agora):**
+**F4.1 — primeiro vertical slice (entregue):**
 
-1. Criar solicitação para uma Validation (Verifier autenticado).
-2. Gerar e persistir token seguro (opaco, single-use, expiração, vinculado a
+1. ✅ Criar solicitação para uma Validation (Verifier autenticado).
+2. ✅ Gerar e persistir token seguro (opaco, single-use, expiração, vinculado a
    tenant + subject + Validation).
-3. Disponibilizar acesso público por link (sem conta do titular).
-4. Registrar consentimento (versão do texto, timestamp, referência à solicitação).
-5. Receber documento do titular (reuso do intake F1.1).
-6. Encaminhar ao pipeline existente (F1.2/F1.3).
-7. Exibir o estado da solicitação ao Verifier.
+3. ✅ Disponibilizar acesso público por link (sem conta do titular).
+4. ✅ Registrar consentimento (versão do texto, timestamp, referência à solicitação).
+5. ✅ Receber documento do titular (reuso do intake F1.1).
+6. ✅ Encaminhar ao pipeline existente (F1.2/F1.3).
+7. ✅ Exibir o estado da solicitação ao Verifier.
 
 **F4.2+ (etapas posteriores):**
 

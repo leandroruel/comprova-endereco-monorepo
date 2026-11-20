@@ -261,6 +261,8 @@ export interface ValidationListItem {
   confidence: number | null
   has_customer_document: boolean
   document_processing: boolean
+  holder_external_reference: string | null
+  consent_granted: boolean
   created_at: string
   expires_at: string
 }

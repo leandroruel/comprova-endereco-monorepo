@@ -366,23 +366,23 @@ export const listValidations = async (
             AND ce.source = ${CUSTOMER_DOCUMENT_INTAKE_SOURCE}
             AND ea.status IN ('pending', 'analyzing')
         )`,
-        holderExternalReference: sql<string | null>`(
-          SELECT h.external_reference
+        holderRequest: sql<{ externalReference: string | null; consentGranted: boolean } | null>`(
+          SELECT jsonb_build_object(
+            'externalReference', h.external_reference,
+            'consentGranted', EXISTS (
+              SELECT 1
+              FROM holder_consent hc
+              WHERE hc.holder_information_request_id = hir.id
+                AND hc.tenant_id = hir.tenant_id
+                AND hc.state = 'granted'
+            )
+          )
           FROM holder_information_request hir
           JOIN holder h ON h.holder_id = hir.holder_id AND h.tenant_id = hir.tenant_id
           WHERE hir.validation_id = validation.validation_id
             AND hir.tenant_id = validation.tenant_id
+          ORDER BY hir.created_at DESC
           LIMIT 1
-        )`,
-        consentGranted: sql<boolean>`EXISTS (
-          SELECT 1
-          FROM holder_consent hc
-          JOIN holder_information_request hir
-            ON hir.id = hc.holder_information_request_id
-           AND hir.tenant_id = hc.tenant_id
-          WHERE hc.tenant_id = validation.tenant_id
-            AND hc.state = 'granted'
-            AND hir.validation_id = validation.validation_id
         )`,
         pageTotal: sql<number>`(SELECT count(*)::int FROM validation v2 WHERE v2.tenant_id = ${tenantId})`,
       })
@@ -395,19 +395,30 @@ export const listValidations = async (
     if (items[0] !== undefined) {
       // pageTotal vem do mesmo snapshot da página (subquery no mesmo SELECT).
       return {
-        items: items.map((row) => ({
-          validationId: row.validationId,
-          status: row.status,
-          verdict: row.verdict,
-          score: row.score,
-          confidence: row.confidence,
-          hasCustomerDocument: row.hasCustomerDocument,
-          documentProcessing: row.documentProcessing,
-          holderExternalReference: row.holderExternalReference,
-          consentGranted: row.consentGranted,
-          createdAt: row.createdAt,
-          expiresAt: row.expiresAt,
-        })),
+        items: items.map((row) => {
+          const holderRequest = (() => {
+            const raw = row.holderRequest
+            if (!raw) return null
+            try {
+              return typeof raw === 'string' ? JSON.parse(raw) : raw
+            } catch {
+              return null
+            }
+          })()
+          return {
+            validationId: row.validationId,
+            status: row.status,
+            verdict: row.verdict,
+            score: row.score,
+            confidence: row.confidence,
+            hasCustomerDocument: row.hasCustomerDocument,
+            documentProcessing: row.documentProcessing,
+            holderExternalReference: holderRequest?.externalReference ?? null,
+            consentGranted: holderRequest?.consentGranted ?? false,
+            createdAt: row.createdAt,
+            expiresAt: row.expiresAt,
+          }
+        }),
         total: items[0].pageTotal,
       }
     }

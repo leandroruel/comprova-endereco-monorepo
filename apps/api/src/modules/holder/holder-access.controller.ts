@@ -216,9 +216,9 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
       const result = await service.registerConsent(context, actor, termsVersion)
       switch (result.kind) {
         case 'ok':
-          return reply.code(200).type(PROBLEM_CONTENT_TYPE).send(result.consent)
+          return reply.code(200).send(result.consent)
         case 'already_consented':
-          return reply.code(200).type(PROBLEM_CONTENT_TYPE).send(result.consent)
+          return reply.code(200).send(result.consent)
         case 'not_found':
           return reply
             .code(401)
