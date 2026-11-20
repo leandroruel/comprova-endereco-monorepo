@@ -3,6 +3,7 @@ import * as t from '@comprova/db'
 import type {
   HolderAccessItem,
   HolderAccessRequest,
+  HolderConsentStatus,
   HolderInformationRequestItem,
   HolderInformationRequestState,
 } from '@comprova/contracts'
@@ -43,6 +44,7 @@ export type HolderAccessResult =
   | { readonly kind: 'not_found' }
   | { readonly kind: 'expired' }
   | { readonly kind: 'cancelled' }
+  | { readonly kind: 'consent_required' }
   | { readonly kind: 'invalid_state'; readonly state: HolderInformationRequestState }
   | { readonly kind: 'item_not_found'; readonly itemId: string }
   | { readonly kind: 'invalid_item'; readonly itemId: string; readonly reason: string }
@@ -55,6 +57,15 @@ export type HolderAccessResult =
   | { readonly kind: 'audit_unavailable' }
 
 export type HolderDeleteDocumentResult = HolderAccessResult | { readonly kind: 'deleted' }
+
+/** Resultado do registro de consentimento. */
+export type HolderConsentResult =
+  | { readonly kind: 'ok'; readonly consent: HolderConsentStatus }
+  | { readonly kind: 'not_found' }
+  | { readonly kind: 'expired' }
+  | { readonly kind: 'cancelled' }
+  | { readonly kind: 'invalid_state'; readonly state: HolderInformationRequestState }
+  | { readonly kind: 'already_consented'; readonly consent: HolderConsentStatus }
 
 export interface HolderAccessDeps {
   readonly db: Db
@@ -219,6 +230,36 @@ const loadView = async (
     )
     .orderBy(t.holderInformationRequestDocument.createdAt)
 
+  const consentRow = await tx
+    .select({
+      termsVersion: t.holderConsent.termsVersion,
+      acceptedAt: t.holderConsent.acceptedAt,
+      state: t.holderConsent.state,
+    })
+    .from(t.holderConsent)
+    .where(
+      and(eq(t.holderConsent.tenantId, tenantId), eq(t.holderConsent.holderInformationRequestId, request.id)),
+    )
+    .limit(1)
+
+  const consent: HolderConsentStatus = {
+    granted: consentRow.length > 0 && consentRow[0]!.state === 'granted',
+    termsVersion: consentRow.length > 0 ? consentRow[0]!.termsVersion : null,
+    acceptedAt: consentRow.length > 0 ? (consentRow[0]!.acceptedAt?.toISOString() ?? null) : null,
+  }
+
+  const hasStoredDocuments = documents.length > 0
+
+  const status = ((): string => {
+    if (state === 'cancelled') return 'encerrada'
+    if (state === 'expired') return 'expirada'
+    if (state === 'completed') return 'concluída'
+    if (state === 'in_progress') return 'processando'
+    if (!consent.granted) return 'aguardando_consentimento'
+    if (!hasStoredDocuments) return 'aguardando_documentos'
+    return 'documento_recebido'
+  })()
+
   const valueByItem = new Map(responses.map((row) => [row.itemId, row.value]))
   const documentsByItem = new Map<string, HolderAccessItem['documents']>()
   for (const document of documents) {
@@ -247,6 +288,8 @@ const loadView = async (
     type: request.type,
     purpose: request.purpose,
     state,
+    status,
+    consent,
     expiresAt: request.expiresAt?.toISOString() ?? null,
     completedAt: request.completedAt?.toISOString() ?? null,
     items,
@@ -328,6 +371,139 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         return mapAuthorize(authorized) as HolderAccessResult
       }
       return toViewResult(tx, context, authorized)
+    })
+
+  /**
+   * Verifica se já existe um consentimento concedido para a solicitação.
+   * Executado dentro de uma transação já com tenant configurado.
+   */
+  const hasConsentInTx = async (tx: DbTx, tenantId: string, requestId: string): Promise<boolean> => {
+    const [row] = await tx
+      .select({ id: t.holderConsent.id })
+      .from(t.holderConsent)
+      .where(
+        and(
+          eq(t.holderConsent.tenantId, tenantId),
+          eq(t.holderConsent.holderInformationRequestId, requestId),
+          eq(t.holderConsent.state, 'granted'),
+        ),
+      )
+      .limit(1)
+    return row !== undefined
+  }
+
+  const hasConsent = async (context: HolderTokenContext): Promise<boolean> =>
+    withTenant(db, context.tenantId, async (tx) => {
+      const authorized = await authorizeInTx(tx, context, 'holder-consent-check')
+      if (authorized.kind !== 'ok') return false
+      return hasConsentInTx(tx, context.tenantId, context.requestId)
+    })
+
+  /**
+   * Registra o consentimento do Holder para a solicitação. O aceite é
+   * explícito e idempotente: um segundo aceite para a mesma solicitação
+   * retorna o consentimento existente sem criar duplicidade.
+   *
+   * Executado dentro de uma transação já com tenant configurado e com o lock
+   * da solicitação já adquirido (mesma ordem: solicitação → consentimento).
+   */
+  const registerConsentInTx = async (
+    tx: DbTx,
+    context: HolderTokenContext,
+    actor: string,
+    termsVersion: string,
+  ): Promise<HolderConsentResult> => {
+    const authorized = await authorizeInTx(tx, context, actor)
+    if (authorized.kind !== 'ok') {
+      return mapAuthorize(authorized) as HolderConsentResult
+    }
+
+    const existing = await hasConsentInTx(tx, context.tenantId, context.requestId)
+    if (existing) {
+      const [consentRow] = await tx
+        .select({
+          termsVersion: t.holderConsent.termsVersion,
+          acceptedAt: t.holderConsent.acceptedAt,
+          state: t.holderConsent.state,
+        })
+        .from(t.holderConsent)
+        .where(
+          and(
+            eq(t.holderConsent.tenantId, context.tenantId),
+            eq(t.holderConsent.holderInformationRequestId, context.requestId),
+            eq(t.holderConsent.state, 'granted'),
+          ),
+        )
+        .limit(1)
+      return {
+        kind: 'already_consented',
+        consent: {
+          granted: true,
+          termsVersion: consentRow?.termsVersion ?? null,
+          acceptedAt: consentRow?.acceptedAt?.toISOString() ?? null,
+        },
+      }
+    }
+
+    const consentId = randomUUID()
+    await tx.insert(t.holderConsent).values({
+      id: consentId,
+      tenantId: context.tenantId,
+      holderInformationRequestId: context.requestId,
+      termsVersion,
+      state: 'granted',
+      acceptedAt: sql`clock_timestamp()`,
+    })
+
+    await insertHolderInformationRequestEvent(tx, context.tenantId, {
+      holderInformationRequestId: context.requestId,
+      eventType: 'holder_consent_granted',
+      fromState: authorized.state,
+      toState: authorized.state,
+      actor,
+      details: JSON.stringify({ consentId, termsVersion }),
+    })
+
+    return {
+      kind: 'ok',
+      consent: {
+        granted: true,
+        termsVersion,
+        acceptedAt: null, // preenchido pelo caller após leitura do relógio, se necessário
+      },
+    }
+  }
+
+  const registerConsent = async (
+    context: HolderTokenContext,
+    actor: string,
+    termsVersion: string,
+  ): Promise<HolderConsentResult> =>
+    withTenant(db, context.tenantId, async (tx) => {
+      const result = await registerConsentInTx(tx, context, actor, termsVersion)
+      if (result.kind !== 'ok') return result
+
+      // Ler o accepted_at do recém-inserido (relógio do banco).
+      const [row] = await tx
+        .select({ acceptedAt: t.holderConsent.acceptedAt })
+        .from(t.holderConsent)
+        .where(
+          and(
+            eq(t.holderConsent.tenantId, context.tenantId),
+            eq(t.holderConsent.holderInformationRequestId, context.requestId),
+            eq(t.holderConsent.state, 'granted'),
+          ),
+        )
+        .limit(1)
+
+      return {
+        kind: 'ok',
+        consent: {
+          granted: true,
+          termsVersion: result.consent.termsVersion,
+          acceptedAt: row?.acceptedAt?.toISOString() ?? null,
+        },
+      }
     })
 
   const saveItem = async (
@@ -413,6 +589,12 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       }
       if (!isMutable(authorized.state)) {
         return { kind: 'invalid_state', state: authorized.state } as HolderAccessResult
+      }
+
+      // Consentimento é pré-requisito para upload de documentos.
+      const consented = await hasConsentInTx(tx, context.tenantId, context.requestId)
+      if (!consented) {
+        return { kind: 'consent_required' } as HolderAccessResult
       }
 
       const item = findItem(authorized.request, itemId)
@@ -1089,6 +1271,8 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
     uploadDocument,
     deleteDocument,
     submit,
+    registerConsent,
+    hasConsent,
     logError,
   }
 }

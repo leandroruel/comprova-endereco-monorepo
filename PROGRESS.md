@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado + OpenAPI com summaries e descrições em português para o Scalar + fluxo do titular F4.2/F4.3 (intake, token público, processamento, vínculo à Validation) entregue + P0 de prontidão para produção concluído** (2026-11-19)
+Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado + OpenAPI com summaries e descrições em português para o Scalar + fluxo do titular F4.1/F4.2/F4.3 (link/token público, consentimento, upload, processamento, vínculo à Validation) entregue + P0 de prontidão para produção concluído** (2026-11-20)
 
 ## Últimas entregas integradas
 
@@ -20,10 +20,10 @@ Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entreg
 | Configuração de produção | `.env.example` completo; segredos fora do git         | Concluído (VITE_API_KEY = item F6) |
 | Observabilidade mínima   | Métricas Prometheus + redação de PII                  | Concluído                          |
 
-### Fluxo do titular F4 (2026-11-19)
+### Fluxo do titular F4 (2026-11-20)
 
 - **F4.2/F4.3 já entregues:** `holder-information-request` (criação/listagem/cancelamento), `holder-access` (token opaco `hlt_`, view, saveItem, uploadDocument, deleteDocument, submit), `holder-token` (geração/hash com pepper), `holder-submission-processing` (worker que vincula ao pipeline F1.1/F1.2/F1.3), migrations `0057`/`0062`/`0066`/`0067`
-- **F4.1 iniciando:** link/token público para o titular, consentimento, integração com Validation original
+- **F4.1 entregue:** consentimento do Holder antes do upload (`POST /v1/holder-access/consent`), tabela `holder_consent` (migration `0073`), upload bloqueado sem consentimento, `status` computado na visão do Holder (`aguardando_consentimento` / `aguardando_documentos` / `documento_recebido` / `processando` / `concluída` / `expirada` / `encerrada`), dashboard do Verifier exibe `holder_external_reference` e `consent_granted` na listagem de validações, OpenAPI documentado, testes de integração (`holder-consent.int.test.ts`).
 
 ## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
 

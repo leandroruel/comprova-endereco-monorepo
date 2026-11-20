@@ -294,6 +294,10 @@ export interface ValidationListItem {
   readonly confidence: number | null
   readonly hasCustomerDocument: boolean
   readonly documentProcessing: boolean
+  /** Referência externa do Holder associado (quando há solicitação vinculada). */
+  readonly holderExternalReference: string | null
+  /** Indica se o consentimento do Holder foi registrado para a solicitação vinculada. */
+  readonly consentGranted: boolean
   readonly createdAt: Date
   readonly expiresAt: Date
 }
@@ -362,6 +366,24 @@ export const listValidations = async (
             AND ce.source = ${CUSTOMER_DOCUMENT_INTAKE_SOURCE}
             AND ea.status IN ('pending', 'analyzing')
         )`,
+        holderExternalReference: sql<string | null>`(
+          SELECT h.external_reference
+          FROM holder_information_request hir
+          JOIN holder h ON h.holder_id = hir.holder_id AND h.tenant_id = hir.tenant_id
+          WHERE hir.validation_id = validation.validation_id
+            AND hir.tenant_id = validation.tenant_id
+          LIMIT 1
+        )`,
+        consentGranted: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM holder_consent hc
+          JOIN holder_information_request hir
+            ON hir.id = hc.holder_information_request_id
+           AND hir.tenant_id = hc.tenant_id
+          WHERE hc.tenant_id = validation.tenant_id
+            AND hc.state = 'granted'
+            AND hir.validation_id = validation.validation_id
+        )`,
         pageTotal: sql<number>`(SELECT count(*)::int FROM validation v2 WHERE v2.tenant_id = ${tenantId})`,
       })
       .from(t.validation)
@@ -381,6 +403,8 @@ export const listValidations = async (
           confidence: row.confidence,
           hasCustomerDocument: row.hasCustomerDocument,
           documentProcessing: row.documentProcessing,
+          holderExternalReference: row.holderExternalReference,
+          consentGranted: row.consentGranted,
           createdAt: row.createdAt,
           expiresAt: row.expiresAt,
         })),

@@ -169,6 +169,8 @@ const LIST_ITEM_KEYS = [
   'confidence',
   'has_customer_document',
   'document_processing',
+  'holder_external_reference',
+  'consent_granted',
   'created_at',
   'expires_at',
 ].sort()

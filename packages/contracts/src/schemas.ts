@@ -266,6 +266,16 @@ export const ValidationListItemDtoSchema = z.object({
    * "Em processamento" na listagem.
    */
   document_processing: z.boolean(),
+  /**
+   * Referência externa do Holder associado à solicitação vinculada (quando
+   * houver). Não expõe hash de documento nem outros PII do titular.
+   */
+  holder_external_reference: z.string().nullable(),
+  /**
+   * Indica se o consentimento do Holder foi registrado para a solicitação
+   * vinculada (F4.1).
+   */
+  consent_granted: z.boolean(),
   created_at: z.string(),
   expires_at: z.string(),
 })

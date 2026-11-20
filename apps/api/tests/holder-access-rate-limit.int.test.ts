@@ -156,6 +156,20 @@ const injectAsHolder = (
   })
 }
 
+const giveConsent = async (token: string, target: typeof app = app) => {
+  const res = await target.inject({
+    method: 'POST',
+    url: '/v1/holder-access/consent',
+    headers: {
+      'x-holder-token': token,
+      'content-type': 'application/json',
+    },
+    remoteAddress: FIXED_IP,
+    payload: JSON.stringify({ termsVersion: '1.0.0' }),
+  })
+  expect(res.statusCode).toBe(200)
+}
+
 const multipartPayload = (
   data: Uint8Array,
 ): { readonly payload: Buffer; readonly headers: Record<string, string> } => {
@@ -277,6 +291,7 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
 
   it('limite de uploads por token: 3 OK (burst), depois 429', async () => {
     const { requestId, token } = await createRequestWithToken()
+    await giveConsent(token)
 
     for (let i = 0; i < 3; i += 1) {
       const part = multipartPayload(PNG_BYTES)
@@ -312,6 +327,8 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
   it('isolamento por token: esgotar uploads de um token não bloqueia outro', async () => {
     const first = await createRequestWithToken()
     const second = await createRequestWithToken()
+    await giveConsent(first.token)
+    await giveConsent(second.token)
 
     for (let i = 0; i < 3; i += 1) {
       const part = multipartPayload(PNG_BYTES)
@@ -358,6 +375,7 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
 
   it('recupera capacidade conforme a taxa do bucket de upload', async () => {
     const { requestId, token } = await createRequestWithToken()
+    await giveConsent(token)
     // IP dedicado: não consome o bucket de IP usado pelos demais testes.
     const remoteAddress = '10.9.9.12'
     const url = '/v1/holder-access/items/address-proof/documents'

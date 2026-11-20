@@ -18,16 +18,17 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
 - **Entregues:** F0.1/F0.2; F1.1/F1.2a/F1.2b/F1.3; F2.1; F2.2a e a
   primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
   o vertical slice F3.2 pelo dashboard; F3.3 (medição de uso, cotas e
-  reconciliação); F4.2/F4.3 (intake do Holder, token de acesso público,
-  processamento de submissão e vínculo ao pipeline F1.1/F1.2/F1.3).
+  reconciliação); F4.1 (link/token seguro público, consentimento do titular,
+  upload com consent prévio, dashboard com holder e consentimento); F4.2/F4.3
+  (intake do Holder, token de acesso público, processamento de submissão e
+  vínculo ao pipeline F1.1/F1.2/F1.3).
 - **Em andamento:** F0 (checklist de produção concluído), F1 (OCR de imagem
   isolada via Tesseract 5 e pypdfium2 — substitui Marker/Surya; pendente), F2
   (expansão/hardening da cobertura fiscal) e F6 (operação/segurança).
 - **Próximo passo:** a unidade de cobrança definitiva, o tratamento comercial de
   indisponibilidade de fonte externa (hoje: não faturável, política provisória
   do ADR-0044 §3b) e as regras de faturamento continuam decisões comerciais
-  abertas. A F4.1 (link/token seguro público + consentimento do titular) inicia
-  agora como vertical slice da F4.
+  abertas.
 - **Futuro:** F4.2+ (atualização de evidência, comparação improved/unchanged/diverged,
   supersedes_validation_id), F7 (NFAg-e/outras fontes) e F8 (SSI).
   F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda

@@ -149,6 +149,8 @@ export function ValidationsPage({
                 <TableRow>
                   <TableHead>Solicitada em</TableHead>
                   <TableHead>Validação</TableHead>
+                  <TableHead>Holder</TableHead>
+                  <TableHead>Consentimento</TableHead>
                   <TableHead>Documento</TableHead>
                   <TableHead>Processamento</TableHead>
                   <TableHead>Resultado</TableHead>
@@ -180,6 +182,16 @@ export function ValidationsPage({
                         >
                           {validation.validation_id.slice(0, 8)}…
                         </button>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-muted-foreground">
+                          {validation.holder_external_reference ?? '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={validation.consent_granted ? 'success' : 'secondary'}>
+                          {validation.consent_granted ? 'Registrado' : 'Pendente'}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge variant={validation.has_customer_document ? 'info' : 'secondary'}>

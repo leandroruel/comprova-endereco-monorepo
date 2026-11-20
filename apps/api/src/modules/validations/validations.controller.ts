@@ -160,6 +160,8 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
         confidence: item.confidence,
         has_customer_document: item.hasCustomerDocument,
         document_processing: item.documentProcessing,
+        holder_external_reference: item.holderExternalReference,
+        consent_granted: item.consentGranted,
         created_at: item.createdAt.toISOString(),
         expires_at: item.expiresAt.toISOString(),
       })),
