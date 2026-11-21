@@ -1748,11 +1748,14 @@
                         "termsVersion": {
                           "type": ["string", "null"]
                         },
+                        "termsHash": {
+                          "type": ["string", "null"]
+                        },
                         "acceptedAt": {
                           "type": ["string", "null"]
                         }
                       },
-                      "required": ["granted", "termsVersion", "acceptedAt"],
+                      "required": ["granted", "termsVersion", "termsHash", "acceptedAt"],
                       "additionalProperties": false
                     },
                     "terms": {
@@ -1766,9 +1769,15 @@
                         },
                         "documentHash": {
                           "type": ["string", "null"]
+                        },
+                        "content": {
+                          "type": ["string", "null"]
+                        },
+                        "hashValid": {
+                          "type": "boolean"
                         }
                       },
-                      "required": ["version", "approved", "documentHash"],
+                      "required": ["version", "approved", "documentHash", "content", "hashValid"],
                       "additionalProperties": false
                     }
                   },
@@ -1815,11 +1824,14 @@
                     "termsVersion": {
                       "type": ["string", "null"]
                     },
+                    "termsHash": {
+                      "type": ["string", "null"]
+                    },
                     "acceptedAt": {
                       "type": ["string", "null"]
                     }
                   },
-                  "required": ["granted", "termsVersion", "acceptedAt"],
+                  "required": ["granted", "termsVersion", "termsHash", "acceptedAt"],
                   "additionalProperties": false
                 }
               }

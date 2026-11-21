@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto'
-import { createDbPool, eq, runMigrations, withTenant } from '@comprova/db'
+import { createDbPool, eq, runMigrations, sql, withTenant } from '@comprova/db'
 import * as t from '@comprova/db'
 import { sha256Of } from '@comprova/providers'
 import { createLogger, createMetrics } from '@comprova/observability'
@@ -501,6 +501,30 @@ describe('F4.1 — consentimento do Holder', () => {
     expect(res.json().code).toBe('HOLDER_TERMS_HASH_INVALID')
 
     // Nada é persistido com hash divergente.
+    expect(await consentRowsOf(requestId)).toHaveLength(0)
+    expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
+  })
+
+  it('solicitação concluída não aceita novo consentimento → 409', async () => {
+    const { requestId } = await createRequest('consent-completed')
+    const issued = await issueTokenOk(requestId)
+
+    // Conclui a solicitação diretamente no banco
+    await withTenant(appPool.db, tenantId, async (tx) => {
+      await tx
+        .update(t.holderInformationRequest)
+        .set({ state: 'completed', completedAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()` })
+        .where(eq(t.holderInformationRequest.id, requestId))
+    })
+
+    const res = await injectAsHolder('POST', '/v1/holder-access/consent', issued.token, {
+      payload: JSON.stringify({ termsVersion: '1.0.0' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('HOLDER_INFORMATION_REQUEST_STATE')
+
+    // Nada é persistido em solicitação concluída.
     expect(await consentRowsOf(requestId)).toHaveLength(0)
     expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
   })

@@ -432,6 +432,11 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       return mapAuthorize(authorized) as HolderConsentResult
     }
 
+    // Solicitações concluídas não podem receber novo consentimento.
+    if (!isMutable(authorized.state)) {
+      return { kind: 'invalid_state', state: authorized.state }
+    }
+
     // Sem conteúdo aprovado cadastrado, o aceite é bloqueado em vez de simular
     // um consentimento válido contra termos que o Holder nunca viu.
     if (
