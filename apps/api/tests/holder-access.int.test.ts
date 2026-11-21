@@ -67,7 +67,6 @@ const app = await buildApp({
     TERMS_APPROVED: 'true',
     TERMS_DOCUMENT_HASH: 'sha256:6c055ec85b30720af261de4e611e480509774189acbb6eeec4ef8f784250220a',
     TERMS_DOCUMENT_CONTENT: 'Conteúdo de termos de teste para comprovação de endereço.',
-    TERMS_DOCUMENT_CONTENT: 'Conteúdo de termos de teste para comprovação de endereço.',
     WORKER_LOOPS: false,
   },
   db: appPool.db,
