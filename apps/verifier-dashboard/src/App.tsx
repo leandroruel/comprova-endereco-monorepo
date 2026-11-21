@@ -11,6 +11,8 @@ import { MembersPage } from '@/pages/members'
 import { IntegrationsPage } from '@/pages/integrations'
 import { ValidationsPage } from '@/pages/validations'
 import { ValidationDetailPage } from '@/pages/validation-detail'
+import { HolderAccessPage } from '@/pages/HolderAccess'
+import { consumeHolderTokenFromLocation, isHolderAccessPath } from '@/lib/holder-access-url'
 
 type Route =
   'login' | 'onboarding' | 'dashboard' | 'members' | 'integrations' | 'validations' | 'validation-detail'
@@ -24,7 +26,26 @@ const queryClient = new QueryClient({
   },
 })
 
+/**
+ * A rota pública do Holder é resolvida fora do shell autenticado do Verifier.
+ * O token é capturado e removido da URL antes de qualquer renderização,
+ * sem depender de login, sessão, organização ativa ou API key.
+ */
+const holderAccessRoute = typeof window !== 'undefined' && isHolderAccessPath(window.location.pathname)
+const holderAccessToken = holderAccessRoute ? consumeHolderTokenFromLocation() : null
+
 export default function App() {
+  if (holderAccessRoute) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <HolderAccessPage token={holderAccessToken} />
+      </QueryClientProvider>
+    )
+  }
+  return <AuthedApp />
+}
+
+function AuthedApp() {
   const [route, setRoute] = useState<Route>('login')
   const [user, setUser] = useState<{
     id: string

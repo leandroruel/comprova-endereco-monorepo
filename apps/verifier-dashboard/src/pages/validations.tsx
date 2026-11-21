@@ -18,9 +18,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui'
-import { statusLabel, validationUiBadge } from '@/pages/validations-state'
+import { holderProcessingLabel, holderRequestUiBadge, validationUiBadge } from '@/pages/validations-state'
 
 const PAGE_SIZE = 20
+
+const formatDate = (value: string | null): string => {
+  if (value === null) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(date)
+}
 
 interface ValidationsPageProps {
   activeOrgId: string | null
@@ -149,7 +156,10 @@ export function ValidationsPage({
                 <TableRow>
                   <TableHead>Solicitada em</TableHead>
                   <TableHead>Validação</TableHead>
-                  <TableHead>Documento</TableHead>
+                  <TableHead>Holder</TableHead>
+                  <TableHead>Solicitação</TableHead>
+                  <TableHead>Consentimento</TableHead>
+                  <TableHead>Documentos</TableHead>
                   <TableHead>Processamento</TableHead>
                   <TableHead>Resultado</TableHead>
                 </TableRow>
@@ -165,11 +175,19 @@ export function ValidationsPage({
                     // processamento" na listagem.
                     progressStatus: validation.document_processing ? 'in_progress' : null,
                   })
+                  // Solicitação real do Holder (`holder_information_request`):
+                  // estados e datas vêm do banco, nunca inferidos no frontend.
+                  const holderBadge = holderRequestUiBadge({
+                    requestState: validation.holder_request_state,
+                    consentGranted: validation.consent_granted,
+                    documentsReceived: validation.holder_documents_received,
+                    documentProcessingState: validation.holder_document_processing_state,
+                  })
                   return (
                     <TableRow key={validation.validation_id}>
                       <TableCell>
                         <span className="text-sm text-muted-foreground">
-                          {new Date(validation.created_at).toLocaleString('pt-BR')}
+                          {formatDate(validation.created_at)}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -182,13 +200,41 @@ export function ValidationsPage({
                         </button>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={validation.has_customer_document ? 'info' : 'secondary'}>
-                          {validation.has_customer_document ? 'Recebido' : 'Aguardando'}
+                        <span className="text-sm text-muted-foreground">
+                          {validation.holder_external_reference ?? '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <Badge variant={holderBadge.variant}>{holderBadge.label}</Badge>
+                          <p className="text-[11px] text-muted-foreground">
+                            Criada {formatDate(validation.holder_request_created_at)}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Expira {formatDate(validation.holder_request_expires_at)}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <Badge variant={validation.consent_granted ? 'success' : 'secondary'}>
+                            {validation.consent_granted ? 'Registrado' : 'Pendente'}
+                          </Badge>
+                          {validation.holder_consent_accepted_at !== null ? (
+                            <p className="text-[11px] text-muted-foreground">
+                              {formatDate(validation.holder_consent_accepted_at)}
+                            </p>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={validation.holder_documents_received ? 'info' : 'secondary'}>
+                          {validation.holder_documents_received ? 'Recebido' : 'Aguardando'}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <span className="text-sm text-muted-foreground">
-                          {statusLabel(validation.status as never)}
+                          {holderProcessingLabel(validation.holder_document_processing_state)}
                         </span>
                       </TableCell>
                       <TableCell>

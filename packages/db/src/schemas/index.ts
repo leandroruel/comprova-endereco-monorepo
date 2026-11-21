@@ -38,6 +38,7 @@ import { holderAccessToken } from './holder-access-token.js'
 import { holderItemResponse } from './holder-item-response.js'
 import { holderInformationRequestDocument } from './holder-information-request-document.js'
 import { holderSubmissionProcessing } from './holder-submission-processing.js'
+import { holderConsent } from './holder-consent.js'
 import { kycProcess, kycEvent } from './kyc.js'
 export * from './enums.js'
 export * from './holder-submission-processing.js'
@@ -66,6 +67,7 @@ export * from './holder-information-request-event.js'
 export * from './holder-access-token.js'
 export * from './holder-item-response.js'
 export * from './holder-information-request-document.js'
+export * from './holder-consent.js'
 export * from './kyc.js'
 
 /**
@@ -127,6 +129,7 @@ export const schema = {
   holderItemResponse,
   holderInformationRequestDocument,
   holderSubmissionProcessing,
+  holderConsent,
   kycProcess,
   kycEvent,
   batch,

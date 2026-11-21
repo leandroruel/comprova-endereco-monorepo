@@ -17,6 +17,10 @@ const queryClient = new QueryClient({
 })
 
 export default function App() {
+  return <AuthedApp />
+}
+
+function AuthedApp() {
   const [page, setPage] = useState('home')
   const { data: session, isPending } = authClient.useSession()
   const user: SessionUser | undefined = session?.user

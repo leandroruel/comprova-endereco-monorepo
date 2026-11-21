@@ -3,8 +3,10 @@ import * as t from '@comprova/db'
 import type {
   HolderAccessItem,
   HolderAccessRequest,
+  HolderConsentStatus,
   HolderInformationRequestItem,
   HolderInformationRequestState,
+  HolderTerms,
 } from '@comprova/contracts'
 import type { Logger, Metrics } from '@comprova/observability'
 import { sha256Of, type ObjectStore } from '@comprova/providers'
@@ -43,6 +45,7 @@ export type HolderAccessResult =
   | { readonly kind: 'not_found' }
   | { readonly kind: 'expired' }
   | { readonly kind: 'cancelled' }
+  | { readonly kind: 'consent_required' }
   | { readonly kind: 'invalid_state'; readonly state: HolderInformationRequestState }
   | { readonly kind: 'item_not_found'; readonly itemId: string }
   | { readonly kind: 'invalid_item'; readonly itemId: string; readonly reason: string }
@@ -56,6 +59,18 @@ export type HolderAccessResult =
 
 export type HolderDeleteDocumentResult = HolderAccessResult | { readonly kind: 'deleted' }
 
+/** Resultado do registro de consentimento. */
+export type HolderConsentResult =
+  | { readonly kind: 'ok'; readonly consent: HolderConsentStatus }
+  | { readonly kind: 'not_found' }
+  | { readonly kind: 'expired' }
+  | { readonly kind: 'cancelled' }
+  | { readonly kind: 'invalid_state'; readonly state: HolderInformationRequestState }
+  | { readonly kind: 'terms_not_approved' }
+  | { readonly kind: 'terms_hash_invalid' }
+  | { readonly kind: 'terms_version_mismatch' }
+  | { readonly kind: 'already_consented'; readonly consent: HolderConsentStatus }
+
 export interface HolderAccessDeps {
   readonly db: Db
   readonly store: ObjectStore
@@ -63,6 +78,11 @@ export interface HolderAccessDeps {
   readonly logger: Logger
   readonly metrics?: Metrics
   readonly maxDocumentBytes: number
+  /**
+   * Versão vigente dos termos definida pelo servidor (mesma fonte do
+   * onboarding: `TERMS_VERSION`, `TERMS_APPROVED`, `TERMS_DOCUMENT_HASH`).
+   */
+  readonly terms: HolderTerms
 }
 
 const MUTABLE_STATES: ReadonlySet<HolderInformationRequestState> = new Set(['pending', 'in_progress'])
@@ -185,6 +205,7 @@ const loadView = async (
   tenantId: string,
   request: HolderInformationRequestRow,
   state: HolderInformationRequestState,
+  terms: HolderTerms,
 ): Promise<HolderAccessRequest> => {
   const responses = await tx
     .select({
@@ -219,6 +240,38 @@ const loadView = async (
     )
     .orderBy(t.holderInformationRequestDocument.createdAt)
 
+  const consentRow = await tx
+    .select({
+      termsVersion: t.holderConsent.termsVersion,
+      termsHash: t.holderConsent.termsHash,
+      acceptedAt: t.holderConsent.acceptedAt,
+      state: t.holderConsent.state,
+    })
+    .from(t.holderConsent)
+    .where(
+      and(eq(t.holderConsent.tenantId, tenantId), eq(t.holderConsent.holderInformationRequestId, request.id)),
+    )
+    .limit(1)
+
+  const consent: HolderConsentStatus = {
+    granted: consentRow.length > 0 && consentRow[0]!.state === 'granted',
+    termsVersion: consentRow.length > 0 ? consentRow[0]!.termsVersion : null,
+    termsHash: consentRow.length > 0 ? (consentRow[0]!.termsHash ?? null) : null,
+    acceptedAt: consentRow.length > 0 ? (consentRow[0]!.acceptedAt?.toISOString() ?? null) : null,
+  }
+
+  const hasStoredDocuments = documents.length > 0
+
+  const status = ((): string => {
+    if (state === 'cancelled') return 'encerrada'
+    if (state === 'expired') return 'expirada'
+    if (state === 'completed') return 'concluída'
+    if (state === 'in_progress') return 'processando'
+    if (!consent.granted) return 'aguardando_consentimento'
+    if (!hasStoredDocuments) return 'aguardando_documentos'
+    return 'documento_recebido'
+  })()
+
   const valueByItem = new Map(responses.map((row) => [row.itemId, row.value]))
   const documentsByItem = new Map<string, HolderAccessItem['documents']>()
   for (const document of documents) {
@@ -247,6 +300,9 @@ const loadView = async (
     type: request.type,
     purpose: request.purpose,
     state,
+    status,
+    consent,
+    terms,
     expiresAt: request.expiresAt?.toISOString() ?? null,
     completedAt: request.completedAt?.toISOString() ?? null,
     items,
@@ -257,9 +313,10 @@ const toViewResult = async (
   tx: DbTx,
   context: HolderTokenContext,
   authorized: Authorized,
+  terms: HolderTerms,
 ): Promise<HolderAccessResult> => ({
   kind: 'ok',
-  view: await loadView(tx, context.tenantId, authorized.request, authorized.state),
+  view: await loadView(tx, context.tenantId, authorized.request, authorized.state, terms),
 })
 
 const mapAuthorize = (outcome: AuthorizeOutcome): HolderAccessResult | null => {
@@ -289,7 +346,7 @@ const findItem = (
  * transação tenant-scoped e revalida a associação antes de ler ou escrever.
  */
 export const makeHolderAccessService = (deps: HolderAccessDeps) => {
-  const { db, store, pepper, logger, metrics } = deps
+  const { db, store, pepper, logger, metrics, terms } = deps
 
   const logError = (operation: string, tenantId: string | null, error: unknown): void => {
     logger.error(
@@ -327,7 +384,174 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       if (authorized.kind !== 'ok') {
         return mapAuthorize(authorized) as HolderAccessResult
       }
-      return toViewResult(tx, context, authorized)
+      return toViewResult(tx, context, authorized, terms)
+    })
+
+  /**
+   * Verifica se já existe um consentimento concedido para a solicitação.
+   * Executado dentro de uma transação já com tenant configurado.
+   */
+  const hasConsentInTx = async (tx: DbTx, tenantId: string, requestId: string): Promise<boolean> => {
+    const [row] = await tx
+      .select({ id: t.holderConsent.id })
+      .from(t.holderConsent)
+      .where(
+        and(
+          eq(t.holderConsent.tenantId, tenantId),
+          eq(t.holderConsent.holderInformationRequestId, requestId),
+          eq(t.holderConsent.state, 'granted'),
+        ),
+      )
+      .limit(1)
+    return row !== undefined
+  }
+
+  const hasConsent = async (context: HolderTokenContext): Promise<boolean> =>
+    withTenant(db, context.tenantId, async (tx) => {
+      const authorized = await authorizeInTx(tx, context, 'holder-consent-check')
+      if (authorized.kind !== 'ok') return false
+      return hasConsentInTx(tx, context.tenantId, context.requestId)
+    })
+
+  /**
+   * Registra o consentimento do Holder para a solicitação. O aceite é
+   * explícito e idempotente: um segundo aceite para a mesma solicitação
+   * retorna o consentimento existente sem criar duplicidade.
+   *
+   * Executado dentro de uma transação já com tenant configurado e com o lock
+   * da solicitação já adquirido (mesma ordem: solicitação → consentimento).
+   */
+  const registerConsentInTx = async (
+    tx: DbTx,
+    context: HolderTokenContext,
+    actor: string,
+    termsVersion: string,
+  ): Promise<HolderConsentResult> => {
+    const authorized = await authorizeInTx(tx, context, actor)
+    if (authorized.kind !== 'ok') {
+      return mapAuthorize(authorized) as HolderConsentResult
+    }
+
+    // Solicitações concluídas não podem receber novo consentimento.
+    if (!isMutable(authorized.state)) {
+      return { kind: 'invalid_state', state: authorized.state }
+    }
+
+    // Sem conteúdo aprovado cadastrado, o aceite é bloqueado em vez de simular
+    // um consentimento válido contra termos que o Holder nunca viu.
+    if (
+      terms.version === null ||
+      !terms.approved ||
+      terms.documentHash === null ||
+      terms.content === null ||
+      terms.content.trim().length === 0
+    ) {
+      return { kind: 'terms_not_approved' }
+    }
+    // A integridade do conteúdo é confirmada comparando o SHA-256 do
+    // conteúdo com o hash configurado (hashValid calculado no app.ts).
+    if (!terms.hashValid) {
+      return { kind: 'terms_hash_invalid' }
+    }
+    if (termsVersion !== terms.version) {
+      return { kind: 'terms_version_mismatch' }
+    }
+
+    const existing = await hasConsentInTx(tx, context.tenantId, context.requestId)
+    if (existing) {
+      const [consentRow] = await tx
+        .select({
+          termsVersion: t.holderConsent.termsVersion,
+          termsHash: t.holderConsent.termsHash,
+          acceptedAt: t.holderConsent.acceptedAt,
+          state: t.holderConsent.state,
+        })
+        .from(t.holderConsent)
+        .where(
+          and(
+            eq(t.holderConsent.tenantId, context.tenantId),
+            eq(t.holderConsent.holderInformationRequestId, context.requestId),
+            eq(t.holderConsent.state, 'granted'),
+          ),
+        )
+        .limit(1)
+      return {
+        kind: 'already_consented',
+        consent: {
+          granted: true,
+          termsVersion: consentRow?.termsVersion ?? null,
+          termsHash: consentRow?.termsHash ?? null,
+          acceptedAt: consentRow?.acceptedAt?.toISOString() ?? null,
+        },
+      }
+    }
+
+    const consentId = randomUUID()
+    await tx.insert(t.holderConsent).values({
+      id: consentId,
+      tenantId: context.tenantId,
+      holderInformationRequestId: context.requestId,
+      termsVersion: terms.version,
+      termsHash: terms.documentHash,
+      state: 'granted',
+      acceptedAt: sql`clock_timestamp()`,
+    })
+
+    await insertHolderInformationRequestEvent(tx, context.tenantId, {
+      holderInformationRequestId: context.requestId,
+      eventType: 'holder_consent_granted',
+      fromState: authorized.state,
+      toState: authorized.state,
+      actor,
+      details: JSON.stringify({ consentId, termsVersion: terms.version }),
+    })
+
+    return {
+      kind: 'ok',
+      consent: {
+        granted: true,
+        termsVersion: terms.version,
+        termsHash: terms.documentHash,
+        acceptedAt: null, // preenchido pelo caller após leitura do relógio, se necessário
+      },
+    }
+  }
+
+  const registerConsent = async (
+    context: HolderTokenContext,
+    actor: string,
+    termsVersion: string,
+  ): Promise<HolderConsentResult> =>
+    withTenant(db, context.tenantId, async (tx) => {
+      const result = await registerConsentInTx(tx, context, actor, termsVersion)
+      if (result.kind === 'terms_hash_invalid') return result
+      if (result.kind !== 'ok') return result
+
+      // Ler o accepted_at do recém-inserido (relógio do banco).
+      const [row] = await tx
+        .select({
+          acceptedAt: t.holderConsent.acceptedAt,
+          termsHash: t.holderConsent.termsHash,
+        })
+        .from(t.holderConsent)
+        .where(
+          and(
+            eq(t.holderConsent.tenantId, context.tenantId),
+            eq(t.holderConsent.holderInformationRequestId, context.requestId),
+            eq(t.holderConsent.state, 'granted'),
+          ),
+        )
+        .limit(1)
+
+      return {
+        kind: 'ok',
+        consent: {
+          granted: true,
+          termsVersion: result.consent.termsVersion,
+          termsHash: row?.termsHash ?? result.consent.termsHash,
+          acceptedAt: row?.acceptedAt?.toISOString() ?? null,
+        },
+      }
     })
 
   const saveItem = async (
@@ -381,7 +605,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         details: JSON.stringify({ itemId }),
       })
 
-      return toViewResult(tx, context, authorized)
+      return toViewResult(tx, context, authorized, terms)
     })
   }
 
@@ -413,6 +637,12 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       }
       if (!isMutable(authorized.state)) {
         return { kind: 'invalid_state', state: authorized.state } as HolderAccessResult
+      }
+
+      // Consentimento é pré-requisito para upload de documentos.
+      const consented = await hasConsentInTx(tx, context.tenantId, context.requestId)
+      if (!consented) {
+        return { kind: 'consent_required' } as HolderAccessResult
       }
 
       const item = findItem(authorized.request, itemId)
@@ -510,7 +740,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         metrics?.holderDocumentUploads.inc({ outcome: 'stored' })
         return {
           kind: 'done',
-          result: await toViewResult(tx, context, authorized),
+          result: await toViewResult(tx, context, authorized, terms),
         } as const
       })
 
@@ -968,7 +1198,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
 
       if (authorized.state === 'completed') {
         // Idempotente: um novo submit não cria um segundo evento terminal.
-        return toViewResult(tx, context, authorized)
+        return toViewResult(tx, context, authorized, terms)
       }
       if (!isMutable(authorized.state)) {
         return { kind: 'invalid_state', state: authorized.state }
@@ -1048,7 +1278,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         if (reloadedState === 'completed') {
           return {
             kind: 'ok',
-            view: await loadView(tx, context.tenantId, reloaded, reloadedState),
+            view: await loadView(tx, context.tenantId, reloaded, reloadedState, terms),
           }
         }
         return { kind: 'invalid_state', state: reloadedState }
@@ -1078,7 +1308,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
 
       return {
         kind: 'ok',
-        view: await loadView(tx, context.tenantId, completed, 'completed'),
+        view: await loadView(tx, context.tenantId, completed, 'completed', terms),
       }
     })
 
@@ -1089,6 +1319,8 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
     uploadDocument,
     deleteDocument,
     submit,
+    registerConsent,
+    hasConsent,
     logError,
   }
 }

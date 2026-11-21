@@ -43,6 +43,10 @@ const appConfig = {
   HOST: '127.0.0.1',
   LOG_LEVEL: 'silent',
   POLICY_VERSION: '2026.11.1',
+  TERMS_VERSION: '1.0.0',
+  TERMS_APPROVED: 'true',
+  TERMS_DOCUMENT_HASH: 'sha256:6c055ec85b30720af261de4e611e480509774189acbb6eeec4ef8f784250220a',
+  TERMS_DOCUMENT_CONTENT: 'Conteúdo de termos de teste para comprovação de endereço.',
   WORKER_LOOPS: false,
 } as const
 
@@ -154,6 +158,20 @@ const injectAsHolder = (
     remoteAddress: extra?.remoteAddress ?? FIXED_IP,
     ...(extra?.payload ? { payload: extra.payload } : {}),
   })
+}
+
+const giveConsent = async (token: string, target: typeof app = app) => {
+  const res = await target.inject({
+    method: 'POST',
+    url: '/v1/holder-access/consent',
+    headers: {
+      'x-holder-token': token,
+      'content-type': 'application/json',
+    },
+    remoteAddress: FIXED_IP,
+    payload: JSON.stringify({ termsVersion: '1.0.0' }),
+  })
+  expect(res.statusCode).toBe(200)
 }
 
 const multipartPayload = (
@@ -277,6 +295,7 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
 
   it('limite de uploads por token: 3 OK (burst), depois 429', async () => {
     const { requestId, token } = await createRequestWithToken()
+    await giveConsent(token)
 
     for (let i = 0; i < 3; i += 1) {
       const part = multipartPayload(PNG_BYTES)
@@ -312,6 +331,8 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
   it('isolamento por token: esgotar uploads de um token não bloqueia outro', async () => {
     const first = await createRequestWithToken()
     const second = await createRequestWithToken()
+    await giveConsent(first.token)
+    await giveConsent(second.token)
 
     for (let i = 0; i < 3; i += 1) {
       const part = multipartPayload(PNG_BYTES)
@@ -358,6 +379,7 @@ describe('F4.2 — rate limiting do acesso do Holder', () => {
 
   it('recupera capacidade conforme a taxa do bucket de upload', async () => {
     const { requestId, token } = await createRequestWithToken()
+    await giveConsent(token)
     // IP dedicado: não consome o bucket de IP usado pelos demais testes.
     const remoteAddress = '10.9.9.12'
     const url = '/v1/holder-access/items/address-proof/documents'

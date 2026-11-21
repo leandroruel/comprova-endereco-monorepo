@@ -169,6 +169,15 @@ const LIST_ITEM_KEYS = [
   'confidence',
   'has_customer_document',
   'document_processing',
+  'holder_external_reference',
+  'consent_granted',
+  'holder_request_id',
+  'holder_request_state',
+  'holder_request_created_at',
+  'holder_request_expires_at',
+  'holder_consent_accepted_at',
+  'holder_documents_received',
+  'holder_document_processing_state',
   'created_at',
   'expires_at',
 ].sort()
@@ -217,6 +226,139 @@ describe('GET /v1/validations (PR #74)', () => {
     expect(byId.get(failedValidation)?.status).toBe('failed')
   })
 
+  it('reporta dados reais da solicitação do Holder (estado, datas, consentimento, documentos e processamento)', async () => {
+    // Duas validações no tenant principal.
+    const valWithConsent = await createValidation(adminPool.db, tenantMain, subjectMain, {
+      status: 'running',
+    })
+    const valWithoutConsent = await createValidation(adminPool.db, tenantMain, subjectMain, {
+      status: 'running',
+    })
+
+    // Holder do tenant principal.
+    const holderId = randomUUID()
+    await adminPool.db.insert(t.holder).values({
+      holderId,
+      tenantId: tenantMain,
+      externalReference: 'holder-external-ref',
+      name: 'Titular Teste',
+      documentHash: '0000000000000000000000000000000000000000000000000000000000000000',
+      documentType: 'CPF',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const requestId = randomUUID()
+    const requestCreatedAt = new Date('2026-11-01T12:00:00.000Z')
+    const requestExpiresAt = new Date('2026-11-10T12:00:00.000Z')
+    const consentAcceptedAt = new Date('2026-11-02T09:30:00.000Z')
+
+    // Solicitação concluída, com consentimento, documento armazenado e
+    // processamento documental já concluído.
+    await adminPool.db.insert(t.holderInformationRequest).values({
+      id: requestId,
+      tenantId: tenantMain,
+      holderId,
+      type: 'documento_complementar',
+      purpose: 'Comprovante',
+      items: [],
+      state: 'completed',
+      validationId: valWithConsent,
+      createdBy: 'system',
+      createdAt: requestCreatedAt,
+      updatedAt: requestCreatedAt,
+      expiresAt: requestExpiresAt,
+      completedAt: consentAcceptedAt,
+    })
+
+    // Segunda solicitação expirada, sem consentimento nem documento.
+    await adminPool.db.insert(t.holderInformationRequest).values({
+      id: randomUUID(),
+      tenantId: tenantMain,
+      holderId,
+      type: 'documento_complementar',
+      purpose: 'Comprovante',
+      items: [],
+      state: 'expired',
+      validationId: valWithoutConsent,
+      createdBy: 'system',
+      createdAt: requestCreatedAt,
+      updatedAt: requestCreatedAt,
+      expiresAt: requestExpiresAt,
+    })
+
+    await adminPool.db.insert(t.holderConsent).values({
+      id: randomUUID(),
+      tenantId: tenantMain,
+      holderInformationRequestId: requestId,
+      termsVersion: '1.0.0',
+      state: 'granted',
+      acceptedAt: consentAcceptedAt,
+      createdAt: consentAcceptedAt,
+    })
+
+    const documentId = randomUUID()
+    await adminPool.db.insert(t.holderInformationRequestDocument).values({
+      documentId,
+      tenantId: tenantMain,
+      holderInformationRequestId: requestId,
+      itemId: 'address-proof',
+      uploadState: 'stored',
+      storageKey: `tenants/${tenantMain}/holder-requests/${requestId}/${documentId}`,
+      contentType: 'application/pdf',
+      sizeBytes: 3,
+      sha256: randomBytes(32),
+      originalFilename: 'comprovante.pdf',
+    })
+
+    await adminPool.db.insert(t.holderSubmissionProcessing).values({
+      processingId: randomUUID(),
+      tenantId: tenantMain,
+      holderInformationRequestId: requestId,
+      state: 'processed',
+      attempts: 1,
+      processedAt: consentAcceptedAt,
+    })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/validations',
+      headers: { Authorization: `Bearer ${keyMain}` },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as {
+      validations: Record<string, unknown>[]
+      total: number
+    }
+    const byId = new Map(body.validations.map((v) => [v.validation_id as string, v]))
+
+    const withConsent = byId.get(valWithConsent)!
+    expect(withConsent.holder_external_reference).toBe('holder-external-ref')
+    expect(withConsent.consent_granted).toBe(true)
+    expect(withConsent.holder_request_id).toBe(requestId)
+    expect(withConsent.holder_request_state).toBe('completed')
+    expect(withConsent.holder_request_created_at).toBe(requestCreatedAt.toISOString())
+    expect(withConsent.holder_request_expires_at).toBe(requestExpiresAt.toISOString())
+    expect(withConsent.holder_consent_accepted_at).toBe(consentAcceptedAt.toISOString())
+    expect(withConsent.holder_documents_received).toBe(true)
+    expect(withConsent.holder_document_processing_state).toBe('processed')
+
+    // A solicitação expirada é exibida como expirada — nunca como concluída.
+    const withoutConsent = byId.get(valWithoutConsent)!
+    expect(withoutConsent.holder_external_reference).toBe('holder-external-ref')
+    expect(withoutConsent.consent_granted).toBe(false)
+    expect(withoutConsent.holder_request_state).toBe('expired')
+    expect(withoutConsent.holder_consent_accepted_at).toBeNull()
+    expect(withoutConsent.holder_documents_received).toBe(false)
+    expect(withoutConsent.holder_document_processing_state).toBeNull()
+
+    // Nenhum segredo/identificador interno na listagem.
+    const serialized = JSON.stringify(body)
+    expect(serialized).not.toMatch(/storage_key|storageKey|sha256|document_hash|holder_id/)
+    expect(withConsent).not.toHaveProperty('holder_id')
+    expect(withConsent).not.toHaveProperty('token')
+  })
+
   it('pagina com limit/offset e ordenação estável por criação desc', async () => {
     const page1 = await app.inject({
       method: 'GET',
@@ -230,7 +372,8 @@ describe('GET /v1/validations (PR #74)', () => {
       limit: number
       offset: number
     }
-    expect(body1.total).toBe(mainValidationIds.length + 1)
+    // 5 validações principais + 1 com documento + 2 do teste de consentimento.
+    expect(body1.total).toBe(mainValidationIds.length + 3)
     expect(body1.validations).toHaveLength(2)
     expect(body1.limit).toBe(2)
     expect(body1.offset).toBe(0)

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { PROBLEM_CONTENT_TYPE, problem } from '@comprova/contracts'
 import { makeT0Checkers } from '@comprova/checkers'
 import { systemClock } from '@comprova/core'
@@ -363,6 +363,25 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       const termsVersion = deps.config.TERMS_VERSION ?? null
       const termsApproved = deps.config.TERMS_APPROVED === 'true'
       const termsDocumentHash = deps.config.TERMS_DOCUMENT_HASH ?? null
+      const termsDocumentContent = deps.config.TERMS_DOCUMENT_CONTENT ?? null
+
+      // Calcula o SHA-256 do conteúdo dos termos e compara com o hash
+      // configurado. A integridade é revalidada no momento do aceite para
+      // evitar que conteúdo alterado seja aceito sem o hash correspondente.
+      let termsHashValid = false
+      if (
+        termsDocumentContent !== null &&
+        termsDocumentContent.trim().length > 0 &&
+        termsDocumentHash !== null &&
+        termsDocumentHash.trim().length > 0
+      ) {
+        const calculatedHash = createHash('sha256').update(termsDocumentContent, 'utf8').digest('hex')
+        // Remove o prefixo "sha256:" do hash configurado, se presente, para
+        // permitir comparação direta com o hash calculado.
+        const configuredHash = termsDocumentHash.replace(/^sha256:/i, '')
+        termsHashValid = calculatedHash === configuredHash
+      }
+
       registerOrganizationsRoutes(v1, {
         db: deps.db,
         termsVersion,
@@ -390,6 +409,13 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
           logger: deps.logger,
           metrics: deps.metrics,
           maxDocumentBytes: evidenceMaxBytes,
+          terms: {
+            version: termsVersion,
+            approved: termsApproved,
+            documentHash: termsDocumentHash,
+            content: termsDocumentContent,
+            hashValid: termsHashValid,
+          },
           processingService: makeHolderSubmissionProcessingService({
             db: deps.db,
             store: objectStore,

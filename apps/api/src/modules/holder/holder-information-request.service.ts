@@ -261,7 +261,6 @@ export const makeHolderInformationRequestService = (deps: {
     // PR 1: verificação e inserção em uma única transação com lock na validation
     // para impedir exclusão concorrente durante a associação.
     const [inserted, tokenResult] = await withTenant(db, tenantId, async (tx) => {
-
       if (create.validationId !== undefined && create.validationId !== null) {
         const validationId = create.validationId
 

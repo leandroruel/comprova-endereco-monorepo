@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado + OpenAPI com summaries e descrições em português para o Scalar + fluxo do titular F4.2/F4.3 (intake, token público, processamento, vínculo à Validation) entregue + P0 de prontidão para produção concluído** (2026-11-19)
+Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entregue (PR #63) + Vertical slice end-to-end testável pelo dashboard (F3) + força de evidência fiscal na policy (F3.1) + integração da evidência fiscal ao assessment (F2.2b) + consulta NF3e real SVRS/RS+SP (F2.2b) + extração física do QR (F2.2b) + normalização da referência fiscal (F2.2a) + contrato fiscal e materialização (F2.1) + verificação do documento enviado (F1.3) + intake/análise do comprovante (F1.1/F1.2) + guarda de fetch externo (F0.2) + artefato tenant-scoped (F0.1) + credencial com KMS + roadmap canônico sincronizado + OpenAPI com summaries e descrições em português para o Scalar + fluxo do titular F4.1/F4.2/F4.3 (link/token público, consentimento, upload, processamento, vínculo à Validation) entregue + P0 de prontidão para produção concluído** (2026-11-20)
 
 ## Últimas entregas integradas
 
@@ -20,10 +20,19 @@ Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entreg
 | Configuração de produção | `.env.example` completo; segredos fora do git         | Concluído (VITE_API_KEY = item F6) |
 | Observabilidade mínima   | Métricas Prometheus + redação de PII                  | Concluído                          |
 
-### Fluxo do titular F4 (2026-11-19)
+### Fluxo do titular F4 (2026-11-20)
 
 - **F4.2/F4.3 já entregues:** `holder-information-request` (criação/listagem/cancelamento), `holder-access` (token opaco `hlt_`, view, saveItem, uploadDocument, deleteDocument, submit), `holder-token` (geração/hash com pepper), `holder-submission-processing` (worker que vincula ao pipeline F1.1/F1.2/F1.3), migrations `0057`/`0062`/`0066`/`0067`
-- **F4.1 iniciando:** link/token público para o titular, consentimento, integração com Validation original
+- **F4.1 totalmente entregue (PR #83):**
+  - Interface pública do Holder em `/holder/:token` no `apps/verifier-dashboard`: rota independente do shell autenticado, captura e remoção do token da URL, `X-Holder-Token` apenas em memória, `no-store`/`no-referrer`, sem `localStorage`/`sessionStorage`
+  - Consentimento validado server-side: `POST /v1/holder-access/consent` compara `termsVersion` contra `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`; versão divergente, conteúdo não aprovado ou hash SHA-256 divergente rejeitados com erro de domínio (`HOLDER_TERMS_VERSION_MISMATCH`, `HOLDER_TERMS_NOT_APPROVED`, `HOLDER_TERMS_HASH_INVALID`); versão e hash persistidos são sempre os do servidor
+  - O backend calcula SHA-256 de `TERMS_DOCUMENT_CONTENT` (UTF-8) e compara com `TERMS_DOCUMENT_HASH` no boot e no momento do aceite; se houver divergência, os termos são considerados indisponíveis
+  - O consentimento persistido registra `termsHash` (SHA-256 do conteúdo aceito) para rastreabilidade; idempotência preservada (segundo aceite retorna o registro original sem alterar versão nem hash)
+  - Upload de documentos apenas após consentimento válido; pipeline existente (F1.1/F1.2/F1.3) reutilizado sem alterações
+  - Acompanhamento de processamento via polling no endpoint existente (`/v1/holder-access/items/:requestId/processing`)
+  - Dashboard do Verifier exibe dados reais de `holder_information_request` na listagem de validações: estado, criação, expiração, consentimento, documentos recebidos e estado do processamento; sem token/hash/segredos
+  - Testes: API Node (consentimento, listagem, acesso, rate limit, integridade de hash), browser (página pública do Holder), node (estado da solicitação no dashboard)
+  - **Dependência de produto:** o aceite só é liberado quando o conteúdo jurídico dos termos estiver aprovado e cadastrado (`content` não nulo e `hashValid` true). Enquanto o conteúdo ou hash não estiverem configurados corretamente, o consentimento permanece bloqueado e o fluxo não está operacionalmente habilitado. Não há segunda fonte de configuração; reutiliza `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`/`TERMS_DOCUMENT_CONTENT` existentes.
 
 ## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
 

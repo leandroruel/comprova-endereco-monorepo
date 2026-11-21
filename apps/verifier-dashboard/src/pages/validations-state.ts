@@ -175,6 +175,73 @@ export const dimensionBadge = (outcome: DimensionOutcome): { label: string; vari
 }
 
 /**
+ * Estado da solicitação do Holder (`holder_information_request`) para a
+ * listagem do Verifier.
+ *
+ * Fonte: colunas reais da solicitação + consentimento + documentos +
+ * `holder_submission_processing`. Nenhum estado é inventado: estados expirados,
+ * cancelados e concluídos são exibidos como tais, e o processamento documental
+ * é distinto do estado da solicitação.
+ */
+export type HolderRequestState = 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'expired'
+export type HolderDocumentProcessingState = 'awaiting' | 'processing' | 'processed' | 'partial' | 'failed'
+
+export interface HolderRequestUiInput {
+  readonly requestState: HolderRequestState | null
+  readonly consentGranted: boolean
+  readonly documentsReceived: boolean
+  readonly documentProcessingState?: HolderDocumentProcessingState | null
+}
+
+export interface HolderRequestUiBadge {
+  readonly label: string
+  readonly variant: BadgeVariant
+}
+
+export const holderRequestUiBadge = (input: HolderRequestUiInput): HolderRequestUiBadge => {
+  const processing = input.documentProcessingState ?? null
+  switch (input.requestState) {
+    case 'expired':
+      return { label: 'Expirada', variant: 'outline' }
+    case 'cancelled':
+      return { label: 'Cancelada', variant: 'outline' }
+    case 'completed':
+      if (processing === 'processing' || processing === 'awaiting') {
+        return { label: 'Processando envio', variant: 'warning' }
+      }
+      if (processing === 'processed') return { label: 'Processado', variant: 'success' }
+      if (processing === 'partial') return { label: 'Processamento parcial', variant: 'warning' }
+      if (processing === 'failed') return { label: 'Falha no processamento', variant: 'destructive' }
+      return { label: 'Enviada', variant: 'info' }
+    case 'pending':
+    case 'in_progress':
+      if (!input.consentGranted) return { label: 'Aguardando consentimento', variant: 'secondary' }
+      if (!input.documentsReceived) return { label: 'Aguardando documentos', variant: 'secondary' }
+      return { label: 'Documentos recebidos', variant: 'info' }
+    case null:
+      return { label: 'Sem solicitação', variant: 'outline' }
+  }
+}
+
+/** Rótulo do processamento documental quando a solicitação já foi enviada. */
+export const holderProcessingLabel = (state: HolderDocumentProcessingState | null): string => {
+  switch (state) {
+    case 'awaiting':
+      return 'Aguardando processamento'
+    case 'processing':
+      return 'Em processamento'
+    case 'processed':
+      return 'Processado'
+    case 'partial':
+      return 'Parcial'
+    case 'failed':
+      return 'Falhou'
+    case null:
+      return '—'
+  }
+}
+
+/**
  * Indica se o detalhe deve continuar sendo atualizado (polling): há
  * processamento ou reavaliação pendente.
  *

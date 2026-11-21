@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import { ValidationProgressSchema } from './validation-progress.js'
+import {
+  HolderInformationRequestStateSchema,
+  HolderSubmissionProcessingStateSchema,
+} from './holder-information-request.js'
 
 export const DocTypeSchema = z.enum(['CPF', 'CNPJ'])
 export const ValModeSchema = z.enum(['fast', 'deep', 'auto'])
@@ -266,6 +270,27 @@ export const ValidationListItemDtoSchema = z.object({
    * "Em processamento" na listagem.
    */
   document_processing: z.boolean(),
+  /**
+   * Referência externa do Holder associado à solicitação vinculada (quando
+   * houver). Não expõe hash de documento nem outros PII do titular.
+   */
+  holder_external_reference: z.string().nullable(),
+  /**
+   * Indica se o consentimento do Holder foi registrado para a solicitação
+   * vinculada (F4.1).
+   */
+  consent_granted: z.boolean(),
+  /**
+   * Dados da solicitação real do Holder (`holder_information_request`)
+   * vinculada à validation. `null` quando não há solicitação.
+   */
+  holder_request_id: z.uuid().nullable(),
+  holder_request_state: HolderInformationRequestStateSchema.nullable(),
+  holder_request_created_at: z.string().nullable(),
+  holder_request_expires_at: z.string().nullable(),
+  holder_consent_accepted_at: z.string().nullable(),
+  holder_documents_received: z.boolean(),
+  holder_document_processing_state: HolderSubmissionProcessingStateSchema.nullable(),
   created_at: z.string(),
   expires_at: z.string(),
 })

@@ -65,7 +65,8 @@ const app = await buildApp({
     POLICY_VERSION: '2026.11.1',
     TERMS_VERSION: '1.0.0',
     TERMS_APPROVED: 'true',
-    TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
+    TERMS_DOCUMENT_HASH: 'sha256:6c055ec85b30720af261de4e611e480509774189acbb6eeec4ef8f784250220a',
+    TERMS_DOCUMENT_CONTENT: 'Conteúdo de termos de teste para comprovação de endereço.',
     WORKER_LOOPS: false,
   },
   db: appPool.db,
@@ -303,7 +304,16 @@ const expireRequest = async (requestId: string): Promise<void> => {
   })
 }
 
+const giveConsent = async (token: string) => {
+  const res = await injectAsHolder('POST', '/v1/holder-access/consent', token, {
+    payload: JSON.stringify({ termsVersion: '1.0.0' }),
+    headers: { 'content-type': 'application/json' },
+  })
+  expect(res.statusCode).toBe(200)
+}
+
 const uploadDocumentOk = async (token: string, itemId: string, requestId?: string) => {
+  await giveConsent(token)
   const part = multipartPayload(PNG_BYTES)
   const res = await injectAsHolder('POST', `/v1/holder-access/items/${itemId}/documents`, token, {
     payload: part.payload,
@@ -700,6 +710,7 @@ describe('F4.2 — acesso do Holder', () => {
   it('upload rejeita magic bytes incompatíveis e conteúdo desconhecido', async () => {
     const { requestId } = await createRequest('acc-upload-invalid')
     const issued = await issueTokenOk(requestId)
+    await giveConsent(issued.token)
 
     const mismatch = multipartPayload(PDF_BYTES, 'doc.png', 'image/png')
     const mismatchRes = await injectAsHolder(
@@ -738,6 +749,7 @@ describe('F4.2 — acesso do Holder', () => {
       { itemId: 'text-only', description: 'Só texto', required: true },
     ])
     const issued = await issueTokenOk(requestId)
+    await giveConsent(issued.token)
 
     const notDocument = multipartPayload(PNG_BYTES)
     const notDocumentRes = await injectAsHolder(
@@ -1448,6 +1460,7 @@ describe('F4.2 — concorrência', () => {
       },
     ])
     const issued = await issueTokenOk(requestId)
+    await giveConsent(issued.token)
 
     // Upload de documento.
     const pngPart = multipartPayload(PNG_BYTES)
@@ -1576,6 +1589,7 @@ describe('F4.2 — concorrência', () => {
       { itemId: 'current-address', description: 'Comprovante', required: true, documentType: 'utility_bill' },
     ])
     const issued = await issueTokenOk(requestId)
+    await giveConsent(issued.token)
 
     const pngPart = multipartPayload(PNG_BYTES)
     await injectAsHolder('POST', '/v1/holder-access/items/current-address/documents', issued.token, {

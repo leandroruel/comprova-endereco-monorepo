@@ -18,16 +18,18 @@ O código mergeado em `main` está à frente do snapshot histórico deste docume
 - **Entregues:** F0.1/F0.2; F1.1/F1.2a/F1.2b/F1.3; F2.1; F2.2a e a
   primeira fatia real da F2.2b (NF3-e/SVRS em produção para RS e SP); F3.1 e
   o vertical slice F3.2 pelo dashboard; F3.3 (medição de uso, cotas e
-  reconciliação); F4.2/F4.3 (intake do Holder, token de acesso público,
-  processamento de submissão e vínculo ao pipeline F1.1/F1.2/F1.3).
+  reconciliação); F4.1 (link/token seguro público, interface pública do titular
+  com consentimento validado no servidor, upload com consent prévio, dados
+  reais do Holder no dashboard do Verifier); F4.2/F4.3
+  (intake do Holder, token de acesso público, processamento de submissão e
+  vínculo ao pipeline F1.1/F1.2/F1.3).
 - **Em andamento:** F0 (checklist de produção concluído), F1 (OCR de imagem
   isolada via Tesseract 5 e pypdfium2 — substitui Marker/Surya; pendente), F2
   (expansão/hardening da cobertura fiscal) e F6 (operação/segurança).
 - **Próximo passo:** a unidade de cobrança definitiva, o tratamento comercial de
   indisponibilidade de fonte externa (hoje: não faturável, política provisória
   do ADR-0044 §3b) e as regras de faturamento continuam decisões comerciais
-  abertas. A F4.1 (link/token seguro público + consentimento do titular) inicia
-  agora como vertical slice da F4.
+  abertas.
 - **Futuro:** F4.2+ (atualização de evidência, comparação improved/unchanged/diverged,
   supersedes_validation_id), F7 (NFAg-e/outras fontes) e F8 (SSI).
   F5 permanece parcialmente entregue: a camada de credencial existe, mas ainda
@@ -928,43 +930,51 @@ original e o histórico é imutável.
 
 ### Estado atual comprovado
 
-| Item                    | Evidência                                                                                       | Situação                                                                                                                                                             |
-| ----------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Consentimento           | `apps/api/src/modules/holder/holder-access.service.ts` (`submit` transiciona para `completed`)  | **Entregue parcialmente**: evento `completed` auditado; `consent_ref` ainda é string opaca na validation (entidade de consentimento dedicada pendente para F4.1)     |
-| Token/link seguro       | `apps/api/src/modules/holder/holder-token.ts` + `holder-access.controller.ts`                   | **Entregue**: token opaco `hlt_` + HMAC-SHA256 com pepper, expiração, revogação, single-use, rate limit; endpoint público sem auth do titular                        |
-| Histórico de validações | `validation` (imutável, nova linha por pedido) + `validation_customer_document` (migração 0067) | Existe como log; vínculo explícito 1:1 Validation ↔ documento (migração 0067); `supersedes_validation_id` pendente (F4.2+)                                           |
-| Superação de credencial | `credential-issuance` / deep path                                                               | Existe para credencial, **não** para o resultado de negócio                                                                                                          |
-| Processamento do Holder | `apps/worker/src/modules/holder-submission-processing/`                                         | **Entregue (F4.3)**: worker consome outbox `holder_submission.processing_requested`, cria `evidence_artifact` + `evidence_analysis`, vincula ao recibo da Validation |
+| Item                    | Evidência                                                                                                                                | Situação                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Consentimento           | `packages/db/migrations/0073_holder_consent.sql` + `0074_holder_consent_terms_hash.sql` + `holder-access.service.ts` (`registerConsent`) | **Entregue (F4.1)**: entidade `holder_consent` dedicada (versão dos termos, hash SHA-256 aceito, `accepted_at` do relógio do banco, estado, evento de auditoria), UNIQUE por solicitação; upload bloqueado sem consentimento. A versão e o hash são validados no servidor contra `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`/`TERMS_DOCUMENT_CONTENT`; o backend calcula SHA-256 do conteúdo (UTF-8) e compara com o hash configurado no boot e no momento do aceite; hash divergente bloqueia o aceite (`HOLDER_TERMS_HASH_INVALID`); nada é inventado |
+| Interface pública       | `apps/verifier-dashboard/src/pages/HolderAccess.tsx` + `src/api/holder-access.ts`                                                        | **Entregue (F4.1, PR #83)**: rota pública `/holder/:token` fora do gate de sessão do Verifier; token via `X-Holder-Token` só em memória, removido da URL, `no-store`/`no-referrer`, sem `localStorage`; termos do servidor, consentimento explícito, itens, upload, envio e acompanhamento de processamento com estados expirada/cancelada/concluída                                                                                                                                                                                                               |
+| Dashboard do Verifier   | `GET /v1/validations` + `apps/verifier-dashboard/src/pages/validations.tsx`                                                              | **Entregue (F4.1, PR #83)**: colunas com dados reais de `holder_information_request` (estado, criação, expiração), consentimento, documentos recebidos e estado de `holder_submission_processing`; sem token/hash/segredos e restrito ao tenant                                                                                                                                                                                                                                                                                                                    |
+| Token/link seguro       | `apps/api/src/modules/holder/holder-token.ts` + `holder-access.controller.ts`                                                            | **Entregue**: token opaco `hlt_` + HMAC-SHA256 com pepper, expiração, revogação, single-use, rate limit; endpoint público sem auth do titular                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Histórico de validações | `validation` (imutável, nova linha por pedido) + `validation_customer_document` (migração 0067)                                          | Existe como log; vínculo explícito 1:1 Validation ↔ documento (migração 0067); `supersedes_validation_id` pendente (F4.2+)                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Superação de credencial | `credential-issuance` / deep path                                                                                                        | Existe para credencial, **não** para o resultado de negócio                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Processamento do Holder | `apps/worker/src/modules/holder-submission-processing/`                                                                                  | **Entregue (F4.3)**: worker consome outbox `holder_submission.processing_requested`, cria `evidence_artifact` + `evidence_analysis`, vincula ao recibo da Validation                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ### Lacunas
 
-1. Fluxo inicial de coleta (F4.1): criar solicitação para uma Validation, gerar
-   link/token público, disponibilizar acesso sem conta do titular, registrar
-   consentimento e encaminhar ao pipeline existente. (inicia agora)
-2. `consent_ref` não prova consentimento: é string opaca; entidade de consentimento
-   dedicada pendente (captura de versão do texto, timestamp, referência à
-   solicitação/Validation).
-3. Não há como dizer "esta validação substitui aquela" nem "o resultado mudou de
+1. Conteúdo aprovado dos termos de consentimento (texto jurídico): o fluxo
+   está preparado (validação de SHA-256 no servidor, persistência do hash
+   aceito na tabela `holder_consent`), mas o conteúdo jurídico real ainda não
+   foi fornecido nem aprovado pelo produto. Enquanto `TERMS_DOCUMENT_CONTENT`
+   e `TERMS_DOCUMENT_HASH` não estiverem configurados e coincidentes, o
+   consentimento permanece bloqueado.
+2. Não há como dizer "esta validação substitui aquela" nem "o resultado mudou de
    X para Y" (`supersedes_validation_id`, F4.2+).
-4. Não há comparação explícita entre evidência antiga e nova
+3. Não há comparação explícita entre evidência antiga e nova
    (`improved`, `unchanged`, `diverged`, `inconclusive`, F4.2+).
-5. Fluxo de atualização de evidência (substituição, reenvio) — separado do fluxo
+4. Fluxo de atualização de evidência (substituição, reenvio) — separado do fluxo
    inicial de coleta (F4.2+).
-6. Autenticação do titular (gov.br, OTP, magic link) — decisão de produto em
+5. Autenticação do titular (gov.br, OTP, magic link) — decisão de produto em
    aberto; não é pré-requisito para o primeiro vertical slice (F4.1).
 
 ### Escopo
 
-**F4.1 — primeiro vertical slice (inicia agora):**
+**F4.1 — primeiro vertical slice (entregue):**
 
-1. Criar solicitação para uma Validation (Verifier autenticado).
-2. Gerar e persistir token seguro (opaco, single-use, expiração, vinculado a
+1. ✅ Criar solicitação para uma Validation (Verifier autenticado).
+2. ✅ Gerar e persistir token seguro (opaco, single-use, expiração, vinculado a
    tenant + subject + Validation).
-3. Disponibilizar acesso público por link (sem conta do titular).
-4. Registrar consentimento (versão do texto, timestamp, referência à solicitação).
-5. Receber documento do titular (reuso do intake F1.1).
-6. Encaminhar ao pipeline existente (F1.2/F1.3).
-7. Exibir o estado da solicitação ao Verifier.
+3. ✅ Disponibilizar acesso público por link (sem conta do titular):
+   interface pública em `/holder/:token` no `apps/verifier-dashboard`,
+   visualização de solicitação, termos de consentimento, upload de documentos
+   e acompanhamento de processamento.
+4. ✅ Registrar consentimento com validação server-side da versão dos termos
+   (`TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`); conteúdo não
+   aprovado bloqueia o aceite (nada é inventado).
+5. ✅ Receber documento do titular (reuso do intake F1.1).
+6. ✅ Encaminhar ao pipeline existente (F1.2/F1.3).
+7. ✅ Exibir o estado da solicitação ao Verifier (dados reais de
+   `holder_information_request` na listagem e no detalhe da validação).
 
 **F4.2+ (etapas posteriores):**
 
@@ -986,6 +996,9 @@ original e o histórico é imutável.
 
 - Token não funciona cross-tenant, expirado ou reutilizado.
 - Consentimento registrado com versão, timestamp e referência à solicitação.
+- Consentimento validado server-side contra `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`;
+  versão divergente ou conteúdo não aprovado rejeitados; nada é persistido sem aprovação.
+- Interface pública em `/holder/:token` sem dependência de login, sessão ou organização ativa.
 - Auditoria registra quem pediu, quem acessou, quem respondeu e quando.
 - Teste de concorrência no consumo do token.
 - Nenhum PII na URL; logs sem conteúdo do documento nem token.
@@ -998,6 +1011,22 @@ original e o histórico é imutável.
 - Vazar PII no link (não colocar documento/endereço na URL).
 - Confundir "atualização" com "contestação" (já existe `contest`).
 - Autenticação do titular ser fraca e permitir que terceiro envie documento.
+
+### Dependência de produto — conteúdo jurídico dos termos
+
+A implementação técnica do fluxo F4.1 está completa (interface pública, consentimento
+validado server-side, upload, acompanhamento de processamento, dashboard do Verifier).
+Entretanto, o fluxo não está **operacionalmente habilitado** enquanto o conteúdo
+jurídico dos termos não estiver aprovado e cadastrado:
+
+- A configuração injeta `content: null` nos termos do módulo Holder (`apps/api/src/app.ts`).
+- O frontend exibe o texto integral dos termos apenas quando `content` não é nulo/vazio.
+- Quando `content` é `null`, o consentimento permanece bloqueado e o Holder não pode
+  prosseguir com o envio de documentos.
+- Não há conteúdo jurídico fictício nem segunda fonte de configuração; reutiliza
+  `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH` existentes.
+- Para habilitar o fluxo, é necessário cadastrar o conteúdo aprovado dos termos e
+  disponibilizá-lo na mesma fonte de configuração existente.
 
 ### Decisões em aberto
 
@@ -1243,18 +1272,18 @@ Não confundir "SSI" com "credencial":
 
 ### Adicionar / acompanhar
 
-| Item                                    | Fase    | Estado / por quê                                                                                                           |
-| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                                                |
-| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                                                         |
-| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                                                    |
-| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                                                  |
-| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial                             |
-| Fluxo do titular por link seguro        | F4      | F4.2/F4.3 entregues (intake, token, processamento, vínculo à Validation); F4.1 (link público + consentimento) inicia agora |
-| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                                            |
-| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                                                          |
-| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial                              |
-| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                                                    |
+| Item                                    | Fase    | Estado / por quê                                                                                                                                   |
+| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                                                                        |
+| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                                                                                 |
+| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                                                                            |
+| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                                                                          |
+| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial                                                     |
+| Fluxo do titular por link seguro        | F4      | F4.1 entregue (interface pública, consentimento, upload, acompanhamento); F4.2/F4.3 entregues (intake, token, processamento, vínculo à Validation) |
+| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                                                                    |
+| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                                                                                  |
+| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial                                                      |
+| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                                                                            |
 
 ## Decisões de produto em aberto
 

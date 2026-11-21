@@ -62,6 +62,7 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
     pepper: deps.pepper,
     logger: deps.logger,
     maxDocumentBytes: deps.maxDocumentBytes,
+    terms: deps.terms,
     ...(deps.metrics !== undefined ? { metrics: deps.metrics } : {}),
   })
 
@@ -84,6 +85,17 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
           .code(409)
           .type(PROBLEM_CONTENT_TYPE)
           .send(problem(409, 'HOLDER_INFORMATION_REQUEST_CANCELLED', 'Solicitação de informações cancelada'))
+      case 'consent_required':
+        return reply
+          .code(403)
+          .type(PROBLEM_CONTENT_TYPE)
+          .send(
+            problem(
+              403,
+              'HOLDER_CONSENT_REQUIRED',
+              'Consentimento do titular é obrigatório antes de enviar documentos',
+            ),
+          )
       case 'invalid_state':
         return reply
           .code(409)
@@ -195,6 +207,85 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
       actor: string,
       reply: FastifyReply,
     ): Promise<FastifyReply> => sendResult(await service.submit(context, actor), reply),
+
+    registerConsent: async (
+      context: Parameters<typeof service.registerConsent>[0],
+      actor: string,
+      termsVersion: string,
+      reply: FastifyReply,
+    ): Promise<FastifyReply> => {
+      const result = await service.registerConsent(context, actor, termsVersion)
+      switch (result.kind) {
+        case 'ok':
+          return reply.code(200).send(result.consent)
+        case 'already_consented':
+          return reply.code(200).send(result.consent)
+        case 'not_found':
+          return reply
+            .code(401)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(401, 'HOLDER_ACCESS_UNAUTHORIZED', 'Token de acesso inválido'))
+        case 'expired':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(problem(409, 'HOLDER_INFORMATION_REQUEST_EXPIRED', 'Solicitação de informações expirada'))
+        case 'cancelled':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(409, 'HOLDER_INFORMATION_REQUEST_CANCELLED', 'Solicitação de informações cancelada'),
+            )
+        case 'invalid_state':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                409,
+                'HOLDER_INFORMATION_REQUEST_STATE',
+                `Solicitação não aceita esta operação no estado '${result.state}'`,
+              ),
+            )
+        case 'terms_not_approved':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                409,
+                'HOLDER_TERMS_NOT_APPROVED',
+                'O conteúdo dos termos ainda não foi aprovado; o aceite está indisponível',
+              ),
+            )
+        case 'terms_hash_invalid':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                409,
+                'HOLDER_TERMS_HASH_INVALID',
+                'O hash dos termos não corresponde ao conteúdo configurado',
+              ),
+            )
+        case 'terms_version_mismatch':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                409,
+                'HOLDER_TERMS_VERSION_MISMATCH',
+                'A versão dos termos aceita não corresponde à versão vigente',
+              ),
+            )
+      }
+    },
+
+    hasConsent: async (context: Parameters<typeof service.hasConsent>[0]): Promise<boolean> =>
+      service.hasConsent(context),
 
     getProcessing: async (
       context: { readonly tenantId: string },

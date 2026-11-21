@@ -12,6 +12,7 @@ import {
   HolderSaveItemBody,
   type HolderAccessRoutesDeps,
 } from './holder-access.schema.js'
+import { HolderConsentRequestSchema, HolderConsentResponseSchema } from '@comprova/contracts'
 import { isHolderTokenFormat } from './holder-token.js'
 import type { HolderTokenContext } from './holder-access.service.js'
 import { type HolderRateLimits } from '../../plugins/holder-rate-limit.js'
@@ -194,6 +195,36 @@ export const registerHolderAccessRoutes = (
       const context = await resolve(request, reply)
       if (isReply(context)) return context
       return controller.submit(context, `holder-token:${context.tokenId}`, reply)
+    },
+  )
+
+  /**
+   * F4.1 — registro de consentimento do Holder.
+   *
+   * O aceite é explícito e pré-requisito para upload de documentos. Não exige
+   * autenticação Better Auth: apenas o token opaco do titular.
+   */
+  app.post(
+    '/holder-access/consent',
+    {
+      preHandler: [rateLimits.ip, rateLimits.token],
+      onSend: [noStore],
+      schema: {
+        body: HolderConsentRequestSchema,
+        response: {
+          200: HolderConsentResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const context = await resolve(request, reply)
+      if (isReply(context)) return context
+      return controller.registerConsent(
+        context,
+        `holder-token:${context.tokenId}`,
+        request.body.termsVersion,
+        reply,
+      )
     },
   )
 
