@@ -141,7 +141,11 @@ const isTerminal = (view: HolderAccessView): boolean =>
   view.state === 'completed' || view.state === 'cancelled' || view.state === 'expired'
 
 const termsAvailable = (view: HolderAccessView): boolean =>
-  view.terms.version !== null && view.terms.approved && view.terms.documentHash !== null
+  view.terms.version !== null &&
+  view.terms.approved &&
+  view.terms.documentHash !== null &&
+  view.terms.content !== null &&
+  view.terms.content.trim().length > 0
 
 const missingRequiredItems = (view: HolderAccessView): readonly string[] =>
   view.items
@@ -335,8 +339,8 @@ export function HolderAccessPage({ token = null }: HolderAccessPageProps) {
               {termsAvailable(view) ? (
                 <>
                   <p className="text-sm text-muted-foreground">
-                    Para enviar documentos, aceite explicitamente os termos apresentados pelo Verifier. O
-                    aceite é registrado com a versão vigente e a data/hora do servidor.
+                    Para enviar documentos, leia e aceite explicitamente os termos apresentados pelo Verifier.
+                    O aceite é registrado com a versão vigente e a data/hora do servidor.
                   </p>
                   <dl className="grid gap-1 text-xs text-muted-foreground">
                     <div className="flex gap-2">
@@ -348,6 +352,13 @@ export function HolderAccessPage({ token = null }: HolderAccessPageProps) {
                       <dd className="font-mono">{view.terms.documentHash}</dd>
                     </div>
                   </dl>
+                  {view.terms.content !== null && view.terms.content.trim().length > 0 ? (
+                    <>
+                      <div className="border border-border rounded-lg p-3 bg-muted/50 text-sm text-text-secondary">
+                        {view.terms.content}
+                      </div>
+                    </>
+                  ) : null}
                   <label className="flex items-start gap-2 text-sm">
                     <input
                       type="checkbox"

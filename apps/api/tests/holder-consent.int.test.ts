@@ -442,6 +442,7 @@ describe('F4.1 — consentimento do Holder', () => {
       version: '1.0.0',
       approved: false,
       documentHash: 'sha256:abc123def456',
+      content: null,
     })
 
     // Sem texto aprovado, o servidor não inventa consentimento.
@@ -588,6 +589,7 @@ describe('F4.1 — consentimento do Holder', () => {
       version: '1.0.0',
       approved: true,
       documentHash: 'sha256:abc123def456',
+      content: null,
     })
 
     // Após consentimento: aguardando_documentos

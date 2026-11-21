@@ -30,7 +30,14 @@ const baseView = (overrides: Partial<HolderAccessView> = {}): HolderAccessView =
   state: 'pending',
   status: 'aguardando_consentimento',
   consent: { granted: false, termsVersion: null, acceptedAt: null },
-  terms: { version: '1.0.0', approved: true, documentHash: 'sha256:abc123def456' },
+  terms: {
+    version: '1.0.0',
+    approved: true,
+    documentHash: 'sha256:abc123def456',
+    content:
+      'Estes são os termos de consentimento de exemplo para comprovação de endereço. ' +
+      'Ao aceitar, você autoriza o Verifier a processar seus documentos.',
+  },
   expiresAt: '2026-12-01T12:00:00.000Z',
   completedAt: null,
   items: [
@@ -174,8 +181,40 @@ describe('HolderAccessPage', () => {
     expect(window.sessionStorage.length).toBe(0)
   })
 
+  it('apresenta o conteúdo integral dos termos antes do checkbox de aceite', async () => {
+    installMock(baseView())
+    await renderPage()
+
+    await expect.element(page.getByText(/Estes são os termos de consentimento de exemplo/)).toBeVisible()
+    await expect.element(page.getByText(/Ao aceitar, você autoriza o Verifier/)).toBeVisible()
+    await expect.element(page.getByRole('checkbox')).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Aceitar e continuar' })).toBeDisabled()
+  })
+
+  it('bloqueia o aceite quando o conteúdo dos termos não está disponível', async () => {
+    installMock(
+      baseView({
+        terms: {
+          version: '1.0.0',
+          approved: true,
+          documentHash: 'sha256:abc123def456',
+          content: null,
+        },
+      }),
+    )
+    await renderPage()
+
+    await expect
+      .element(page.getByText(/O conteúdo jurídico dos termos ainda não foi aprovado/))
+      .toBeVisible()
+    expect(page.getByRole('checkbox').elements()).toHaveLength(0)
+    expect(page.getByRole('button', { name: 'Aceitar e continuar' }).elements()).toHaveLength(0)
+  })
+
   it('bloqueia o aceite quando o conteúdo jurídico não está aprovado', async () => {
-    installMock(baseView({ terms: { version: '1.0.0', approved: false, documentHash: 'sha256:abc' } }))
+    installMock(
+      baseView({ terms: { version: '1.0.0', approved: false, documentHash: 'sha256:abc', content: null } }),
+    )
     await renderPage()
 
     await expect

@@ -19,6 +19,7 @@ export type HolderTerms = {
   readonly version: string | null
   readonly approved: boolean
   readonly documentHash: string | null
+  readonly content: string | null
 }
 
 export type HolderAccessDocument = {

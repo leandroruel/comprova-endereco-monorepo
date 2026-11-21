@@ -15,11 +15,14 @@ import { z } from 'zod'
  * O Holder não escolhe a versão: ele deve aceitar exatamente a versão
  * apresentada aqui. `approved` é `false` enquanto o conteúdo jurídico não
  * estiver formalmente aprovado, e nesse caso o aceite é bloqueado.
+ * `content` contém o texto integral dos termos aprovados e só deve ser
+ * apresentado quando houver conteúdo aprovado disponível.
  */
 export const HolderTermsSchema = z.object({
   version: z.string().nullable(),
   approved: z.boolean(),
   documentHash: z.string().nullable(),
+  content: z.string().nullable(),
 })
 
 export type HolderTerms = z.infer<typeof HolderTermsSchema>
