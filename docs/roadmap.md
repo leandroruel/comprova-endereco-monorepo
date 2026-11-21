@@ -1269,18 +1269,18 @@ Não confundir "SSI" com "credencial":
 
 ### Adicionar / acompanhar
 
-| Item                                    | Fase    | Estado / por quê                                                                                                           |
-| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                                                |
-| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                                                         |
-| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                                                    |
-| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                                                  |
-| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial                             |
-| Fluxo do titular por link seguro        | F4      | F4.2/F4.3 entregues (intake, token, processamento, vínculo à Validation); F4.1 (link público + consentimento) inicia agora |
-| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                                            |
-| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                                                          |
-| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial                              |
-| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                                                    |
+| Item                                    | Fase    | Estado / por quê                                                                                                                                   |
+| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Evidence Source / EvidenceObservation   | F1/F2   | Implementado; uniformiza documento e fontes                                                                                                        |
+| Contrato de verificador + taxonomia     | F1.3/F2 | Implementado; evita "booleano mágico" e duplicação                                                                                                 |
+| Verificação do documento contra o claim | F1.3    | **Entregue**; fecha a etapa de extração                                                                                                            |
+| Policy/scoring por dimensões            | F3      | **Primeiro slice entregue**; evolução por tenant pendente                                                                                          |
+| Fluxo comercial e cobrança por consulta | F3      | F3.3 entregue (PR #63); unidade de cobrança definitiva e tabela de preços em decisão comercial                                                     |
+| Fluxo do titular por link seguro        | F4      | F4.1 entregue (interface pública, consentimento, upload, acompanhamento); F4.2/F4.3 entregues (intake, token, processamento, vínculo à Validation) |
+| Credencial como saída                   | F5      | Parcialmente entregue; kit/produto ainda evolui                                                                                                    |
+| Guarda de fetch (SSRF real)             | F0      | Entregue; expansão/hardening operacional continua                                                                                                  |
+| Medição faturável                       | F3      | **Entregue (PR #63)**; unidade de cobrança definitiva e tabela de preços em decisão comercial                                                      |
+| Expansão de fontes (NFAg-e etc.)        | F7      | Futuro; adaptadores, não novos domínios                                                                                                            |
 
 ## Decisões de produto em aberto
 

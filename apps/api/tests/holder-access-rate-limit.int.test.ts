@@ -46,6 +46,7 @@ const appConfig = {
   TERMS_VERSION: '1.0.0',
   TERMS_APPROVED: 'true',
   TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
+  TERMS_DOCUMENT_CONTENT: 'Conteúdo de termos de teste para comprovação de endereço.',
   WORKER_LOOPS: false,
 } as const
 

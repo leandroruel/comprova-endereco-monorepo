@@ -119,6 +119,13 @@ const EnvSchema = z.object({
    * aceite. Ausente indica que não há documento oficial disponível.
    */
   TERMS_DOCUMENT_HASH: z.string().optional(),
+  /**
+   * Conteúdo do documento jurídico dos termos de onboarding, definido
+   * exclusivamente pelo servidor. Quando presente, é apresentado ao Holder
+   * antes do aceite e o consentimento só é aceito se houver conteúdo aprovado.
+   * Ausente indica que não há texto oficial disponível para exibição.
+   */
+  TERMS_DOCUMENT_CONTENT: z.string().optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

@@ -363,6 +363,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       const termsVersion = deps.config.TERMS_VERSION ?? null
       const termsApproved = deps.config.TERMS_APPROVED === 'true'
       const termsDocumentHash = deps.config.TERMS_DOCUMENT_HASH ?? null
+      const termsDocumentContent = deps.config.TERMS_DOCUMENT_CONTENT ?? null
       registerOrganizationsRoutes(v1, {
         db: deps.db,
         termsVersion,
@@ -394,7 +395,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
             version: termsVersion,
             approved: termsApproved,
             documentHash: termsDocumentHash,
-            content: null,
+            content: termsDocumentContent,
           },
           processingService: makeHolderSubmissionProcessingService({
             db: deps.db,

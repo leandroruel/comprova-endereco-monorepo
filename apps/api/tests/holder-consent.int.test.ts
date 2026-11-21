@@ -50,6 +50,7 @@ const baseConfig = {
   TERMS_VERSION: '1.0.0',
   TERMS_APPROVED: 'true',
   TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
+  TERMS_DOCUMENT_CONTENT: 'Conteúdo de termos de teste para comprovação de endereço.',
   WORKER_LOOPS: false,
 } as const
 
@@ -60,6 +61,7 @@ const buildTestApp = (terms: {
   TERMS_VERSION?: string
   TERMS_APPROVED?: string
   TERMS_DOCUMENT_HASH?: string
+  TERMS_DOCUMENT_CONTENT?: string
 }) =>
   buildApp({
     config: { ...baseConfig, ...terms },
@@ -442,10 +444,35 @@ describe('F4.1 — consentimento do Holder', () => {
       version: '1.0.0',
       approved: false,
       documentHash: 'sha256:abc123def456',
-      content: null,
+      content: 'Conteúdo de termos de teste para comprovação de endereço.',
     })
 
     // Sem texto aprovado, o servidor não inventa consentimento.
+    expect(await consentRowsOf(requestId)).toHaveLength(0)
+    expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
+  })
+
+  it('sem conteúdo dos termos cadastrado → 409 e nenhum consentimento persistido', async () => {
+    const { requestId } = await createRequest('consent-no-content')
+    const issued = await issueTokenOk(requestId)
+
+    // App sem conteúdo dos termos cadastrado (TERMS_DOCUMENT_CONTENT ausente)
+    holderIpCounter = (holderIpCounter + 1) % 250
+    const appNoContent = await buildTestApp({ TERMS_DOCUMENT_CONTENT: undefined })
+    const res = await appNoContent.inject({
+      method: 'POST',
+      url: '/v1/holder-access/consent',
+      headers: {
+        'x-holder-token': issued.token,
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify({ termsVersion: '1.0.0' }),
+      remoteAddress: `10.9.0.${holderIpCounter + 1}`,
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('HOLDER_TERMS_NOT_APPROVED')
+
+    // Nada é persistido sem conteúdo aprovado.
     expect(await consentRowsOf(requestId)).toHaveLength(0)
     expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
   })
@@ -589,7 +616,7 @@ describe('F4.1 — consentimento do Holder', () => {
       version: '1.0.0',
       approved: true,
       documentHash: 'sha256:abc123def456',
-      content: null,
+      content: 'Conteúdo de termos de teste para comprovação de endereço.',
     })
 
     // Após consentimento: aguardando_documentos

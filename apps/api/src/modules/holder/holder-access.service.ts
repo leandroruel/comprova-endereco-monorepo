@@ -431,9 +431,15 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
 
     // A versão aceita é determinada pelo servidor, na mesma fonte de verdade
     // do onboarding (`TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`).
-    // Sem conteúdo aprovado, o aceite é bloqueado em vez de simular um
-    // consentimento válido.
-    if (terms.version === null || !terms.approved || terms.documentHash === null) {
+    // Sem conteúdo aprovado cadastrado, o aceite é bloqueado em vez de simular
+    // um consentimento válido contra termos que o Holder nunca viu.
+    if (
+      terms.version === null ||
+      !terms.approved ||
+      terms.documentHash === null ||
+      terms.content === null ||
+      terms.content.trim().length === 0
+    ) {
       return { kind: 'terms_not_approved' }
     }
     if (termsVersion !== terms.version) {
