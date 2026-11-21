@@ -1,0 +1,105 @@
+services:
+  # --- Redis (serviço gerenciado pelo Render) ---
+  - type: redis
+    name: comprova-redis
+    region: ohio
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+  # --- API Comprova (Fastify/Node.js) ---
+  - type: web
+    name: comprova-api
+    region: ohio
+    plan: free
+    runtime: docker
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: WORKER_LOOPS
+        value: "false"
+      - key: PORT
+        value: "3000"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_ADMIN_URL
+        sync: false
+      - key: REFERENCE_DATABASE_URL
+        sync: false
+      - key: REFERENCE_DATABASE_ADMIN_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: comprova-redis
+          property: connectionString
+      - key: API_KEY_PEPPER
+        sync: false
+      - key: INVITE_TOKEN_PEPPER
+        sync: false
+      - key: BETTER_AUTH_SECRET
+        sync: false
+      - key: BETTER_AUTH_URL
+        value: https://comprova-api.onrender.com
+      - key: CREDENTIAL_ISSUER_ORIGIN
+        value: https://comprova-api.onrender.com
+      - key: CREDENTIAL_SIGNING_KEYS
+        sync: false
+      - key: TERMS_VERSION
+        value: "1.0.0"
+      - key: TERMS_APPROVED
+        value: "true"
+      - key: TERMS_DOCUMENT_CONTENT
+        sync: false
+      - key: TERMS_DOCUMENT_HASH
+        sync: false
+    healthCheckPath: /healthz
+    autoDeploy: false
+
+  # --- Worker Comprova (background loops) ---
+  - type: worker
+    name: comprova-worker
+    region: ohio
+    plan: free
+    runtime: docker
+    dockerfilePath: apps/worker/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: WORKER_LOOPS
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_ADMIN_URL
+        sync: false
+      - key: REFERENCE_DATABASE_URL
+        sync: false
+      - key: REFERENCE_DATABASE_ADMIN_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: comprova-redis
+          property: connectionString
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: us-east-1
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_BUCKET
+        value: evidence
+      - key: DOCUMENT_INTELLIGENCE_URL
+        sync: false
+    autoDeploy: false

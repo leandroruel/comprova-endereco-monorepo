@@ -12,3 +12,4 @@ logs/
 
 # Artefatos do Vitest (relatórios, anexos e screenshots de falha do browser).
 .vitest/
+supabase/.temp/

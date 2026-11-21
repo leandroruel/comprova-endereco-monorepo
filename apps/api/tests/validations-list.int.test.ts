@@ -178,6 +178,10 @@ const LIST_ITEM_KEYS = [
   'holder_consent_accepted_at',
   'holder_documents_received',
   'holder_document_processing_state',
+  'holder_document_issued_at',
+  'holder_document_received_at',
+  'holder_document_verified_at',
+  'holder_document_expires_at',
   'created_at',
   'expires_at',
 ].sort()

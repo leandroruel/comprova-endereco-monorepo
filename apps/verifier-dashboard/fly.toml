@@ -1,0 +1,32 @@
+# fly.toml — Verifier Dashboard (React/Vite servido estaticamente)
+# Deploy: flyctl deploy --config apps/verifier-dashboard/fly.toml
+
+app = "comprova-verifier-dashboard"
+primary_region = "gru"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  HOST = "0.0.0.0"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[checks]]
+  name = "healthz"
+  type = "http"
+  http = "/"
+  interval = "30s"
+  timeout = "5s"
+  restart_limit = 0
+
+# Secrets (não versionar): definir com `flyctl secrets set --config apps/verifier-dashboard/fly.toml`
+#   VITE_API_URL=https://comprova-api.fly.dev
+#   VITE_DASHBOARD_VERIFIER_AUTH_URL=https://comprova-api.fly.dev/v1/auth/verifier

@@ -65,7 +65,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'dashboard',
-          include: ['apps/dashboard/src/**/*.test.tsx'],
+          include: ['apps/dashboard/src/**/*.test.tsx', 'apps/verifier-dashboard/src/**/*.test.tsx'],
           // As asserções de locator (`expect.element`) tentam de novo até o
           // timeout do teste: um seletor quebrado aqui precisa falhar rápido,
           // sem herdar os 2 min que os testes de banco/API exigem.

@@ -1,0 +1,51 @@
+# fly.toml — API Comprova (Fastify)
+# Deploy: flyctl deploy --config fly.toml
+
+app = "comprova-api"
+primary_region = "gru"
+
+[env]
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  WORKER_LOOPS = "false"
+  PORT = "3000"
+  HOST = "0.0.0.0"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[processes]
+  app = "/app/node_modules/.bin/tsx /app/apps/api/src/server.ts"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[checks]]
+  name = "healthz"
+  type = "http"
+  http = "/healthz"
+  interval = "30s"
+  timeout = "5s"
+  restart_limit = 0
+
+[[checks]]
+  name = "readyz"
+  type = "http"
+  http = "/readyz"
+  interval = "30s"
+  timeout = "5s"
+  restart_limit = 0
+
+# Secrets (não versionar): definir com `flyctl secrets set`
+#   DATABASE_URL, DATABASE_ADMIN_URL, REFERENCE_DATABASE_URL
+#   REDIS_URL, API_KEY_PEPPER, INVITE_TOKEN_PEPPER
+#   CREDENTIAL_ISSUER_ORIGIN, CREDENTIAL_SIGNING_KEYS
+#   TERMS_VERSION, TERMS_APPROVED, TERMS_DOCUMENT_CONTENT, TERMS_DOCUMENT_HASH
+#   S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET
+#   DOCUMENT_INTELLIGENCE_URL
+#   BETTER_AUTH_SECRET, BETTER_AUTH_URL

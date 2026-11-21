@@ -1,0 +1,13 @@
+# wrangler.toml — Dashboard Comprova (Cloudflare Pages)
+# Deploy: npx wrangler pages deploy dist --project-name=comprova-dashboard --config apps/dashboard/wrangler.toml
+
+name = "comprova-dashboard"
+compatibility_date = "2026-11-21"
+
+[build]
+  command = "pnpm install && pnpm --filter dashboard build"
+  watch_dir = "apps/dashboard"
+  root = "apps/dashboard/dist"
+
+[env.production]
+  vars = { VITE_API_URL = "https://comprova-api.fly.dev", VITE_DASHBOARD_ADMIN_AUTH_URL = "https://comprova-api.fly.dev/v1/auth/admin" }

@@ -101,7 +101,7 @@ export const evidenceAnalysis = pgTable(
     // expires_at deve ser posterior a verified_at quando ambos preenchidos
     check(
       'evidence_analysis_expires_after_verified',
-      sql`${t.expiresAt} IS NULL OR ${t.verifiedAt} IS NULL OR ${t.expiresAt} > ${t.verifiedAt}`
+      sql`${t.expiresAt} IS NULL OR ${t.verifiedAt} IS NULL OR ${t.expiresAt} > ${t.verifiedAt}`,
     ),
   ],
 )

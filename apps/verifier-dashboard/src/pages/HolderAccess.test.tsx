@@ -167,7 +167,9 @@ describe('HolderAccessPage', () => {
     await userEvent.click(page.getByRole('checkbox'))
     await userEvent.click(accept)
 
-    await expect.element(page.getByText(/Consentimento registrado/)).toBeVisible()
+    await expect
+      .element(page.getByText('Consentimento registrado. Você já pode enviar os documentos.'))
+      .toBeVisible()
 
     const consentCall = state.calls.find(
       (call) => call.method === 'POST' && call.url === '/v1/holder-access/consent',

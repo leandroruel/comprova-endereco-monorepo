@@ -1,0 +1,29 @@
+# fly.toml — Redis/Valkey para Comprova
+# Deploy: flyctl deploy --config fly.redis.toml
+
+app = "comprova-redis"
+primary_region = "gru"
+
+[env]
+  REDIS_ARGS = "--save '' --appendonly no"
+
+[build]
+  dockerfile = "Dockerfile.redis"
+
+[http_service]
+  internal_port = 6379
+  force_https = false
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[checks]]
+  name = "redis-ping"
+  type = "tcp"
+  port = 6379
+  interval = "10s"
+  timeout = "3s"
+  restart_limit = 0
+
+# Expõe Redis apenas na rede interna do Fly.io (6pn), não na internet pública.
+# Acesso via: redis://comprova-redis.internal:6379
