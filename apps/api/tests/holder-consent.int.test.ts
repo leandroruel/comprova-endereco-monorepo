@@ -49,7 +49,7 @@ const baseConfig = {
   POLICY_VERSION: '2026.11.1',
   TERMS_VERSION: '1.0.0',
   TERMS_APPROVED: 'true',
-  TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
+  TERMS_DOCUMENT_HASH: 'sha256:6c055ec85b30720af261de4e611e480509774189acbb6eeec4ef8f784250220a',
   TERMS_DOCUMENT_CONTENT: 'Conteúdo de termos de teste para comprovação de endereço.',
   WORKER_LOOPS: false,
 } as const
@@ -443,8 +443,9 @@ describe('F4.1 — consentimento do Holder', () => {
     expect(view.json().terms).toEqual({
       version: '1.0.0',
       approved: false,
-      documentHash: 'sha256:abc123def456',
+      documentHash: 'sha256:6c055ec85b30720af261de4e611e480509774189acbb6eeec4ef8f784250220a',
       content: 'Conteúdo de termos de teste para comprovação de endereço.',
+      hashValid: true,
     })
 
     // Sem texto aprovado, o servidor não inventa consentimento.
@@ -473,6 +474,33 @@ describe('F4.1 — consentimento do Holder', () => {
     expect(res.json().code).toBe('HOLDER_TERMS_NOT_APPROVED')
 
     // Nada é persistido sem conteúdo aprovado.
+    expect(await consentRowsOf(requestId)).toHaveLength(0)
+    expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
+  })
+
+  it('hash divergente do conteúdo → 409 e nenhum consentimento persistido', async () => {
+    const { requestId } = await createRequest('consent-hash-divergent')
+    const issued = await issueTokenOk(requestId)
+
+    // App com hash que não confere com o conteúdo
+    holderIpCounter = (holderIpCounter + 1) % 250
+    const appHashDivergent = await buildTestApp({
+      TERMS_DOCUMENT_HASH: 'sha256:hash_divergente_que_nao_confere',
+    })
+    const res = await appHashDivergent.inject({
+      method: 'POST',
+      url: '/v1/holder-access/consent',
+      headers: {
+        'x-holder-token': issued.token,
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify({ termsVersion: '1.0.0' }),
+      remoteAddress: `10.9.0.${holderIpCounter + 1}`,
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('HOLDER_TERMS_HASH_INVALID')
+
+    // Nada é persistido com hash divergente.
     expect(await consentRowsOf(requestId)).toHaveLength(0)
     expect(await countEvents(requestId, 'holder_consent_granted')).toBe(0)
   })
@@ -615,8 +643,9 @@ describe('F4.1 — consentimento do Holder', () => {
     expect(view.json().terms).toEqual({
       version: '1.0.0',
       approved: true,
-      documentHash: 'sha256:abc123def456',
+      documentHash: 'sha256:6c055ec85b30720af261de4e611e480509774189acbb6eeec4ef8f784250220a',
       content: 'Conteúdo de termos de teste para comprovação de endereço.',
+      hashValid: true,
     })
 
     // Após consentimento: aguardando_documentos

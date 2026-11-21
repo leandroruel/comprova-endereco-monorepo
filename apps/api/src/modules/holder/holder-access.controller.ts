@@ -259,6 +259,17 @@ export const makeHolderAccessController = (deps: HolderAccessRoutesDeps) => {
                 'O conteúdo dos termos ainda não foi aprovado; o aceite está indisponível',
               ),
             )
+        case 'terms_hash_invalid':
+          return reply
+            .code(409)
+            .type(PROBLEM_CONTENT_TYPE)
+            .send(
+              problem(
+                409,
+                'HOLDER_TERMS_HASH_INVALID',
+                'O hash dos termos não corresponde ao conteúdo configurado',
+              ),
+            )
         case 'terms_version_mismatch':
           return reply
             .code(409)

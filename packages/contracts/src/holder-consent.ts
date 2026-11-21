@@ -17,12 +17,15 @@ import { z } from 'zod'
  * estiver formalmente aprovado, e nesse caso o aceite é bloqueado.
  * `content` contém o texto integral dos termos aprovados e só deve ser
  * apresentado quando houver conteúdo aprovado disponível.
+ * `hashValid` indica se o SHA-256 de `content` confere com `documentHash`;
+ * quando falso, os termos são considerados indisponíveis para aceite.
  */
 export const HolderTermsSchema = z.object({
   version: z.string().nullable(),
   approved: z.boolean(),
   documentHash: z.string().nullable(),
   content: z.string().nullable(),
+  hashValid: z.boolean(),
 })
 
 export type HolderTerms = z.infer<typeof HolderTermsSchema>
@@ -44,6 +47,7 @@ export type HolderConsentRequest = z.infer<typeof HolderConsentRequestSchema>
 export const HolderConsentResponseSchema = z.object({
   granted: z.boolean(),
   termsVersion: z.string().nullable(),
+  termsHash: z.string().nullable(),
   acceptedAt: z.string().nullable(),
 })
 

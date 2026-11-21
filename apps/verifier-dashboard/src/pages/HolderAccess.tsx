@@ -106,6 +106,8 @@ const errorMessage = (error: unknown): string => {
         return 'O conteúdo dos termos ainda não está disponível para aceite. Tente novamente mais tarde.'
       case 'HOLDER_TERMS_VERSION_MISMATCH':
         return 'A versão dos termos mudou. Recarregue a página para ver a versão vigente.'
+      case 'HOLDER_TERMS_HASH_INVALID':
+        return 'O conteúdo dos termos não confere com o hash configurado. Recarregue a página.'
       case 'EVIDENCE_TOO_LARGE':
         return 'O arquivo excede o limite de tamanho permitido.'
       case 'UNSUPPORTED_EVIDENCE_TYPE':
@@ -145,7 +147,8 @@ const termsAvailable = (view: HolderAccessView): boolean =>
   view.terms.approved &&
   view.terms.documentHash !== null &&
   view.terms.content !== null &&
-  view.terms.content.trim().length > 0
+  view.terms.content.trim().length > 0 &&
+  view.terms.hashValid === true
 
 const missingRequiredItems = (view: HolderAccessView): readonly string[] =>
   view.items

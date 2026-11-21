@@ -67,6 +67,7 @@ export type HolderConsentResult =
   | { readonly kind: 'cancelled' }
   | { readonly kind: 'invalid_state'; readonly state: HolderInformationRequestState }
   | { readonly kind: 'terms_not_approved' }
+  | { readonly kind: 'terms_hash_invalid' }
   | { readonly kind: 'terms_version_mismatch' }
   | { readonly kind: 'already_consented'; readonly consent: HolderConsentStatus }
 
@@ -242,6 +243,7 @@ const loadView = async (
   const consentRow = await tx
     .select({
       termsVersion: t.holderConsent.termsVersion,
+      termsHash: t.holderConsent.termsHash,
       acceptedAt: t.holderConsent.acceptedAt,
       state: t.holderConsent.state,
     })
@@ -254,6 +256,7 @@ const loadView = async (
   const consent: HolderConsentStatus = {
     granted: consentRow.length > 0 && consentRow[0]!.state === 'granted',
     termsVersion: consentRow.length > 0 ? consentRow[0]!.termsVersion : null,
+    termsHash: consentRow.length > 0 ? (consentRow[0]!.termsHash ?? null) : null,
     acceptedAt: consentRow.length > 0 ? (consentRow[0]!.acceptedAt?.toISOString() ?? null) : null,
   }
 
@@ -429,8 +432,6 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       return mapAuthorize(authorized) as HolderConsentResult
     }
 
-    // A versão aceita é determinada pelo servidor, na mesma fonte de verdade
-    // do onboarding (`TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH`).
     // Sem conteúdo aprovado cadastrado, o aceite é bloqueado em vez de simular
     // um consentimento válido contra termos que o Holder nunca viu.
     if (
@@ -442,6 +443,11 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
     ) {
       return { kind: 'terms_not_approved' }
     }
+    // A integridade do conteúdo é confirmada comparando o SHA-256 do
+    // conteúdo com o hash configurado (hashValid calculado no app.ts).
+    if (!terms.hashValid) {
+      return { kind: 'terms_hash_invalid' }
+    }
     if (termsVersion !== terms.version) {
       return { kind: 'terms_version_mismatch' }
     }
@@ -451,6 +457,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       const [consentRow] = await tx
         .select({
           termsVersion: t.holderConsent.termsVersion,
+          termsHash: t.holderConsent.termsHash,
           acceptedAt: t.holderConsent.acceptedAt,
           state: t.holderConsent.state,
         })
@@ -468,6 +475,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         consent: {
           granted: true,
           termsVersion: consentRow?.termsVersion ?? null,
+          termsHash: consentRow?.termsHash ?? null,
           acceptedAt: consentRow?.acceptedAt?.toISOString() ?? null,
         },
       }
@@ -479,6 +487,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       tenantId: context.tenantId,
       holderInformationRequestId: context.requestId,
       termsVersion: terms.version,
+      termsHash: terms.documentHash,
       state: 'granted',
       acceptedAt: sql`clock_timestamp()`,
     })
@@ -497,6 +506,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
       consent: {
         granted: true,
         termsVersion: terms.version,
+        termsHash: terms.documentHash,
         acceptedAt: null, // preenchido pelo caller após leitura do relógio, se necessário
       },
     }
@@ -509,11 +519,15 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
   ): Promise<HolderConsentResult> =>
     withTenant(db, context.tenantId, async (tx) => {
       const result = await registerConsentInTx(tx, context, actor, termsVersion)
+      if (result.kind === 'terms_hash_invalid') return result
       if (result.kind !== 'ok') return result
 
       // Ler o accepted_at do recém-inserido (relógio do banco).
       const [row] = await tx
-        .select({ acceptedAt: t.holderConsent.acceptedAt })
+        .select({
+          acceptedAt: t.holderConsent.acceptedAt,
+          termsHash: t.holderConsent.termsHash,
+        })
         .from(t.holderConsent)
         .where(
           and(
@@ -529,6 +543,7 @@ export const makeHolderAccessService = (deps: HolderAccessDeps) => {
         consent: {
           granted: true,
           termsVersion: result.consent.termsVersion,
+          termsHash: row?.termsHash ?? result.consent.termsHash,
           acceptedAt: row?.acceptedAt?.toISOString() ?? null,
         },
       }

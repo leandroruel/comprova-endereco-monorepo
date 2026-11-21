@@ -37,6 +37,7 @@ const baseView = (overrides: Partial<HolderAccessView> = {}): HolderAccessView =
     content:
       'Estes são os termos de consentimento de exemplo para comprovação de endereço. ' +
       'Ao aceitar, você autoriza o Verifier a processar seus documentos.',
+    hashValid: true,
   },
   expiresAt: '2026-12-01T12:00:00.000Z',
   completedAt: null,
@@ -199,6 +200,29 @@ describe('HolderAccessPage', () => {
           approved: true,
           documentHash: 'sha256:abc123def456',
           content: null,
+        },
+      }),
+    )
+    await renderPage()
+
+    await expect
+      .element(page.getByText(/O conteúdo jurídico dos termos ainda não foi aprovado/))
+      .toBeVisible()
+    expect(page.getByRole('checkbox').elements()).toHaveLength(0)
+    expect(page.getByRole('button', { name: 'Aceitar e continuar' }).elements()).toHaveLength(0)
+  })
+
+  it('bloqueia o aceite quando o hash dos termos não confere com o conteúdo', async () => {
+    installMock(
+      baseView({
+        terms: {
+          version: '1.0.0',
+          approved: true,
+          documentHash: 'sha256:hash_errado',
+          content:
+            'Estes são os termos de consentimento de exemplo para comprovação de endereço. ' +
+            'Ao aceitar, você autoriza o Verifier a processar seus documentos.',
+          hashValid: false,
         },
       }),
     )

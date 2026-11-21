@@ -22,6 +22,7 @@ export const holderConsent = pgTable(
       .notNull()
       .references(() => holderInformationRequest.id),
     termsVersion: text('terms_version').notNull(),
+    termsHash: text('terms_hash'),
     state: text('state').notNull().default('granted').$type<'granted' | 'withdrawn'>(),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
