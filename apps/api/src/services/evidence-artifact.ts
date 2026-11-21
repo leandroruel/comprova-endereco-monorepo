@@ -64,6 +64,16 @@ export interface CreateEvidenceArtifactInput {
   readonly data: Uint8Array
   readonly contentType: string
   readonly retentionUntil: Date
+  /**
+   * Data de emissão do documento pelo emissor (opcional). Nunca inventada:
+   * ausente quando não disponível.
+   */
+  readonly documentIssuedAt?: Date
+  /**
+   * Data/hora em que o Comprova recebeu o documento. Se omitido, usa-se
+   * clock_timestamp() do banco no momento da inserção.
+   */
+  readonly receivedAt?: Date
 }
 
 export interface InsertEvidenceArtifactInput {
@@ -72,6 +82,8 @@ export interface InsertEvidenceArtifactInput {
   readonly holderInformationRequestId?: string
   readonly object: StoredEvidenceObject
   readonly retentionUntil: Date
+  readonly documentIssuedAt?: Date
+  readonly receivedAt?: Date
 }
 
 export interface EvidenceArtifactMetadata extends StoredEvidenceObject {
@@ -79,6 +91,8 @@ export interface EvidenceArtifactMetadata extends StoredEvidenceObject {
   readonly claimEvidenceId: string | null
   readonly holderInformationRequestId: string | null
   readonly retentionUntil: Date
+  readonly documentIssuedAt: Date | null
+  readonly receivedAt: Date
 }
 
 export const evidenceArtifactStorageKey = (tenantId: string, artifactId: string): string =>
@@ -169,6 +183,8 @@ export const insertEvidenceArtifact = async (
   assertExactlyOneSource(input.claimEvidenceId, input.holderInformationRequestId)
   assertRetentionUntil(input.retentionUntil)
 
+  const receivedAt = input.receivedAt ?? new Date()
+
   await tx.insert(t.evidenceArtifact).values({
     artifactId: input.object.artifactId,
     tenantId: input.tenantId,
@@ -178,6 +194,9 @@ export const insertEvidenceArtifact = async (
     contentType: input.object.contentType,
     sizeBytes: input.object.sizeBytes,
     sha256: input.object.sha256,
+    documentIssuedAt: input.documentIssuedAt ?? null,
+    receivedAt,
+    createdAt: receivedAt,
     retentionUntil: input.retentionUntil,
   })
 
@@ -187,6 +206,8 @@ export const insertEvidenceArtifact = async (
     claimEvidenceId: input.claimEvidenceId ?? null,
     holderInformationRequestId: input.holderInformationRequestId ?? null,
     retentionUntil: input.retentionUntil,
+    documentIssuedAt: input.documentIssuedAt ?? null,
+    receivedAt,
   }
 }
 
@@ -212,6 +233,8 @@ export const createEvidenceArtifact = async (
         holderInformationRequestId: input.holderInformationRequestId,
         object,
         retentionUntil: input.retentionUntil,
+        documentIssuedAt: input.documentIssuedAt,
+        receivedAt: input.receivedAt,
       }),
     )
   } catch (error) {

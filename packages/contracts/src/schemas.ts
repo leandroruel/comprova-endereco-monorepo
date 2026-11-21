@@ -291,6 +291,14 @@ export const ValidationListItemDtoSchema = z.object({
   holder_consent_accepted_at: z.string().nullable(),
   holder_documents_received: z.boolean(),
   holder_document_processing_state: HolderSubmissionProcessingStateSchema.nullable(),
+  /**
+   * Metadados temporais do documento original (evidence_artifact) e da
+   * verificação (evidence_analysis), quando disponíveis.
+   */
+  holder_document_issued_at: z.string().nullable(),
+  holder_document_received_at: z.string().nullable(),
+  holder_document_verified_at: z.string().nullable(),
+  holder_document_expires_at: z.string().nullable(),
   created_at: z.string(),
   expires_at: z.string(),
 })

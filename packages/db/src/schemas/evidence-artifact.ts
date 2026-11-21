@@ -48,6 +48,17 @@ export const evidenceArtifact = pgTable(
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
     sha256: bytea('sha256').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Data de emissão do documento pelo emissor (ex: conta de luz). Opcional:
+     * nunca inventada ou inferida quando não disponível.
+     */
+    documentIssuedAt: timestamp('document_issued_at', { withTimezone: true }),
+    /**
+     * Data/hora em que o Comprova recebeu e armazenou o documento.
+     * Preenchido no INSERT do artefato (mesmo instante de created_at para
+     * artefatos novos; preenchido em backfill para registros existentes).
+     */
+    receivedAt: timestamp('received_at', { withTimezone: true }),
     retentionUntil: timestamp('retention_until', { withTimezone: true }).notNull(),
   },
   (t) => [

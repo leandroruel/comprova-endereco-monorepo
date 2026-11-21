@@ -62,6 +62,11 @@ export interface EvidenceIntakeInput {
   readonly data: Uint8Array
   readonly declaredContentType: string | undefined
   readonly idempotencyKey: string | undefined
+  /**
+   * Data de emissão do documento pelo emissor (opcional). Nunca inventada:
+   * ausente quando não informada pelo cliente.
+   */
+  readonly documentIssuedAt?: Date
 }
 
 export interface EvidenceIntakeResult {
@@ -725,6 +730,8 @@ export const uploadEvidence = async (
         claimEvidenceId,
         object,
         retentionUntil: validation.expiresAt,
+        documentIssuedAt: input.documentIssuedAt,
+        receivedAt: now,
       })
       // F1.2: enfileira a análise na MESMA transação do intake. A análise não
       // altera a observação `unknown`/`pending` da F1.1; o verificador F1.3

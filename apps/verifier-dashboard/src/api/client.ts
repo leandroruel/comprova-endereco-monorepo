@@ -270,6 +270,14 @@ export interface ValidationListItem {
   holder_consent_accepted_at: string | null
   holder_documents_received: boolean
   holder_document_processing_state: 'awaiting' | 'processing' | 'processed' | 'partial' | 'failed' | null
+  /**
+   * Metadados temporais do documento original (evidence_artifact) e da
+   * verificação (evidence_analysis), quando disponíveis.
+   */
+  holder_document_issued_at: string | null
+  holder_document_received_at: string | null
+  holder_document_verified_at: string | null
+  holder_document_expires_at: string | null
   created_at: string
   expires_at: string
 }

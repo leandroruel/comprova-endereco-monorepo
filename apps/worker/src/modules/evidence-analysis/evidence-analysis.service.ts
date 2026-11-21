@@ -152,6 +152,9 @@ const persistResult = async (
   lastError: string | null = null,
 ): Promise<void> =>
   withTenant(deps.db, job.tenantId, async (tx) => {
+    const now = (deps.now ?? (() => new Date()))()
+    const verifiedAt = new Date(result.analyzedAt)
+    const expiresAt = new Date(verifiedAt.getTime() + 6 * 30 * 24 * 60 * 60 * 1000) // +6 meses
     await tx
       .update(t.evidenceAnalysis)
       .set({
@@ -160,8 +163,10 @@ const persistResult = async (
         errorCodes: [...result.errorCodes],
         attempts: job.attempts,
         lastError,
-        updatedAt: (deps.now ?? (() => new Date()))(),
-        analyzedAt: new Date(result.analyzedAt),
+        updatedAt: now,
+        analyzedAt: verifiedAt,
+        verifiedAt,
+        expiresAt,
       })
       .where(
         and(eq(t.evidenceAnalysis.analysisId, job.analysisId), eq(t.evidenceAnalysis.tenantId, job.tenantId)),

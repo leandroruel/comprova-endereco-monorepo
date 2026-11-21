@@ -42,6 +42,8 @@ interface DocumentToProcess {
   readonly contentType: string
   readonly sizeBytes: number
   readonly sha256: Buffer
+  /** Data/hora em que o documento foi recebido (upload concluído). */
+  readonly createdAt: Date
 }
 
 type ProcessingState = 'awaiting' | 'processing' | 'processed' | 'partial' | 'failed'
@@ -270,6 +272,7 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
         contentType: t.holderInformationRequestDocument.contentType,
         sizeBytes: t.holderInformationRequestDocument.sizeBytes,
         sha256: t.holderInformationRequestDocument.sha256,
+        createdAt: t.holderInformationRequestDocument.createdAt,
       })
       .from(t.holderInformationRequestDocument)
       .where(
@@ -293,6 +296,7 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
               contentType: r.contentType,
               sizeBytes: r.sizeBytes,
               sha256: r.sha256,
+              createdAt: r.createdAt,
             },
           ],
     )
@@ -404,6 +408,8 @@ export const makeHolderSubmissionProcessingService = (deps: HolderSubmissionProc
             contentType: doc.contentType,
             sizeBytes: doc.sizeBytes,
             sha256: doc.sha256,
+            documentIssuedAt: null, // não fornecido pelo Holder no upload
+            receivedAt: doc.createdAt ?? new Date(), // quando o documento foi armazenado pelo Holder
             retentionUntil,
           })
         }

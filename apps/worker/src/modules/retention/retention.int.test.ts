@@ -795,6 +795,7 @@ const seedHolderSubmission = async (
   contentType: string
   sizeBytes: number
   sha256: Buffer
+  createdAt: Date
 }> => {
   const holderId = randomUUID()
   await adminPool.db.insert(t.holder).values({
@@ -849,6 +850,7 @@ const seedHolderSubmission = async (
     contentType: 'application/pdf',
     sizeBytes: 3,
     sha256,
+    createdAt: new Date(),
   }
 }
 
@@ -1352,6 +1354,7 @@ describe('corrida validation_id × lock (P1 r3)', () => {
           contentType: submission.contentType,
           sizeBytes: submission.sizeBytes,
           sha256: submission.sha256,
+          createdAt: submission.createdAt,
         },
       ]),
     )

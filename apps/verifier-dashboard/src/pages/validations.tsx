@@ -228,14 +228,36 @@ export function ValidationsPage({
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={validation.holder_documents_received ? 'info' : 'secondary'}>
-                          {validation.holder_documents_received ? 'Recebido' : 'Aguardando'}
-                        </Badge>
+                        <div className="space-y-1">
+                          <Badge variant={validation.holder_documents_received ? 'info' : 'secondary'}>
+                            {validation.holder_documents_received ? 'Recebido' : 'Aguardando'}
+                          </Badge>
+                          {validation.holder_document_issued_at !== null ? (
+                            <p className="text-[11px] text-muted-foreground">
+                              Emitido {formatDate(validation.holder_document_issued_at)}
+                            </p>
+                          ) : null}
+                          {validation.holder_document_received_at !== null ? (
+                            <p className="text-[11px] text-muted-foreground">
+                              Recebido {formatDate(validation.holder_document_received_at)}
+                            </p>
+                          ) : null}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <span className="text-sm text-muted-foreground">
                           {holderProcessingLabel(validation.holder_document_processing_state)}
                         </span>
+                        {validation.holder_document_verified_at !== null ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            Verificado {formatDate(validation.holder_document_verified_at)}
+                          </p>
+                        ) : null}
+                        {validation.holder_document_expires_at !== null ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            Expira {formatDate(validation.holder_document_expires_at)}
+                          </p>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <Badge variant={badge.variant}>{badge.label}</Badge>

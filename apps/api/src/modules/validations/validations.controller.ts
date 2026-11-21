@@ -172,6 +172,10 @@ export const makeValidationController = (deps: ValidationControllerDeps) => ({
         holder_documents_received: item.holderDocumentsReceived,
         holder_document_processing_state:
           item.holderDocumentProcessingState as HolderSubmissionProcessingState | null,
+        holder_document_issued_at: item.holderDocumentIssuedAt,
+        holder_document_received_at: item.holderDocumentReceivedAt,
+        holder_document_verified_at: item.holderDocumentVerifiedAt,
+        holder_document_expires_at: item.holderDocumentExpiresAt,
         created_at: item.createdAt.toISOString(),
         expires_at: item.expiresAt.toISOString(),
       })),

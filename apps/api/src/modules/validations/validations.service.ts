@@ -315,6 +315,10 @@ export interface ValidationListItem {
   readonly holderConsentAcceptedAt: string | null
   readonly holderDocumentsReceived: boolean
   readonly holderDocumentProcessingState: string | null
+  readonly holderDocumentIssuedAt: string | null
+  readonly holderDocumentReceivedAt: string | null
+  readonly holderDocumentVerifiedAt: string | null
+  readonly holderDocumentExpiresAt: string | null
   readonly createdAt: Date
   readonly expiresAt: Date
 }
@@ -393,6 +397,10 @@ export const listValidations = async (
           consentAcceptedAt: string | null
           documentsReceived: boolean
           documentProcessingState: string | null
+          documentIssuedAt: string | null
+          documentReceivedAt: string | null
+          documentVerifiedAt: string | null
+          documentExpiresAt: string | null
         } | null>`(
           SELECT jsonb_build_object(
             'externalReference', h.external_reference,
@@ -428,6 +436,46 @@ export const listValidations = async (
               FROM holder_submission_processing hsp
               WHERE hsp.holder_information_request_id = hir.id
                 AND hsp.tenant_id = hir.tenant_id
+              LIMIT 1
+            ),
+            'documentIssuedAt', (
+              SELECT ea_doc.document_issued_at
+              FROM evidence_artifact ea_doc
+              WHERE ea_doc.holder_information_request_id = hir.id
+                AND ea_doc.tenant_id = hir.tenant_id
+              LIMIT 1
+            ),
+            'documentReceivedAt', (
+              SELECT ea_doc.received_at
+              FROM evidence_artifact ea_doc
+              WHERE ea_doc.holder_information_request_id = hir.id
+                AND ea_doc.tenant_id = hir.tenant_id
+              LIMIT 1
+            ),
+            'documentVerifiedAt', (
+              SELECT ea.verified_at
+              FROM evidence_analysis ea
+              WHERE ea.artifact_id = (
+                SELECT ea2.artifact_id
+                FROM evidence_artifact ea2
+                WHERE ea2.holder_information_request_id = hir.id
+                  AND ea2.tenant_id = hir.tenant_id
+                LIMIT 1
+              )
+                AND ea.tenant_id = hir.tenant_id
+              LIMIT 1
+            ),
+            'documentExpiresAt', (
+              SELECT ea.expires_at
+              FROM evidence_analysis ea
+              WHERE ea.artifact_id = (
+                SELECT ea2.artifact_id
+                FROM evidence_artifact ea2
+                WHERE ea2.holder_information_request_id = hir.id
+                  AND ea2.tenant_id = hir.tenant_id
+                LIMIT 1
+              )
+                AND ea.tenant_id = hir.tenant_id
               LIMIT 1
             )
           )
@@ -476,6 +524,10 @@ export const listValidations = async (
             holderConsentAcceptedAt: jsonText(holderRequest?.consentAcceptedAt),
             holderDocumentsReceived: holderRequest?.documentsReceived ?? false,
             holderDocumentProcessingState: holderRequest?.documentProcessingState ?? null,
+            holderDocumentIssuedAt: jsonText(holderRequest?.documentIssuedAt),
+            holderDocumentReceivedAt: jsonText(holderRequest?.documentReceivedAt),
+            holderDocumentVerifiedAt: jsonText(holderRequest?.documentVerifiedAt),
+            holderDocumentExpiresAt: jsonText(holderRequest?.documentExpiresAt),
             createdAt: row.createdAt,
             expiresAt: row.expiresAt,
           }

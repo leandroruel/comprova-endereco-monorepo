@@ -54,6 +54,18 @@ export const evidenceAnalysis = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     analyzedAt: timestamp('analyzed_at', { withTimezone: true }),
+    /**
+     * Data/hora em que a verificação foi concluída (status terminal).
+     * Preenchida junto com analyzed_at quando a análise atinge um estado
+     * terminal (completed, inconclusive, unsupported, unavailable, failed).
+     */
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    /**
+     * Data/hora prevista de expiração da evidência = verified_at + 6 meses
+     * (política padrão de retenção do documento original). Calculada pelo
+     * backend, nunca confiada em dados do cliente.
+     */
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (t) => [
     foreignKey({
@@ -85,6 +97,11 @@ export const evidenceAnalysis = pgTable(
     check(
       'evidence_analysis_terminal_result_ck',
       sql`(${t.status} IN ('pending','analyzing') AND ${t.result} IS NULL) OR (${t.status} IN ('completed','inconclusive','unsupported','unavailable','failed') AND ${t.result} IS NOT NULL AND ${t.analyzedAt} IS NOT NULL AND (${t.result}->>'status') IS NOT DISTINCT FROM ${t.status})`,
+    ),
+    // expires_at deve ser posterior a verified_at quando ambos preenchidos
+    check(
+      'evidence_analysis_expires_after_verified',
+      sql`${t.expiresAt} IS NULL OR ${t.verifiedAt} IS NULL OR ${t.expiresAt} > ${t.verifiedAt}`
     ),
   ],
 )

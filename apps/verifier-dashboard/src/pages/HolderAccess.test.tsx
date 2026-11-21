@@ -200,6 +200,7 @@ describe('HolderAccessPage', () => {
           approved: true,
           documentHash: 'sha256:abc123def456',
           content: null,
+          hashValid: true,
         },
       }),
     )
@@ -237,7 +238,15 @@ describe('HolderAccessPage', () => {
 
   it('bloqueia o aceite quando o conteúdo jurídico não está aprovado', async () => {
     installMock(
-      baseView({ terms: { version: '1.0.0', approved: false, documentHash: 'sha256:abc', content: null } }),
+      baseView({
+        terms: {
+          version: '1.0.0',
+          approved: false,
+          documentHash: 'sha256:abc',
+          content: null,
+          hashValid: false,
+        },
+      }),
     )
     await renderPage()
 
