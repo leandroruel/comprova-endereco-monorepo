@@ -65,7 +65,27 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'dashboard',
-          include: ['apps/dashboard/src/**/*.test.tsx', 'apps/verifier-dashboard/src/**/*.test.tsx'],
+          include: ['apps/dashboard/src/**/*.test.tsx'],
+          // As asserções de locator (`expect.element`) tentam de novo até o
+          // timeout do teste: um seletor quebrado aqui precisa falhar rápido,
+          // sem herdar os 2 min que os testes de banco/API exigem.
+          testTimeout: 90_000,
+          browser: {
+            enabled: true,
+            // No v4+ o provider é uma factory, vinda do pacote
+            // `@vitest/browser-playwright` (o pacote `@vitest/browser` deixou de
+            // ser dependência nossa).
+            provider: playwright(),
+            headless: true,
+            instances: [{ browser: 'chromium' }],
+          },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'verifier-dashboard',
+          include: ['apps/verifier-dashboard/src/**/*.test.tsx'],
           // As asserções de locator (`expect.element`) tentam de novo até o
           // timeout do teste: um seletor quebrado aqui precisa falhar rápido,
           // sem herdar os 2 min que os testes de banco/API exigem.
