@@ -30,6 +30,7 @@ Estado: **F3.3 (medição de uso, idempotência, cotas e reconciliação) entreg
   - Acompanhamento de processamento via polling no endpoint existente (`/v1/holder-access/items/:requestId/processing`)
   - Dashboard do Verifier exibe dados reais de `holder_information_request` na listagem de validações: estado, criação, expiração, consentimento, documentos recebidos e estado do processamento; sem token/hash/segredos
   - Testes: API Node (consentimento, listagem, acesso, rate limit), browser (página pública do Holder), node (estado da solicitação no dashboard)
+  - **Dependência de produto:** o aceite só é liberado quando o conteúdo jurídico dos termos estiver aprovado e cadastrado (`content` não nulo). Enquanto `content` for `null`, o consentimento permanece bloqueado e o fluxo não está operacionalmente habilitado. Não há segunda fonte de configuração; reutiliza `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH` existentes.
 
 ## Entrega do resultado ao Verifier (PR #74) (2026-11-15)
 

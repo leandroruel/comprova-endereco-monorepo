@@ -1009,6 +1009,22 @@ original e o histórico é imutável.
 - Confundir "atualização" com "contestação" (já existe `contest`).
 - Autenticação do titular ser fraca e permitir que terceiro envie documento.
 
+### Dependência de produto — conteúdo jurídico dos termos
+
+A implementação técnica do fluxo F4.1 está completa (interface pública, consentimento
+validado server-side, upload, acompanhamento de processamento, dashboard do Verifier).
+Entretanto, o fluxo não está **operacionalmente habilitado** enquanto o conteúdo
+jurídico dos termos não estiver aprovado e cadastrado:
+
+- A configuração injeta `content: null` nos termos do módulo Holder (`apps/api/src/app.ts`).
+- O frontend exibe o texto integral dos termos apenas quando `content` não é nulo/vazio.
+- Quando `content` é `null`, o consentimento permanece bloqueado e o Holder não pode
+  prosseguir com o envio de documentos.
+- Não há conteúdo jurídico fictício nem segunda fonte de configuração; reutiliza
+  `TERMS_VERSION`/`TERMS_APPROVED`/`TERMS_DOCUMENT_HASH` existentes.
+- Para habilitar o fluxo, é necessário cadastrar o conteúdo aprovado dos termos e
+  disponibilizá-lo na mesma fonte de configuração existente.
+
 ### Decisões em aberto
 
 - Link é por consulta, validação ou caso? Existe entidade "caso"?
