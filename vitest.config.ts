@@ -18,6 +18,12 @@ export default defineConfig({
         new URL('./packages/observability/src/index.ts', import.meta.url),
       ),
     },
+    // `vitest-browser-react` é importado diretamente nos testes de browser do
+    // dashboard e do verifier-dashboard; adicionar ao optimizeDeps evita
+    // problemas de resolução de dependência no CI.
+    optimizeDeps: {
+      include: ['vitest-browser-react'],
+    },
   },
   test: {
     testTimeout: 120_000,
@@ -63,7 +69,7 @@ export default defineConfig({
           // As asserções de locator (`expect.element`) tentam de novo até o
           // timeout do teste: um seletor quebrado aqui precisa falhar rápido,
           // sem herdar os 2 min que os testes de banco/API exigem.
-          testTimeout: 30_000,
+          testTimeout: 90_000,
           browser: {
             enabled: true,
             // No v4+ o provider é uma factory, vinda do pacote
