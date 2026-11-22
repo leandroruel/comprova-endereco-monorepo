@@ -1,8 +1,0 @@
-# syntax=docker/dockerfile:1
-# Redis/Valkey para Comprova (apenas rede interna Fly.io)
-FROM valkey/valkey:8-alpine
-
-# Valkey roda como usuário não-root por padrão nesta imagem
-EXPOSE 6379
-
-CMD ["valkey-server", "--save", "", "--appendonly", "no"]

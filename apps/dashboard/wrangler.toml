@@ -6,7 +6,7 @@ main = "src/worker.ts"
 compatibility_date = "2026-11-21"
 
 [build]
-  command = "pnpm install && pnpm --filter dashboard build"
+  command = "VITE_API_URL=/api VITE_DASHBOARD_ADMIN_AUTH_URL=/api/auth pnpm install && pnpm --filter dashboard build"
   watch_dir = "apps/dashboard"
   root = "apps/dashboard/dist"
 
@@ -15,4 +15,18 @@ compatibility_date = "2026-11-21"
   binding = "ASSETS"
 
 [env.production]
-  vars = { VITE_API_URL = "/api" }
+  vars = { VITE_API_URL = "/api", VITE_DASHBOARD_ADMIN_AUTH_URL = "/api/auth" }
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = false
+head_sampling_rate = 1
+persist = true
+
+[observability.issue_detection]
+enabled = false
