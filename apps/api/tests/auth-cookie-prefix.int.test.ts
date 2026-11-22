@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { startTestDb, startTestRedis, TEST_APP_DB_PASSWORD } from '@comprova/testing'
 import { runMigrations, createDbPool, sql } from '@comprova/db'
+import { hashPassword } from 'better-auth/crypto'
 import Redis from 'ioredis'
 import { createLogger, createMetrics } from '@comprova/observability'
 import { buildApp } from '../src/app.js'
@@ -179,13 +181,28 @@ let verifierSetCookie: string | string[] | undefined
  * legacy-auth) para que cookies de localhost não colidam entre dashboards.
  */
 describe('auth cookie prefix isolation', () => {
-  it('admin sign-in seta cookie com prefixo admin-auth', async () => {
-    // Primeiro cria o usuário via sign-up
-    await app.inject({
+  it('admin sign-up está desabilitado', async () => {
+    const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/admin/sign-up/email',
-      body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: 'Admin Cookie Test' },
+      body: { email: `signup-bloqueado-${Date.now()}@exemplo.com`, password: ADMIN_PASSWORD, name: 'Blocked' },
     })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ code: 'EMAIL_PASSWORD_SIGN_UP_DISABLED' })
+  })
+
+  it('admin sign-in seta cookie com prefixo admin-auth', async () => {
+    // O cadastro é fechado; o admin é provisionado como em produção (create-admin).
+    const adminUserId = randomUUID()
+    await adminPool.db.execute(sql`
+      INSERT INTO admin_user (id, name, email, email_verified, role)
+      VALUES (${adminUserId}, 'Admin Cookie Test', ${ADMIN_EMAIL}, true, 'superadmin')
+    `)
+    await adminPool.db.execute(sql`
+      INSERT INTO admin_account (id, account_id, provider_id, user_id, password)
+      VALUES (${randomUUID()}, ${adminUserId}, 'credential', ${adminUserId}, ${await hashPassword(ADMIN_PASSWORD)})
+    `)
 
     const res = await app.inject({
       method: 'POST',

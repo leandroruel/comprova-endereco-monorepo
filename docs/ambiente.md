@@ -176,10 +176,15 @@ configuração/segredo externo; no KMS ele nunca sai do KMS. Uma chave com
 ## Outras variáveis
 
 `DATABASE_URL`, `DATABASE_ADMIN_URL`, `REDIS_URL`, `BETTER_AUTH_SECRET`,
-`BETTER_AUTH_URL`, `OPENAI_API_KEY`, `GOOGLE_STREET_VIEW_KEY`, `VLM_ENABLED`,
-`TEMPORAL_*`, `PORT`, `DB_POOL_MAX`, `LOG_LEVEL` e `POLICY_VERSION` estão
-documentadas no [`.env.example`](../.env.example). O `.env` não deve ser
-commitado.
+`BETTER_AUTH_URL`, `DASHBOARD_ADMIN_ORIGINS`, `DASHBOARD_VERIFIER_ORIGINS`,
+`OPENAI_API_KEY`, `GOOGLE_STREET_VIEW_KEY`, `VLM_ENABLED`, `TEMPORAL_*`,
+`PORT`, `DB_POOL_MAX`, `LOG_LEVEL` e `POLICY_VERSION` estão documentadas no
+[`.env.example`](../.env.example). O `.env` não deve ser commitado.
+
+`DASHBOARD_ADMIN_ORIGINS` e `DASHBOARD_VERIFIER_ORIGINS` aceitam uma lista
+separada por vírgula. Elas alimentam CORS, `trustedOrigins` do Better Auth e a
+seleção da instância de sessão; sem elas valem apenas as origens locais de
+desenvolvimento.
 
 ## Logs (Elastic Stack)
 
