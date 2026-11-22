@@ -24,11 +24,10 @@ const resolveAdminAuthBaseUrl = (): string => {
     const hasAuthPath = /^\/v1\/auth\/(admin|verifier)/.test(parsed.pathname)
     if (!hasAuthPath) {
       // Apenas uma origem: não adicionamos /v1/auth/admin aqui. O
-      // `basePath: '/api/auth'` do better-auth adiciona /api/auth à origem,
-      // e o proxy do Vite captura /api/auth/* e reescreve para
-      // /v1/auth/admin/* no backend. Se adicionássemos /v1/auth/admin
-      // agora, o better-auth chamaria /v1/auth/admin/sign-in/email
-      // diretamente, que o proxy do Vite NÃO captura → 404.
+      // `basePath: '/api/auth'` do better-auth adiciona o caminho
+      // correto (`/api/auth/sign-in/email`) para que o proxy do Vite capture
+      // e encaminhe para a instância isolada do admin (`/v1/auth/admin/*`)
+      // na porta 3000.
       return parsed.origin
     }
     return parsed.toString()
