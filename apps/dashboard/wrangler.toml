@@ -1,21 +1,16 @@
-# wrangler.toml — Dashboard Comprova (Cloudflare Pages + Worker proxy)
-# Deploy: npx wrangler pages deploy dist --project-name=comprova-dashboard --config apps/dashboard/wrangler.toml
+# wrangler.toml — Dashboard Comprova (Cloudflare Worker proxy)
+# Deploy: npx wrangler deploy --config apps/dashboard/wrangler.toml
 
 name = "comprova-dashboard"
 main = "src/worker.ts"
 compatibility_date = "2026-11-21"
 
 [build]
-  command = "VITE_API_URL=/api VITE_DASHBOARD_ADMIN_AUTH_URL=/api/auth pnpm install && pnpm --filter dashboard build"
-  watch_dir = "apps/dashboard"
-  root = "apps/dashboard/dist"
+  command = "pnpm install && pnpm --filter dashboard build"
 
 [assets]
   directory = "dist"
   binding = "ASSETS"
-
-[env.production]
-  vars = { VITE_API_URL = "/api", VITE_DASHBOARD_ADMIN_AUTH_URL = "/api/auth" }
 
 [observability.logs]
 enabled = true
@@ -25,8 +20,8 @@ persist = true
 
 [observability.traces]
 enabled = false
-head_sampling_rate = 1
 persist = true
+head_sampling_rate = 1
 
 [observability.issue_detection]
 enabled = false

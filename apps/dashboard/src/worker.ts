@@ -19,6 +19,18 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
+    // --- Diagnóstico: verificar se a API_KEY chegou ao Worker ---
+    if (url.pathname === '/api/_health') {
+      return new Response(JSON.stringify({
+        hasKey: Boolean(env.API_KEY),
+        keyLength: env.API_KEY?.length ?? 0,
+        envKeys: Object.keys(env).filter(k => k.includes('API') || k.includes('KEY')),
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     // --- Proxy da API ---
     if (url.pathname.startsWith('/api/')) {
       return proxyToApi(request, env)
