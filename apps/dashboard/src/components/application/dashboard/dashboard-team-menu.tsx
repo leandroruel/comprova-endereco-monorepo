@@ -3,7 +3,7 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useTemplateCopy } from '@/components/foundations/template-copy/template-copy'
 
-import { RiLogoutBoxRLine, RiPaletteLine, RiSettings4Line, RiUserSmileLine } from '@remixicon/react'
+import { RiLockPasswordLine, RiLogoutBoxRLine, RiPaletteLine, RiSettings4Line, RiUserSmileLine } from '@remixicon/react'
 import { Avatar } from '@/components/base/avatar/avatar'
 import { ChevronDownSmall } from '@/components/foundations/icons/chevrons'
 import { ThemeToggle } from '@/components/application/theme/theme-toggle'
@@ -143,6 +143,15 @@ export function DashboardTeamMenu({
           >
             <RiSettings4Line className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
             <span className="truncate text-body-medium text-text-primary">Configurações</span>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item
+            className={menuItemClass}
+            onSelect={() => {
+              onNavigate?.('change-password')
+            }}
+          >
+            <RiLockPasswordLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
+            <span className="truncate text-body-medium text-text-primary">Alterar senha</span>
           </DropdownMenu.Item>
           {onSignOut && (
             <DropdownMenu.Item

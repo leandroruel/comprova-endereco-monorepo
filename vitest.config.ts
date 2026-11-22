@@ -19,10 +19,11 @@ export default defineConfig({
       ),
     },
     // `vitest-browser-react` é importado diretamente nos testes de browser do
-    // dashboard e do verifier-dashboard; adicionar ao optimizeDeps evita
+    // dashboard e do verifier-dashboard; `better-auth/react` entra pelo mock do
+    // authClient na página de troca de senha. Adicionar ao optimizeDeps evita
     // problemas de resolução de dependência no CI.
     optimizeDeps: {
-      include: ['vitest-browser-react'],
+      include: ['vitest-browser-react', 'better-auth/react'],
     },
   },
   test: {
