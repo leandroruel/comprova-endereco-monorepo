@@ -31,6 +31,32 @@ export default {
       })
     }
 
+    // --- Diagnóstico: testar conexão com a API usando a API_KEY ---
+    if (url.pathname === '/api/_debug') {
+      try {
+        const testRes = await fetch(`${API_BASE}/healthz`, {
+          headers: { Authorization: `Bearer ${env.API_KEY}` },
+        })
+        return new Response(JSON.stringify({
+          apiStatus: testRes.status,
+          apiStatusText: testRes.statusText,
+          apiHeaders: Object.fromEntries(testRes.headers.entries()),
+          body: await testRes.text(),
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      } catch (err: any) {
+        return new Response(JSON.stringify({
+          error: err.message,
+          stack: err.stack,
+        }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     // --- Proxy da API ---
     if (url.pathname.startsWith('/api/')) {
       return proxyToApi(request, env)

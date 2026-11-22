@@ -4,6 +4,7 @@
 name = "comprova-dashboard"
 main = "src/worker.ts"
 compatibility_date = "2026-11-21"
+workers_dev = true
 
 [build]
   command = "pnpm install && pnpm --filter dashboard build"
@@ -22,6 +23,3 @@ persist = true
 enabled = false
 persist = true
 head_sampling_rate = 1
-
-[observability.issue_detection]
-enabled = false
