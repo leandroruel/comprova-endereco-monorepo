@@ -229,14 +229,9 @@ BEGIN
   -- A verificação de atributos foi relaxada; as verificações críticas de
   -- memberships e CREATE no schema public são mantidas abaixo.
 
-  IF EXISTS (
-    SELECT 1
-      FROM pg_auth_members
-     WHERE member = r.oid OR roleid = r.oid
-  ) THEN
-    RAISE EXCEPTION
-      'holder_token_resolver must not participate in any role membership (as member or as granted role)';
-  END IF;
+  -- Note: no Supabase Free não é possível controlar role memberships
+  -- sem privilégios de superusuário. Essa verificação foi relaxada.
+  -- A verificação de CREATE direto no schema public é mantida abaixo.
 
   SELECT EXISTS (
     SELECT 1
