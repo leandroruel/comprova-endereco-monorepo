@@ -5,7 +5,8 @@ name = "comprova-dashboard"
 compatibility_date = "2026-11-21"
 
 [build]
-  command = "pnpm install && pnpm --filter dashboard build"
+  # Injetar variáveis de ambiente no build do Vite (estático, não Functions)
+  command = "VITE_API_URL=https://comprova-api.onrender.com VITE_DASHBOARD_ADMIN_AUTH_URL=https://comprova-api.onrender.com/v1/auth/admin pnpm install && pnpm --filter dashboard build"
   watch_dir = "apps/dashboard"
   root = "apps/dashboard/dist"
 
