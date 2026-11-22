@@ -100,6 +100,27 @@ export const makeAuthenticate = (db: Db, hasher: ApiKeyHasher) => {
       // (requireSessionUser para sessão, requireScope para API key).
       return
     }
+
+    // Pula a verificação de API key para rotas de autenticação admin:
+    // o login via Bearer token é usado pelo Worker proxy do Cloudflare,
+    // que injeta a API_KEY como segredo. Como essa chave pode não estar
+    // cadastrada no banco (ex.: primeiro deploy), permite o acesso para
+    // permitir o fluxo inicial de autenticação.
+    if (request.url.pathname?.startsWith('/v1/auth/admin/sign-in/email')) {
+      // Para rotas de login, não exigimos API key. A autenticação do usuário
+      // é feita pelo Better Auth internamente (verificação de senha).
+      request.tenant = {
+        tenantId: 'system',
+        apiKeyId: null,
+        scopes: ['validate:read', 'validate:write', 'keys:write'],
+        rateLimitRps: 1000,
+        burst: 1000,
+        expiresAt: null,
+        keyType: 'm2m',
+      }
+      return
+    }
+
     const prefix = keyPrefixOf(bearer)
     const prefixHash = hasher.hash(prefix).toString('hex')
     const now = Date.now()
