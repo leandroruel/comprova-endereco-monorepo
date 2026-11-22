@@ -87,10 +87,17 @@ export const registerAuthAdminRoutes = (app: FastifyInstance, auth: AuthAdmin): 
           .where(eq(t.adminAuthUser.email, email))
           .limit(1)
         if (existing.length > 0) {
+          // Usuário já existe: atualizar a senha
+          const passwordHash = await argon2Hash(password)
+          await pool.db
+            .update(t.adminAuthAccount)
+            .set({ password: passwordHash, updatedAt: new Date() })
+            .where(eq(t.adminAuthAccount.accountId, email))
           return reply.send({
             ok: true,
-            message: 'Usuário já existe',
+            message: 'Usuário atualizado: senha redefinida',
             email,
+            role: 'superadmin',
           })
         }
 
