@@ -10,4 +10,4 @@ compatibility_date = "2026-11-21"
   root = "apps/dashboard/dist"
 
 [env.production]
-  vars = { VITE_API_URL = "https://comprova-api.fly.dev", VITE_DASHBOARD_ADMIN_AUTH_URL = "https://comprova-api.fly.dev/v1/auth/admin" }
+  vars = { VITE_API_URL = "https://comprova-api.onrender.com", VITE_DASHBOARD_ADMIN_AUTH_URL = "https://comprova-api.onrender.com/v1/auth/admin" }

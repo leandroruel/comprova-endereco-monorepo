@@ -1,0 +1,13 @@
+# wrangler.toml — Verifier Dashboard (Cloudflare Pages)
+# Deploy: npx wrangler pages deploy dist --project-name=comprova-verifier-dashboard --config apps/verifier-dashboard/wrangler.toml
+
+name = "comprova-verifier-dashboard"
+compatibility_date = "2026-11-21"
+
+[build]
+  command = "pnpm install && pnpm --filter verifier-dashboard build"
+  watch_dir = "apps/verifier-dashboard"
+  root = "apps/verifier-dashboard/dist"
+
+[env.production]
+  vars = { VITE_API_URL = "https://comprova-api.onrender.com", VITE_DASHBOARD_VERIFIER_AUTH_URL = "https://comprova-api.onrender.com/v1/auth/verifier" }

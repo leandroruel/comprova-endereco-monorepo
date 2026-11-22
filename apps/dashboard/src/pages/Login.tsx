@@ -75,32 +75,18 @@ function PasswordStrength({ password }: { password: string }) {
 export function LoginPage({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [isSignUp, setIsSignUp] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const canSubmit =
-    email.trim().length > 0 &&
-    password.length > 0 &&
-    (!isSignUp || (password === confirmPassword && checkPassword(password).every((c) => c.passed)))
+  const canSubmit = email.trim().length > 0 && password.length > 0
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
     try {
-      if (isSignUp) {
-        const result = await authClient.signUp.email({
-          email,
-          password,
-          name: email.split('@')[0] ?? 'User',
-        })
-        if (result.error) throw new Error(result.error.message ?? 'Signup failed')
-      } else {
-        const result = await authClient.signIn.email({ email, password })
-        if (result.error) throw new Error(result.error.message ?? 'Login failed')
-      }
+      const result = await authClient.signIn.email({ email, password })
+      if (result.error) throw new Error(result.error.message ?? 'Login failed')
       onSuccess()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed')
@@ -145,50 +131,20 @@ export function LoginPage({ onSuccess }: { onSuccess: () => void }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                autoComplete="current-password"
               />
             </div>
 
-            {isSignUp && (
-              <>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground" htmlFor="confirm">
-                    Confirmar senha
-                  </label>
-                  <Input
-                    id="confirm"
-                    type="password"
-                    placeholder="••••••••"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                    autoComplete="new-password"
-                  />
-                  {confirmPassword.length > 0 && password !== confirmPassword && (
-                    <p className="text-[10px] text-red-500">As senhas não coincidem</p>
-                  )}
-                </div>
-                <PasswordStrength password={password} />
-              </>
-            )}
-
             {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
+            <p className="text-[10px] text-muted-foreground text-center">
+              Cadastro não disponível. Solicite acesso ao administrador.
+            </p>
+
             <Button type="submit" className="w-full" disabled={loading || !canSubmit}>
-              {loading ? <Spinner /> : isSignUp ? 'Criar conta' : 'Entrar'}
+              {loading ? <Spinner /> : 'Entrar'}
             </Button>
           </form>
-
-          <button
-            onClick={() => {
-              setIsSignUp(!isSignUp)
-              setError(null)
-              setConfirmPassword('')
-            }}
-            className="mt-4 w-full text-center text-xs text-muted-foreground hover:text-foreground"
-          >
-            {isSignUp ? 'Já tem conta? Entrar' : 'Não tem conta? Criar'}
-          </button>
         </CardContent>
       </Card>
     </div>
