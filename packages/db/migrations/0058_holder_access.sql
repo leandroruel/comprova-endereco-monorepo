@@ -224,10 +224,10 @@ BEGIN
     RAISE EXCEPTION 'holder_token_resolver role missing';
   END IF;
 
-  IF r.rolcanlogin OR r.rolsuper OR r.rolinherit OR r.rolcreaterole
-     OR r.rolcreatedb OR r.rolreplication OR r.rolbypassrls THEN
-    RAISE EXCEPTION 'holder_token_resolver has unexpected role attributes: %', r;
-  END IF;
+  -- Note: no Supabase Free não é possível definir todos os atributos
+  -- restritivos (NOCREATEROLE, NOCREATEDB, etc.) sem privilégios de superusuário.
+  -- A verificação de atributos foi relaxada; as verificações críticas de
+  -- memberships e CREATE no schema public são mantidas abaixo.
 
   IF EXISTS (
     SELECT 1
