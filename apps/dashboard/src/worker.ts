@@ -8,57 +8,15 @@
  * O segredo API_KEY nunca chega ao browser: vive apenas no ambiente do Worker.
  */
 
-const API_BASE = 'https://comprova-api.onrender.com'
-
-// Origens permitidas para o proxy (evita que o Worker vire API aberta)
-const ALLOWED_ORIGINS = [
-  'https://comprova-dashboard.leandro-ruel.workers.dev',
-]
+// `API_BASE` e `DASHBOARD_ORIGIN` vêm do ambiente do Worker (wrangler [vars]).
+// Assim a URL da API e a origem permitida não ficam fixas no código.
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
-    // --- Diagnóstico: verificar se a API_KEY chegou ao Worker ---
-    if (url.pathname === '/api/_health') {
-      return new Response(JSON.stringify({
-        hasKey: Boolean(env.API_KEY),
-        keyLength: env.API_KEY?.length ?? 0,
-        envKeys: Object.keys(env).filter(k => k.includes('API') || k.includes('KEY')),
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
-
-    // --- Diagnóstico: testar conexão com a API usando a API_KEY ---
-    if (url.pathname === '/api/_debug') {
-      try {
-        const testRes = await fetch(`${API_BASE}/healthz`, {
-          headers: { Authorization: `Bearer ${env.API_KEY}` },
-        })
-        return new Response(JSON.stringify({
-          apiStatus: testRes.status,
-          apiStatusText: testRes.statusText,
-          apiHeaders: Object.fromEntries(testRes.headers.entries()),
-          body: await testRes.text(),
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      } catch (err: any) {
-        return new Response(JSON.stringify({
-          error: err.message,
-          stack: err.stack,
-        }), {
-          status: 502,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-    }
-
     // --- Proxy da API ---
-    if (url.pathname.startsWith('/api/')) {
+    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       return proxyToApi(request, env)
     }
 
@@ -68,17 +26,33 @@ export default {
 } satisfies ExportedHandler<Env>
 
 /**
+ * Converte o caminho público do dashboard para o caminho da API.
+ *
+ * O frontend usa `/api` como base (`VITE_API_URL=/api`) e `/api/auth` para
+ * o Better Auth. A API expõe os dados em `/v1/*` e o auth admin em
+ * `/v1/auth/admin/*`, então o prefixo `/api` é removido aqui, no Worker.
+ */
+function toUpstreamPath(pathname: string): string {
+  const authPrefix = '/api/auth'
+  if (pathname === authPrefix || pathname.startsWith(`${authPrefix}/`)) {
+    return `/v1/auth/admin${pathname.slice(authPrefix.length)}`
+  }
+  return pathname.slice('/api'.length) || '/'
+}
+
+/**
  * Encaminha a requisição para a API externa, injetando Authorization.
  */
 async function proxyToApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
 
   // Valida a origem da requisição (anti-proxy aberto)
+  const allowedOrigin = env.DASHBOARD_ORIGIN
   const origin = request.headers.get('Origin') ?? ''
   const referer = request.headers.get('Referer') ?? ''
   const isAllowedOrigin =
-    ALLOWED_ORIGINS.includes(origin) ||
-    ALLOWED_ORIGINS.some((o) => referer.startsWith(o))
+    allowedOrigin.length > 0 &&
+    (origin === allowedOrigin || referer.startsWith(allowedOrigin))
 
   if (!isAllowedOrigin) {
     return new Response(JSON.stringify({ error: 'Acesso não autorizado' }), {
@@ -88,15 +62,15 @@ async function proxyToApi(request: Request, env: Env): Promise<Response> {
   }
 
   // Constrói a URL alvo na API externa
-  const targetUrl = `${API_BASE}${url.pathname}${url.search}`
+  const targetUrl = `${env.API_BASE}${toUpstreamPath(url.pathname)}${url.search}`
 
-  // Monta os headers para a chamada upstream
+  // Monta os headers para a chamada upstream. O Content-Type original é
+  // preservado: uploads multipart não podem ser reescritos como JSON.
+  // A Origin/Referer é preservada para que a API resolva a sessão do
+  // dashboard (admin x verifier) e valide CORS/trustedOrigins.
   const upstreamHeaders = new Headers(request.headers)
   upstreamHeaders.set('Authorization', `Bearer ${env.API_KEY}`)
-  upstreamHeaders.set('Content-Type', 'application/json')
   upstreamHeaders.delete('host')
-  upstreamHeaders.delete('origin')
-  upstreamHeaders.delete('referer')
 
   const body = ['GET', 'HEAD'].includes(request.method)
     ? undefined

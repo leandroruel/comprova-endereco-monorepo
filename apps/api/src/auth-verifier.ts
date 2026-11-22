@@ -15,7 +15,11 @@ import {
  * `verifier_account`, `verifier_verification`) para isolamento total de
  * sessões da instância admin.
  */
-export const createAuthVerifier = (db: Db, secret: string) =>
+export const createAuthVerifier = (
+  db: Db,
+  secret: string,
+  trustedOrigins: readonly string[] = ['http://localhost:5174', 'http://verifier.localhost:5174'],
+) =>
   betterAuth({
     database: drizzleAdapter(db, {
       provider: 'pg',
@@ -27,7 +31,7 @@ export const createAuthVerifier = (db: Db, secret: string) =>
       },
     }),
     secret,
-    trustedOrigins: ['http://localhost:5174', 'http://verifier.localhost:5174', 'http://localhost:3000'],
+    trustedOrigins: [...trustedOrigins],
     advanced: { cookiePrefix: 'verifier-auth' },
     emailAndPassword: {
       enabled: true,

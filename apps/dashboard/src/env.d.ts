@@ -1,5 +1,7 @@
 interface Env {
   API_KEY: string
+  API_BASE: string
+  DASHBOARD_ORIGIN: string
   ASSETS: Fetcher
 }
 

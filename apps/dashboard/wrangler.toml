@@ -9,6 +9,10 @@ workers_dev = true
 [build]
   command = "pnpm install && pnpm --filter dashboard build"
 
+[vars]
+API_BASE = "https://comprova-api.onrender.com"
+DASHBOARD_ORIGIN = "https://comprova-dashboard.leandro-ruel.workers.dev"
+
 [assets]
   directory = "dist"
   binding = "ASSETS"

@@ -37,7 +37,13 @@ import {
 } from '@fastify/type-provider-zod'
 import type Redis from 'ioredis'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
-import { DEFAULT_EVIDENCE_MAX_CONCURRENCY, type AppConfig } from './config.js'
+import {
+  DEFAULT_ADMIN_ORIGINS,
+  DEFAULT_EVIDENCE_MAX_CONCURRENCY,
+  DEFAULT_VERIFIER_ORIGINS,
+  parseOriginList,
+  type AppConfig,
+} from './config.js'
 import { makeAuthenticate } from './plugins/auth.js'
 import { makeRateLimiter } from './plugins/rate-limit.js'
 import { createAuthAdmin } from './auth-admin.js'
@@ -167,13 +173,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   const documentIntelligenceMaxBytes = documentIntelligenceMaxFileSizeMb * 1024 * 1024
 
   await app.register(helmet)
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://admin.localhost:5173',
-    'http://verifier.localhost:5174',
-    'http://localhost:3000',
-  ]
+  const adminOrigins = parseOriginList(deps.config.DASHBOARD_ADMIN_ORIGINS) ?? DEFAULT_ADMIN_ORIGINS
+  const verifierOrigins =
+    parseOriginList(deps.config.DASHBOARD_VERIFIER_ORIGINS) ?? DEFAULT_VERIFIER_ORIGINS
+  const allowedOrigins = [...new Set([...adminOrigins, ...verifierOrigins, 'http://localhost:3000'])]
 
   await app.register(cors, {
     origin: allowedOrigins,
@@ -306,10 +309,15 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   }
   // Instâncias separadas do Better Auth para admin e verifier, com tabelas
   // de auth distintas (isolamento total de sessões entre os dashboards).
-  const authAdmin = createAuthAdmin(deps.db, process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER)
+  const authAdmin = createAuthAdmin(
+    deps.db,
+    process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER,
+    adminOrigins,
+  )
   const authVerifier = createAuthVerifier(
     deps.db,
     process.env.BETTER_AUTH_SECRET ?? deps.config.API_KEY_PEPPER,
+    verifierOrigins,
   )
   registerAuthAdminRoutes(app, authAdmin)
   registerAuthVerifierRoutes(app, authVerifier)
@@ -319,6 +327,8 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     makeSessionMiddleware({
       admin: authAdmin as unknown as AuthInstance,
       verifier: authVerifier as unknown as AuthInstance,
+      adminOrigins,
+      verifierOrigins,
     }),
   )
   app.addHook('preHandler', authenticate)

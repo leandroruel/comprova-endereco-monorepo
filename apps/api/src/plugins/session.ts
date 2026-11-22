@@ -37,8 +37,12 @@ declare module 'fastify' {
  * dashboard do verifier — e vice-versa. Sem uma regra de seleção por origem,
  * um login no dashboard admin apareceria como sessão no verifier.
  */
-const VERIFIER_ORIGINS = new Set(['http://localhost:5174', 'http://verifier.localhost:5174'])
-const ADMIN_ORIGINS = new Set(['http://localhost:5173', 'http://admin.localhost:5173'])
+export interface SessionMiddlewareAuths {
+  readonly admin: AuthInstance
+  readonly verifier: AuthInstance
+  readonly adminOrigins: readonly string[]
+  readonly verifierOrigins: readonly string[]
+}
 
 /**
  * Origem do contexto do dashboard que originou a request.
@@ -76,12 +80,10 @@ const requestOrigin = (request: FastifyRequest): string | undefined => {
  * Não reusa o token de sessão como credencial de API: é um contexto de
  * autenticação distinto do `authenticate` (chaves de API/Bearer).
  */
-export interface SessionMiddlewareAuths {
-  readonly admin: AuthInstance
-  readonly verifier: AuthInstance
-}
-
 export const makeSessionMiddleware = (auths: SessionMiddlewareAuths) => {
+  const verifierOrigins = new Set(auths.verifierOrigins)
+  const adminOrigins = new Set(auths.adminOrigins)
+
   return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     try {
       const cookieHeader = request.headers.cookie
@@ -89,9 +91,9 @@ export const makeSessionMiddleware = (auths: SessionMiddlewareAuths) => {
 
       const origin = requestOrigin(request)
       const candidates: AuthInstance[] =
-        origin !== undefined && VERIFIER_ORIGINS.has(origin)
+        origin !== undefined && verifierOrigins.has(origin)
           ? [auths.verifier]
-          : origin !== undefined && ADMIN_ORIGINS.has(origin)
+          : origin !== undefined && adminOrigins.has(origin)
             ? [auths.admin]
             : []
 

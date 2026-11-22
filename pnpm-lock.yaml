@@ -258,9 +258,6 @@ importers:
       '@fastify/type-provider-zod':
         specifier: ^1.0.0
         version: 1.0.0(@fastify/swagger@9.9.2(supports-color@10.2.2))(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
-      '@node-rs/argon2':
-        specifier: ^2.2.2
-        version: 2.2.2
       better-auth:
         specifier: ^1.7.10
         version: 1.7.10(@opentelemetry/api@1.9.1)(drizzle-orm@0.45.4(@opentelemetry/api@1.9.1)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
@@ -554,9 +551,9 @@ importers:
       '@comprova/observability':
         specifier: workspace:^
         version: link:../observability
-      '@node-rs/argon2':
-        specifier: 2.2.2
-        version: 2.2.2
+      better-auth:
+        specifier: ^1.7.10
+        version: 1.7.10(@opentelemetry/api@1.9.1)(drizzle-orm@0.45.4(@opentelemetry/api@1.9.1)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.9.1)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9)

@@ -9,6 +9,22 @@ import { z } from 'zod'
  */
 export const DEFAULT_EVIDENCE_MAX_CONCURRENCY = 4
 
+export const DEFAULT_ADMIN_ORIGINS = ['http://localhost:5173', 'http://admin.localhost:5173'] as const
+export const DEFAULT_VERIFIER_ORIGINS = ['http://localhost:5174', 'http://verifier.localhost:5174'] as const
+
+/**
+ * Converte uma lista de origens separadas por vírgula. Usada para CORS,
+ * `trustedOrigins` do Better Auth e seleção da instância de sessão
+ * (admin x verifier). `undefined`/vazio significa "usar os defaults locais".
+ */
+export const parseOriginList = (value: string | undefined): readonly string[] | undefined => {
+  const origins = (value ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0)
+  return origins.length > 0 ? origins : undefined
+}
+
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   DATABASE_ADMIN_URL: z.string().optional(),
@@ -19,6 +35,13 @@ const EnvSchema = z.object({
    * é preservado durante a transição.
    */
   REFERENCE_DATABASE_URL: z.string().min(1).optional(),
+  /**
+   * Origens públicas dos dashboards. Servem para CORS, `trustedOrigins` do
+   * Better Auth e para decidir qual instância de sessão (admin ou verifier)
+   * deve ler o cookie. Em produção, defina as URLs do Cloudflare aqui.
+   */
+  DASHBOARD_ADMIN_ORIGINS: z.string().optional(),
+  DASHBOARD_VERIFIER_ORIGINS: z.string().optional(),
   REDIS_URL: z.string().min(1),
   API_KEY_PEPPER: z.string().min(8),
   /**

@@ -47,6 +47,10 @@ services:
         sync: false
       - key: BETTER_AUTH_URL
         value: https://comprova-api.onrender.com
+      - key: DASHBOARD_ADMIN_ORIGINS
+        value: https://comprova-dashboard.leandro-ruel.workers.dev
+      - key: DASHBOARD_VERIFIER_ORIGINS
+        value: https://comprova-verifier-dashboard.leandro-ruel.workers.dev
       - key: CREDENTIAL_ISSUER_ORIGIN
         value: https://comprova-api.onrender.com
       - key: CREDENTIAL_SIGNING_KEYS

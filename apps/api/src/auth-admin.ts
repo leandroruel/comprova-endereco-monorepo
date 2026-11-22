@@ -15,7 +15,11 @@ import {
  * Usa tabelas separadas (`admin_user`, `admin_session`, `admin_account`,
  * `admin_verification`) para isolamento total de sessões da instância verifier.
  */
-export const createAuthAdmin = (db: Db, secret: string) =>
+export const createAuthAdmin = (
+  db: Db,
+  secret: string,
+  trustedOrigins: readonly string[] = ['http://localhost:5173', 'http://admin.localhost:5173'],
+) =>
   betterAuth({
     database: drizzleAdapter(db, {
       provider: 'pg',
@@ -27,10 +31,13 @@ export const createAuthAdmin = (db: Db, secret: string) =>
       },
     }),
     secret,
-    trustedOrigins: ['http://localhost:5173', 'http://admin.localhost:5173', 'http://localhost:3000'],
+    trustedOrigins: [...trustedOrigins],
     advanced: { cookiePrefix: 'admin-auth' },
     emailAndPassword: {
       enabled: true,
+      // O cadastro do dashboard administrativo é fechado: usuários são
+      // criados apenas pelo provisionamento (create-admin), nunca pela UI.
+      disableSignUp: true,
       minPasswordLength: 8,
     },
     session: {
