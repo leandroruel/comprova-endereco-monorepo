@@ -186,6 +186,22 @@ separada por vírgula. Elas alimentam CORS, `trustedOrigins` do Better Auth e a
 seleção da instância de sessão; sem elas valem apenas as origens locais de
 desenvolvimento.
 
+## Deploy e keep-warm
+
+- **API**: Render (`autoDeploy: false`; deploy manual por
+  `render deploys create <service> --confirm`).
+- **Dashboards**: Cloudflare Workers com assets do Vite
+  (`npx --no-install wrangler deploy --config apps/dashboard/wrangler.toml`).
+- **Keep-warm**: o plano free do Render desliga a instância após 15 min sem
+  tráfego (cold start de ~1 min no próximo acesso, muitas vezes visto como
+  502/timeout). O Worker do dashboard admin tem um Cron Trigger
+  (`*/5 * * * *`, `[triggers]` no `wrangler.toml`) cujo handler `scheduled`
+  faz um GET em `/healthz` — resposta estática, sem banco — só para zerar o
+  contador de inatividade. Execuções aparecem nos logs do Worker com o prefixo
+  `[keep-warm]`. Contrapartida: a instância passa a rodar 24/7 e consome
+  ~720 h/mês das 750 h free da conta — com um único serviço free cabe, mas não
+  há margem para um segundo serviço 24/7 no mesmo plano.
+
 ## Logs (Elastic Stack)
 
 `ELASTIC_PASSWORD`, `KIBANA_PASSWORD`, `KIBANA_ENCRYPTION_KEY`,

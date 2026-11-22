@@ -9,6 +9,12 @@ workers_dev = true
 [build]
   command = "pnpm install && pnpm --filter dashboard build"
 
+# Keep-warm da API no Render (plano free): a instância desliga após 15 min de
+# inatividade; um ping a cada 5 min em /healthz (handler `scheduled` em
+# src/worker.ts) evita o cold start de ~1 min no primeiro acesso.
+[triggers]
+crons = ["*/5 * * * *"]
+
 [vars]
 API_BASE = "https://comprova-api.onrender.com"
 DASHBOARD_ORIGIN = "https://comprova-dashboard.leandro-ruel.workers.dev"

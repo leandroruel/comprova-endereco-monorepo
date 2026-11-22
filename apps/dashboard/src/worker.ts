@@ -23,6 +23,31 @@ export default {
     // --- Assets estáticos ---
     return env.ASSETS.fetch(request)
   },
+
+  /**
+   * Keep-warm da API no Render (plano free): sem tráfego por 15 minutos a
+   * instância desliga e o próximo usuário espera ~1 minuto de cold start
+   * (muitas vezes visto como 502/timeout no proxy). O cron de 5 minutos
+   * (`[triggers]` no wrangler.toml) dispara este handler e um GET barato em
+   * `/healthz` (resposta estática, sem banco) basta para zerar o contador de
+   * inatividade.
+   *
+   * Custo: ~288 requisições/dia contra o limite de 100 mil do plano free do
+   * Workers. Contrapartida: a instância passa a consumir ~720 h/mês das 750 h
+   * free do Render — com um único serviço free na conta, cabe, mas não sobra
+   * margem para um segundo serviço 24/7.
+   */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      fetch(`${env.API_BASE}/healthz`)
+        .then((res) => {
+          console.log(`[keep-warm] /healthz -> ${res.status}`)
+        })
+        .catch((err: unknown) => {
+          console.log(`[keep-warm] falhou: ${err instanceof Error ? err.message : String(err)}`)
+        }),
+    )
+  },
 } satisfies ExportedHandler<Env>
 
 /**
