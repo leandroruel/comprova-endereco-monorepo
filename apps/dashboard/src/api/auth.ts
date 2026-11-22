@@ -3,31 +3,25 @@ import { createAuthClient } from 'better-auth/react'
 /**
  * Resolve a base URL do cliente de auth do dashboard admin.
  *
- * Quando `VITE_DASHBOARD_ADMIN_AUTH_URL` é apenas uma origem (ex.
- * `http://localhost:5173` ou `https://api.exemplo.com`), retorna apenas a
- * origem. O `basePath: '/api/auth'` do better-auth adiciona o caminho
- * correto (`/api/auth/sign-in/email`) para que o proxy do Vite capture
- * e encaminhe para a instância isolada do admin (`/v1/auth/admin/*`)
- * na porta 3000.
+ * Em produção (Cloudflare Pages), forçamos baseURL vazio para que as
+ * requisições de auth caiam no mesmo domínio (/api/auth/...) e sejam
+ * interceptadas pelo Worker proxy.
  *
- * Quando a URL já inclui `/v1/auth/admin` (produção), é preservada
- * como está: o better-auth chama diretamente `/v1/auth/admin/sign-in/email`
- * no servidor (sem proxy do Vite em produção).
- *
- * Sem a variável, usa string vazia e confia no proxy do Vite (dev).
+ * Em desenvolvimento (localhost), usamos a URL configurada ou vazio para
+ * o proxy do Vite.
  */
 const resolveAdminAuthBaseUrl = (): string => {
   const url = import.meta.env.VITE_DASHBOARD_ADMIN_AUTH_URL ?? ''
   if (!url) return ''
+  // Em produção (não localhost), não usamos a URL configurada: as requisições
+  // de auth devem cair no mesmo domínio para serem interceptadas pelo Worker.
+  if (!url.includes('localhost')) {
+    return ''
+  }
   try {
     const parsed = new URL(url)
     const hasAuthPath = /^\/v1\/auth\/(admin|verifier)/.test(parsed.pathname)
     if (!hasAuthPath) {
-      // Apenas uma origem: não adicionamos /v1/auth/admin aqui. O
-      // `basePath: '/api/auth'` do better-auth adiciona o caminho
-      // correto (`/api/auth/sign-in/email`) para que o proxy do Vite capture
-      // e encaminhe para a instância isolada do admin (`/v1/auth/admin/*`)
-      // na porta 3000.
       return parsed.origin
     }
     return parsed.toString()
@@ -38,11 +32,8 @@ const resolveAdminAuthBaseUrl = (): string => {
 
 export const authClient = createAuthClient({
   baseURL: resolveAdminAuthBaseUrl(),
-  // Quando `VITE_DASHBOARD_ADMIN_AUTH_URL` não está definida (dev local),
-  // `baseURL` fica vazio e o better-auth resolve para `window.location.origin`
-  // sem path. O proxy do Vite só captura `/api/auth/*`, então forçamos o base
-  // path para que as requisições de auth caiam em `/api/auth/sign-in/email`
-  // e sejam encaminhadas para a instância do admin na porta 3000.
+  // Requisições de auth caem em /api/auth/sign-in/email na mesma origem e
+  // são interceptadas pelo Worker proxy (ou pelo proxy do Vite em dev).
   basePath: '/api/auth',
 })
 

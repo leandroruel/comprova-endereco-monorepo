@@ -1,14 +1,18 @@
-# wrangler.toml — Dashboard Comprova (Cloudflare Pages)
+# wrangler.toml — Dashboard Comprova (Cloudflare Pages + Worker proxy)
 # Deploy: npx wrangler pages deploy dist --project-name=comprova-dashboard --config apps/dashboard/wrangler.toml
 
 name = "comprova-dashboard"
+main = "src/worker.ts"
 compatibility_date = "2026-11-21"
 
 [build]
-  # Injetar variáveis de ambiente no build do Vite (estático, não Functions)
-  command = "VITE_API_URL=https://comprova-api.onrender.com VITE_DASHBOARD_ADMIN_AUTH_URL=https://comprova-api.onrender.com/v1/auth/admin pnpm install && pnpm --filter dashboard build"
+  command = "pnpm install && pnpm --filter dashboard build"
   watch_dir = "apps/dashboard"
   root = "apps/dashboard/dist"
 
+[assets]
+  directory = "dist"
+  binding = "ASSETS"
+
 [env.production]
-  vars = { VITE_API_URL = "https://comprova-api.onrender.com", VITE_DASHBOARD_ADMIN_AUTH_URL = "https://comprova-api.onrender.com/v1/auth/admin" }
+  vars = { VITE_API_URL = "/api" }
