@@ -7,7 +7,7 @@ import {
   makeNf3eFiscalAdapter,
 } from '@comprova/providers'
 import { workerEnvFromProcess, type WorkerEnv } from './config.js'
-import { buildWorkerContext, hasS3Config, makeObjectStore } from './context.js'
+import { buildWorkerContext, hasStorageConfig, makeObjectStore } from './context.js'
 import { runWorkerLifecycle } from './lifecycle.js'
 import {
   startEvidenceAnalysisLoop,
@@ -135,7 +135,7 @@ const main = async (): Promise<void> => {
           'document intelligence disabled: analyzer uses local text layer only',
         )
       }
-      const s3Configured = hasS3Config(env)
+      const s3Configured = hasStorageConfig(env)
       if (adminRetentionPool !== null && s3Configured) {
         track(
           startEvidenceAnalysisLoop(

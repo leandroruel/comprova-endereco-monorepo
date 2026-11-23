@@ -12,6 +12,7 @@ import {
   makeNominatimGeocoder,
   makeOverpassPlaces,
   makeS3ObjectStore,
+  makeSupabaseObjectStore,
   type EvidenceObjectStore,
 } from '@comprova/providers'
 import { readFileSync } from 'node:fs'
@@ -31,29 +32,53 @@ export interface WorkerContext {
   readonly signalCache: SignalCacheReader
 }
 
-type S3ConfiguredEnv = WorkerEnv & {
+type StorageConfiguredEnv = WorkerEnv & {
   readonly s3Endpoint: string
   readonly s3Bucket: string
   readonly s3AccessKeyId: string
   readonly s3SecretAccessKey: string
+  readonly supabaseUrl: string
+  readonly supabaseServiceRoleKey: string
+  readonly supabaseStorageBucket: string
 }
 
-export const hasS3Config = (env: WorkerEnv): env is S3ConfiguredEnv =>
-  env.s3Endpoint !== undefined &&
-  env.s3AccessKeyId !== undefined &&
-  env.s3SecretAccessKey !== undefined &&
-  env.s3Bucket !== undefined
+export const hasStorageConfig = (env: WorkerEnv): env is StorageConfiguredEnv =>
+  (env.s3Endpoint !== undefined &&
+    env.s3AccessKeyId !== undefined &&
+    env.s3SecretAccessKey !== undefined &&
+    env.s3Bucket !== undefined) ||
+  (env.supabaseUrl !== undefined &&
+    env.supabaseServiceRoleKey !== undefined &&
+    env.supabaseStorageBucket !== undefined)
 
-export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore =>
-  hasS3Config(env)
-    ? makeS3ObjectStore({
-        endpoint: env.s3Endpoint,
-        region: env.s3Region ?? 'us-east-1',
-        bucket: env.s3Bucket,
-        accessKeyId: env.s3AccessKeyId,
-        secretAccessKey: env.s3SecretAccessKey,
-      })
-    : makeFakeObjectStore()
+export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore => {
+  if (
+    env.s3Endpoint !== undefined &&
+    env.s3AccessKeyId !== undefined &&
+    env.s3SecretAccessKey !== undefined &&
+    env.s3Bucket !== undefined
+  ) {
+    return makeS3ObjectStore({
+      endpoint: env.s3Endpoint,
+      region: env.s3Region ?? 'us-east-1',
+      bucket: env.s3Bucket,
+      accessKeyId: env.s3AccessKeyId,
+      secretAccessKey: env.s3SecretAccessKey,
+    })
+  }
+  if (
+    env.supabaseUrl !== undefined &&
+    env.supabaseServiceRoleKey !== undefined &&
+    env.supabaseStorageBucket !== undefined
+  ) {
+    return makeSupabaseObjectStore({
+      supabaseUrl: env.supabaseUrl,
+      supabaseServiceRoleKey: env.supabaseServiceRoleKey,
+      bucket: env.supabaseStorageBucket,
+    })
+  }
+  return makeFakeObjectStore()
+}
 
 export const buildT2Checkers = (_env: WorkerEnv, _evidenceWriter: EvidenceWriter): readonly Checker[] => {
   // T2/VLM checkers (Street View, OpenAI Vision) estão fora do escopo do MVP.

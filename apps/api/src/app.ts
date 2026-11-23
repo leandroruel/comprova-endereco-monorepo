@@ -20,6 +20,7 @@ import {
 import {
   makeDocumentIntelligenceClient,
   makeS3ObjectStore,
+  makeSupabaseObjectStore,
   makeUnavailableObjectStore,
   type ObjectStore,
 } from '@comprova/providers'
@@ -131,19 +132,34 @@ export interface AppDeps {
   readonly objectStore?: ObjectStore
 }
 
-const resolveObjectStore = (config: AppConfig): ObjectStore =>
-  config.S3_ENDPOINT !== undefined &&
-  config.S3_ACCESS_KEY_ID !== undefined &&
-  config.S3_SECRET_ACCESS_KEY !== undefined &&
-  config.S3_BUCKET !== undefined
-    ? makeS3ObjectStore({
-        endpoint: config.S3_ENDPOINT,
-        region: config.S3_REGION ?? 'us-east-1',
-        bucket: config.S3_BUCKET,
-        accessKeyId: config.S3_ACCESS_KEY_ID,
-        secretAccessKey: config.S3_SECRET_ACCESS_KEY,
-      })
-    : makeUnavailableObjectStore()
+const resolveObjectStore = (config: AppConfig): ObjectStore => {
+  if (
+    config.S3_ENDPOINT !== undefined &&
+    config.S3_ACCESS_KEY_ID !== undefined &&
+    config.S3_SECRET_ACCESS_KEY !== undefined &&
+    config.S3_BUCKET !== undefined
+  ) {
+    return makeS3ObjectStore({
+      endpoint: config.S3_ENDPOINT,
+      region: config.S3_REGION ?? 'us-east-1',
+      bucket: config.S3_BUCKET,
+      accessKeyId: config.S3_ACCESS_KEY_ID,
+      secretAccessKey: config.S3_SECRET_ACCESS_KEY,
+    })
+  }
+  if (
+    config.SUPABASE_URL !== undefined &&
+    config.SUPABASE_SERVICE_ROLE_KEY !== undefined &&
+    config.SUPABASE_STORAGE_BUCKET !== undefined
+  ) {
+    return makeSupabaseObjectStore({
+      supabaseUrl: config.SUPABASE_URL,
+      supabaseServiceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY,
+      bucket: config.SUPABASE_STORAGE_BUCKET,
+    })
+  }
+  return makeUnavailableObjectStore()
+}
 
 export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   // O banco de referência é opcional. Quando ausente, o sistema opera em

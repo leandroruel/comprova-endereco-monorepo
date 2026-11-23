@@ -101,6 +101,15 @@ const EnvSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().min(1).optional(),
   S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   /**
+   * Supabase Storage privado para artefatos de comprovante (alternativa ao S3).
+   * Quando definido, substitui o armazenamento S3. Todas as três variáveis são
+   * obrigatórias juntas: URL do projeto, service role key e nome do bucket.
+   * A service role key nunca é exposta ao frontend: só backend e worker.
+   */
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  SUPABASE_STORAGE_BUCKET: z.string().min(1).optional(),
+  /**
    * Limite de upload do comprovante em bytes. O default é o limite que o
    * banco já impõe em `evidence_artifact` (50 MiB). É configurável apenas
    * para baixo, para testes e para políticas operacionais mais restritas.

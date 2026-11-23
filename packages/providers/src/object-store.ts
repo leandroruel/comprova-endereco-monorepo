@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 export interface StoredObject {
   readonly key: string
@@ -106,6 +107,74 @@ export const makeS3ObjectStore = (options: S3ObjectStoreOptions): EvidenceObject
     }
   },
 })
+
+interface SupabaseObjectStoreOptions {
+  readonly supabaseUrl: string
+  readonly supabaseServiceRoleKey: string
+  readonly bucket: string
+}
+
+/**
+ * Adaptador do ObjectStore sobre Supabase Storage (bucket privado `evidence`).
+ *
+ * Usa a service role key do Supabase para contornar o RLS no backend: o
+ * cliente nunca é exposto ao frontend, e todas as decisões de autorização
+ * permanecem na aplicação. O bucket deve ser privado (sem acesso público, sem
+ * upload anônimo).
+ *
+ * As chaves de objeto seguem o padrão existente do Comprova:
+ * `tenants/<tenant>/evidence/<artifactId>`.
+ */
+export const makeSupabaseObjectStore = (
+  options: SupabaseObjectStoreOptions,
+  /** Injeção de dependência para testes: permite passar um createClient mock. */
+  _createClient?: (
+    url: string,
+    key: string,
+    options?: { auth?: { persistSession?: boolean; autoRefreshToken?: boolean } },
+  ) => ReturnType<typeof createSupabaseClient>,
+): EvidenceObjectStore => {
+  const createClientFn = _createClient ?? createSupabaseClient
+  let supabase: ReturnType<typeof createSupabaseClient> | null = null
+  const bucket = options.bucket
+  const getClient = () => {
+    if (supabase === null) {
+      supabase = createClientFn(options.supabaseUrl, options.supabaseServiceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+    }
+    return supabase!
+  }
+
+  return {
+    put: async (key, data, contentType) => {
+      const { error } = await getClient().storage.from(bucket).upload(key, data, {
+        contentType,
+        upsert: false,
+      })
+      if (error) throw error
+      return {
+        key,
+        uri: `${options.supabaseUrl}/storage/v1/object/public/${bucket}/${key}`,
+        sha256: sha256Of(data),
+        bytes: data.byteLength,
+      }
+    },
+    get: async (key) => {
+      const { data, error } = await getClient().storage.from(bucket).download(key)
+      if (error) {
+        // 404 = objeto inexistente; tratamos como null (idempotente)
+        if ((error as { statusCode?: number }).statusCode === 404) return null
+        throw error
+      }
+      return new Uint8Array(await data.arrayBuffer())
+    },
+    delete: async (key) => {
+      const { error } = await getClient().storage.from(bucket).remove([key])
+      if (error) throw error
+    },
+  }
+}
 
 /**
  * Store fail-closed para quando o object storage não foi configurado. Evita

@@ -17,6 +17,9 @@ export interface WorkerEnv {
   readonly s3Bucket?: string
   readonly s3AccessKeyId?: string
   readonly s3SecretAccessKey?: string
+  readonly supabaseUrl?: string
+  readonly supabaseServiceRoleKey?: string
+  readonly supabaseStorageBucket?: string
   /** Limite de bytes que o analisador F1.2 carrega em memória. */
   readonly evidenceAnalysisMaxBytes: number
   /**
@@ -51,6 +54,9 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     s3Bucket: nonEmpty(env.S3_BUCKET),
     s3AccessKeyId: nonEmpty(env.S3_ACCESS_KEY_ID),
     s3SecretAccessKey: nonEmpty(env.S3_SECRET_ACCESS_KEY),
+    supabaseUrl: nonEmpty(env.SUPABASE_URL),
+    supabaseServiceRoleKey: nonEmpty(env.SUPABASE_SERVICE_ROLE_KEY),
+    supabaseStorageBucket: nonEmpty(env.SUPABASE_STORAGE_BUCKET),
     documentIntelligenceUrl: nonEmpty(env.DOCUMENT_INTELLIGENCE_URL),
   }
 

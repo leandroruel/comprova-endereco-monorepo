@@ -15,6 +15,7 @@
     "@comprova/db": "workspace:*",
     "@comprova/observability": "workspace:*",
     "@napi-rs/canvas": "^1.0.13",
+    "@supabase/supabase-js": "^2.119.2",
     "image-size": "2.0.4",
     "ipaddr.js": "^2.5.0",
     "unpdf": "^1.9.1",
