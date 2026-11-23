@@ -30,8 +30,35 @@ export default {
       return assetResponse
     }
 
-    // Fallback SPA: serve o index.html para qualquer rota não-API não encontrada
-    return env.ASSETS.fetch(new Request('https://' + url.host + '/index.html', request))
+    // Fallback SPA: serve o conteúdo do index.html com status 200, mantendo a
+    // URL original no navegador para que o React Router renderize a rota
+    // correta (ex: /organizations) em vez de redirecionar para /.
+    const indexUrl = new URL('/index.html', url.origin)
+    const indexResponse = await fetch(indexUrl.toString(), {
+      method: 'GET',
+      headers: request.headers,
+      redirect: 'manual',
+    })
+
+    // O Cloudflare Assets redireciona /index.html para / (307). Seguimos
+    // manualmente para obter o conteúdo real.
+    let finalResponse = indexResponse
+    if (indexResponse.status === 307 || indexResponse.status === 308) {
+      const location = indexResponse.headers.get('location') ?? '/'
+      finalResponse = await fetch(new URL(location, url.origin).toString(), {
+        method: 'GET',
+        headers: request.headers,
+      })
+    }
+
+    return new Response(finalResponse.body, {
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'public, max-age=0, must-revalidate',
+      },
+    })
   },
 
   /**
