@@ -37,7 +37,7 @@ export function DashboardLayout({
   }
 
   const navItems = useMemo<readonly DashboardNavItem[]>(() => {
-    const items = userRole === 'admin' ? [...baseNavItems, ...adminNavItems] : baseNavItems
+    const items = (userRole === 'admin' || userRole === 'superadmin') ? [...baseNavItems, ...adminNavItems] : baseNavItems
     return items.map((item) => ({
       ...item,
       onSelect: () => navigate(item.key),
