@@ -21,7 +21,17 @@ export default {
     }
 
     // --- Assets estáticos ---
-    return env.ASSETS.fetch(request)
+    // Para rotas da SPA (ex: /organizations, /validations) que não existem
+    // como arquivo estático, servimos o index.html e deixamos o React Router
+    // do Vite cuidar da navegação no lado do cliente. Sem isso, um refresh
+    // em /organizations retorna 404 do Cloudflare.
+    const assetResponse = await env.ASSETS.fetch(request)
+    if (assetResponse.status !== 404) {
+      return assetResponse
+    }
+
+    // Fallback SPA: serve o index.html para qualquer rota não-API não encontrada
+    return env.ASSETS.fetch(new Request('https://' + url.host + '/index.html', request))
   },
 
   /**
