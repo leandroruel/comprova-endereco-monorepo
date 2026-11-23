@@ -3,11 +3,11 @@
 // Atenção: isto é uma facilidade de desenvolvimento — num dashboard público a
 // chave não pode viver no bundle (precisaria de sessão/BFF).
 //
-// Em produção (Cloudflare Worker), `VITE_API_URL` deve ser `/api` para que as
-// requisições caiam no Worker proxy na mesma origem. Quando não definido,
-// usamos `/api` em produção e `http://localhost:3000` em desenvolvimento.
-export const API_BASE =
-  import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '/api' : 'http://localhost:3000')
+// Sempre usamos a mesma origem (/api) como base:
+//   - Desenvolvimento: o proxy do Vite encaminha /api/* para http://localhost:3000
+//   - Produção: o Worker proxy encaminha /api/* para https://comprova-api.onrender.com
+// Isso evita qualquer dependência de VITE_API_URL ou de import.meta.env.PROD.
+export const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 const apiKey = import.meta.env.VITE_API_KEY ?? ''
 if (apiKey === '' && import.meta.env.DEV && import.meta.env.MODE !== 'test') {
