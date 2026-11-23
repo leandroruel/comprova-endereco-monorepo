@@ -1,55 +1,35 @@
 'use client'
 
 import { useDirection } from '@/components/foundations/direction/direction'
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  RiBankCardLine,
-  RiBookOpenLine,
   RiCheckboxCircleFill,
   RiCloseLine,
-  RiCodeBlock,
-  RiDatabase2Line,
-  RiGitMergeLine,
   RiLockPasswordLine,
-  RiOrganizationChart,
   RiPaletteLine,
-  RiPlugLine,
   RiSchoolLine,
-  RiSettings6Line,
-  RiSettingsLine,
-  RiToolsFill,
-  RiStore2Line,
 } from '@remixicon/react'
 import { cx } from '@/utils/cx'
-import { SettingsGeneral } from './settings-general'
+import { SettingsAppearance } from './settings-appearance'
 import { SettingsProfile } from './settings-profile'
 import { SettingsSecurity } from './settings-security'
-import { SettingsStorage } from './settings-storage'
-import { SettingsTools } from './settings-tools'
 
 /**
- * Figma sources: Board UI → "Settings/Profile" (node 4081:13943) and
- * "Settings/General" (node 4079:13037).
+ * Figma sources: Board UI → "Settings/Profile" (node 4081:13943).
  *
  * The app-wide settings modal, opened from any sidebar's "Settings" item.
  *
  * Shell (1:1 with Figma):
  *   backdrop  color/bg_separator — black at 20%.
  *   panel     871×614 (max-height 614), radius/3xl (24px), white, shadow/xs.
- *   rail      240px desktop / 192px compact, bg background/secondary, 1px right border, p 10 —
- *             same group/item recipe as the board-team dropdown menus
- *             (label pl-8, items p-8 radius/2lg icon-20 + body-medium),
- *             selected row bg background/secondary/hover.
- *   content   px 32, title row fixed,
- *             the page itself scrolls when taller than the shell (General).
+ *   rail      240px desktop / 192px compact, bg background/secondary, 1px right border, p 10.
+ *   content   px 32, title row fixed; the page scrolls when taller than the shell.
  *
- * Open/close animation: the panel fades + blurs in from scale 0.85 (300ms),
- * the backdrop cross-fades; the same transition plays in reverse on close,
- * and the modal unmounts only after the exit transition finishes.
+ * Open/close animation: fade + blur + scale, reversed on close.
  */
 
-export type SettingsPage = 'general' | 'profile' | 'security' | 'storage' | 'tools' | 'marketplace'
+export type SettingsPage = 'profile' | 'security' | 'appearance'
 
 export interface SettingsModalProps {
   /** Controlled open state, owned by the host page, sidebar, or menu. */
@@ -58,10 +38,6 @@ export interface SettingsModalProps {
   onClose: () => void
   /** Page selected each time the modal opens. */
   defaultPage?: SettingsPage
-  /** Optional product artwork used by the animated Current plan card. */
-  planArtSrc?: string
-  /** Optional marketplace pane, including its own fixed header and scroll region. */
-  marketplace?: ReactNode
 }
 
 type IconComponent = ComponentType<{
@@ -78,51 +54,25 @@ interface NavEntry {
 
 const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
   {
-    label: 'Settings',
+    label: 'Configurações',
     items: [
-      { label: 'General', icon: RiSettings6Line, page: 'general' },
-      { label: 'Profile', icon: RiSchoolLine, page: 'profile' },
+      { label: 'Perfil', icon: RiSchoolLine, page: 'profile' },
       { label: 'Segurança', icon: RiLockPasswordLine, page: 'security' },
-      { label: 'Marketplace', icon: RiStore2Line, page: 'marketplace' },
-      { label: 'Appearance', icon: RiPaletteLine },
-      { label: 'Billing', icon: RiBankCardLine },
-      { label: 'Rules and Workflows', icon: RiOrganizationChart },
-      { label: 'Tools', icon: RiToolsFill, page: 'tools' },
-      { label: 'Storage', icon: RiDatabase2Line, page: 'storage' },
-    ],
-  },
-  {
-    label: 'Desktop app',
-    items: [
-      { label: 'General', icon: RiSettingsLine },
-      { label: 'Plugins', icon: RiPlugLine },
-      { label: 'Developer', icon: RiCodeBlock },
-    ],
-  },
-  {
-    label: 'Customize',
-    items: [
-      { label: 'Skills', icon: RiBookOpenLine },
-      { label: 'Git', icon: RiGitMergeLine },
+      { label: 'Aparência', icon: RiPaletteLine, page: 'appearance' },
     ],
   },
 ]
 
 const PAGE_TITLES: Record<SettingsPage, string> = {
-  general: 'General',
-  profile: 'Profile',
+  profile: 'Perfil',
   security: 'Segurança',
-  storage: 'Storage',
-  tools: 'Tools',
-  marketplace: 'Marketplace',
+  appearance: 'Aparência',
 }
 
 export function SettingsModal({
   isOpen,
   onClose,
-  defaultPage = 'general',
-  planArtSrc,
-  marketplace,
+  defaultPage = 'profile',
 }: SettingsModalProps) {
   const direction = useDirection()
   const [page, setPage] = useState<SettingsPage>(defaultPage)
@@ -246,9 +196,7 @@ export function SettingsModal({
                   {group.label}
                 </span>
                 <div className="flex w-full flex-col gap-1">
-                  {group.items
-                    .filter((item) => item.page !== 'marketplace' || marketplace != null)
-                    .map((item) => {
+                  {group.items.map((item) => {
                       const selected = item.page !== undefined && item.page === page
                       return (
                         <button
@@ -292,19 +240,9 @@ export function SettingsModal({
 
           {/* Content pane — fixed title row, scrollable page below */}
           <div className="flex min-w-0 flex-1 flex-col">
-            {page === 'marketplace' && marketplace != null ? (
-              marketplace
-            ) : (
-              <>
-                {/* Storage keeps a tighter title gap: its page already carries
-              10px of scroll-safe headroom for the upload progress badge, so
-              the shared pb-3 read as a double margin above the dropzone. */}
-                <div
-                  className={cx(
-                    'flex shrink-0 items-center justify-between px-8 pt-8',
-                    page === 'storage' ? 'pb-1.5' : 'pb-3',
-                  )}
-                >
+            <div
+              className={cx('flex shrink-0 items-center justify-between px-8 pt-8 pb-3')}
+            >
                   <h2 className="text-title-3-medium text-text-primary">{PAGE_TITLES[page]}</h2>
                   <button
                     type="button"
@@ -329,12 +267,8 @@ export function SettingsModal({
                       <SettingsProfile onSaved={showSavedToast} />
                     ) : page === 'security' ? (
                       <SettingsSecurity />
-                    ) : page === 'storage' ? (
-                      <SettingsStorage />
-                    ) : page === 'tools' ? (
-                      <SettingsTools />
                     ) : (
-                      <SettingsGeneral planArtSrc={planArtSrc} />
+                      <SettingsAppearance />
                     )}
                   </div>
                   {/* Progressive top fade — eases in once the page is scrolled so
@@ -348,8 +282,6 @@ export function SettingsModal({
                     )}
                   />
                 </div>
-              </>
-            )}
           </div>
         </div>
 
