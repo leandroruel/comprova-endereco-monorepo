@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { authClient, type SessionUser } from '@/api/auth'
 import { Spinner } from '@/components/ui'
@@ -9,6 +9,30 @@ import { BulkSearchPage } from '@/pages/BulkSearch'
 import { DebugNf3eQrCodePage } from '@/pages/DebugNf3eQrCode'
 import OrganizationsPage from '@/pages/Organizations'
 import { LoginPage } from '@/pages/Login'
+
+type PageKey =
+  | 'home'
+  | 'validations'
+  | 'bulk'
+  | 'organizations'
+  | 'debug-nf3e-qrcode'
+
+const PAGE_PATHS: Record<PageKey, string> = {
+  home: '/',
+  validations: '/validations',
+  bulk: '/bulk',
+  organizations: '/organizations',
+  'debug-nf3e-qrcode': '/debug-nf3e-qrcode',
+}
+
+const PATH_TO_PAGE: Record<string, PageKey> = {
+  '/': 'home',
+  '/home': 'home',
+  '/validations': 'validations',
+  '/bulk': 'bulk',
+  '/organizations': 'organizations',
+  '/debug-nf3e-qrcode': 'debug-nf3e-qrcode',
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,9 +45,36 @@ export default function App() {
 }
 
 function AuthedApp() {
-  const [page, setPage] = useState('home')
+  const [page, setPageState] = useState<PageKey>('home')
   const { data: session, isPending } = authClient.useSession()
   const user: SessionUser | undefined = session?.user
+
+  // Sincroniza a página com a URL ao montar e ao navegar pelo histórico do navegador.
+  useEffect(() => {
+    const onPopState = () => {
+      const pageFromPath = PATH_TO_PAGE[window.location.pathname]
+      if (pageFromPath) {
+        setPageState(pageFromPath)
+      }
+    }
+
+    const initialPage = PATH_TO_PAGE[window.location.pathname] ?? 'home'
+    setPageState(initialPage)
+
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  // Atualiza a URL quando a página muda internamente.
+  const setPage = useCallback(
+    (nextPage: string) => {
+      const pageKey = nextPage as PageKey
+      if (!(pageKey in PAGE_PATHS)) return
+      setPageState(pageKey)
+      window.history.pushState(null, '', PAGE_PATHS[pageKey])
+    },
+    [],
+  )
 
   if (isPending) {
     return (
@@ -70,6 +121,6 @@ function AuthedApp() {
           <Dashboard onNavigate={setPage} user={user} />
         )}
       </DashboardLayout>
-    </QueryClientProvider>
+      </QueryClientProvider>
   )
 }

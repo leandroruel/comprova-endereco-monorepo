@@ -174,8 +174,10 @@ export default function OrganizationsPage({
 
   return (
     <div className="space-y-6">
-      {/* Erro de API: aviso no topo, não esconde nada */}
-      {error && (
+      {/* Erro de API: aviso no topo, não esconde nada.
+          Só mostra quando há erro real de rede/API e ainda há dados carregados.
+          Quando a lista está vazia (sem organizações), não é erro — é estado vazio legítimo. */}
+      {error && !isLoading && organizations.length > 0 && (
         <div className="rounded-xl border border-border-error-default bg-red-50 p-3 shadow-sm">
           <div className="flex items-start gap-3">
             <AlertTriangle className="size-5 shrink-0 text-red-600" />

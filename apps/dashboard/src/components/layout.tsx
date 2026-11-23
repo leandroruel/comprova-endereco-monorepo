@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from 'react'
+import { type ReactNode, useMemo } from 'react'
 import { DashboardSidebar } from '@/components/application/dashboard/dashboard-sidebar'
 import type { DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar'
 import { RiBuildingLine, RiChatAiLine, RiFileSearchLine, RiHomeLine, RiQrCodeLine } from '@remixicon/react'
@@ -32,10 +32,7 @@ export function DashboardLayout({
   onNavigate?: (page: string) => void
   activePage?: string
 }) {
-  const [active, setActive] = useState(activePage ?? 'home')
-
   const navigate = (page: string) => {
-    setActive(page)
     onNavigate?.(page)
   }
 
@@ -66,7 +63,7 @@ export function DashboardLayout({
     <div className="flex min-h-screen w-full bg-background-full">
       <DashboardSidebar
         className="sticky top-3 m-3 hidden h-[calc(100vh-24px)] shrink-0 lg:flex"
-        selected={active}
+        selected={activePage ?? 'home'}
         items={navItems}
         user={user}
         workspace={workspace}
