@@ -1,14 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react'
 import { DashboardSidebar } from '@/components/application/dashboard/dashboard-sidebar'
 import type { DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar'
-import {
-  RiBuildingLine,
-  RiChatAiLine,
-  RiFileSearchLine,
-  RiHomeLine,
-  RiLockPasswordLine,
-  RiQrCodeLine,
-} from '@remixicon/react'
+import { RiBuildingLine, RiChatAiLine, RiFileSearchLine, RiHomeLine, RiQrCodeLine } from '@remixicon/react'
 
 /** Itens de navegação da SPA: usam `onSelect` (render <button>) em vez de `href` (render <a>). */
 const baseNavItems: readonly DashboardNavItem[] = [
@@ -16,7 +9,6 @@ const baseNavItems: readonly DashboardNavItem[] = [
   { key: 'validations', label: 'Validações', icon: RiFileSearchLine, onSelect: () => {} },
   { key: 'bulk', label: 'Busca em lote', icon: RiChatAiLine, onSelect: () => {} },
   { key: 'organizations', label: 'Organizações', icon: RiBuildingLine, onSelect: () => {} },
-  { key: 'change-password', label: 'Alterar senha', icon: RiLockPasswordLine, onSelect: () => {} },
 ]
 
 const adminNavItems: readonly DashboardNavItem[] = [

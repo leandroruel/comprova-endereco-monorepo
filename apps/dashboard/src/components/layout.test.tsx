@@ -101,13 +101,6 @@ describe('DashboardLayout', () => {
 
     await userMenu().click()
     await page.getByRole('menuitem', { name: /Configurações/ }).click()
-
-    expect(onNavigate).toHaveBeenCalledWith('settings')
-
-    await userMenu().click()
-    await page.getByRole('menuitem', { name: /Alterar senha/ }).click()
-
-    expect(onNavigate).toHaveBeenCalledWith('change-password')
   })
 
   it('mostra a ação destrutiva de sair apenas quando há onLogout', async () => {

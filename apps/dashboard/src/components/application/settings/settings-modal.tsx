@@ -11,6 +11,7 @@ import {
   RiCodeBlock,
   RiDatabase2Line,
   RiGitMergeLine,
+  RiLockPasswordLine,
   RiOrganizationChart,
   RiPaletteLine,
   RiPlugLine,
@@ -23,6 +24,7 @@ import {
 import { cx } from '@/utils/cx'
 import { SettingsGeneral } from './settings-general'
 import { SettingsProfile } from './settings-profile'
+import { SettingsSecurity } from './settings-security'
 import { SettingsStorage } from './settings-storage'
 import { SettingsTools } from './settings-tools'
 
@@ -47,7 +49,7 @@ import { SettingsTools } from './settings-tools'
  * and the modal unmounts only after the exit transition finishes.
  */
 
-export type SettingsPage = 'general' | 'profile' | 'storage' | 'tools' | 'marketplace'
+export type SettingsPage = 'general' | 'profile' | 'security' | 'storage' | 'tools' | 'marketplace'
 
 export interface SettingsModalProps {
   /** Controlled open state, owned by the host page, sidebar, or menu. */
@@ -80,6 +82,7 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
     items: [
       { label: 'General', icon: RiSettings6Line, page: 'general' },
       { label: 'Profile', icon: RiSchoolLine, page: 'profile' },
+      { label: 'Segurança', icon: RiLockPasswordLine, page: 'security' },
       { label: 'Marketplace', icon: RiStore2Line, page: 'marketplace' },
       { label: 'Appearance', icon: RiPaletteLine },
       { label: 'Billing', icon: RiBankCardLine },
@@ -108,6 +111,7 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
 const PAGE_TITLES: Record<SettingsPage, string> = {
   general: 'General',
   profile: 'Profile',
+  security: 'Segurança',
   storage: 'Storage',
   tools: 'Tools',
   marketplace: 'Marketplace',
@@ -323,6 +327,8 @@ export function SettingsModal({
                   >
                     {page === 'profile' ? (
                       <SettingsProfile onSaved={showSavedToast} />
+                    ) : page === 'security' ? (
+                      <SettingsSecurity />
                     ) : page === 'storage' ? (
                       <SettingsStorage />
                     ) : page === 'tools' ? (

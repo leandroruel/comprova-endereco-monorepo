@@ -556,6 +556,7 @@ export function DashboardSidebar({
           collapsed={collapsed}
           user={user}
           onNavigate={onNavigate}
+          onOpenSettings={() => setSettingsOpen(true)}
           onSignOut={onSignOut}
           className={flat ? 'bg-background-secondary-default!' : undefined}
         />

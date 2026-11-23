@@ -8,7 +8,7 @@ vi.mock('@/api/auth', () => ({
   authClient: { changePassword: changePasswordMock },
 }))
 
-import ChangePasswordPage from './ChangePassword'
+import { SettingsSecurity } from './settings-security'
 import { describeAuthError } from '@/lib/auth-errors'
 
 const fillForm = async ({
@@ -25,11 +25,10 @@ const fillForm = async ({
   await page.getByLabelText('Confirmar nova senha').fill(confirm)
 }
 
-describe('ChangePasswordPage', () => {
+describe('SettingsSecurity', () => {
   it('renderiza o formulário com os três campos', async () => {
-    await render(<ChangePasswordPage />)
+    await render(<SettingsSecurity />)
 
-    await expect.element(page.getByRole('heading', { name: 'Alterar senha' })).toBeVisible()
     await expect.element(page.getByLabelText('Senha atual')).toBeVisible()
     await expect.element(page.getByLabelText('Nova senha')).toBeVisible()
     await expect.element(page.getByLabelText('Confirmar nova senha')).toBeVisible()
@@ -37,7 +36,7 @@ describe('ChangePasswordPage', () => {
   })
 
   it('mostra erro inline quando a confirmação não coincide', async () => {
-    await render(<ChangePasswordPage />)
+    await render(<SettingsSecurity />)
 
     await fillForm({ confirm: 'Diferente789$' })
 
@@ -48,7 +47,7 @@ describe('ChangePasswordPage', () => {
 
   it('altera a senha com revokeOtherSessions e exibe confirmação', async () => {
     changePasswordMock.mockResolvedValue({ data: { token: 'novo-token', user: { id: '1' } }, error: null })
-    await render(<ChangePasswordPage />)
+    await render(<SettingsSecurity />)
 
     await fillForm()
     await page.getByRole('button', { name: /Alterar senha/ }).click()
@@ -58,9 +57,7 @@ describe('ChangePasswordPage', () => {
       newPassword: 'NovaSenhaForte456#',
       revokeOtherSessions: true,
     })
-    await expect
-      .element(page.getByText('Senha alterada.', { exact: false }))
-      .toBeVisible()
+    await expect.element(page.getByText('Senha alterada.', { exact: false })).toBeVisible()
   })
 
   it('mapeia INVALID_PASSWORD para mensagem amigável', async () => {
@@ -68,7 +65,7 @@ describe('ChangePasswordPage', () => {
       data: null,
       error: { code: 'INVALID_PASSWORD', message: 'Invalid password', status: 400 },
     })
-    await render(<ChangePasswordPage />)
+    await render(<SettingsSecurity />)
 
     await fillForm()
     await page.getByRole('button', { name: /Alterar senha/ }).click()

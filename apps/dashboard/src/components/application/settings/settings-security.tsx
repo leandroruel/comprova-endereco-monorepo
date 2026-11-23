@@ -1,5 +1,7 @@
+'use client'
+
 import { useState } from 'react'
-import { RiInformationLine, RiLockLine, RiLockPasswordLine, RiShieldKeyholeLine } from '@remixicon/react'
+import { RiLockLine, RiLockPasswordLine, RiShieldKeyholeLine } from '@remixicon/react'
 import { authClient } from '@/api/auth'
 import { Button } from '@/components/base/buttons/button'
 import { Input } from '@/components/base/input/input'
@@ -7,15 +9,18 @@ import { SpinnerGlyph } from '@/components/base/spinner/spinner'
 import { PasswordStrength } from '@/components/password-strength'
 import { describeAuthError } from '@/lib/auth-errors'
 import { PASSWORD_MIN_LENGTH, isPasswordValid } from '@/lib/password-policy'
+import { SettingsCard } from './settings-rows'
 
 /**
- * Alteração de senha do painel, sem área de configurações: um formulário
- * único que chama o endpoint nativo do Better Auth. Com
- * `revokeOtherSessions: true`, as demais sessões do usuário são encerradas e
- * a sessão atual é renovada (a API reemite o cookie), então o painel continua
- * autenticado neste dispositivo.
+ * Painel "Segurança" das configurações: troca de senha da conta via endpoint
+ * nativo do Better Auth (`POST /change-password`, exposto pelo proxy do
+ * Worker em `/api/auth/change-password` → `/v1/auth/admin/change-password`).
+ *
+ * Com `revokeOtherSessions: true`, as demais sessões do usuário são
+ * encerradas e a sessão atual é renovada (a API reemite o cookie), então o
+ * painel continua autenticado neste dispositivo.
  */
-export default function ChangePasswordPage() {
+export function SettingsSecurity() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -24,6 +29,10 @@ export default function ChangePasswordPage() {
   const [loading, setLoading] = useState(false)
 
   const passwordsDontMatch = confirmPassword.length > 0 && confirmPassword !== newPassword
+  const isPristine = currentPassword.length === 0 && newPassword.length === 0 && confirmPassword.length === 0
+
+  const canSubmit =
+    currentPassword.length > 0 && isPasswordValid(newPassword) && confirmPassword === newPassword && !loading
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -65,26 +74,15 @@ export default function ChangePasswordPage() {
     }
   }
 
-  const canSubmit =
-    currentPassword.length > 0 && isPasswordValid(newPassword) && confirmPassword === newPassword && !loading
-  const isPristine = currentPassword.length === 0 && newPassword.length === 0 && confirmPassword.length === 0
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-title-3-semibold text-text-primary">Alterar senha</h1>
-        <p className="text-body-regular text-text-secondary">
-          Redefina a senha da sua conta. Outras sessões conectadas serão encerradas.
-        </p>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
+    <div className="flex w-full flex-col gap-3">
+      <SettingsCard className="p-6">
         <form
           onSubmit={(event) => {
             void handleSubmit(event)
           }}
           noValidate
-          className="flex flex-col gap-5 rounded-3xl border border-border-button-default bg-background-primary-default p-6 lg:col-span-2"
+          className="flex flex-col gap-4"
         >
           <Input
             label="Senha atual"
@@ -171,19 +169,12 @@ export default function ChangePasswordPage() {
             </Button>
           </div>
         </form>
+      </SettingsCard>
 
-        <aside className="flex h-max flex-col gap-3 rounded-3xl border border-border-button-default bg-background-primary-default p-6">
-          <span className="flex items-center gap-2 text-body-medium text-text-primary">
-            <RiInformationLine className="size-5 text-foreground-icon-secondary" aria-hidden />
-            Boas práticas
-          </span>
-          <ul className="flex list-disc flex-col gap-1.5 ps-4 text-body-regular text-text-secondary">
-            <li>Use uma senha única, que você não usa em outros serviços.</li>
-            <li>Prefira uma frase-longa com símbolos a uma senha curta complexa.</li>
-            <li>Ao trocar a senha, todas as outras sessões são desconectadas automaticamente.</li>
-          </ul>
-        </aside>
-      </div>
+      <p className="px-3 text-body-2-regular text-text-secondary">
+        Ao alterar a senha, todas as outras sessões conectadas são encerradas automaticamente e este
+        dispositivo permanece logado.
+      </p>
     </div>
   )
 }

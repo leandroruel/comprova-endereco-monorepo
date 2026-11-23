@@ -9,7 +9,6 @@ import { BulkSearchPage } from '@/pages/BulkSearch'
 import { DebugNf3eQrCodePage } from '@/pages/DebugNf3eQrCode'
 import OrganizationsPage from '@/pages/Organizations'
 import { LoginPage } from '@/pages/Login'
-import ChangePasswordPage from '@/pages/ChangePassword'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -67,8 +66,6 @@ function AuthedApp() {
           <DebugNf3eQrCodePage onNavigate={setPage} user={user} />
         ) : page === 'organizations' ? (
           <OrganizationsPage onNavigate={setPage} user={user} />
-        ) : page === 'change-password' ? (
-          <ChangePasswordPage />
         ) : (
           <Dashboard onNavigate={setPage} user={user} />
         )}
