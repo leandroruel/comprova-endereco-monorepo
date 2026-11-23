@@ -2,7 +2,12 @@
 // a raiz do repo — ver README e `.env.example`). Sem ela a API responde 401.
 // Atenção: isto é uma facilidade de desenvolvimento — num dashboard público a
 // chave não pode viver no bundle (precisaria de sessão/BFF).
-export const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+//
+// Em produção (Cloudflare Worker), `VITE_API_URL` deve ser `/api` para que as
+// requisições caiam no Worker proxy na mesma origem. Quando não definido,
+// usamos `/api` em produção e `http://localhost:3000` em desenvolvimento.
+export const API_BASE =
+  import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '/api' : 'http://localhost:3000')
 
 const apiKey = import.meta.env.VITE_API_KEY ?? ''
 if (apiKey === '' && import.meta.env.DEV && import.meta.env.MODE !== 'test') {
