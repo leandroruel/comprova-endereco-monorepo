@@ -190,8 +190,7 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
 
   await app.register(helmet)
   const adminOrigins = parseOriginList(deps.config.DASHBOARD_ADMIN_ORIGINS) ?? DEFAULT_ADMIN_ORIGINS
-  const verifierOrigins =
-    parseOriginList(deps.config.DASHBOARD_VERIFIER_ORIGINS) ?? DEFAULT_VERIFIER_ORIGINS
+  const verifierOrigins = parseOriginList(deps.config.DASHBOARD_VERIFIER_ORIGINS) ?? DEFAULT_VERIFIER_ORIGINS
   const allowedOrigins = [...new Set([...adminOrigins, ...verifierOrigins, 'http://localhost:3000'])]
 
   await app.register(cors, {
@@ -260,6 +259,37 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       .send(problem(404, 'NOT_FOUND', 'Route not found', request.url))
   })
 
+  /**
+   * O erro do drizzle (`DrizzleQueryError`) só carrega a query e os params na
+   * mensagem; código SQLSTATE, constraint e detalhe do Postgres ficam em
+   * `cause`. Sem isso o log de um 500 é apenas "Failed query" e não permite
+   * saber qual constraint foi violada. `redactDeep` (logger) descarta campos
+   * não enumeráveis de `Error`, então montamos um objeto plano.
+   */
+  const errorCauseDetails = (error: unknown): Record<string, unknown> | undefined => {
+    if (!(error instanceof Error)) return undefined
+    const cause = error.cause
+    if (cause === undefined || cause === null) return undefined
+    if (!(cause instanceof Error)) return { message: String(cause) }
+    const pg = cause as Error & {
+      readonly code?: unknown
+      readonly severity?: unknown
+      readonly detail?: unknown
+      readonly constraint?: unknown
+      readonly table?: unknown
+      readonly column?: unknown
+    }
+    const details: Record<string, unknown> = {
+      type: cause.constructor.name,
+      message: cause.message,
+      stack: cause.stack,
+    }
+    for (const field of ['code', 'severity', 'detail', 'constraint', 'table', 'column'] as const) {
+      if (pg[field] !== undefined) details[field] = pg[field]
+    }
+    return details
+  }
+
   app.setErrorHandler((err, request, reply) => {
     if ((err as FastifyError).validation !== undefined) {
       reply
@@ -292,6 +322,9 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     deps.logger.error(
       {
         err: err instanceof Error ? err.message : String(err),
+        error_type: err instanceof Error ? err.constructor.name : typeof err,
+        error_stack: err instanceof Error ? err.stack : undefined,
+        error_cause: errorCauseDetails(err),
         request_id: request.id,
         route: request.routeOptions.url,
       },

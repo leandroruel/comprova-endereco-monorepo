@@ -1,10 +1,19 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 
+/**
+ * Instância de auth que emitiu a sessão. `admin` e `verifier` são espaços de
+ * identidade distintos (`admin_user` vs `verifier_user`): só ids de `verifier`
+ * podem ser gravados nas colunas com FK para `verifier_user` (ex.:
+ * `validation.user_id`, `batch.user_id`, `organization_member.user_id`).
+ */
+export type SessionSource = 'admin' | 'verifier'
+
 export interface SessionUser {
   readonly id: string
   readonly email: string
   readonly name: string
   readonly role: string
+  readonly source: SessionSource
 }
 
 /** Forma mínima necessária pelas instâncias de auth neste middleware. */
@@ -66,6 +75,18 @@ const requestOrigin = (request: FastifyRequest): string | undefined => {
 }
 
 /**
+ * Id do usuário do Verifier (`verifier_user.id`) associado à sessão.
+ *
+ * Retorna `null` para sessões do dashboard administrativo. O dashboard admin
+ * envia, na mesma request, o Bearer de uma API key e o cookie da sessão
+ * `admin_user`; gravar `admin_user.id` em colunas com FK para `verifier_user`
+ * (ex.: `validation.user_id`) viola a constraint e derruba a request com 500.
+ * O `user_id` dessas colunas deve refletir apenas a identidade do Verifier.
+ */
+export const verifierUserId = (request: FastifyRequest): string | null =>
+  request.sessionUser?.source === 'verifier' ? request.sessionUser.id : null
+
+/**
  * Middleware de sessão do dashboard (Better Auth).
  *
  * Popula `request.sessionUser` a partir do cookie de sessão da instância de
@@ -90,17 +111,17 @@ export const makeSessionMiddleware = (auths: SessionMiddlewareAuths) => {
       if (cookieHeader === undefined) return
 
       const origin = requestOrigin(request)
-      const candidates: AuthInstance[] =
+      const candidates: readonly { readonly auth: AuthInstance; readonly source: SessionSource }[] =
         origin !== undefined && verifierOrigins.has(origin)
-          ? [auths.verifier]
+          ? [{ auth: auths.verifier, source: 'verifier' }]
           : origin !== undefined && adminOrigins.has(origin)
-            ? [auths.admin]
+            ? [{ auth: auths.admin, source: 'admin' }]
             : []
 
       const headers = new Headers()
       headers.set('cookie', cookieHeader)
 
-      for (const auth of candidates) {
+      for (const { auth, source } of candidates) {
         const session = await auth.api.getSession({ headers })
         if (session?.user) {
           // O plugin admin do better-auth inclui o campo `role` no usuário.
@@ -110,6 +131,7 @@ export const makeSessionMiddleware = (auths: SessionMiddlewareAuths) => {
             email: session.user.email,
             name: session.user.name,
             role: user.role ?? 'user',
+            source,
           }
           return
         }

@@ -1,6 +1,7 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance } from 'fastify'
 import { requireReadScope, requireWriteScope } from '../../plugins/scope.js'
+import { verifierUserId } from '../../plugins/session.js'
 import { makeBatchController, type BatchControllerDeps } from './batches.controller.js'
 import {
   BatchDetailsResponse,
@@ -28,13 +29,14 @@ export const registerBatchRoutes = (instance: FastifyInstance, deps: BatchRoutes
       },
     },
     async (request, reply) =>
-      controller.create(request.tenant?.tenantId, request.sessionUser?.id, request.body, reply),
+      // `batch.user_id` tem FK para `verifier_user` (sessão admin não entra).
+      controller.create(request.tenant?.tenantId, verifierUserId(request), request.body, reply),
   )
 
   app.get(
     '/batches',
     { preHandler: requireReadScope, schema: { response: { 200: BatchListResponse } } },
-    async (request) => controller.list(request.tenant?.tenantId, request.sessionUser?.id),
+    async (request) => controller.list(request.tenant?.tenantId, verifierUserId(request) ?? undefined),
   )
 
   app.get(

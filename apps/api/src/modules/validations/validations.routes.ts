@@ -6,6 +6,7 @@ import {
   requireWriteScope,
   requireSessionOrM2MVerify,
 } from '../../plugins/scope.js'
+import { verifierUserId } from '../../plugins/session.js'
 import {
   makeEvidenceIntakeController,
   type EvidenceIntakeControllerDeps,
@@ -79,7 +80,9 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
     async (request, reply) =>
       controller.create(
         request.tenant,
-        request.sessionUser?.id,
+        // `validation.user_id` tem FK para `verifier_user`: sessão do admin
+        // não é identidade de Verifier (ver `verifierUserId`).
+        verifierUserId(request),
         request.headers['idempotency-key'],
         request.body,
         reply,
@@ -102,7 +105,7 @@ export const registerValidationRoutes = (instance: FastifyInstance, deps: Valida
     async (request, reply) =>
       controller.contest(
         request.tenant,
-        request.sessionUser?.id ?? null,
+        verifierUserId(request),
         request.params.id,
         request.body.reason,
         deps.fastPath.docHmacKey,
