@@ -13,6 +13,7 @@ import {
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { ValidationCard } from '@/components/validation-card'
 import { ValidationProgress } from '@/components/validation/validation-progress'
+import { useConsole } from '@/components/console/console-context'
 import { FileUp, Search } from 'lucide-react'
 
 /**
@@ -143,6 +144,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   const poll = deps?.poll ?? getValidation
   const lookupCep = deps?.lookupCep ?? getAddressByCep
   const pollIntervalMs = deps?.pollIntervalMs ?? POLL_INTERVAL_MS
+  const { addLog, setStatus } = useConsole()
 
   const [document, setDocument] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -253,6 +255,11 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
       setFile(null)
       setAddress(emptyAddress)
       setTouchedAddressFields(new Set())
+      setStatus('running')
+      addLog('INFO', `Validação iniciada para documento: ${created.validation_id}`)
+      if (file !== null) {
+        addLog('SYS', `Anexo de evidência recebido: ${file.name} (${file.size} bytes)`)
+      }
     },
   })
 
@@ -310,6 +317,34 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
 
   const running = mutation.isPending
   const active = validation.data as ValidationDto | undefined
+
+  // Registra logs quando a validação atinge um estado terminal.
+  const lastTerminalRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!active || lastTerminalRef.current === active.validation_id) return
+    if (!hardTerminal(active)) return
+    lastTerminalRef.current = active.validation_id
+    const confidencePct = active.confidence != null ? (active.confidence * 100).toFixed(0) : '—'
+    if (active.status === 'failed' || active.status === 'expired') {
+      setStatus('error')
+      addLog('ERROR', `Validação ${active.validation_id} falhou com status ${active.status}`)
+    } else if (active.verdict === 'CONFIRMED_COMMERCIAL') {
+      setStatus('success')
+      addLog('RES', `Validação ${active.validation_id} concluída: APROVADO (confiança ${confidencePct}%)`)
+    } else if (active.verdict === 'INSUFFICIENT_EVIDENCE') {
+      setStatus('error')
+      addLog(
+        'RES',
+        `Validação ${active.validation_id} concluída: EVIDÊNCIA INSUFICIENTE (confiança ${confidencePct}%)`,
+      )
+    } else if (active.verdict === 'DIVERGENT') {
+      setStatus('error')
+      addLog('WARN', `Validação ${active.validation_id} concluída: DIVERGENTE (confiança ${confidencePct}%)`)
+    } else {
+      setStatus('success')
+      addLog('RES', `Validação ${active.validation_id} concluída: veredito ${active.verdict}`)
+    }
+  }, [active, addLog, setStatus])
 
   return (
     <Card>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { authClient, type SessionUser } from '@/api/auth'
 import { AlertProvider } from '@/components/base/alert/alert-context'
+import { ConsoleProvider } from '@/components/console/console-context'
 import { Spinner } from '@/components/ui'
 import { DashboardLayout } from '@/components/layout'
 import Dashboard from '@/pages/Dashboard'
@@ -89,33 +90,35 @@ function AuthedApp() {
 
   return (
     <AlertProvider>
-      <QueryClientProvider client={queryClient}>
-        <DashboardLayout
-          activePage={page}
-          onNavigate={setPage}
-          userName={user?.name ?? undefined}
-          userEmail={user?.email ?? undefined}
-          userRole={user?.role ?? undefined}
-          onLogout={() => {
-            void authClient
-              .signOut()
-              .then(() => window.location.reload())
-              .catch(() => window.location.reload())
-          }}
-        >
-          {page === 'home' ? (
-            <HomePage user={user} onNavigate={setPage} />
-          ) : page === 'bulk' ? (
-            <BulkSearchPage onNavigate={setPage} user={user} />
-          ) : page === 'debug-nf3e-qrcode' ? (
-            <DebugNf3eQrCodePage onNavigate={setPage} user={user} />
-          ) : page === 'organizations' ? (
-            <OrganizationsPage onNavigate={setPage} user={user} />
-          ) : (
-            <Dashboard onNavigate={setPage} user={user} />
-          )}
-        </DashboardLayout>
-      </QueryClientProvider>
+      <ConsoleProvider>
+        <QueryClientProvider client={queryClient}>
+          <DashboardLayout
+            activePage={page}
+            onNavigate={setPage}
+            userName={user?.name ?? undefined}
+            userEmail={user?.email ?? undefined}
+            userRole={user?.role ?? undefined}
+            onLogout={() => {
+              void authClient
+                .signOut()
+                .then(() => window.location.reload())
+                .catch(() => window.location.reload())
+            }}
+          >
+            {page === 'home' ? (
+              <HomePage user={user} onNavigate={setPage} />
+            ) : page === 'bulk' ? (
+              <BulkSearchPage onNavigate={setPage} user={user} />
+            ) : page === 'debug-nf3e-qrcode' ? (
+              <DebugNf3eQrCodePage onNavigate={setPage} user={user} />
+            ) : page === 'organizations' ? (
+              <OrganizationsPage onNavigate={setPage} user={user} />
+            ) : (
+              <Dashboard onNavigate={setPage} user={user} />
+            )}
+          </DashboardLayout>
+        </QueryClientProvider>
+      </ConsoleProvider>
     </AlertProvider>
   )
 }
