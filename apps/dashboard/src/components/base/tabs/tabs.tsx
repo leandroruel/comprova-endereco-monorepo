@@ -88,7 +88,7 @@ export function Tab({
       )}
       {...props}
       aria-selected={isSelected}
-      onClick={() => context?.onValueChange(value)}
+      onClick={() => context?.onValueChange?.(value)}
     >
       <span className={cx('inline-flex items-center gap-1.5')}>
         {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
