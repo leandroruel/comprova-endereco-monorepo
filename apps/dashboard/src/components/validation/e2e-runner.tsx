@@ -65,7 +65,14 @@ const evidenceArrived = (v: ValidationDto): boolean =>
 const fiscalPending = (v: ValidationDto): boolean =>
   v.fiscal_reference === 'found' && v.fiscal_reassessment !== 'completed'
 
-const hardTerminal = (v: ValidationDto): boolean => v.status === 'failed' || v.status === 'expired'
+/**
+ * Estados terminais da validação: quando o backend já concluiu a validação
+ * (`completed`) ou ela falhou/expirou, não há mais motivo para continuar o
+ * polling. `completed` inclui vereditos definitivos como
+ * `INSUFFICIENT_EVIDENCE`.
+ */
+const hardTerminal = (v: ValidationDto): boolean =>
+  v.status === 'completed' || v.status === 'failed' || v.status === 'expired'
 
 const snapshotOf = (v: ValidationDto): string =>
   JSON.stringify([
