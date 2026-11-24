@@ -51,5 +51,8 @@
     "skills": [
       "*"
     ]
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.2"
   }
 }
