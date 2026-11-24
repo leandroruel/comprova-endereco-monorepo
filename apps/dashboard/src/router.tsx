@@ -16,35 +16,30 @@ export const rootRoute = createRootRoute({
 })
 
 export const homeRoute = createRoute({
-  id: 'home',
   getParentRoute: () => rootRoute,
   path: '/',
   component: HomePage,
 })
 
 export const validationsRoute = createRoute({
-  id: 'validations',
   getParentRoute: () => rootRoute,
   path: '/validations',
   component: Validations,
 })
 
 export const bulkRoute = createRoute({
-  id: 'bulk',
   getParentRoute: () => rootRoute,
   path: '/bulk',
   component: BulkSearchPage,
 })
 
 export const organizationsRoute = createRoute({
-  id: 'organizations',
   getParentRoute: () => rootRoute,
   path: '/organizations',
   component: OrganizationsPage,
 })
 
 export const debugNf3eQrCodeRoute = createRoute({
-  id: 'debug-nf3e-qrcode',
   getParentRoute: () => rootRoute,
   path: '/debug-nf3e-qrcode',
   component: DebugNf3eQrCodePage,
