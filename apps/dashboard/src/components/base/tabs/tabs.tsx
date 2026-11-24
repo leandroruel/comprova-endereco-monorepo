@@ -1,6 +1,6 @@
 'use client'
 
-import type { ComponentType, ReactNode, Ref } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import React from 'react'
 import { cx } from '@/utils/cx'
 
@@ -43,7 +43,7 @@ const TabsContext = React.createContext<{
 export function Tabs({
   children,
   className,
-  defaultValue = '',
+  defaultValue = 'simple',
   value,
   onValueChange,
 }: TabsProps) {
@@ -83,9 +83,7 @@ export function Tab({
         'relative inline-flex cursor-pointer items-center gap-2.5 px-2.5 py-2 whitespace-nowrap',
         'outline-none transition-colors duration-150 ease',
         'focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-        isSelected
-          ? 'text-body-medium text-accent-600'
-          : 'text-body-regular text-text-primary',
+        isSelected ? 'text-body-medium text-accent-600' : 'text-body-regular text-text-primary',
         className,
       )}
       {...props}

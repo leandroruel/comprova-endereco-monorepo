@@ -194,7 +194,7 @@ export default function Validations({
       </div>
 
       {/* Tabs */}
-      <Tabs>
+      <Tabs defaultValue="simple">
         <TabList className="w-full grid grid-cols-2">
           <Tab value="simple" key="simple" className="flex-1 py-2.5 text-sm font-medium">
             Validação Simples
