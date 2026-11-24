@@ -5,6 +5,7 @@ import { type SessionUser } from '@/api/auth'
 import { ValidationCard } from '@/components/validation-card'
 import { E2eRunner } from '@/components/validation/e2e-runner'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
+import { useAlerts } from '@/components/base/alert/alert-context'
 import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
 
 function StatCard({
@@ -50,6 +51,7 @@ export default function Dashboard({
   const [document, setDocument] = useState('')
   const [history, setHistory] = useState<ValidationDto[]>([])
   const queryClient = useQueryClient()
+  const { add } = useAlerts()
 
   const stats = useQuery({
     queryKey: ['stats'],
@@ -63,6 +65,13 @@ export default function Dashboard({
 
   const mutation = useMutation({
     mutationFn: () => createValidation(document),
+    onError: (error) => {
+      add({
+        variant: 'error',
+        title: 'Falha ao validar',
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+      })
+    },
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
       setDocument('')
@@ -150,11 +159,6 @@ export default function Dashboard({
               {mutation.isPending ? <Spinner /> : 'Validar'}
             </Button>
           </form>
-          {mutation.isError && (
-            <p className="mt-2 text-sm text-destructive">
-              {mutation.error instanceof Error ? mutation.error.message : 'Erro desconhecido'}
-            </p>
-          )}
         </CardContent>
       </Card>
 

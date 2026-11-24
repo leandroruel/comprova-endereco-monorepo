@@ -1,6 +1,7 @@
 import { type ReactNode, useMemo } from 'react'
 import { DashboardSidebar } from '@/components/application/dashboard/dashboard-sidebar'
 import type { DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar'
+import { Alerts } from '@/components/base/alert/alert'
 import { RiBuildingLine, RiChatAiLine, RiFileSearchLine, RiHomeLine, RiQrCodeLine } from '@remixicon/react'
 
 /** Itens de navegação da SPA: usam `onSelect` (render <button>) em vez de `href` (render <a>). */
@@ -37,7 +38,8 @@ export function DashboardLayout({
   }
 
   const navItems = useMemo<readonly DashboardNavItem[]>(() => {
-    const items = (userRole === 'admin' || userRole === 'superadmin') ? [...baseNavItems, ...adminNavItems] : baseNavItems
+    const items =
+      userRole === 'admin' || userRole === 'superadmin' ? [...baseNavItems, ...adminNavItems] : baseNavItems
     return items.map((item) => ({
       ...item,
       onSelect: () => navigate(item.key),
@@ -73,7 +75,10 @@ export function DashboardLayout({
 
       <div className="min-w-0 flex-1">
         <div className="flex w-full pt-10 pb-14 px-6 sm:px-10">
-          <main className="w-full min-w-0 flex-col gap-3">{children}</main>
+          <main className="w-full min-w-0 flex-col gap-3">
+            <Alerts className="mb-3" />
+            {children}
+          </main>
         </div>
       </div>
     </div>

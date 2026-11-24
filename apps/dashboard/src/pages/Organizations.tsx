@@ -11,7 +11,8 @@ import { Input } from '@/components/base/input/input'
 import { Button } from '@/components/base/buttons/button'
 import { Card, CardContent } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import { Building2, Users, Clock, CircleAlert, FileText, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Building2, Users, Clock, CircleAlert, FileText } from 'lucide-react'
+import { useAlerts } from '@/components/base/alert/alert-context'
 
 const STATUS_LABELS: Record<string, string> = {
   active: 'Ativo',
@@ -113,6 +114,8 @@ export default function OrganizationsPage({
   const legalNameRef = useRef<HTMLInputElement>(null)
   const documentRef = useRef<HTMLInputElement>(null)
   const dataRegionRef = useRef<HTMLInputElement>(null)
+  const organizationsErroredRef = useRef(false)
+  const { add } = useAlerts()
 
   const showSuccessToast = () => {
     if (toastTimer.current) clearTimeout(toastTimer.current)
@@ -137,6 +140,20 @@ export default function OrganizationsPage({
   })
 
   const { data: organizations = [], isLoading, error } = organizationsQuery
+
+  // Dispara o alerta global uma vez quando a consulta de organizações falha,
+  // sem duplicar o alerta a cada renderização enquanto o erro persiste.
+  useEffect(() => {
+    if (error && !organizationsErroredRef.current) {
+      organizationsErroredRef.current = true
+      add({
+        variant: 'error',
+        title: 'Falha ao carregar organizações',
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+      })
+    }
+    if (!error) organizationsErroredRef.current = false
+  }, [error, add])
 
   const total = organizations.length
   const activeCount = organizations.filter((o) => o.status === 'active').length
@@ -174,38 +191,6 @@ export default function OrganizationsPage({
 
   return (
     <div className="space-y-6">
-      {/* Erro de API: aviso no topo, não esconde nada.
-          Só mostra quando há erro real de rede/API e ainda há dados carregados.
-          Quando a lista está vazia (sem organizações), não é erro — é estado vazio legítimo. */}
-      {error && !isLoading && organizations.length > 0 && (
-        <div className="rounded-xl border border-border-error-default bg-red-50 p-3 shadow-sm">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="size-5 shrink-0 text-red-600" />
-            <div>
-              <p className="text-sm font-medium text-red-800">Não foi possível carregar as organizações</p>
-              {error instanceof Error && error.message.includes('HTTP 500') && (
-                <p className="text-xs text-red-600 mt-1">
-                  O servidor retornou um erro inesperado. Verifique se a API está rodando.
-                </p>
-              )}
-              {!isServerError(error) && (
-                <p className="text-xs text-red-600 mt-1">
-                  {error instanceof Error ? error.message : 'Erro inesperado'}
-                </p>
-              )}
-              <button
-                onClick={() => {
-                  void organizationsQuery.refetch()
-                }}
-                className="mt-2 inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800"
-              >
-                <RefreshCw className="size-3.5" /> Tentar novamente
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Toast de sucesso */}
       {toastPhase !== 'hidden' && (
         <div
@@ -348,8 +333,4 @@ export default function OrganizationsPage({
       </div>
     </div>
   )
-}
-
-function isServerError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('HTTP 500')
 }

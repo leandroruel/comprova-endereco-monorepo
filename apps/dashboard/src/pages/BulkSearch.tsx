@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge, Button, Card, CardContent, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, Download, FileText, Upload, XCircle } from 'lucide-react'
+import { useAlerts } from '@/components/base/alert/alert-context'
 import { API_BASE, API_KEY } from '@/api/client'
 import type { SessionUser } from '@/api/auth'
 
@@ -82,6 +83,7 @@ export function BulkSearchPage({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
+  const { add } = useAlerts()
 
   const batches = useQuery({
     queryKey: ['batches'],
@@ -91,6 +93,13 @@ export function BulkSearchPage({
 
   const mutation = useMutation({
     mutationFn: (docs: Array<{ type: 'CPF' | 'CNPJ'; value: string }>) => createBatch(docs),
+    onError: (error) => {
+      add({
+        variant: 'error',
+        title: 'Falha ao processar lote',
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+      })
+    },
     onSuccess: () => {
       setRawText('')
       void queryClient.invalidateQueries({ queryKey: ['batches'] })
@@ -189,11 +198,6 @@ export function BulkSearchPage({
                 {mutation.isPending ? <Spinner /> : 'Processar'}
               </Button>
             </div>
-            {mutation.isError && (
-              <p className="mt-2 text-sm text-red-500">
-                {mutation.error instanceof Error ? mutation.error.message : 'Erro'}
-              </p>
-            )}
           </CardContent>
         </Card>
       </div>
