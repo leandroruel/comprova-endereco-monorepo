@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createValidation,
   getAddressByCep,
@@ -136,6 +136,7 @@ export interface E2eRunnerDeps {
  * para CNPJ, o endereço continua vindo do snapshot da Receita Federal no backend.
  */
 export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
+  const queryClient = useQueryClient()
   const create =
     deps?.create ?? ((document: string, address?: AddressInput | null) => createValidation(document, address))
   const upload = deps?.upload ?? uploadEvidence
@@ -279,6 +280,17 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
     queryFn: () => (activeId === null ? Promise.reject(new Error('no active validation')) : poll(activeId)),
     retry: false,
   })
+
+  // Garante que o acompanhamento encerre assim que o backend já concluiu a
+  // validação (status 'completed'), independentemente do progresso exposto.
+  // O `refetchInterval` pode não ser reavaliado quando o dado chega completo
+  // na primeira leitura; este efeito é a rede de segurança.
+  useEffect(() => {
+    if (activeId === null || validation.data?.status !== 'completed') return
+    // eslint-disable-next-line react/set-state-in-effect
+    setStopped(true)
+    void queryClient.cancelQueries({ queryKey: ['e2e-validation', activeId] })
+  }, [validation.data?.status, activeId, queryClient])
 
   useEffect(() => {
     if (activeId === null) return
