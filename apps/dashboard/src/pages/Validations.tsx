@@ -1,13 +1,12 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createValidation, uploadEvidence, getStats, type ValidationDto } from '@/api/client'
+import { createValidation, getStats, uploadEvidence, type ValidationDto } from '@/api/client'
 import { type SessionUser } from '@/api/auth'
 import { ValidationCard } from '@/components/validation-card'
 import { ConsoleFixedBottom } from '@/components/console/console-fixed-bottom'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { Tabs, TabList, Tab, TabPanel } from '@/components/base/tabs/tabs'
 import { useAlerts } from '@/components/base/alert/alert-context'
-import { useConsole } from '@/components/console/console-context'
 import { Activity, CheckCircle2, FileUp, Search, Timer, Users, XCircle } from 'lucide-react'
 import { cx } from '@/utils/cx'
 
@@ -57,7 +56,6 @@ export default function Validations({
   const [activeValidation, setActiveValidation] = useState<ValidationDto | null>(null)
   const queryClient = useQueryClient()
   const { add } = useAlerts()
-  const { addLog, setStatus } = useConsole()
 
   const stats = useQuery({
     queryKey: ['stats'],
@@ -71,16 +69,12 @@ export default function Validations({
     mutationFn: () => createValidation(document.trim()),
     onError: (error) => {
       add({ variant: 'error', title: 'Falha ao validar', message: error instanceof Error ? error.message : 'Erro' })
-      setStatus('error')
-      addLog('ERROR', `Validação simples falhou: ${error instanceof Error ? error.message : 'Erro desconhecido'}`)
     },
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
       setActiveValidation(result)
       setDocument('')
       void queryClient.invalidateQueries({ queryKey: ['stats'] })
-      setStatus('success')
-      addLog('RES', `Validação simples concluída: ${result.validation_id}`, undefined, JSON.stringify(result))
     },
   })
 
@@ -94,8 +88,6 @@ export default function Validations({
     },
     onError: (error) => {
       add({ variant: 'error', title: 'Falha ao validar', message: error instanceof Error ? error.message : 'Erro' })
-      setStatus('error')
-      addLog('ERROR', `Validação completa falhou: ${error instanceof Error ? error.message : 'Erro desconhecido'}`)
     },
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
@@ -103,8 +95,6 @@ export default function Validations({
       setDocument('')
       setFile(null)
       void queryClient.invalidateQueries({ queryKey: ['stats'] })
-      setStatus('success')
-      addLog('RES', `Validação completa concluída: ${result.validation_id}`, undefined, JSON.stringify(result))
     },
   })
 
@@ -204,6 +194,7 @@ export default function Validations({
           </Tab>
         </TabList>
 
+        {/* Validação Simples */}
         <TabPanel value="simple" key="simple" className="mt-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="col-span-2">
@@ -286,26 +277,27 @@ export default function Validations({
                       </p>
                     </div>
                   )}
+                  {history.length > 0 && (
+                    <div className="mt-4">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                        Histórico
+                      </h3>
+                      {history.map((validation, index) => (
+                        <ValidationCard
+                          key={validation.validation_id}
+                          validation={validation}
+                          defaultCollapsed={index > 0}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-              {history.length > 0 && (
-                <div className="mt-4">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                    Histórico
-                  </h3>
-                  {history.map((validation, index) => (
-                    <ValidationCard
-                      key={validation.validation_id}
-                      validation={validation}
-                      defaultCollapsed={index > 0}
-                    />
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </TabPanel>
 
+        {/* Validação Completa + NF3e */}
         <TabPanel value="complete" key="complete" className="mt-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="col-span-2">
@@ -343,7 +335,10 @@ export default function Validations({
                         type="file"
                         accept="application/pdf,image/png,image/jpeg"
                         className="sr-only"
-                        onChange={handleFileSelect}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) setFile(f)
+                        }}
                       />
                     </label>
                     {file && (
