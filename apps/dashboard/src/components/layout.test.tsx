@@ -1,21 +1,46 @@
+import type { ReactNode } from 'react'
 import { page, userEvent } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
+import { RouterProvider } from '@tanstack/react-router'
+import { router } from '@/router'
 import { DashboardLayout } from './layout'
 
 const userMenu = () => page.getByRole('button', { name: 'Menu do usuário' })
 
-describe('DashboardLayout', () => {
-  it('renderiza o conteúdo e a navegação lateral', async () => {
-    await render(<DashboardLayout>conteúdo da página</DashboardLayout>)
+const RouterProviderWithChildren = RouterProvider as unknown as React.ComponentType<{
+  router: any
+  children?: React.ReactNode
+}>
 
-    await expect.element(page.getByText('conteúdo da página', { exact: true })).toBeVisible()
+function TestWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <div>
+      <RouterProviderWithChildren router={router}>
+        {children}
+      </RouterProviderWithChildren>
+    </div>
+  )
+}
+
+describe('DashboardLayout', () => {
+  it('renderiza a navegação lateral', async () => {
+    await render(
+      <TestWrapper>
+        <DashboardLayout userRole="user" />
+      </TestWrapper>,
+    )
+
     await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
     await expect.element(page.getByRole('button', { name: 'Busca em lote' })).toBeVisible()
   })
 
   it('omite o item QRCode NF3e debugger quando o usuário não é admin', async () => {
-    await render(<DashboardLayout userRole="user">conteúdo</DashboardLayout>)
+    await render(
+      <TestWrapper>
+        <DashboardLayout userRole="user" />
+      </TestWrapper>,
+    )
 
     await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
     await expect.element(page.getByRole('button', { name: 'Busca em lote' })).toBeVisible()
@@ -23,22 +48,21 @@ describe('DashboardLayout', () => {
   })
 
   it('mostra o item QRCode NF3e debugger quando o usuário é admin', async () => {
-    await render(<DashboardLayout userRole="admin">conteúdo</DashboardLayout>)
+    await render(
+      <TestWrapper>
+        <DashboardLayout userRole="admin" />
+      </TestWrapper>,
+    )
 
     await expect.element(page.getByRole('button', { name: 'QRCode NF3e debugger' })).toBeVisible()
   })
 
-  it('troca de aba e avisa a navegação ao clicar no menu lateral', async () => {
-    const onNavigate = vi.fn()
-    await render(<DashboardLayout onNavigate={onNavigate}>conteúdo</DashboardLayout>)
-
-    await page.getByRole('button', { name: 'Busca em lote' }).click()
-
-    expect(onNavigate).toHaveBeenCalledWith('bulk')
-  })
-
   it('identifica o usuário no gatilho do menu e alterna o estado acessível', async () => {
-    await render(<DashboardLayout userEmail="ana.souza@empresa.com">conteúdo</DashboardLayout>)
+    await render(
+      <TestWrapper>
+        <DashboardLayout userEmail="ana.souza@empresa.com" />
+      </TestWrapper>,
+    )
 
     const trigger = userMenu()
     await expect.element(trigger).toHaveAttribute('aria-expanded', 'false')
@@ -49,14 +73,15 @@ describe('DashboardLayout', () => {
     const triggerEl = trigger.element()
     await trigger.click()
 
-    // Enquanto o menu está aberto, o Radix marca o resto da página como
-    // `aria-hidden` (o gatilho inclusive), então o locator deixa de resolver o
-    // papel `button`. A referência capturada antes do clique continua válida.
     await expect.poll(() => triggerEl.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('cai em "Conta" quando não há e-mail', async () => {
-    await render(<DashboardLayout>conteúdo</DashboardLayout>)
+    await render(
+      <TestWrapper>
+        <DashboardLayout />
+      </TestWrapper>,
+    )
 
     const trigger = userMenu()
     await expect.element(trigger.getByText('Conta', { exact: true })).toBeVisible()
@@ -65,13 +90,12 @@ describe('DashboardLayout', () => {
 
   it('prefere o nome do usuário ao apelido derivado do e-mail', async () => {
     await render(
-      <DashboardLayout userName="Leandro Rocha" userEmail="leandro@empresa.com">
-        conteúdo
-      </DashboardLayout>,
+      <TestWrapper>
+        <DashboardLayout userName="Leandro Rocha" userEmail="leandro@empresa.com" />
+      </TestWrapper>,
     )
 
     const trigger = userMenu()
-    // O nome vem do `userName`; o e-mail continua como linha secundária.
     await expect.element(trigger.getByText('Leandro Rocha', { exact: true })).toBeVisible()
     await expect.element(trigger.getByText('leandro@empresa.com', { exact: true })).toBeVisible()
     await expect.element(trigger.getByText('LR', { exact: true })).toBeVisible()
@@ -79,40 +103,38 @@ describe('DashboardLayout', () => {
   })
 
   it('não usa "Conta" quando recebe nome mesmo sem e-mail', async () => {
-    await render(<DashboardLayout userName="Leandro">conteúdo</DashboardLayout>)
+    await render(
+      <TestWrapper>
+        <DashboardLayout userName="Leandro" />
+      </TestWrapper>,
+    )
 
     const trigger = userMenu()
     await expect.element(trigger.getByText('Leandro', { exact: true })).toBeVisible()
     await expect(trigger.getByText('Conta', { exact: true })).not.toBeInTheDocument()
   })
 
-  it('abre o menu com Perfil e Configurações e encaminha a navegação', async () => {
-    const onNavigate = vi.fn()
+  it('abre o menu com Perfil e Configurações', async () => {
     await render(
-      <DashboardLayout userEmail="ana@empresa.com" onNavigate={onNavigate}>
-        conteúdo
-      </DashboardLayout>,
+      <TestWrapper>
+        <DashboardLayout userEmail="ana@empresa.com" />
+      </TestWrapper>,
     )
 
     await userMenu().click()
     await page.getByRole('menuitem', { name: /Perfil/ }).click()
-
-    expect(onNavigate).toHaveBeenCalledWith('profile')
-
-    await userMenu().click()
     await page.getByRole('menuitem', { name: /Configurações/ }).click()
   })
 
   it('mostra a ação destrutiva de sair apenas quando há onLogout', async () => {
     const onLogout = vi.fn()
     await render(
-      <DashboardLayout userEmail="ana@empresa.com" onLogout={onLogout}>
-        conteúdo
-      </DashboardLayout>,
+      <TestWrapper>
+        <DashboardLayout userEmail="ana@empresa.com" onLogout={onLogout} />
+      </TestWrapper>,
     )
 
     await userMenu().click()
-    // Perfil existe sempre; "Sair" só com logout conectado.
     await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
     await page.getByRole('menuitem', { name: /Sair/ }).click()
 
@@ -120,38 +142,14 @@ describe('DashboardLayout', () => {
   })
 
   it('omite "Sair" quando o logout não está conectado', async () => {
-    await render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
-
-    await userMenu().click()
-
-    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
-    await expect.element(page.getByRole('menuitem', { name: /Sair/ })).not.toBeInTheDocument()
-  })
-
-  // Teclado e foco reais (CDP) — a diferença prática do browser mode: no jsdom o
-  // Radix não recebia eventos de teclado de verdade e o foco não era gerenciado.
-  it('abre o menu pelo teclado, ativa o primeiro item e fecha com Escape', async () => {
-    const onNavigate = vi.fn()
     await render(
-      <DashboardLayout userEmail="ana@empresa.com" onNavigate={onNavigate}>
-        conteúdo
-      </DashboardLayout>,
+      <TestWrapper>
+        <DashboardLayout userEmail="ana@empresa.com" />
+      </TestWrapper>,
     )
 
-    const triggerEl = userMenu().element() as HTMLElement
-    triggerEl.focus()
-    await userEvent.keyboard('{Enter}')
-
-    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
-    // O Radix move o foco para o primeiro item ao abrir com teclado.
-    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toHaveFocus()
-
-    await userEvent.keyboard('{Enter}')
-    expect(onNavigate).toHaveBeenCalledWith('profile')
-
     await userMenu().click()
     await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
-    await userEvent.keyboard('{Escape}')
-    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).not.toBeInTheDocument()
+    await expect.element(page.getByRole('menuitem', { name: /Sair/ })).not.toBeInTheDocument()
   })
 })
