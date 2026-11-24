@@ -168,15 +168,15 @@ export default function Validations({
       {/* Tabs */}
       <Tabs>
         <TabList className="w-full grid grid-cols-2">
-          <Tab key="simple" className="flex-1 py-2.5 text-sm font-medium">
+          <Tab value="simple" key="simple" className="flex-1 py-2.5 text-sm font-medium">
             Validação Simples
           </Tab>
-          <Tab key="complete" className="flex-1 py-2.5 text-sm font-medium">
+          <Tab value="complete" key="complete" className="flex-1 py-2.5 text-sm font-medium">
             Validação Completa + NF3e
           </Tab>
         </TabList>
 
-        <TabPanel key="simple" className="mt-4">
+        <TabPanel value="simple" key="simple" className="mt-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="col-span-2">
               <Card>
@@ -245,7 +245,7 @@ export default function Validations({
           </div>
         </TabPanel>
 
-        <TabPanel key="complete" className="mt-4">
+        <TabPanel value="complete" key="complete" className="mt-4">
           <E2eRunner />
         </TabPanel>
       </Tabs>

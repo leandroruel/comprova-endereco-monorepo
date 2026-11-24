@@ -71,7 +71,7 @@ export function DashboardLayout({
         onSignOut={onLogout}
       />
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 relative">
         <div className="flex w-full pt-10 pb-14 px-6 sm:px-10">
           <main className="w-full min-w-0 flex-col gap-3">
             <Alerts className="mb-3" />

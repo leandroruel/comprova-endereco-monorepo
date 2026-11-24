@@ -56,7 +56,7 @@ export function ConsoleFixedBottom({ className }: ConsoleFixedBottomProps) {
   return (
     <div
       className={cx(
-        'fixed bottom-0 left-0 right-0 z-50 flex flex-col',
+        'absolute bottom-0 left-0 right-0 z-50 flex flex-col',
         'transition-all duration-300 ease-in-out overflow-hidden',
         className,
       )}
@@ -100,12 +100,11 @@ export function ConsoleFixedBottom({ className }: ConsoleFixedBottomProps) {
         </div>
       </div>
 
-      {/* Área expandível de logs */}
+      {/* Área de logs (apenas quando expandida via clique no header) */}
       <div
         className={cx(
-          'flex-1 bg-background border-t border-border-border p-3 overflow-y-auto',
+          'max-h-[320px] overflow-y-auto border-t border-border-border p-3 bg-background',
           'transition-all duration-300 ease-in-out',
-          'max-h-[320px]',
         )}
         ref={scrollRef}
       >
@@ -114,7 +113,10 @@ export function ConsoleFixedBottom({ className }: ConsoleFixedBottomProps) {
             <p className="text-xs text-muted-foreground italic">Nenhum log registrado.</p>
           ) : (
             logs.map((log) => (
-              <div key={log.id} className="flex items-start gap-2 text-xs font-mono leading-tight">
+              <div
+                key={log.id}
+                className="flex items-start gap-2 text-xs font-mono leading-tight"
+              >
                 <span className={cx('font-medium', levelStyles[log.level])}>
                   [{log.time} {log.level}]
                 </span>
