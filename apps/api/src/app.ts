@@ -19,10 +19,9 @@ import {
 } from '@comprova/db'
 import {
   makeDocumentIntelligenceClient,
-  makeS3ObjectStore,
-  makeSupabaseObjectStore,
-  makeUnavailableObjectStore,
+  makeObjectStore,
   type ObjectStore,
+  type ObjectStoreProvider,
 } from '@comprova/providers'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
@@ -133,32 +132,39 @@ export interface AppDeps {
 }
 
 const resolveObjectStore = (config: AppConfig): ObjectStore => {
-  if (
+  const provider: ObjectStoreProvider =
     config.S3_ENDPOINT !== undefined &&
     config.S3_ACCESS_KEY_ID !== undefined &&
     config.S3_SECRET_ACCESS_KEY !== undefined &&
     config.S3_BUCKET !== undefined
-  ) {
-    return makeS3ObjectStore({
-      endpoint: config.S3_ENDPOINT,
-      region: config.S3_REGION ?? 'us-east-1',
-      bucket: config.S3_BUCKET,
-      accessKeyId: config.S3_ACCESS_KEY_ID,
-      secretAccessKey: config.S3_SECRET_ACCESS_KEY,
-    })
-  }
-  if (
-    config.SUPABASE_URL !== undefined &&
-    config.SUPABASE_SERVICE_ROLE_KEY !== undefined &&
-    config.SUPABASE_STORAGE_BUCKET !== undefined
-  ) {
-    return makeSupabaseObjectStore({
-      supabaseUrl: config.SUPABASE_URL,
-      supabaseServiceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY,
-      bucket: config.SUPABASE_STORAGE_BUCKET,
-    })
-  }
-  return makeUnavailableObjectStore()
+      ? 's3'
+      : config.SUPABASE_URL !== undefined &&
+        config.SUPABASE_SERVICE_ROLE_KEY !== undefined &&
+        config.SUPABASE_STORAGE_BUCKET !== undefined
+        ? 'supabase'
+        : 'unavailable'
+
+  return makeObjectStore({
+    provider,
+    s3: provider === 's3'
+      ? {
+          endpoint: config.S3_ENDPOINT!,
+          region: config.S3_REGION ?? 'us-east-1',
+          bucket: config.S3_BUCKET!,
+          accessKeyId: config.S3_ACCESS_KEY_ID!,
+          secretAccessKey: config.S3_SECRET_ACCESS_KEY!,
+        }
+      : undefined,
+    supabase: provider === 'supabase'
+      ? {
+          supabaseUrl: config.SUPABASE_URL!,
+          supabaseServiceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY!,
+          bucket: config.SUPABASE_STORAGE_BUCKET!,
+        }
+      : undefined,
+    supabaseRetry: { attempts: 3, baseDelayMs: 200 },
+    unavailableReason: 'object storage is not configured',
+  })
 }
 
 export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {

@@ -513,6 +513,22 @@ const preflight = async (
 
 const errorNameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown')
 
+const errorMessageOf = (error: unknown): string | null => (error instanceof Error ? error.message : null)
+
+/**
+ * Status HTTP reportado por erros de storage (`StorageApiError` expõe `status`
+ * number e `statusCode` string). Diferencia 5xx transitórios de 4xx
+ * definitivos no log sem depender da mensagem.
+ */
+const errorStatusOf = (error: unknown): number | string | null => {
+  if (error === null || typeof error !== 'object') return null
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown }
+  if (typeof status === 'number') return status
+  if (typeof statusCode === 'number') return statusCode
+  if (typeof statusCode === 'string') return statusCode
+  return null
+}
+
 const errorCodeOf = (error: unknown, depth = 0): string | null => {
   if (depth > 3 || typeof error !== 'object' || error === null) return null
   const code = (error as { code?: unknown }).code
@@ -565,6 +581,8 @@ const compensate = async (
         trigger,
         error_name: errorNameOf(error),
         error_code: errorCodeOf(error),
+        error_status: errorStatusOf(error),
+        error_message: errorMessageOf(error),
       },
       'evidence storage compensation failed',
     )
@@ -619,6 +637,8 @@ export const uploadEvidence = async (
         reason: 'EVIDENCE_STORAGE_PUT_FAILED',
         error_name: errorNameOf(error),
         error_code: errorCodeOf(error),
+        error_status: errorStatusOf(error),
+        error_message: errorMessageOf(error),
       },
       'evidence storage put failed',
     )

@@ -108,10 +108,115 @@ export const makeS3ObjectStore = (options: S3ObjectStoreOptions): EvidenceObject
   },
 })
 
+/**
+ * Provedores de object storage suportados. A fábrica `makeObjectStore` escolhe
+ * o adapter com base neste valor, então migrar de um provedor para outro é
+ * apenas uma mudança de configuração — sem tocar nos consumidores.
+ */
+export type ObjectStoreProvider = 's3' | 'supabase' | 'unavailable'
+
 interface SupabaseObjectStoreOptions {
   readonly supabaseUrl: string
   readonly supabaseServiceRoleKey: string
   readonly bucket: string
+}
+
+/**
+ * Opções da fábrica genérica de object store. Só o provedor selecionado
+ * precisa de opções; os demais são ignorados.
+ */
+export interface ObjectStoreFactoryOptions {
+  readonly provider: ObjectStoreProvider
+  readonly s3?: S3ObjectStoreOptions
+  readonly supabase?: SupabaseObjectStoreOptions
+  readonly supabaseRetry?: SupabaseRetryOptions
+  readonly unavailableReason?: string
+}
+
+/**
+ * Fábrica genérica de object store. Retorna um `EvidenceObjectStore` (o
+ * contrato abstrato) construído pelo adapter do provedor escolhido.
+ *
+ * Novos provedores só precisam de um `make*ObjectStore` adapter e de um caso
+ * neste `switch` — os consumidores (`buildApp`, testes) não mudam.
+ */
+export const makeObjectStore = (opts: ObjectStoreFactoryOptions): EvidenceObjectStore => {
+  switch (opts.provider) {
+    case 's3': {
+      if (!opts.s3) throw new Error('object store: opções do S3 são obrigatórias para o provedor "s3"')
+      return makeS3ObjectStore(opts.s3)
+    }
+    case 'supabase': {
+      if (!opts.supabase)
+        throw new Error(
+          'object store: opções do Supabase são obrigatórias para o provedor "supabase"',
+        )
+      return makeSupabaseObjectStore(opts.supabase, undefined, opts.supabaseRetry ?? {})
+    }
+    case 'unavailable':
+      return makeUnavailableObjectStore(opts.unavailableReason)
+    default:
+      return makeUnavailableObjectStore()
+  }
+}
+
+export interface SupabaseRetryOptions {
+  /** Número total de tentativas por operação (1 desliga o retry). Default: 3. */
+  readonly attempts?: number
+  /** Atraso base entre tentativas, multiplicado pelo número da tentativa. Default: 200. */
+  readonly baseDelayMs?: number
+  /** Injetável para testes. */
+  readonly sleep?: (ms: number) => Promise<void>
+}
+
+const DEFAULT_RETRY_ATTEMPTS = 3
+const DEFAULT_RETRY_BASE_DELAY_MS = 200
+
+const sleepFor = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Normaliza o status HTTP dos erros do storage-js: `StorageApiError` expõe
+ * `status` (number) e `statusCode` (string), mocks e wrappers variam entre os
+ * dois formatos.
+ */
+const storageStatusOf = (error: unknown): number | null => {
+  if (error === null || typeof error !== 'object') return null
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown }
+  if (typeof status === 'number') return status
+  if (typeof statusCode === 'number') return statusCode
+  if (typeof statusCode === 'string' && /^\d{3}$/.test(statusCode)) return Number(statusCode)
+  return null
+}
+
+/**
+ * Erros transitórios do Storage: 5xx e 429 vindos da API e falhas de rede sem
+ * status (`StorageUnknownError` do storage-js, `FetchError`/`TypeError` do
+ * runtime). 4xx são definitivos (bucket ausente, objeto duplicado, permissão)
+ * e falham na primeira tentativa.
+ */
+const isTransientStorageError = (error: unknown): boolean => {
+  const status = storageStatusOf(error)
+  if (status !== null) return status >= 500 || status === 429
+  if (error === null || typeof error !== 'object') return false
+  const name = (error as { name?: unknown }).name
+  return name === 'StorageUnknownError' || name === 'FetchError' || name === 'TypeError'
+}
+
+const withStorageRetry = async <T>(operation: () => Promise<T>, retry: SupabaseRetryOptions): Promise<T> => {
+  const attempts = Math.max(1, retry.attempts ?? DEFAULT_RETRY_ATTEMPTS)
+  const baseDelayMs = retry.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS
+  const sleep = retry.sleep ?? sleepFor
+  let lastError: unknown
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      if (attempt >= attempts || !isTransientStorageError(error)) break
+      await sleep(baseDelayMs * attempt)
+    }
+  }
+  throw lastError
 }
 
 /**
@@ -125,6 +230,27 @@ interface SupabaseObjectStoreOptions {
  * As chaves de objeto seguem o padrão existente do Comprova:
  * `tenants/<tenant>/evidence/<artifactId>`.
  */
+/**
+ * Superfície mínima do cliente que o adaptador usa (`storage.from` com
+ * upload/download/remove). O `createSupabaseClient` real satisfaz este tipo
+ * structuralmente e mocks de teste também, sem precisar implementar o client
+ * inteiro. Se as assinaturas reais divergirem, o `?? createSupabaseClient`
+ * abaixo falha no tsc.
+ */
+interface SupabaseStorageClient {
+  storage: {
+    from: (bucket: string) => {
+      upload: (
+        path: string,
+        fileBody: Uint8Array | Blob | ArrayBuffer | ArrayBufferView,
+        fileOptions?: { contentType?: string; upsert?: boolean },
+      ) => PromiseLike<{ data?: unknown; error: unknown }>
+      download: (path: string) => PromiseLike<{ data: Blob | null; error: unknown }>
+      remove: (paths: string[]) => PromiseLike<{ data?: unknown; error: unknown }>
+    }
+  }
+}
+
 export const makeSupabaseObjectStore = (
   options: SupabaseObjectStoreOptions,
   /** Injeção de dependência para testes: permite passar um createClient mock. */
@@ -132,10 +258,17 @@ export const makeSupabaseObjectStore = (
     url: string,
     key: string,
     options?: { auth?: { persistSession?: boolean; autoRefreshToken?: boolean } },
-  ) => ReturnType<typeof createSupabaseClient>,
+  ) => SupabaseStorageClient,
+  /**
+   * Política de retry para erros transitórios (5xx, 429 e falhas de rede). A
+   * plataforma Supabase degrada de forma intermitente (ex.: incidente de
+   * 2026-11 em que o Storage devolvia 500 "prepared statement does not
+   * exist"); repetir a operação recupera a request sem ação do usuário.
+   */
+  retry: SupabaseRetryOptions = {},
 ): EvidenceObjectStore => {
   const createClientFn = _createClient ?? createSupabaseClient
-  let supabase: ReturnType<typeof createSupabaseClient> | null = null
+  let supabase: SupabaseStorageClient | null = null
   const bucket = options.bucket
   const getClient = () => {
     if (supabase === null) {
@@ -147,32 +280,36 @@ export const makeSupabaseObjectStore = (
   }
 
   return {
-    put: async (key, data, contentType) => {
-      const { error } = await getClient().storage.from(bucket).upload(key, data, {
-        contentType,
-        upsert: false,
-      })
-      if (error) throw error
-      return {
-        key,
-        uri: `${options.supabaseUrl}/storage/v1/object/public/${bucket}/${key}`,
-        sha256: sha256Of(data),
-        bytes: data.byteLength,
-      }
-    },
-    get: async (key) => {
-      const { data, error } = await getClient().storage.from(bucket).download(key)
-      if (error) {
-        // 404 = objeto inexistente; tratamos como null (idempotente)
-        if ((error as { statusCode?: number }).statusCode === 404) return null
-        throw error
-      }
-      return new Uint8Array(await data.arrayBuffer())
-    },
-    delete: async (key) => {
-      const { error } = await getClient().storage.from(bucket).remove([key])
-      if (error) throw error
-    },
+    put: (key, data, contentType) =>
+      withStorageRetry(async () => {
+        const { error } = await getClient().storage.from(bucket).upload(key, data, {
+          contentType,
+          upsert: false,
+        })
+        if (error) throw error
+        return {
+          key,
+          uri: `${options.supabaseUrl}/storage/v1/object/public/${bucket}/${key}`,
+          sha256: sha256Of(data),
+          bytes: data.byteLength,
+        }
+      }, retry),
+    get: (key) =>
+      withStorageRetry(async () => {
+        const { data, error } = await getClient().storage.from(bucket).download(key)
+        if (error) {
+          // 404 = objeto inexistente; tratamos como null (idempotente)
+          if (storageStatusOf(error) === 404) return null
+          throw error
+        }
+        if (data === null) return null
+        return new Uint8Array(await data.arrayBuffer())
+      }, retry),
+    delete: (key) =>
+      withStorageRetry(async () => {
+        const { error } = await getClient().storage.from(bucket).remove([key])
+        if (error) throw error
+      }, retry),
   }
 }
 
