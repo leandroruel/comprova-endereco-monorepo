@@ -3,10 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createValidation, getStats, type ValidationDto } from '@/api/client'
 import { type SessionUser } from '@/api/auth'
 import { ValidationCard } from '@/components/validation-card'
-import { E2eRunner } from '@/components/validation/e2e-runner'
+import { ConsoleFixedBottom } from '@/components/console/console-fixed-bottom'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
+import { Tabs, TabList, Tab, TabPanel } from '@/components/base/tabs/tabs'
 import { useAlerts } from '@/components/base/alert/alert-context'
 import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
+import { cx } from '@/utils/cx'
 
 function StatCard({
   icon,
@@ -56,8 +58,6 @@ export default function Dashboard({
   const stats = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
-    // A rota /v1/stats exige role === 'admin' (backend). Só busca para admins
-    // para evitar 403 (erro no console) para usuários sem permissão.
     enabled: user?.role === 'admin',
     staleTime: Infinity,
     refetchOnWindowFocus: true,
@@ -96,92 +96,249 @@ export default function Dashboard({
   const notFoundCount = s?.by_verdict?.['NOT_FOUND'] ?? 0
   const unsuccessful = insuffCount + notFoundCount + (s?.by_verdict?.['INCONSISTENT'] ?? 0)
 
+  const apiStatus = stats.isLoading ? 'checking' : 'online'
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Validação de endereço</h1>
           <p className="text-sm text-muted-foreground">
-            Verifica CNPJ ou CPF contra múltiplas fontes de evidência
+            Verificação de CNPJ/CPF contra múltiplas fontes de evidência oficiais
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className={cx(
+              'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+              apiStatus === 'online'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : apiStatus === 'checking'
+                  ? 'bg-muted text-muted-foreground border border-border-button-default'
+                  : 'bg-red-50 text-red-800 border border-red-200',
+            )}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 animate-pulse' : apiStatus === 'checking' ? 'bg-muted-foreground animate-pulse' : 'bg-red-500'}`}
+              aria-hidden
+            />
+            API Receita:{' '}
+            {apiStatus === 'online' ? 'Online' : apiStatus === 'checking' ? 'Verificando…' : 'Offline'}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => setDocument('')} disabled={mutation.isPending}>
+            <XCircle className="size-3.5 mr-1.5" aria-hidden />
+            Novo
+          </Button>
         </div>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           icon={<Activity className="h-4 w-4 text-foreground/60" />}
-          label="Consultas"
+          label="Consultas Totais"
           value={stats.isLoading ? '—' : String(s?.total ?? 0)}
           sub={s ? `${uniqueDocs} doc${uniqueDocs === 1 ? '' : 's'} · ${s.completed} completas` : undefined}
         />
         <StatCard
           icon={<Users className="h-4 w-4 text-blue-600" />}
-          label="CNPJ / CPF"
-          value={stats.isLoading ? '—' : `${cnpjCount}/${cpfCount}`}
-          sub={`${uniqueDocs} documento${uniqueDocs === 1 ? '' : 's'} único${uniqueDocs === 1 ? '' : 's'}`}
+          label="Documentos Únicos"
+          value={stats.isLoading ? '—' : `${uniqueDocs}`}
+          sub={`${cnpjCount + cpfCount} CNPJ/CPF`}
           accent="bg-blue-50"
         />
         <StatCard
           icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
-          label="Bem sucedidas"
+          label="Bem Sucedidas"
           value={stats.isLoading ? '—' : String(confirmedCount)}
           sub={s && s.total > 0 ? `${((confirmedCount / s.total) * 100).toFixed(0)}% do total` : undefined}
           accent="bg-emerald-50"
         />
         <StatCard
           icon={<XCircle className="h-4 w-4 text-red-600" />}
-          label="Não sucedidas"
+          label="Não Sucedidas"
           value={stats.isLoading ? '—' : String(unsuccessful)}
           sub={s && s.total > 0 ? `${((unsuccessful / s.total) * 100).toFixed(0)}% do total` : undefined}
           accent="bg-red-50"
         />
       </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <form
-            className="flex flex-col gap-3 sm:flex-row"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (document.trim()) mutation.mutate()
-            }}
-          >
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="CNPJ ou CPF — ex: 33.986.733/0001-04"
-                value={document}
-                onChange={(e) => setDocument(e.target.value)}
-                className="pl-9 font-mono text-sm"
-              />
+      {/* Tabs */}
+      <Tabs>
+        <TabList className="w-full grid grid-cols-2">
+          <Tab key="simple" className="flex-1 py-2.5 text-sm font-medium">
+            Validação Simples
+          </Tab>
+          <Tab key="complete" className="flex-1 py-2.5 text-sm font-medium">
+            Validação Completa + NF3e
+          </Tab>
+        </TabList>
+
+        <TabPanel key="simple" className="mt-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="col-span-2">
+              <Card>
+                <CardContent className="p-5">
+                  <form
+                    className="flex flex-col gap-3"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (document.trim()) mutation.mutate()
+                    }}
+                  >
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder="CNPJ ou CPF — ex: 33.986.733/0001-04"
+                        value={document}
+                        onChange={(e) => setDocument(e.target.value)}
+                        className="pl-9 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <Button
+                        type="submit"
+                        disabled={mutation.isPending || !document.trim()}
+                        className="px-6 py-2.5"
+                      >
+                        {mutation.isPending ? <Spinner /> : 'Executar Validação'}
+                      </Button>
+                    </div>
+                  </form>
+                  {mutation.isError && (
+                    <p className="mt-2 text-sm text-destructive" role="alert">
+                      {mutation.error instanceof Error ? mutation.error.message : 'Erro desconhecido'}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
             </div>
-            <Button type="submit" disabled={mutation.isPending || !document.trim()} className="px-5">
-              {mutation.isPending ? <Spinner /> : 'Validar'}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+            <div className="col-span-1">
+              <Card>
+                <CardContent className="p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+                    Histórico desta sessão
+                  </h3>
+                  {history.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                      <Timer className="mb-2 h-6 w-6 text-muted-foreground/30" />
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Nenhuma validação nesta sessão
+                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground/70">
+                        Digite um CNPJ acima e pressione Enter
+                      </p>
+                    </div>
+                  )}
+                  {history.map((validation, index) => (
+                    <ValidationCard
+                      key={validation.validation_id}
+                      validation={validation}
+                      defaultCollapsed={index > 0}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabPanel>
 
-      <E2eRunner />
+        <TabPanel key="complete" className="mt-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="col-span-2">
+              <Card>
+                <CardContent className="p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+                    Validação Completa com Comprovante NF3e
+                  </h3>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Anexe um comprovante (PDF ou imagem) com QR Code NF3e. A referência fiscal é extraída
+                    automaticamente pelo backend.
+                  </p>
+                  <div className="space-y-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder="CNPJ ou CPF do destinatário"
+                        value={document}
+                        onChange={(e) => setDocument(e.target.value)}
+                        className="pl-9 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input placeholder="CEP Alvo" className="font-mono text-sm" />
+                      <Input placeholder="Número" className="font-mono text-sm" />
+                    </div>
+                    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent">
+                      <span>Anexar evidência digital</span>
+                      <input type="file" accept="application/pdf,image/png,image/jpeg" className="sr-only" />
+                    </label>
+                    <div className="flex justify-end">
+                      <Button
+                        variant="default"
+                        disabled={mutation.isPending || !document.trim()}
+                        className="px-6 py-2.5"
+                      >
+                        {mutation.isPending ? <Spinner /> : 'Executar Validação'}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            <div className="col-span-1">
+              <Card>
+                <CardContent className="p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+                    Histórico de Consultas
+                  </h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-medium text-muted-foreground">Últimas 50 transações</span>
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="sm" className="px-2">
+                        Todos os tipos
+                      </Button>
+                      <Button variant="outline" size="sm" className="px-2">
+                        Sucesso
+                      </Button>
+                      <Button variant="outline" size="sm" className="px-2">
+                        Erro
+                      </Button>
+                    </div>
+                  </div>
+                  {history.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                      <Timer className="mb-2 h-6 w-6 text-muted-foreground/30" />
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Nenhuma validação registrada
+                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground/70">
+                        Execute uma validação para ver o histórico
+                      </p>
+                    </div>
+                  )}
+                  {history.map((validation, index) => (
+                    <ValidationCard
+                      key={validation.validation_id}
+                      validation={validation}
+                      defaultCollapsed={index > 0}
+                    />
+                  ))}
+                  <div className="mt-4 flex justify-end">
+                    <Button variant="outline" size="sm" className="px-2 py-1">
+                      Exportar JSON
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabPanel>
+      </Tabs>
 
-      <div className="space-y-4">
-        {history.length === 0 && (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-              <Timer className="mb-3 h-8 w-8 text-muted-foreground/30" />
-              <p className="text-sm font-medium text-muted-foreground">Nenhuma validação nesta sessão</p>
-              <p className="mt-1 text-xs text-muted-foreground/70">Digite um CNPJ acima e pressione Enter</p>
-            </CardContent>
-          </Card>
-        )}
-        {history.map((validation, index) => (
-          <ValidationCard
-            key={validation.validation_id}
-            validation={validation}
-            defaultCollapsed={index > 0}
-          />
-        ))}
-      </div>
+      {/* Console flutuante no rodapé */}
+      <ConsoleFixedBottom />
     </div>
   )
 }
