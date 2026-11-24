@@ -156,6 +156,8 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
 
   const startedAtRef = useRef(0)
   const snapshotRef = useRef<string | null>(null)
+  /** Quando true, o `refetchInterval` deve retornar `false` para parar o polling de vez. */
+  const pollingStoppedRef = useRef(false)
 
   const isCpf = isCpfDocument(document)
   const cepDigits = address.cep.replace(/\D+/g, '')
@@ -245,6 +247,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
       setActiveId(created.validation_id)
       startedAtRef.current = Date.now()
       snapshotRef.current = null
+      pollingStoppedRef.current = false
       setStopped(false)
       setDocument('')
       setFile(null)
@@ -258,6 +261,8 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
     enabled: activeId !== null,
     initialData: mutation.data ?? undefined,
     refetchInterval: (query) => {
+      // Se a rede de segurança já decidiu parar, não retoma o polling.
+      if (pollingStoppedRef.current) return false
       const data = query.state.data as ValidationDto | undefined
       if (data === undefined) return pollIntervalMs
       // Única regra de parada (fonte da verdade, também para o estado `stopped`):
@@ -272,6 +277,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
         (evidenceArrived(data) && !fiscalPending(data) && snapshotRef.current === snapshotOf(data))
       snapshotRef.current = snapshotOf(data)
       if (stop) {
+        pollingStoppedRef.current = true
         setStopped(true)
         return false
       }
@@ -287,6 +293,7 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
   // na primeira leitura; este efeito é a rede de segurança.
   useEffect(() => {
     if (activeId === null || validation.data?.status !== 'completed') return
+    pollingStoppedRef.current = true
     // eslint-disable-next-line react/set-state-in-effect
     setStopped(true)
     void queryClient.cancelQueries({ queryKey: ['e2e-validation', activeId] })
@@ -294,7 +301,10 @@ export function E2eRunner({ deps }: { deps?: E2eRunnerDeps }) {
 
   useEffect(() => {
     if (activeId === null) return
-    const timer = setTimeout(() => setStopped(true), MAX_WATCH_MS)
+    const timer = setTimeout(() => {
+      pollingStoppedRef.current = true
+      setStopped(true)
+    }, MAX_WATCH_MS)
     return () => clearTimeout(timer)
   }, [activeId])
 
