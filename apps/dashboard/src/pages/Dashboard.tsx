@@ -4,6 +4,7 @@ import { createValidation, getStats, type ValidationDto } from '@/api/client'
 import { type SessionUser } from '@/api/auth'
 import { ValidationCard } from '@/components/validation-card'
 import { ConsoleFixedBottom } from '@/components/console/console-fixed-bottom'
+import { E2eRunner } from '@/components/validation/e2e-runner'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { Tabs, TabList, Tab, TabPanel } from '@/components/base/tabs/tabs'
 import { useAlerts } from '@/components/base/alert/alert-context'
@@ -245,95 +246,7 @@ export default function Dashboard({
         </TabPanel>
 
         <TabPanel key="complete" className="mt-4">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="col-span-2">
-              <Card>
-                <CardContent className="p-5">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-                    Validação Completa com Comprovante NF3e
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-6">
-                    Anexe um comprovante (PDF ou imagem) com QR Code NF3e. A referência fiscal é extraída
-                    automaticamente pelo backend.
-                  </p>
-                  <div className="space-y-3">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        placeholder="CNPJ ou CPF do destinatário"
-                        value={document}
-                        onChange={(e) => setDocument(e.target.value)}
-                        className="pl-9 font-mono text-sm"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input placeholder="CEP Alvo" className="font-mono text-sm" />
-                      <Input placeholder="Número" className="font-mono text-sm" />
-                    </div>
-                    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent">
-                      <span>Anexar evidência digital</span>
-                      <input type="file" accept="application/pdf,image/png,image/jpeg" className="sr-only" />
-                    </label>
-                    <div className="flex justify-end">
-                      <Button
-                        variant="default"
-                        disabled={mutation.isPending || !document.trim()}
-                        className="px-6 py-2.5"
-                      >
-                        {mutation.isPending ? <Spinner /> : 'Executar Validação'}
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-            <div className="col-span-1">
-              <Card>
-                <CardContent className="p-5">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-                    Histórico de Consultas
-                  </h3>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-medium text-muted-foreground">Últimas 50 transações</span>
-                    <div className="flex gap-1">
-                      <Button variant="outline" size="sm" className="px-2">
-                        Todos os tipos
-                      </Button>
-                      <Button variant="outline" size="sm" className="px-2">
-                        Sucesso
-                      </Button>
-                      <Button variant="outline" size="sm" className="px-2">
-                        Erro
-                      </Button>
-                    </div>
-                  </div>
-                  {history.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <Timer className="mb-2 h-6 w-6 text-muted-foreground/30" />
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Nenhuma validação registrada
-                      </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground/70">
-                        Execute uma validação para ver o histórico
-                      </p>
-                    </div>
-                  )}
-                  {history.map((validation, index) => (
-                    <ValidationCard
-                      key={validation.validation_id}
-                      validation={validation}
-                      defaultCollapsed={index > 0}
-                    />
-                  ))}
-                  <div className="mt-4 flex justify-end">
-                    <Button variant="outline" size="sm" className="px-2 py-1">
-                      Exportar JSON
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
+          <E2eRunner />
         </TabPanel>
       </Tabs>
 
