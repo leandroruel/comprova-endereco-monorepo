@@ -139,30 +139,31 @@ const resolveObjectStore = (config: AppConfig): ObjectStore => {
     config.S3_BUCKET !== undefined
       ? 's3'
       : config.SUPABASE_URL !== undefined &&
-        config.SUPABASE_SERVICE_ROLE_KEY !== undefined &&
-        config.SUPABASE_STORAGE_BUCKET !== undefined
+          config.SUPABASE_SERVICE_ROLE_KEY !== undefined &&
+          config.SUPABASE_STORAGE_BUCKET !== undefined
         ? 'supabase'
         : 'unavailable'
 
   return makeObjectStore({
     provider,
-    s3: provider === 's3'
-      ? {
-          endpoint: config.S3_ENDPOINT!,
-          region: config.S3_REGION ?? 'us-east-1',
-          bucket: config.S3_BUCKET!,
-          accessKeyId: config.S3_ACCESS_KEY_ID!,
-          secretAccessKey: config.S3_SECRET_ACCESS_KEY!,
-        }
-      : undefined,
-    supabase: provider === 'supabase'
-      ? {
-          supabaseUrl: config.SUPABASE_URL!,
-          supabaseServiceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY!,
-          bucket: config.SUPABASE_STORAGE_BUCKET!,
-        }
-      : undefined,
-    supabaseRetry: { attempts: 3, baseDelayMs: 200 },
+    s3:
+      provider === 's3'
+        ? {
+            endpoint: config.S3_ENDPOINT!,
+            region: config.S3_REGION ?? 'us-east-1',
+            bucket: config.S3_BUCKET!,
+            accessKeyId: config.S3_ACCESS_KEY_ID!,
+            secretAccessKey: config.S3_SECRET_ACCESS_KEY!,
+          }
+        : undefined,
+    supabase:
+      provider === 'supabase'
+        ? {
+            supabaseUrl: config.SUPABASE_URL!,
+            supabaseServiceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY!,
+            bucket: config.SUPABASE_STORAGE_BUCKET!,
+          }
+        : undefined,
     unavailableReason: 'object storage is not configured',
   })
 }

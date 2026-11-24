@@ -1,9 +1,5 @@
 import { makeS3ObjectStore, type S3ObjectStoreOptions } from './s3/index.js'
-import {
-  makeSupabaseObjectStore,
-  type SupabaseObjectStoreOptions,
-  type SupabaseRetryOptions,
-} from './supabase/index.js'
+import { makeSupabaseObjectStore, type SupabaseObjectStoreOptions } from './supabase/index.js'
 import { makeUnavailableObjectStore } from './unavailable/index.js'
 import { makeFakeObjectStore } from './fake/index.js'
 import {
@@ -29,7 +25,6 @@ export interface ObjectStoreFactoryOptions {
   readonly provider: ObjectStoreProvider
   readonly s3?: S3ObjectStoreOptions
   readonly supabase?: SupabaseObjectStoreOptions
-  readonly supabaseRetry?: SupabaseRetryOptions
   readonly unavailableReason?: string
 }
 
@@ -49,7 +44,7 @@ export const makeObjectStore = (opts: ObjectStoreFactoryOptions): EvidenceObject
     case 'supabase': {
       if (!opts.supabase)
         throw new Error('object store: opções do Supabase são obrigatórias para o provedor "supabase"')
-      return makeSupabaseObjectStore(opts.supabase, undefined, opts.supabaseRetry ?? {})
+      return makeSupabaseObjectStore(opts.supabase)
     }
     case 'unavailable':
       return makeUnavailableObjectStore(opts.unavailableReason)
@@ -70,5 +65,4 @@ export {
   sha256Of,
   type S3ObjectStoreOptions,
   type SupabaseObjectStoreOptions,
-  type SupabaseRetryOptions,
 }
