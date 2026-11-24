@@ -1,5 +1,4 @@
 import { type ReactNode, useMemo } from 'react'
-import { Outlet, useNavigate } from '@tanstack/react-router'
 import { DashboardSidebar } from '@/components/application/dashboard/dashboard-sidebar'
 import type { DashboardNavItem } from '@/components/application/dashboard/dashboard-sidebar'
 import { Alerts } from '@/components/base/alert/alert'
@@ -18,28 +17,34 @@ const adminNavItems: readonly DashboardNavItem[] = [
 ]
 
 export function DashboardLayout({
+  children,
   onLogout,
   userName,
   userEmail,
   userRole,
+  onNavigate,
+  activePage,
 }: {
+  children: ReactNode
   onLogout?: () => void
   userName?: string
   userEmail?: string
   userRole?: string
+  onNavigate?: (page: string) => void
+  activePage?: string
 }) {
-  const navigateFn = useNavigate()
+  const navigate = (page: string) => {
+    onNavigate?.(page)
+  }
 
   const navItems = useMemo<readonly DashboardNavItem[]>(() => {
     const items =
       userRole === 'admin' || userRole === 'superadmin' ? [...baseNavItems, ...adminNavItems] : baseNavItems
     return items.map((item) => ({
       ...item,
-      onSelect: () => {
-        navigateFn({ to: `/${item.key}` })
-      },
+      onSelect: () => navigate(item.key),
     }))
-  }, [navigateFn, userRole])
+  }, [navigate, userRole])
 
   const workspace = {
     name: 'comprova',
@@ -70,7 +75,7 @@ export function DashboardLayout({
         <div className="flex w-full pt-10 pb-14 px-6 sm:px-10">
           <main className="w-full min-w-0 flex-col gap-3">
             <Alerts className="mb-3" />
-            <Outlet />
+            {children}
           </main>
         </div>
       </div>

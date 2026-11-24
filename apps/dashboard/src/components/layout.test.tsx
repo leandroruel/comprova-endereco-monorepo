@@ -1,45 +1,28 @@
-import type { ReactNode } from 'react'
 import { page, userEvent } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
-import { RouterProvider } from '@tanstack/react-router'
-import { router } from '@/router'
 import { DashboardLayout } from './layout'
 
 const userMenu = () => page.getByRole('button', { name: 'Menu do usuário' })
 
-const RouterProviderWithChildren = RouterProvider as unknown as React.ComponentType<{
-  router: any
-  children?: React.ReactNode
-}>
-
-function TestWrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <div>
-      <RouterProviderWithChildren router={router}>
-        {children}
-      </RouterProviderWithChildren>
-    </div>
-  )
-}
-
 describe('DashboardLayout', () => {
   it('renderiza a navegação lateral', async () => {
     await render(
-      <TestWrapper>
-        <DashboardLayout userRole="user" />
-      </TestWrapper>,
+      <DashboardLayout userRole="user">
+        <div>conteúdo da página</div>
+      </DashboardLayout>,
     )
 
+    await expect.element(page.getByText('conteúdo da página', { exact: true })).toBeVisible()
     await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
     await expect.element(page.getByRole('button', { name: 'Busca em lote' })).toBeVisible()
   })
 
   it('omite o item QRCode NF3e debugger quando o usuário não é admin', async () => {
     await render(
-      <TestWrapper>
-        <DashboardLayout userRole="user" />
-      </TestWrapper>,
+      <DashboardLayout userRole="user">
+        conteúdo
+      </DashboardLayout>,
     )
 
     await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
@@ -49,9 +32,9 @@ describe('DashboardLayout', () => {
 
   it('mostra o item QRCode NF3e debugger quando o usuário é admin', async () => {
     await render(
-      <TestWrapper>
-        <DashboardLayout userRole="admin" />
-      </TestWrapper>,
+      <DashboardLayout userRole="admin">
+        conteúdo
+      </DashboardLayout>,
     )
 
     await expect.element(page.getByRole('button', { name: 'QRCode NF3e debugger' })).toBeVisible()
@@ -59,9 +42,9 @@ describe('DashboardLayout', () => {
 
   it('identifica o usuário no gatilho do menu e alterna o estado acessível', async () => {
     await render(
-      <TestWrapper>
-        <DashboardLayout userEmail="ana.souza@empresa.com" />
-      </TestWrapper>,
+      <DashboardLayout userEmail="ana.souza@empresa.com">
+        conteúdo
+      </DashboardLayout>,
     )
 
     const trigger = userMenu()
@@ -77,11 +60,7 @@ describe('DashboardLayout', () => {
   })
 
   it('cai em "Conta" quando não há e-mail', async () => {
-    await render(
-      <TestWrapper>
-        <DashboardLayout />
-      </TestWrapper>,
-    )
+    await render(<DashboardLayout>conteúdo</DashboardLayout>)
 
     const trigger = userMenu()
     await expect.element(trigger.getByText('Conta', { exact: true })).toBeVisible()
@@ -90,9 +69,9 @@ describe('DashboardLayout', () => {
 
   it('prefere o nome do usuário ao apelido derivado do e-mail', async () => {
     await render(
-      <TestWrapper>
-        <DashboardLayout userName="Leandro Rocha" userEmail="leandro@empresa.com" />
-      </TestWrapper>,
+      <DashboardLayout userName="Leandro Rocha" userEmail="leandro@empresa.com">
+        conteúdo
+      </DashboardLayout>,
     )
 
     const trigger = userMenu()
@@ -103,11 +82,7 @@ describe('DashboardLayout', () => {
   })
 
   it('não usa "Conta" quando recebe nome mesmo sem e-mail', async () => {
-    await render(
-      <TestWrapper>
-        <DashboardLayout userName="Leandro" />
-      </TestWrapper>,
-    )
+    await render(<DashboardLayout userName="Leandro">conteúdo</DashboardLayout>)
 
     const trigger = userMenu()
     await expect.element(trigger.getByText('Leandro', { exact: true })).toBeVisible()
@@ -116,9 +91,9 @@ describe('DashboardLayout', () => {
 
   it('abre o menu com Perfil e Configurações', async () => {
     await render(
-      <TestWrapper>
-        <DashboardLayout userEmail="ana@empresa.com" />
-      </TestWrapper>,
+      <DashboardLayout userEmail="ana@empresa.com">
+        conteúdo
+      </DashboardLayout>,
     )
 
     await userMenu().click()
@@ -129,9 +104,9 @@ describe('DashboardLayout', () => {
   it('mostra a ação destrutiva de sair apenas quando há onLogout', async () => {
     const onLogout = vi.fn()
     await render(
-      <TestWrapper>
-        <DashboardLayout userEmail="ana@empresa.com" onLogout={onLogout} />
-      </TestWrapper>,
+      <DashboardLayout userEmail="ana@empresa.com" onLogout={onLogout}>
+        conteúdo
+      </DashboardLayout>,
     )
 
     await userMenu().click()
@@ -143,9 +118,9 @@ describe('DashboardLayout', () => {
 
   it('omite "Sair" quando o logout não está conectado', async () => {
     await render(
-      <TestWrapper>
-        <DashboardLayout userEmail="ana@empresa.com" />
-      </TestWrapper>,
+      <DashboardLayout userEmail="ana@empresa.com">
+        conteúdo
+      </DashboardLayout>,
     )
 
     await userMenu().click()

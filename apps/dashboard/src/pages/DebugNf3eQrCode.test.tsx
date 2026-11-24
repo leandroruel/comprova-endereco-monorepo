@@ -1,27 +1,9 @@
-import type { ReactNode } from 'react'
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import type { DebugNf3eQrCodeResponse } from '@/api/client'
-import { RouterProvider } from '@tanstack/react-router'
 import { DebugNf3eQrCodePage } from './DebugNf3eQrCode'
 import { DashboardLayout } from '@/components/layout'
-import { router } from '@/router'
-
-const RouterProviderWithChildren = RouterProvider as unknown as React.ComponentType<{
-  router: any
-  children?: ReactNode
-}>
-
-function TestWrapper({ children }: { children: ReactNode }) {
-  return (
-    <div>
-      <RouterProviderWithChildren router={router}>
-        {children}
-      </RouterProviderWithChildren>
-    </div>
-  )
-}
 
 const pdf = (): File =>
   new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'conta.pdf', { type: 'application/pdf' })
@@ -190,10 +172,9 @@ describe('DebugNf3eQrCodePage', () => {
     respondWith({ events: [], reference })
 
     await render(
-      <TestWrapper>
-        <DashboardLayout userName="Leandro Rocha" userEmail="leandro@empresa.com" />
+      <DashboardLayout userName="Leandro Rocha" userEmail="leandro@empresa.com">
         <DebugNf3eQrCodePage user={{ name: 'Leandro Rocha', email: 'leandro@empresa.com' }} />
-      </TestWrapper>,
+      </DashboardLayout>,
     )
 
     const trigger = page.getByRole('button', { name: 'Menu do usuário' })
