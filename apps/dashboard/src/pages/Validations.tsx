@@ -1,14 +1,14 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createValidation, getStats, type ValidationDto } from '@/api/client'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createValidation, uploadEvidence, getStats, type ValidationDto } from '@/api/client'
 import { type SessionUser } from '@/api/auth'
 import { ValidationCard } from '@/components/validation-card'
 import { ConsoleFixedBottom } from '@/components/console/console-fixed-bottom'
-import { E2eRunner } from '@/components/validation/e2e-runner'
 import { Button, Card, CardContent, Input, Spinner } from '@/components/ui'
 import { Tabs, TabList, Tab, TabPanel } from '@/components/base/tabs/tabs'
 import { useAlerts } from '@/components/base/alert/alert-context'
-import { Activity, CheckCircle2, Search, Timer, Users, XCircle } from 'lucide-react'
+import { useConsole } from '@/components/console/console-context'
+import { Activity, CheckCircle2, FileUp, Search, Timer, Users, XCircle } from 'lucide-react'
 import { cx } from '@/utils/cx'
 
 function StatCard({
@@ -52,9 +52,12 @@ export default function Validations({
   onNavigate?: (page: string) => void
 }) {
   const [document, setDocument] = useState('')
+  const [file, setFile] = useState<File | null>(null)
   const [history, setHistory] = useState<ValidationDto[]>([])
+  const [activeValidation, setActiveValidation] = useState<ValidationDto | null>(null)
   const queryClient = useQueryClient()
   const { add } = useAlerts()
+  const { addLog, setStatus } = useConsole()
 
   const stats = useQuery({
     queryKey: ['stats'],
@@ -64,19 +67,44 @@ export default function Validations({
     refetchOnWindowFocus: true,
   })
 
-  const mutation = useMutation({
-    mutationFn: () => createValidation(document),
+  const simpleMutation = useMutation({
+    mutationFn: () => createValidation(document.trim()),
     onError: (error) => {
-      add({
-        variant: 'error',
-        title: 'Falha ao validar',
-        message: error instanceof Error ? error.message : 'Erro desconhecido',
-      })
+      add({ variant: 'error', title: 'Falha ao validar', message: error instanceof Error ? error.message : 'Erro' })
+      setStatus('error')
+      addLog('ERROR', `Validação simples falhou: ${error instanceof Error ? error.message : 'Erro desconhecido'}`)
     },
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
+      setActiveValidation(result)
       setDocument('')
       void queryClient.invalidateQueries({ queryKey: ['stats'] })
+      setStatus('success')
+      addLog('RES', `Validação simples concluída: ${result.validation_id}`, undefined, JSON.stringify(result))
+    },
+  })
+
+  const completeMutation = useMutation({
+    mutationFn: async () => {
+      const created = await createValidation(document.trim())
+      if (file !== null) {
+        await uploadEvidence(created.validation_id, file)
+      }
+      return created
+    },
+    onError: (error) => {
+      add({ variant: 'error', title: 'Falha ao validar', message: error instanceof Error ? error.message : 'Erro' })
+      setStatus('error')
+      addLog('ERROR', `Validação completa falhou: ${error instanceof Error ? error.message : 'Erro desconhecido'}`)
+    },
+    onSuccess: (result) => {
+      setHistory((prev) => [result, ...prev])
+      setActiveValidation(result)
+      setDocument('')
+      setFile(null)
+      void queryClient.invalidateQueries({ queryKey: ['stats'] })
+      setStatus('success')
+      addLog('RES', `Validação completa concluída: ${result.validation_id}`, undefined, JSON.stringify(result))
     },
   })
 
@@ -99,6 +127,11 @@ export default function Validations({
 
   const apiStatus = stats.isLoading ? 'checking' : 'online'
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (f) setFile(f)
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -110,24 +143,19 @@ export default function Validations({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span
-            className={cx(
-              'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-              apiStatus === 'online'
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                : apiStatus === 'checking'
-                  ? 'bg-muted text-muted-foreground border border-border-button-default'
-                  : 'bg-red-50 text-red-800 border border-red-200',
-            )}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 animate-pulse' : apiStatus === 'checking' ? 'bg-muted-foreground animate-pulse' : 'bg-red-500'}`}
-              aria-hidden
-            />
+          <span className={cx(
+            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+            apiStatus === 'online'
+              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+              : apiStatus === 'checking'
+                ? 'bg-muted text-muted-foreground border border-border-button-default'
+                : 'bg-red-50 text-red-800 border border-red-200',
+          )}>
+            <span className={`h-1.5 w-1.5 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 animate-pulse' : apiStatus === 'checking' ? 'bg-muted-foreground animate-pulse' : 'bg-red-500'}`} aria-hidden />
             API Receita:{' '}
             {apiStatus === 'online' ? 'Online' : apiStatus === 'checking' ? 'Verificando…' : 'Offline'}
           </span>
-          <Button variant="outline" size="sm" onClick={() => setDocument('')} disabled={mutation.isPending}>
+          <Button variant="outline" size="sm" onClick={() => { setDocument(''); setFile(null); setActiveValidation(null) }} disabled={simpleMutation.isPending || completeMutation.isPending}>
             <XCircle className="size-3.5 mr-1.5" aria-hidden />
             Novo
           </Button>
@@ -185,7 +213,7 @@ export default function Validations({
                     className="flex flex-col gap-3"
                     onSubmit={(e) => {
                       e.preventDefault()
-                      if (document.trim()) mutation.mutate()
+                      if (document.trim()) simpleMutation.mutate()
                     }}
                   >
                     <div className="relative flex-1">
@@ -200,16 +228,16 @@ export default function Validations({
                     <div className="flex items-end gap-3">
                       <Button
                         type="submit"
-                        disabled={mutation.isPending || !document.trim()}
+                        disabled={simpleMutation.isPending || !document.trim()}
                         className="px-6 py-2.5"
                       >
-                        {mutation.isPending ? <Spinner /> : 'Executar Validação'}
+                        {simpleMutation.isPending ? <Spinner /> : 'Validar'}
                       </Button>
                     </div>
                   </form>
-                  {mutation.isError && (
+                  {simpleMutation.isError && (
                     <p className="mt-2 text-sm text-destructive" role="alert">
-                      {mutation.error instanceof Error ? mutation.error.message : 'Erro desconhecido'}
+                      {simpleMutation.error instanceof Error ? simpleMutation.error.message : 'Erro desconhecido'}
                     </p>
                   )}
                 </CardContent>
@@ -219,16 +247,151 @@ export default function Validations({
               <Card>
                 <CardContent className="p-5">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-                    Histórico desta sessão
+                    Resultado da Validação
+                  </h3>
+                  {activeValidation ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className={cx(
+                          activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
+                          'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                        )}
+                        >
+                          {activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}
+                          {activeValidation.verdict}
+                        </span>
+                        <span className="text-xs font-mono text-muted-foreground">{activeValidation.score?.toFixed(3) ?? '—'}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-muted/50 p-2 rounded">
+                          <p className="text-[10px] text-muted-foreground uppercase">Confiança</p>
+                          <p className="text-sm font-medium">{activeValidation.confidence?.toFixed(2) ?? '—'}</p>
+                        </div>
+                        <div className="bg-muted/50 p-2 rounded">
+                          <p className="text-[10px] text-muted-foreground uppercase">Score</p>
+                          <p className="text-sm font-medium">{activeValidation.score?.toFixed(3) ?? '—'}</p>
+                        </div>
+                        <div className="bg-muted/50 p-2 rounded">
+                          <p className="text-[10px] text-muted-foreground uppercase">Status</p>
+                          <p className="text-sm font-medium">{activeValidation.status}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                      <Timer className="mb-2 h-6 w-6 text-muted-foreground/30" />
+                      <p className="text-xs font-medium text-muted-foreground">Nenhuma validação realizada</p>
+                      <p className="mt-1 text-[10px] text-muted-foreground/70">
+                        Digite um CNPJ/CPF acima e clique em Validar
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              {history.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                    Histórico
+                  </h3>
+                  {history.map((validation, index) => (
+                    <ValidationCard
+                      key={validation.validation_id}
+                      validation={validation}
+                      defaultCollapsed={index > 0}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </TabPanel>
+
+        <TabPanel value="complete" key="complete" className="mt-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="col-span-2">
+              <Card>
+                <CardContent className="p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+                    Validação Completa com Comprovante NF3e
+                  </h3>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Anexe um comprovante (PDF ou imagem) com QR Code NF3e. A referência fiscal é extraída
+                    automaticamente pelo backend.
+                  </p>
+                  <form
+                    className="space-y-4"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (document.trim()) completeMutation.mutate()
+                    }}
+                  >
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder="CNPJ ou CPF do destinatário"
+                        value={document}
+                        onChange={(e) => setDocument(e.target.value)}
+                        className="pl-9 font-mono text-sm"
+                      />
+                    </div>
+                    <label
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent"
+                    >
+                      <FileUp className="h-3 w-3" aria-hidden />
+                      <span>{file?.name || 'Anexar comprovante (PDF/imagem)'}</span>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/png,image/jpeg"
+                        className="sr-only"
+                        onChange={handleFileSelect}
+                      />
+                    </label>
+                    {file && (
+                      <div className="flex items-center gap-2 bg-amber-50 p-2 rounded border border-amber-200 mt-2">
+                        <FileUp className="size-4 text-amber-600" aria-hidden />
+                        <span className="text-xs text-amber-800">{file.name} ({file.size} bytes)</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setFile(null)
+                          }}
+                          className="ml-auto p-1 hover:bg-amber-200 rounded text-amber-600"
+                          aria-label="Remover arquivo"
+                        >
+                          <XCircle className="size-3.5" aria-hidden />
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex justify-end">
+                      <Button
+                        type="submit"
+                        disabled={completeMutation.isPending || !document.trim()}
+                        className="px-6 py-2.5"
+                      >
+                        {completeMutation.isPending ? <Spinner /> : 'Validar'}
+                      </Button>
+                    </div>
+                  </form>
+                  {completeMutation.isError && (
+                    <p className="mt-2 text-sm text-destructive" role="alert">
+                      {completeMutation.error instanceof Error ? completeMutation.error.message : 'Erro desconhecido'}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+            <div className="col-span-1">
+              <Card>
+                <CardContent className="p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+                    Histórico de Consultas
                   </h3>
                   {history.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
                       <Timer className="mb-2 h-6 w-6 text-muted-foreground/30" />
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Nenhuma validação nesta sessão
-                      </p>
+                      <p className="text-xs font-medium text-muted-foreground">Nenhuma validação registrada</p>
                       <p className="mt-1 text-[10px] text-muted-foreground/70">
-                        Digite um CNPJ acima e pressione Enter
+                        Execute uma validação para ver o histórico
                       </p>
                     </div>
                   )}
@@ -243,10 +406,6 @@ export default function Validations({
               </Card>
             </div>
           </div>
-        </TabPanel>
-
-        <TabPanel value="complete" key="complete" className="mt-4">
-          <E2eRunner />
         </TabPanel>
       </Tabs>
 
