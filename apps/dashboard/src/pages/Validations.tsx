@@ -196,104 +196,95 @@ export default function Validations({
 
         {/* Validação Simples */}
         <TabPanel value="simple" key="simple" className="mt-4">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="col-span-2">
-              <Card>
-                <CardContent className="p-5">
-                  <form
-                    className="flex flex-col gap-3"
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      if (document.trim()) simpleMutation.mutate()
-                    }}
-                  >
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        placeholder="CNPJ ou CPF — ex: 33.986.733/0001-04"
-                        value={document}
-                        onChange={(e) => setDocument(e.target.value)}
-                        className="pl-9 font-mono text-sm"
-                      />
-                    </div>
-                    <div className="flex items-end gap-3">
-                      <Button
-                        type="submit"
-                        disabled={simpleMutation.isPending || !document.trim()}
-                        className="px-6 py-2.5"
-                      >
-                        {simpleMutation.isPending ? <Spinner /> : 'Validar'}
-                      </Button>
-                    </div>
-                  </form>
-                  {simpleMutation.isError && (
-                    <p className="mt-2 text-sm text-destructive" role="alert">
-                      {simpleMutation.error instanceof Error ? simpleMutation.error.message : 'Erro desconhecido'}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-            <div className="col-span-1">
+          <div className="space-y-4">
+            <Card>
+              <CardContent className="p-5">
+                <form
+                  className="flex flex-col gap-3"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    if (document.trim()) simpleMutation.mutate()
+                  }}
+                >
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="CNPJ ou CPF — ex: 33.986.733/0001-04"
+                      value={document}
+                      onChange={(e) => setDocument(e.target.value)}
+                      className="pl-9 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="flex items-end gap-3">
+                    <Button
+                      type="submit"
+                      disabled={simpleMutation.isPending || !document.trim()}
+                      className="px-6 py-2.5"
+                    >
+                      {simpleMutation.isPending ? <Spinner /> : 'Validar'}
+                    </Button>
+                  </div>
+                </form>
+                {simpleMutation.isError && (
+                  <p className="mt-2 text-sm text-destructive" role="alert">
+                    {simpleMutation.error instanceof Error ? simpleMutation.error.message : 'Erro desconhecido'}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Resultado da Validação - full width abaixo do formulário */}
+            {activeValidation && (
               <Card>
                 <CardContent className="p-5">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
                     Resultado da Validação
                   </h3>
-                  {activeValidation ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <span className={cx(
-                          activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
-                          'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-                        )}
-                        >
-                          {activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}
-                          {activeValidation.verdict}
-                        </span>
-                        <span className="text-xs font-mono text-muted-foreground">{activeValidation.score?.toFixed(3) ?? '—'}</span>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className={cx(
+                        activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
+                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                      )}
+                      >
+                        {activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}
+                        {activeValidation.verdict}
+                      </span>
+                      <span className="text-xs font-mono text-muted-foreground">{activeValidation.score?.toFixed(3) ?? '—'}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-muted/50 p-2 rounded">
+                        <p className="text-[10px] text-muted-foreground uppercase">Confiança</p>
+                        <p className="text-sm font-medium">{activeValidation.confidence?.toFixed(2) ?? '—'}</p>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-muted/50 p-2 rounded">
-                          <p className="text-[10px] text-muted-foreground uppercase">Confiança</p>
-                          <p className="text-sm font-medium">{activeValidation.confidence?.toFixed(2) ?? '—'}</p>
-                        </div>
-                        <div className="bg-muted/50 p-2 rounded">
-                          <p className="text-[10px] text-muted-foreground uppercase">Score</p>
-                          <p className="text-sm font-medium">{activeValidation.score?.toFixed(3) ?? '—'}</p>
-                        </div>
-                        <div className="bg-muted/50 p-2 rounded">
-                          <p className="text-[10px] text-muted-foreground uppercase">Status</p>
-                          <p className="text-sm font-medium">{activeValidation.status}</p>
-                        </div>
+                      <div className="bg-muted/50 p-2 rounded">
+                        <p className="text-[10px] text-muted-foreground uppercase">Score</p>
+                        <p className="text-sm font-medium">{activeValidation.score?.toFixed(3) ?? '—'}</p>
+                      </div>
+                      <div className="bg-muted/50 p-2 rounded">
+                        <p className="text-[10px] text-muted-foreground uppercase">Status</p>
+                        <p className="text-sm font-medium">{activeValidation.status}</p>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <Timer className="mb-2 h-6 w-6 text-muted-foreground/30" />
-                      <p className="text-xs font-medium text-muted-foreground">Nenhuma validação realizada</p>
-                      <p className="mt-1 text-[10px] text-muted-foreground/70">
-                        Digite um CNPJ/CPF acima e clique em Validar
-                      </p>
-                    </div>
-                  )}
-                  {history.length > 0 && (
-                    <div className="mt-4">
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                        Histórico
-                      </h3>
-                      {history.map((validation, index) => (
-                        <ValidationCard
-                          key={validation.validation_id}
-                          validation={validation}
-                          defaultCollapsed={index > 0}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  </div>
                 </CardContent>
               </Card>
-            </div>
+            )}
+
+            {history.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                  Histórico
+                </h3>
+                {history.map((validation, index) => (
+                  <ValidationCard
+                    key={validation.validation_id}
+                    validation={validation}
+                    defaultCollapsed={index > 0}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </TabPanel>
 
