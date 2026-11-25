@@ -38,6 +38,10 @@ ALTER TABLE evidence_analysis
 
 -- 5) backfill: registros antigos usam created_at/analyzed_at/retention_until como fallback
 --    (sem inventar datas de emissão: document_issued_at fica NULL para registros antigos)
+-- Desabilita temporariamente os triggers de imutabilidade para permitir o backfill
+ALTER TABLE evidence_artifact DISABLE TRIGGER evidence_artifact_immutable_guard_trg;
+ALTER TABLE evidence_analysis DISABLE TRIGGER evidence_analysis_guard_trg;
+
 UPDATE evidence_artifact
 SET received_at = created_at
 WHERE received_at IS NULL;
@@ -49,6 +53,10 @@ WHERE verified_at IS NULL AND analyzed_at IS NOT NULL;
 UPDATE evidence_analysis
 SET expires_at = (verified_at + interval '6 months')
 WHERE expires_at IS NULL AND verified_at IS NOT NULL;
+
+-- Reabilita os triggers
+ALTER TABLE evidence_artifact ENABLE TRIGGER evidence_artifact_immutable_guard_trg;
+ALTER TABLE evidence_analysis ENABLE TRIGGER evidence_analysis_guard_trg;
 
 -- 6) Comentários documentando os novos campos
 COMMENT ON COLUMN evidence_artifact.document_issued_at IS
