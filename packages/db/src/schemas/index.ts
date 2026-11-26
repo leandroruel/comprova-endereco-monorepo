@@ -29,6 +29,13 @@ import { subject } from './subjects.js'
 import { apiKey, tenant } from './tenancy.js'
 import { organizationInvitation, organizationMember } from './organizations.js'
 import { auditLog, tenantQuotaAudit, usageBillingUnit, usageEvent, usageEventIdempotency } from './usage.js'
+import {
+  billingPlan,
+  tenantSubscription,
+  invoice,
+  payment,
+  providerWebhookEvent,
+} from './billing.js'
 import { validation, validationIdempotency } from './validations.js'
 import { validationCustomerDocument } from './validation-customer-document.js'
 import { holder } from './holder.js'
@@ -134,4 +141,10 @@ export const schema = {
   kycEvent,
   batch,
   batchItem,
+  // Billing (migration 0094)
+  billingPlan,
+  tenantSubscription,
+  invoice,
+  payment,
+  providerWebhookEvent,
 } as const
