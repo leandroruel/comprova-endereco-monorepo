@@ -1389,14 +1389,55 @@ tenant_id)`** (0025): garante `claim.tenant_id = subject.tenant_id` (antes, a FK
 - **Nota** — `signal.evidence_id` referencia apenas artefato material (S3/VLM); a ligação observação↔claim é `claim_evidence.signal_id` (desambiguado na migração 0023).
 - **Testes** — `f3.int.test.ts` +1 (reuso de claim + ligação de evidências T1) e asserções no caso ambíguo. Suíte: 127/127.
 
-## Dashboard (apps/dashboard)
+## Provider Abstraction Layer — Billing (2026-11-26)
 
-- **Better Auth** — login/signup com email/senha, sessão de 7 dias, cookie httpOnly, trustedOrigins, strength meter, confirmar senha
-- **Stats por usuário** — total de consultas, documentos únicos (DISTINCT doc_hmac), CNPJ/CPF, confirmadas/não sucedidas
-- **Busca em lote** — drag & drop CSV, textarea, processamento em background, progresso em tempo real, export CSV/JSON
-- **Sidebar** — navegação entre Valações e Busca em lote, nome do usuário, botão Sair
-- **Hooks order fix** — todos os hooks antes dos early returns (crash após login)
-- **VLM_ENABLED=false** — botões deep/auto escondidos da UI, API retorna 422 DEEP_PATH_DISABLED
+Implementa **Provider Abstraction Layer** para billing, transformando Stripe em um *provider* plugável (não core).
+
+### Core (`packages/billing-core/`)
+- **`BillingProvider` interface** — Operations: Products, Prices, Customers, Subscriptions, Invoices, Payments, Usage Metering, Credits, Webhooks
+- **`ProviderRegistry`** — DI container para múltiplos providers
+- **`PlanService`** — CRUD + auto sync Product+Price no provider
+- **`CustomerService`** — Customer + payment method management
+- **`SubscriptionService`** — activate/update/cancel/pause + webhook sync
+- **`InvoiceService`** — Invoice/Payment sync via webhooks
+
+### Stripe Provider (`packages/billing-stripe/`)
+- **`StripeProvider`** — Full `BillingProvider` implementation usando Stripe SDK
+- Idempotency keys em todas as chamadas
+- Auto-registration helper
+
+### Database
+- **Migration 0094** — provider fields em todas as tabelas de billing
+- **Novos schemas** — billingPlan, tenantSubscription, invoice, payment, providerWebhookEvent
+- **Enums** — subscription/invoice/payment/plan statuses
+
+### Architecture
+```
+Core (billing-core)          Providers
+┌─────────────────────┐      ┌────────────────────┐
+│ PlanService         │      │ StripeProvider     │
+│ SubscriptionService │◄────►│ (billing-stripe)   │
+│ CustomerService     │      │ MercadoPagoProvider│
+│ InvoiceService      │      │ (futuro)           │
+└─────────────────────┘      └────────────────────┘
+       ▲
+       │ interface BillingProvider
+       ▼
+```
+
+### Key Benefits
+- **Stripe é um provider, não core** — Fácil adicionar Mercado Pago, Asaas depois
+- **Sales-led onboarding**: Admin cria plano → sync Stripe → Admin ativa billing no tenant → Verifier completa onboarding com payment_method
+- **Webhooks normalizados** → `provider_webhook_event` idempotente → sync local
+
+### CI Status
+- ✅ `pnpm format` passes
+- ✅ `pnpm typecheck` (db package passes)
+- ✅ `pnpm vitest run` (1671 tests pass)
+- ✅ `pnpm db:fence` passes
+- ✅ `pnpm lint` passes (warnings only)
+
+## Dashboard (apps/dashboard)
 
 ## API (apps/api)
 

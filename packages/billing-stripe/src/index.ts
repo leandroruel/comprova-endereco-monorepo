@@ -18,7 +18,12 @@ let _stripeProvider: StripeProvider | null = null
  * Inicializa e registra o StripeProvider.
  * Deve ser chamado uma vez no bootstrap da aplicação.
  */
-export function initializeStripeProvider(config: { secretKey: string; webhookSecret: string; apiVersion?: string; publishableKey?: string }): StripeProvider {
+export function initializeStripeProvider(config: {
+  secretKey: string
+  webhookSecret: string
+  apiVersion?: string
+  publishableKey?: string
+}): StripeProvider {
   if (_stripeProvider) {
     return _stripeProvider
   }

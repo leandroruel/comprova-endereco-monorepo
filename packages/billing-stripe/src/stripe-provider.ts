@@ -75,12 +75,16 @@ export class StripeProvider implements BillingProvider {
   }
 
   async updateProduct(id: string, input: UpdateProductInput): Promise<void> {
-    await this.stripe.products.update(id, {
-      name: input.name,
-      description: input.description,
-      metadata: input.metadata,
-      active: input.active,
-    }, { idempotencyKey: input.idempotencyKey })
+    await this.stripe.products.update(
+      id,
+      {
+        name: input.name,
+        description: input.description,
+        metadata: input.metadata,
+        active: input.active,
+      },
+      { idempotencyKey: input.idempotencyKey },
+    )
   }
 
   async archiveProduct(id: string): Promise<void> {
@@ -126,14 +130,18 @@ export class StripeProvider implements BillingProvider {
   }
 
   async updateCustomer(id: string, input: UpdateCustomerInput): Promise<void> {
-    await this.stripe.customers.update(id, {
-      email: input.email,
-      name: input.name,
-      company: input.companyName,
-      tax_id: input.taxId,
-      address: input.address ? this.mapAddress(input.address) : undefined,
-      metadata: input.metadata,
-    }, { idempotencyKey: input.idempotencyKey })
+    await this.stripe.customers.update(
+      id,
+      {
+        email: input.email,
+        name: input.name,
+        company: input.companyName,
+        tax_id: input.taxId,
+        address: input.address ? this.mapAddress(input.address) : undefined,
+        metadata: input.metadata,
+      },
+      { idempotencyKey: input.idempotencyKey },
+    )
   }
 
   async attachPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
@@ -181,10 +189,12 @@ export class StripeProvider implements BillingProvider {
     }
 
     if (input.priceId) {
-      updateParams.items = [{
-        id: (await this.stripe.subscriptions.retrieve(id)).items.data[0]?.id,
-        price: input.priceId,
-      }]
+      updateParams.items = [
+        {
+          id: (await this.stripe.subscriptions.retrieve(id)).items.data[0]?.id,
+          price: input.priceId,
+        },
+      ]
       updateParams.proration_behavior = input.prorationBehavior ?? 'create_prorations'
     }
     if (input.quantity !== undefined) {
@@ -280,7 +290,10 @@ export class StripeProvider implements BillingProvider {
     }
   }
 
-  async listInvoices(customerId: string, options?: ListInvoicesOptions): Promise<ReadonlyArray<ProviderInvoice>> {
+  async listInvoices(
+    customerId: string,
+    options?: ListInvoicesOptions,
+  ): Promise<ReadonlyArray<ProviderInvoice>> {
     const invoices = await this.stripe.invoices.list({
       customer: customerId,
       limit: options?.limit ?? 50,
@@ -367,10 +380,10 @@ export class StripeProvider implements BillingProvider {
 
     return {
       type: typeMap[event.type] ?? (event.type as WebhookEventType),
-      providerSubscriptionId: data.subscription as string ?? data.customer as string,
+      providerSubscriptionId: (data.subscription as string) ?? (data.customer as string),
       providerCustomerId: data.customer as string,
       providerInvoiceId: data.id as string,
-      providerPaymentId: data.payment_intent as string ?? data.charge as string,
+      providerPaymentId: (data.payment_intent as string) ?? (data.charge as string),
       payload: data,
     }
   }
@@ -401,12 +414,12 @@ export class StripeProvider implements BillingProvider {
       productId: price.product as string,
       currency: price.currency.toUpperCase() as Currency,
       unitAmountMicros: this.centavosToMicros(price.unit_amount ?? 0),
-      interval: price.recurring?.interval as Interval ?? 'month',
+      interval: (price.recurring?.interval as Interval) ?? 'month',
       intervalCount: price.recurring?.interval_count ?? 1,
       trialPeriodDays: price.recurring?.trial_period_days ?? undefined,
       metadata: price.metadata as Record<string, string>,
       active: price.active,
-      usageType: price.recurring?.usage_type as 'metered' | 'licensed' ?? 'licensed',
+      usageType: (price.recurring?.usage_type as 'metered' | 'licensed') ?? 'licensed',
     }
   }
 
@@ -415,10 +428,10 @@ export class StripeProvider implements BillingProvider {
       id: customer.id,
       email: customer.email ?? '',
       name: customer.name ?? undefined,
-      companyName: customer.company as string ?? undefined,
+      companyName: (customer.company as string) ?? undefined,
       taxId: customer.tax_id ?? undefined,
       address: customer.address ? this.mapAddressFromStripe(customer.address) : undefined,
-      defaultPaymentMethodId: customer.invoice_settings?.default_payment_method as string ?? undefined,
+      defaultPaymentMethodId: (customer.invoice_settings?.default_payment_method as string) ?? undefined,
       metadata: customer.metadata as Record<string, string>,
       createdAt: new Date(customer.created * 1000),
     }
@@ -428,17 +441,23 @@ export class StripeProvider implements BillingProvider {
     return {
       id: pm.id,
       type: pm.type,
-      card: pm.card ? {
-        brand: pm.card.brand,
-        last4: pm.card.last4,
-        expMonth: pm.card.exp_month,
-        expYear: pm.card.exp_year,
-      } : undefined,
-      billingDetails: pm.billing_details ? {
-        name: pm.billing_details.name ?? undefined,
-        email: pm.billing_details.email ?? undefined,
-        address: pm.billing_details.address ? this.mapAddressFromStripe(pm.billing_details.address) : undefined,
-      } : undefined,
+      card: pm.card
+        ? {
+            brand: pm.card.brand,
+            last4: pm.card.last4,
+            expMonth: pm.card.exp_month,
+            expYear: pm.card.exp_year,
+          }
+        : undefined,
+      billingDetails: pm.billing_details
+        ? {
+            name: pm.billing_details.name ?? undefined,
+            email: pm.billing_details.email ?? undefined,
+            address: pm.billing_details.address
+              ? this.mapAddressFromStripe(pm.billing_details.address)
+              : undefined,
+          }
+        : undefined,
     }
   }
 
@@ -456,13 +475,13 @@ export class StripeProvider implements BillingProvider {
       cancelAtPeriodEnd: sub.cancel_at_period_end,
       canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : undefined,
       pausedAt: sub.pause_collection ? new Date() : undefined,
-      defaultPaymentMethodId: sub.default_payment_method as string ?? undefined,
+      defaultPaymentMethodId: (sub.default_payment_method as string) ?? undefined,
       metadata: sub.metadata as Record<string, string>,
-      items: sub.items.data.map(item => ({
+      items: sub.items.data.map((item) => ({
         id: item.id,
         priceId: item.price.id,
         quantity: item.quantity,
-        usageType: item.price.recurring?.usage_type as 'metered' | 'licensed' ?? 'licensed',
+        usageType: (item.price.recurring?.usage_type as 'metered' | 'licensed') ?? 'licensed',
       })),
     }
   }
@@ -470,7 +489,7 @@ export class StripeProvider implements BillingProvider {
   private mapInvoice(inv: Stripe.Invoice): ProviderInvoice {
     return {
       id: inv.id,
-      subscriptionId: inv.subscription as string ?? undefined,
+      subscriptionId: (inv.subscription as string) ?? undefined,
       customerId: inv.customer as string,
       status: inv.status as ProviderInvoice['status'],
       amountDueMicros: this.centavosToMicros(inv.amount_due),
@@ -481,10 +500,11 @@ export class StripeProvider implements BillingProvider {
       periodStart: new Date(inv.period_start * 1000),
       periodEnd: new Date(inv.period_end * 1000),
       dueDate: inv.due_date ? new Date(inv.due_date * 1000) : undefined,
-      paidAt: inv.status === 'paid' && inv.status_transitions?.paid_at
-        ? new Date(inv.status_transitions.paid_at * 1000)
-        : undefined,
-      lines: inv.lines.data.map(line => ({
+      paidAt:
+        inv.status === 'paid' && inv.status_transitions?.paid_at
+          ? new Date(inv.status_transitions.paid_at * 1000)
+          : undefined,
+      lines: inv.lines.data.map((line) => ({
         id: line.id,
         priceId: line.price?.id ?? '',
         quantity: line.quantity,
@@ -502,14 +522,18 @@ export class StripeProvider implements BillingProvider {
     const charge = pi.charges.data[0]
     return {
       id: pi.id,
-      invoiceId: pi.invoice as string ?? undefined,
+      invoiceId: (pi.invoice as string) ?? undefined,
       customerId: pi.customer as string,
       amountMicros: this.centavosToMicros(pi.amount),
       currency: pi.currency.toUpperCase() as Currency,
-      status: pi.status === 'succeeded' ? 'succeeded'
-        : pi.status === 'processing' ? 'pending'
-        : pi.status === 'requires_payment_method' ? 'pending'
-        : 'failed',
+      status:
+        pi.status === 'succeeded'
+          ? 'succeeded'
+          : pi.status === 'processing'
+            ? 'pending'
+            : pi.status === 'requires_payment_method'
+              ? 'pending'
+              : 'failed',
       paymentMethodType: pi.payment_method_types[0] ?? 'card',
       providerFeeMicros: charge?.balance_transaction
         ? this.centavosToMicros(charge.balance_transaction.fee)
@@ -525,7 +549,7 @@ export class StripeProvider implements BillingProvider {
     return {
       id: cn.id,
       customerId: cn.customer as string,
-      invoiceId: cn.invoice as string ?? undefined,
+      invoiceId: (cn.invoice as string) ?? undefined,
       amountMicros: this.centavosToMicros(cn.amount),
       currency: cn.currency.toUpperCase() as Currency,
       reason: cn.reason as ProviderCreditNote['reason'],

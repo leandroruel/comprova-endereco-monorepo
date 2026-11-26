@@ -8,7 +8,7 @@
 import type { ProviderRegistry } from './provider-registry.js'
 import type { BillingProvider, ProviderPrice, PlanFeatures, PlanPricing } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
-import { billingPlan } from '@comprova/db'
+import * as t from '@comprova/db'
 import { eq, desc } from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 
@@ -44,7 +44,7 @@ export class BillingPlanService {
   /**
    * Cria um novo plano e sincroniza com o provider (Product + Price).
    */
-  async createPlan(input: CreatePlanInput, tx?: DbTx): Promise<typeof billingPlan.$inferSelect> {
+  async createPlan(input: CreatePlanInput, tx?: DbTx): Promise<t.BillingPlan> {
     const db = tx ?? this.db
     const provider = this.providerRegistry.get(input.providerName)
 
@@ -71,7 +71,7 @@ export class BillingPlanService {
     // 3. Salva plano local com IDs do provider
     const planId = randomUUID()
     const [plan] = await db
-      .insert(billingPlan)
+      .insert(t.billingPlan)
       .values({
         id: planId,
         name: input.name,
@@ -99,13 +99,13 @@ export class BillingPlanService {
   /**
    * Atualiza um plano. Se preço/intervalo mudam, cria novo Price e arquiva o antigo.
    */
-  async updatePlan(planId: string, input: UpdatePlanInput, tx?: DbTx): Promise<typeof billingPlan.$inferSelect> {
+  async updatePlan(planId: string, input: UpdatePlanInput, tx?: DbTx): Promise<t.BillingPlan> {
     const db = tx ?? this.db
 
     const plan = await this.getPlan(planId, db)
     const provider = this.providerRegistry.get(plan.providerName)
 
-    const updateData: Partial<typeof billingPlan.$inferInsert> = {}
+    const updateData: Partial<t.NewBillingPlan> = {}
 
     // Atualiza Product se nome/descrição mudaram
     if (input.name || input.description) {
@@ -158,9 +158,9 @@ export class BillingPlanService {
     }
 
     const [updated] = await db
-      .update(billingPlan)
+      .update(t.billingPlan)
       .set(updateData)
-      .where(eq(billingPlan.id, planId))
+      .where(eq(t.billingPlan.id, planId))
       .returning()
 
     if (!updated) {
@@ -181,20 +181,20 @@ export class BillingPlanService {
     await provider.archiveProduct(plan.providerPriceId)
 
     await db
-      .update(billingPlan)
+      .update(t.billingPlan)
       .set({ isActive: false })
-      .where(eq(billingPlan.id, planId))
+      .where(eq(t.billingPlan.id, planId))
   }
 
   /**
    * Busca plano por ID.
    */
-  async getPlan(planId: string, db?: Db | DbTx): Promise<typeof billingPlan.$inferSelect> {
+  async getPlan(planId: string, db?: Db | DbTx): Promise<t.BillingPlan> {
     const client = db ?? this.db
     const [plan] = await client
       .select()
-      .from(billingPlan)
-      .where(eq(billingPlan.id, planId))
+      .from(t.billingPlan)
+      .where(eq(t.billingPlan.id, planId))
       .limit(1)
 
     if (!plan) {
@@ -207,12 +207,12 @@ export class BillingPlanService {
   /**
    * Busca plano por provider_price_id.
    */
-  async getPlanByProviderPriceId(providerPriceId: string, db?: Db | DbTx): Promise<typeof billingPlan.$inferSelect> {
+  async getPlanByProviderPriceId(providerPriceId: string, db?: Db | DbTx): Promise<t.BillingPlan> {
     const client = db ?? this.db
     const [plan] = await client
       .select()
-      .from(billingPlan)
-      .where(eq(billingPlan.providerPriceId, providerPriceId))
+      .from(t.billingPlan)
+      .where(eq(t.billingPlan.providerPriceId, providerPriceId))
       .limit(1)
 
     if (!plan) {
@@ -225,24 +225,24 @@ export class BillingPlanService {
   /**
    * Lista planos ativos (público para verifiers verem opções).
    */
-  async listActivePlans(db?: Db | DbTx): Promise<ReadonlyArray<typeof billingPlan.$inferSelect>> {
+  async listActivePlans(db?: Db | DbTx): Promise<ReadonlyArray<t.BillingPlan>> {
     const client = db ?? this.db
     return client
       .select()
-      .from(billingPlan)
-      .where(eq(billingPlan.isActive, true))
-      .orderBy(desc(billingPlan.createdAt))
+      .from(t.billingPlan)
+      .where(eq(t.billingPlan.isActive, true))
+      .orderBy(desc(t.billingPlan.createdAt))
   }
 
   /**
    * Lista todos os planos (admin).
    */
-  async listAllPlans(db?: Db | DbTx): Promise<ReadonlyArray<typeof billingPlan.$inferSelect>> {
+  async listAllPlans(db?: Db | DbTx): Promise<ReadonlyArray<t.BillingPlan>> {
     const client = db ?? this.db
     return client
       .select()
-      .from(billingPlan)
-      .orderBy(desc(billingPlan.createdAt))
+      .from(t.billingPlan)
+      .orderBy(desc(t.billingPlan.createdAt))
   }
 
   /**

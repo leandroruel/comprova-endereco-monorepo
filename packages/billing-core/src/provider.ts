@@ -26,28 +26,11 @@ export type Currency = 'BRL' | 'USD' | 'EUR'
 export type Interval = 'month' | 'year'
 
 export type SubscriptionStatus =
-  | 'incomplete'
-  | 'trialing'
-  | 'active'
-  | 'past_due'
-  | 'canceled'
-  | 'unpaid'
-  | 'paused'
+  'incomplete' | 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid' | 'paused'
 
-export type InvoiceStatus =
-  | 'draft'
-  | 'open'
-  | 'paid'
-  | 'void'
-  | 'uncollectible'
-  | 'pending'
+export type InvoiceStatus = 'draft' | 'open' | 'paid' | 'void' | 'uncollectible' | 'pending'
 
-export type PaymentStatus =
-  | 'pending'
-  | 'succeeded'
-  | 'failed'
-  | 'refunded'
-  | 'partially_refunded'
+export type PaymentStatus = 'pending' | 'succeeded' | 'failed' | 'refunded' | 'partially_refunded'
 
 export type WebhookEventType =
   | 'subscription.created'
@@ -392,7 +375,12 @@ export interface BillingProvider {
   // ---------------------------------------------------------------------------
   // Usage Metering (Overages)
   // ---------------------------------------------------------------------------
-  reportUsage(subscriptionItemId: string, quantity: number, timestamp: number, action?: 'increment' | 'set'): Promise<void>
+  reportUsage(
+    subscriptionItemId: string,
+    quantity: number,
+    timestamp: number,
+    action?: 'increment' | 'set',
+  ): Promise<void>
 
   // ---------------------------------------------------------------------------
   // Credits
@@ -709,7 +697,12 @@ export interface BillingProvider {
   // ---------------------------------------------------------------------------
   // Usage Metering (Overages)
   // ---------------------------------------------------------------------------
-  reportUsage(subscriptionItemId: string, quantity: number, timestamp: number, action?: 'increment' | 'set'): Promise<void>
+  reportUsage(
+    subscriptionItemId: string,
+    quantity: number,
+    timestamp: number,
+    action?: 'increment' | 'set',
+  ): Promise<void>
 
   // ---------------------------------------------------------------------------
   // Credits
@@ -723,50 +716,4 @@ export interface BillingProvider {
   parseWebhookEvent(event: ProviderWebhookEvent): NormalizedWebhookEvent
 }
 
-// ============================================================================
-// Tipos Básicos (Provider-Agnósticos) - colocados no final para referência
-// ============================================================================
 
-export type Currency = 'BRL' | 'USD' | 'EUR'
-export type Interval = 'month' | 'year'
-
-export type SubscriptionStatus =
-  | 'incomplete'
-  | 'trialing'
-  | 'active'
-  | 'past_due'
-  | 'canceled'
-  | 'unpaid'
-  | 'paused'
-
-export type InvoiceStatus =
-  | 'draft'
-  | 'open'
-  | 'paid'
-  | 'void'
-  | 'uncollectible'
-  | 'pending'
-
-export type PaymentStatus =
-  | 'pending'
-  | 'succeeded'
-  | 'failed'
-  | 'refunded'
-  | 'partially_refunded'
-
-export type WebhookEventType =
-  | 'subscription.created'
-  | 'subscription.updated'
-  | 'subscription.canceled'
-  | 'subscription.trial_will_end'
-  | 'invoice.created'
-  | 'invoice.finalized'
-  | 'invoice.paid'
-  | 'invoice.payment_failed'
-  | 'invoice.upcoming'
-  | 'payment_intent.succeeded'
-  | 'payment_intent.payment_failed'
-  | 'payment_method.attached'
-  | 'payment_method.detached'
-  | 'customer.updated'
-  | 'credit_note.created'

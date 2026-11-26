@@ -20,6 +20,11 @@ export const tenant = pgTable('tenant', {
   monthlyQuota: bigint('monthly_quota', { mode: 'number' }),
   dataRegion: text('data_region').notNull().default('sa-east-1'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+  // Provider fields (migration 0094)
+  providerName: text('provider_name'),
+  stripeCustomerId: text('stripe_customer_id'),
+  stripePaymentMethodId: text('stripe_payment_method_id'),
 })
 
 /**

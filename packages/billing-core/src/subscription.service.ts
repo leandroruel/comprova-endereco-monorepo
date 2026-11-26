@@ -8,7 +8,7 @@
 import type { ProviderRegistry } from './provider-registry.js'
 import type { BillingProvider, ProviderSubscription, CreateSubscriptionInput, UpdateSubscriptionInput, NormalizedWebhookEvent, SubscriptionStatus } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
-import { tenantSubscription, billingPlan, tenant } from '@comprova/db'
+import * as t from '@comprova/db'
 import { eq, and, desc } from '@comprova/db'
 import { BillingPlanService } from './plan.service.js'
 import { CustomerService } from './customer.service.js'
@@ -32,8 +32,8 @@ export interface ActivateBillingInput {
 }
 
 export interface SubscriptionWithPlan {
-  readonly subscription: typeof tenantSubscription.$inferSelect
-  readonly plan: typeof billingPlan.$inferSelect
+  readonly subscription: t.TenantSubscription
+  readonly plan: t.BillingPlan
 }
 
 export class SubscriptionService {
@@ -49,7 +49,7 @@ export class SubscriptionService {
    * Cria customer no provider, anexa payment method se fornecido,
    * e cria a subscription.
    */
-  async activateBilling(input: ActivateBillingInput, tx?: DbTx): Promise<typeof tenantSubscription.$inferSelect> {
+  async activateBilling(input: ActivateBillingInput, tx?: DbTx): Promise<t.TenantSubscription> {
     const db = tx ?? this.db
 
     // 1. Valida plano
@@ -90,7 +90,7 @@ export class SubscriptionService {
 
     // 5. Salva subscription local
     const [created] = await db
-      .insert(tenantSubscription)
+      .insert(t.tenantSubscription)
       .values({
         id: randomUUID(),
         tenantId: input.tenantId,
@@ -124,13 +124,13 @@ export class SubscriptionService {
 
     // 6. Atualiza tenant com provider info
     await db
-      .update(tenant)
+      .update(t.tenant)
       .set({
         providerName: plan.providerName,
         stripeCustomerId: customerResult.providerCustomerId,
         stripePaymentMethodId: input.paymentMethodId,
       })
-      .where(eq(tenant.tenantId, input.tenantId))
+      .where(eq(t.tenant.tenantId, input.tenantId))
 
     return created
   }
@@ -147,13 +147,13 @@ export class SubscriptionService {
       readonly paymentMethodId?: string
     },
     tx?: DbTx,
-  ): Promise<typeof tenantSubscription.$inferSelect> {
+  ): Promise<t.TenantSubscription> {
     const db = tx ?? this.db
 
     const [sub] = await db
       .select()
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.id, subscriptionId))
       .limit(1)
 
     if (!sub) {
@@ -161,7 +161,7 @@ export class SubscriptionService {
     }
 
     const provider = this.providerRegistry.get(sub.providerName)
-    const updateData: Partial<typeof tenantSubscription.$inferInsert> = {}
+    const updateData: Partial<t.NewTenantSubscription> = {}
 
     // Upgrade/downgrade de plano
     if (input.planId && input.planId !== sub.planId) {
@@ -213,9 +213,9 @@ export class SubscriptionService {
     }
 
     const [updated] = await db
-      .update(tenantSubscription)
+      .update(t.tenantSubscription)
       .set(updateData)
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .where(eq(t.tenantSubscription.id, subscriptionId))
       .returning()
 
     if (!updated) {
@@ -233,8 +233,8 @@ export class SubscriptionService {
 
     const [sub] = await db
       .select()
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.id, subscriptionId))
       .limit(1)
 
     if (!sub) {
@@ -245,13 +245,13 @@ export class SubscriptionService {
     await provider.cancelSubscription(sub.providerSubscriptionId, false)
 
     await db
-      .update(tenantSubscription)
+      .update(t.tenantSubscription)
       .set({
         status: 'canceled',
         canceledAt: new Date(),
         cancelAtPeriodEnd: false,
       })
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .where(eq(t.tenantSubscription.id, subscriptionId))
   }
 
   /**
@@ -262,8 +262,8 @@ export class SubscriptionService {
 
     const [sub] = await db
       .select()
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.id, subscriptionId))
       .limit(1)
 
     if (!sub) {
@@ -274,12 +274,12 @@ export class SubscriptionService {
     await provider.pauseSubscription(sub.providerSubscriptionId)
 
     await db
-      .update(tenantSubscription)
+      .update(t.tenantSubscription)
       .set({
         status: 'paused',
         pausedAt: new Date(),
       })
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .where(eq(t.tenantSubscription.id, subscriptionId))
   }
 
   /**
@@ -290,8 +290,8 @@ export class SubscriptionService {
 
     const [sub] = await db
       .select()
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.id, subscriptionId))
       .limit(1)
 
     if (!sub) {
@@ -302,12 +302,12 @@ export class SubscriptionService {
     await provider.resumeSubscription(sub.providerSubscriptionId)
 
     await db
-      .update(tenantSubscription)
+      .update(t.tenantSubscription)
       .set({
         status: 'active',
         pausedAt: null,
       })
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .where(eq(t.tenantSubscription.id, subscriptionId))
   }
 
   /**
@@ -318,18 +318,18 @@ export class SubscriptionService {
 
     const [sub] = await db
       .select({
-        subscription: tenantSubscription,
-        plan: billingPlan,
+        subscription: t.tenantSubscription,
+        plan: t.billingPlan,
       })
-      .from(tenantSubscription)
-      .innerJoin(billingPlan, eq(tenantSubscription.planId, billingPlan.id))
+      .from(t.tenantSubscription)
+      .innerJoin(t.billingPlan, eq(t.tenantSubscription.planId, t.billingPlan.id))
       .where(
         and(
-          eq(tenantSubscription.tenantId, tenantId),
-          eq(tenantSubscription.status, 'active'),
+          eq(t.tenantSubscription.tenantId, tenantId),
+          eq(t.tenantSubscription.status, 'active'),
         ),
       )
-      .orderBy(desc(tenantSubscription.createdAt))
+      .orderBy(desc(t.tenantSubscription.createdAt))
       .limit(1)
 
     return sub ?? null
@@ -338,13 +338,13 @@ export class SubscriptionService {
   /**
    * Busca subscription por ID.
    */
-  async getSubscription(subscriptionId: string, tx?: DbTx): Promise<typeof tenantSubscription.$inferSelect | null> {
+  async getSubscription(subscriptionId: string, tx?: DbTx): Promise<t.TenantSubscription | null> {
     const db = tx ?? this.db
 
     const [sub] = await db
       .select()
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.id, subscriptionId))
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.id, subscriptionId))
       .limit(1)
 
     return sub ?? null
@@ -353,13 +353,13 @@ export class SubscriptionService {
   /**
    * Busca subscription por provider_subscription_id.
    */
-  async getSubscriptionByProviderId(providerSubscriptionId: string, tx?: DbTx): Promise<typeof tenantSubscription.$inferSelect | null> {
+  async getSubscriptionByProviderId(providerSubscriptionId: string, tx?: DbTx): Promise<t.TenantSubscription | null> {
     const db = tx ?? this.db
 
     const [sub] = await db
       .select()
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.providerSubscriptionId, providerSubscriptionId))
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
       .limit(1)
 
     return sub ?? null
@@ -368,14 +368,14 @@ export class SubscriptionService {
   /**
    * Lista subscriptions do tenant.
    */
-  async listSubscriptions(tenantId: string, tx?: DbTx): Promise<ReadonlyArray<typeof tenantSubscription.$inferSelect>> {
+  async listSubscriptions(tenantId: string, tx?: DbTx): Promise<ReadonlyArray<t.TenantSubscription>> {
     const db = tx ?? this.db
 
     return db
       .select()
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.tenantId, tenantId))
-      .orderBy(desc(tenantSubscription.createdAt))
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.tenantId, tenantId))
+      .orderBy(desc(t.tenantSubscription.createdAt))
   }
 
   /**
@@ -452,14 +452,14 @@ export class SubscriptionService {
     if (!providerSub) {
       // Subscription não existe mais no provider - marca como cancelada
       await db
-        .update(tenantSubscription)
+        .update(t.tenantSubscription)
         .set({ status: 'canceled', canceledAt: new Date() })
-        .where(eq(tenantSubscription.providerSubscriptionId, providerSubscriptionId))
+        .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
       return
     }
 
     await db
-      .update(tenantSubscription)
+      .update(t.tenantSubscription)
       .set({
         status: providerSub.status,
         currentPeriodStart: providerSub.currentPeriodStart,
@@ -475,7 +475,7 @@ export class SubscriptionService {
           lastSyncedAt: new Date().toISOString(),
         },
       })
-      .where(eq(tenantSubscription.providerSubscriptionId, providerSubscriptionId))
+      .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
   }
 
   private async handleSubscriptionCanceled(
@@ -483,13 +483,13 @@ export class SubscriptionService {
     db: Db | DbTx,
   ): Promise<void> {
     await db
-      .update(tenantSubscription)
+      .update(t.tenantSubscription)
       .set({
         status: 'canceled',
         canceledAt: new Date(),
         cancelAtPeriodEnd: false,
       })
-      .where(eq(tenantSubscription.providerSubscriptionId, providerSubscriptionId))
+      .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
   }
 
   private async handleTrialWillEnd(

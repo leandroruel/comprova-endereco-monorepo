@@ -4,7 +4,19 @@
  * Criadas pela migration 0094 (provider abstraction layer).
  */
 
-import { bigint, boolean, index, integer, pgTable, text, timestamp, unique, uuid, jsonb, pgEnum } from 'drizzle-orm/pg-core'
+import {
+  bigint,
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+  jsonb,
+  pgEnum,
+} from 'drizzle-orm/pg-core'
 import { tenant } from './tenancy.js'
 import { adminAuthUser } from './auth.js'
 
@@ -13,9 +25,30 @@ import { adminAuthUser } from './auth.js'
 // ============================================================================
 
 export const billingPlanStatusEnum = pgEnum('billing_plan_status', ['active', 'archived', 'deprecated'])
-export const subscriptionStatusEnum = pgEnum('subscription_status', ['incomplete', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused'])
-export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'open', 'paid', 'void', 'uncollectible', 'pending'])
-export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'succeeded', 'failed', 'refunded', 'partially_refunded'])
+export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'incomplete',
+  'trialing',
+  'active',
+  'past_due',
+  'canceled',
+  'unpaid',
+  'paused',
+])
+export const invoiceStatusEnum = pgEnum('invoice_status', [
+  'draft',
+  'open',
+  'paid',
+  'void',
+  'uncollectible',
+  'pending',
+])
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'pending',
+  'succeeded',
+  'failed',
+  'refunded',
+  'partially_refunded',
+])
 
 // ============================================================================
 // billing_plan — Planos de billing configurados pelo admin
@@ -129,8 +162,7 @@ export const invoice = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
-    subscriptionId: uuid('subscription_id')
-      .references(() => tenantSubscription.id, { onDelete: 'set null' }),
+    subscriptionId: uuid('subscription_id').references(() => tenantSubscription.id, { onDelete: 'set null' }),
     number: text('number').notNull(),
     status: invoiceStatusEnum('status').notNull().default('draft'),
     periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
@@ -187,8 +219,7 @@ export const payment = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
-    invoiceId: uuid('invoice_id')
-      .references(() => invoice.id, { onDelete: 'set null' }),
+    invoiceId: uuid('invoice_id').references(() => invoice.id, { onDelete: 'set null' }),
     amountMicros: bigint('amount_micros', { mode: 'number' }).notNull(),
     currency: text('currency').notNull().default('BRL'),
     status: paymentStatusEnum('status').notNull().default('pending'),
@@ -244,7 +275,10 @@ export const providerWebhookEvent = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    unique('provider_webhook_event_provider_name_provider_event_id_key').on(t.providerName, t.providerEventId),
+    unique('provider_webhook_event_provider_name_provider_event_id_key').on(
+      t.providerName,
+      t.providerEventId,
+    ),
     index('idx_provider_webhook_event_created').on(t.createdAt),
   ],
 )

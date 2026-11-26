@@ -8,14 +8,14 @@
 import type { ProviderRegistry } from './provider-registry.js'
 import type { BillingProvider, ProviderInvoice, ProviderPayment, ListInvoicesOptions } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
-import { invoice, payment, tenantSubscription } from '@comprova/db'
+import * as t from '@comprova/db'
 import { eq, and, desc } from '@comprova/db'
 import { randomUUID } from 'node:crypto'
 
 export interface InvoiceWithDetails {
-  readonly invoice: typeof invoice.$inferSelect
-  readonly payments: ReadonlyArray<typeof payment.$inferSelect>
-  readonly subscription?: typeof tenantSubscription.$inferSelect
+  readonly invoice: t.Invoice
+  readonly payments: ReadonlyArray<t.Payment>
+  readonly subscription?: t.TenantSubscription
 }
 
 export class InvoiceService {
@@ -32,7 +32,7 @@ export class InvoiceService {
     providerInvoiceId: string,
     providerName: string,
     tx?: DbTx,
-  ): Promise<typeof invoice.$inferSelect | null> {
+  ): Promise<t.Invoice | null> {
     const db = tx ?? this.db
     const provider = this.providerRegistry.get(providerName)
 
@@ -47,15 +47,15 @@ export class InvoiceService {
 
     if (subscriptionId) {
       const [sub] = await db
-        .select({ id: tenantSubscription.id })
-        .from(tenantSubscription)
-        .where(eq(tenantSubscription.providerSubscriptionId, subscriptionId))
+        .select({ id: t.tenantSubscription.id })
+        .from(t.tenantSubscription)
+        .where(eq(t.tenantSubscription.providerSubscriptionId, subscriptionId))
         .limit(1)
       localSubscriptionId = sub?.id ?? null
     }
 
     const [synced] = await db
-      .insert(invoice)
+      .insert(t.invoice)
       .values({
         id: randomUUID(),
         subscriptionId: localSubscriptionId,
@@ -74,7 +74,7 @@ export class InvoiceService {
         metadata: providerInvoice.metadata,
       })
       .onConflictDoUpdate({
-        target: invoice.providerInvoiceId,
+        target: t.invoice.providerInvoiceId,
         set: {
           status: providerInvoice.status,
           amountDueMicros: providerInvoice.amountDueMicros,
@@ -98,7 +98,7 @@ export class InvoiceService {
     providerPaymentId: string,
     providerName: string,
     tx?: DbTx,
-  ): Promise<typeof payment.$inferSelect | null> {
+  ): Promise<t.Payment | null> {
     const db = tx ?? this.db
     const provider = this.providerRegistry.get(providerName)
 
@@ -111,21 +111,20 @@ export class InvoiceService {
     let localInvoiceId: string | null = null
     if (providerPayment.invoiceId) {
       const [inv] = await db
-        .select({ id: invoice.id })
-        .from(invoice)
-        .where(eq(invoice.providerInvoiceId, providerPayment.invoiceId))
+        .select({ id: t.invoice.id })
+        .from(t.invoice)
+        .where(eq(t.invoice.providerInvoiceId, providerPayment.invoiceId))
         .limit(1)
       localInvoiceId = inv?.id ?? null
     }
 
     const [synced] = await db
-      .insert(payment)
+      .insert(t.payment)
       .values({
         id: randomUUID(),
         invoiceId: localInvoiceId,
         providerName,
         providerPaymentId: providerPayment.id,
-        providerChargeId: providerPayment.providerChargeId,
         status: providerPayment.status,
         amountMicros: providerPayment.amountMicros,
         currency: providerPayment.currency,
@@ -137,7 +136,7 @@ export class InvoiceService {
         metadata: providerPayment.metadata,
       })
       .onConflictDoUpdate({
-        target: payment.providerPaymentId,
+        target: t.payment.providerPaymentId,
         set: {
           status: providerPayment.status,
           amountMicros: providerPayment.amountMicros,
@@ -160,26 +159,26 @@ export class InvoiceService {
     tenantId: string,
     options?: { readonly limit?: number; readonly status?: string },
     tx?: DbTx,
-  ): Promise<ReadonlyArray<typeof invoice.$inferSelect>> {
+  ): Promise<ReadonlyArray<t.Invoice>> {
     const db = tx ?? this.db
 
     const subscriptions = await db
-      .select({ id: tenantSubscription.id })
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.tenantId, tenantId))
+      .select({ id: t.tenantSubscription.id })
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.tenantId, tenantId))
 
     if (subscriptions.length === 0) {
       return []
     }
 
     return db
-      .select({ invoice: invoice })
-      .from(invoice)
-      .innerJoin(tenantSubscription, eq(invoice.subscriptionId, tenantSubscription.id))
-      .where(eq(tenantSubscription.tenantId, tenantId))
-      .orderBy(desc(invoice.createdAt))
+      .select({ invoice: t.invoice })
+      .from(t.invoice)
+      .innerJoin(t.tenantSubscription, eq(t.invoice.subscriptionId, t.tenantSubscription.id))
+      .where(eq(t.tenantSubscription.tenantId, tenantId))
+      .orderBy(desc(t.invoice.createdAt))
       .limit(options?.limit ?? 50)
-      .then((rows: ReadonlyArray<{ invoice: typeof invoice.$inferSelect }>) => rows.map((r) => r.invoice))
+      .then((rows: ReadonlyArray<{ invoice: t.Invoice }>) => rows.map((r) => r.invoice))
   }
 
   /**
@@ -190,24 +189,24 @@ export class InvoiceService {
 
     const [inv] = await db
       .select()
-      .from(invoice)
-      .where(eq(invoice.id, invoiceId))
+      .from(t.invoice)
+      .where(eq(t.invoice.id, invoiceId))
       .limit(1)
 
     if (!inv) return null
 
     const payments = await db
       .select()
-      .from(payment)
-      .where(eq(payment.invoiceId, invoiceId))
-      .orderBy(desc(payment.createdAt))
+      .from(t.payment)
+      .where(eq(t.payment.invoiceId, invoiceId))
+      .orderBy(desc(t.payment.createdAt))
 
-    let subscription: typeof tenantSubscription.$inferSelect | undefined
+    let subscription: t.TenantSubscription | undefined
     if (inv.subscriptionId) {
       const [sub] = await db
         .select()
-        .from(tenantSubscription)
-        .where(eq(tenantSubscription.id, inv.subscriptionId))
+        .from(t.tenantSubscription)
+        .where(eq(t.tenantSubscription.id, inv.subscriptionId))
         .limit(1)
       subscription = sub
     }
@@ -222,16 +221,16 @@ export class InvoiceService {
     providerInvoiceId: string,
     providerName: string,
     tx?: DbTx,
-  ): Promise<typeof invoice.$inferSelect | null> {
+  ): Promise<t.Invoice | null> {
     const db = tx ?? this.db
 
     const [inv] = await db
       .select()
-      .from(invoice)
+      .from(t.invoice)
       .where(
         and(
-          eq(invoice.providerInvoiceId, providerInvoiceId),
-          eq(invoice.providerName, providerName),
+          eq(t.invoice.providerInvoiceId, providerInvoiceId),
+          eq(t.invoice.providerName, providerName),
         ),
       )
       .limit(1)
@@ -252,9 +251,9 @@ export class InvoiceService {
     const db = tx ?? this.db
 
     const subscriptions = await db
-      .select({ id: tenantSubscription.id })
-      .from(tenantSubscription)
-      .where(eq(tenantSubscription.tenantId, tenantId))
+      .select({ id: t.tenantSubscription.id })
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.tenantId, tenantId))
 
     if (subscriptions.length === 0) {
       return {
@@ -268,8 +267,8 @@ export class InvoiceService {
 
     const invoices = await db
       .select()
-      .from(invoice)
-      .where(eq(invoice.subscriptionId, subscriptions[0].id))
+      .from(t.invoice)
+      .where(eq(t.invoice.subscriptionId, subscriptions[0].id))
 
     let totalInvoicedMicros = 0
     let totalPaidMicros = 0

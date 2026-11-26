@@ -6,30 +6,11 @@
  */
 
 import type { ProviderRegistry } from './provider-registry.js'
-import type { BillingProvider, ProviderCustomer, CreateCustomerInput, UpdateCustomerInput, ProviderPaymentMethod, Address } from './provider.js'
+import type { ProviderCustomer, CreateCustomerInput, UpdateCustomerInput, ProviderPaymentMethod, Address } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
-import { tenant } from '@comprova/db'
+import * as t from '@comprova/db'
 import { eq, and } from '@comprova/db'
 import { sql } from 'drizzle-orm'
-
-export interface CustomerBillingData {
-  readonly email: string
-  readonly companyName: string
-  readonly taxId: string
-  readonly address: Address
-  readonly contactEmail?: string
-}
-
-/**
- * Extended tenant type with billing columns added by migration 0094.
- * These columns exist in the database but not yet in the TypeScript schema.
- */
-interface TenantWithBilling {
-  readonly tenantId: string
-  readonly stripeCustomerId: string | null
-  readonly providerName: string | null
-  readonly stripePaymentMethodId: string | null
-}
 
 export interface CustomerBillingData {
   readonly email: string
@@ -59,11 +40,11 @@ export class CustomerService {
     // Busca tenant para ver se já tem customer
     const [tenantRecord] = await db
       .select({
-        stripeCustomerId: sql<string | null>`${tenant.stripeCustomerId}`,
-        providerName: sql<string | null>`${tenant.providerName}`,
+        stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
+        providerName: sql<string | null>`${t.tenant.providerName}`,
       })
-      .from(tenant)
-      .where(eq(tenant.tenantId, tenantId))
+      .from(t.tenant)
+      .where(eq(t.tenant.tenantId, tenantId))
       .limit(1)
 
     if (!tenantRecord) {
@@ -104,12 +85,12 @@ export class CustomerService {
 
     // Salva provider_customer_id no tenant
     await db
-      .update(tenant)
+      .update(t.tenant)
       .set({
         stripeCustomerId: customer.id,
         providerName,
       })
-      .where(eq(tenant.tenantId, tenantId))
+      .where(eq(t.tenant.tenantId, tenantId))
 
     return { providerCustomerId: customer.id, providerName }
   }
@@ -126,11 +107,11 @@ export class CustomerService {
 
     const [tenantRecord] = await db
       .select({
-        stripeCustomerId: sql<string | null>`${tenant.stripeCustomerId}`,
-        providerName: sql<string | null>`${tenant.providerName}`,
+        stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
+        providerName: sql<string | null>`${t.tenant.providerName}`,
       })
-      .from(tenant)
-      .where(eq(tenant.tenantId, tenantId))
+      .from(t.tenant)
+      .where(eq(t.tenant.tenantId, tenantId))
       .limit(1)
 
     if (!tenantRecord || !tenantRecord.stripeCustomerId) {
@@ -142,9 +123,9 @@ export class CustomerService {
 
     // Atualiza payment_method_id no tenant
     await db
-      .update(tenant)
+      .update(t.tenant)
       .set({ stripePaymentMethodId: paymentMethodId })
-      .where(eq(tenant.tenantId, tenantId))
+      .where(eq(t.tenant.tenantId, tenantId))
   }
 
   /**
@@ -155,11 +136,11 @@ export class CustomerService {
 
     const [tenantRecord] = await db
       .select({
-        stripeCustomerId: sql<string | null>`${tenant.stripeCustomerId}`,
-        providerName: sql<string | null>`${tenant.providerName}`,
+        stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
+        providerName: sql<string | null>`${t.tenant.providerName}`,
       })
-      .from(tenant)
-      .where(eq(tenant.tenantId, tenantId))
+      .from(t.tenant)
+      .where(eq(t.tenant.tenantId, tenantId))
       .limit(1)
 
     if (!tenantRecord || !tenantRecord.stripeCustomerId) {
@@ -178,11 +159,11 @@ export class CustomerService {
 
     const [tenantRecord] = await db
       .select({
-        stripeCustomerId: sql<string | null>`${tenant.stripeCustomerId}`,
-        providerName: sql<string | null>`${tenant.providerName}`,
+        stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
+        providerName: sql<string | null>`${t.tenant.providerName}`,
       })
-      .from(tenant)
-      .where(eq(tenant.tenantId, tenantId))
+      .from(t.tenant)
+      .where(eq(t.tenant.tenantId, tenantId))
       .limit(1)
 
     if (!tenantRecord || !tenantRecord.stripeCustomerId) {
@@ -194,8 +175,8 @@ export class CustomerService {
 
     // Se era o default, limpa
     await db
-      .update(tenant)
+      .update(t.tenant)
       .set({ stripePaymentMethodId: null })
-      .where(and(eq(tenant.tenantId, tenantId), eq(sql`${tenant.stripePaymentMethodId}`, paymentMethodId)))
+      .where(and(eq(t.tenant.tenantId, tenantId), eq(sql`${t.tenant.stripePaymentMethodId}`, paymentMethodId)))
   }
 }
