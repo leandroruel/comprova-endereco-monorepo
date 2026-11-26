@@ -476,6 +476,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@comprova/api':
+        specifier: workspace:^
+        version: link:../api
       '@comprova/checkers':
         specifier: workspace:^
         version: link:../../packages/checkers

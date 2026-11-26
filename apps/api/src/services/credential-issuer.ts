@@ -21,6 +21,10 @@ import {
   ensureFirstCredentialIssuance,
 } from './credential-status.js'
 import { signingKeyTrustedCondition } from './signing-key-lifecycle.js'
+import type { CredentialIssuerDeps } from '@comprova/core'
+
+/** Re-exporta o tipo base do core para consumidores externos. */
+export type { CredentialIssuerDeps } from '@comprova/core'
 
 /**
  * Fronteira de acesso ao PostgreSQL do builder de credencial (FASE 9). Carrega
@@ -219,6 +223,7 @@ export const loadAssertionSource = async (
 
 /** Chave de assinatura ativa do tenant, como persistida (só material público). */
 export interface ActiveSigningKey {
+  readonly issuerSigningKeyId: string
   readonly keyId: string
   /** 32 bytes crus da chave pública Ed25519 publicada para este `key_id`. */
   readonly publicKey: Buffer
@@ -249,6 +254,7 @@ export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<Ac
   withTenant(db, tenantId, async (tx) => {
     const rows = await tx
       .select({
+        issuerSigningKeyId: t.issuerSigningKey.issuerSigningKeyId,
         keyId: t.issuerSigningKey.keyId,
         publicKey: t.issuerSigningKey.publicKey,
         kmsKeyReference: t.issuerSigningKey.kmsKeyReference,
@@ -265,7 +271,12 @@ export const loadActiveSigningKey = async (db: Db, tenantId: string): Promise<Ac
     const row = rows[0]
     return row === undefined
       ? null
-      : { keyId: row.keyId, publicKey: row.publicKey, kmsKeyReference: row.kmsKeyReference }
+      : {
+          issuerSigningKeyId: row.issuerSigningKeyId,
+          keyId: row.keyId,
+          publicKey: row.publicKey,
+          kmsKeyReference: row.kmsKeyReference,
+        }
   })
 
 /**
@@ -321,28 +332,11 @@ export const signerWithDomainErrors = (signer: Signer): Signer => ({
   },
 })
 
-export interface IssueCredentialDeps {
-  /**
-   * Origem HTTPS controlada pelo projeto (`CREDENTIAL_ISSUER_ORIGIN`). O `id` do
-   * issuer é derivado dela + tenant, então o caller não escolhe o issuer: não
-   * existe caminho para atribuir a assertion de um tenant ao issuer de outro.
-   */
-  readonly issuerOrigin: string
-  /**
-   * Provider de assinatura por (`tenant_id`, `key_id`). Resolve o material da
-   * chave JÁ SELECIONADA (o domínio não escolhe a chave nem conhece onde o
-   * material vive: configuração local, KMS ou HSM) e devolve um `Signer`. NÃO
-   * existe chave global de fallback: tenant sem material configurado ou com
-   * material incoerente falha fechado (`SIGNING_KEY_UNAVAILABLE`/
-   * `SIGNING_KEY_MISMATCH`).
-   */
-  readonly signingKeyProvider: SigningKeyProvider
-  /**
-   * Horizonte da CREDENCIAL em segundos (`policy.credential_ttl_seconds`).
-   * Omitido = 30 dias, o default das policies já publicadas. NÃO é o horizonte
-   * de retenção (`validation.expires_at`).
-   */
-  readonly credentialTtlSeconds?: number
+/**
+ * Dependências completas para emissão de credencial (inclui relógio).
+ * Estende as dependências base do core com o relógio opcional.
+ */
+export interface IssueCredentialDeps extends CredentialIssuerDeps {
   /**
    * Relógio da emissão (`proof.created` = momento real da prova). Injetável para
    * testes; default: o relógio do sistema.
@@ -376,9 +370,6 @@ export const credentialValidUntilOf = (
   )
   return new Date(Math.min(policyHorizon, evidenceHorizon))
 }
-
-/** Dependências de assinatura do issuer já resolvidas no boot (sem relógio). */
-export type CredentialIssuerDeps = Omit<IssueCredentialDeps, 'now'>
 
 /**
  * `validation_id → carrega o grafo → resolve a chave ativa do tenant → provider
@@ -464,6 +455,7 @@ export const issueCredential = async (
       credentialSource.validation.id,
       credentialId,
       deps.now ?? (() => new Date()),
+      signingKey.issuerSigningKeyId,
     )
   } catch (error) {
     if (error instanceof CredentialIssuanceIdentityConflictError) {

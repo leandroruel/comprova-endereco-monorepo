@@ -142,6 +142,8 @@ const resolveObjectStore = (config: AppConfig): ObjectStore => {
           config.SUPABASE_SERVICE_ROLE_KEY !== undefined &&
           config.SUPABASE_STORAGE_BUCKET !== undefined
         ? 'supabase'
+        : config.LOCAL_STORAGE_PATH !== undefined
+        ? 'local'
         : 'unavailable'
 
   return makeObjectStore({
@@ -162,6 +164,12 @@ const resolveObjectStore = (config: AppConfig): ObjectStore => {
             supabaseUrl: config.SUPABASE_URL!,
             supabaseServiceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY!,
             bucket: config.SUPABASE_STORAGE_BUCKET!,
+          }
+        : undefined,
+    local:
+      provider === 'local'
+        ? {
+            rootPath: config.LOCAL_STORAGE_PATH!,
           }
         : undefined,
     unavailableReason: 'object storage is not configured',

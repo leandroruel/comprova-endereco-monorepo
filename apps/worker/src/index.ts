@@ -18,6 +18,7 @@ import {
   startValidationRetentionLoop,
 } from './loops.js'
 import { deepEnrich, type DeepEnrichDeps } from './modules/deep-enrich/deep-enrich.service.js'
+import { makeSigningKeyProvider } from '@comprova/api/services'
 
 const LOG_BASE = { service: 'worker' }
 
@@ -76,6 +77,13 @@ const main = async (): Promise<void> => {
     base: LOG_BASE,
     file: env.logFile,
     pretty: env.logFile === undefined && process.stdout.isTTY === true,
+  })
+
+  // Create signing key provider before starting lifecycle (it's async)
+  const signingKeyProvider = await makeSigningKeyProvider({
+    SIGNING_KEY_PROVIDER: env.signingKeyProvider ?? 'local',
+    CREDENTIAL_SIGNING_KEYS: env.credentialSigningKeys ?? '[]',
+    AWS_KMS_REGION: env.awsKmsRegion,
   })
 
   // Pools criados durante o boot. O lifecycle fecha todos depois que os loops
@@ -185,6 +193,12 @@ const main = async (): Promise<void> => {
         policyHash: ctx.policyHash,
         clock: systemClock,
         signalCache: ctx.signalCache,
+        credentialIssuer: {
+          issuerOrigin: env.credentialIssuerOrigin ?? 'https://comprova.local',
+          signingKeyProvider,
+          credentialTtlSeconds: ctx.policy.credential_ttl_seconds,
+        },
+        logger,
       }
       if (adminRetentionPool !== null) {
         track(

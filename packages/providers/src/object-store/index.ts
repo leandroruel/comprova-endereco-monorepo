@@ -2,6 +2,7 @@ import { makeS3ObjectStore, type S3ObjectStoreOptions } from './s3/index.js'
 import { makeSupabaseObjectStore, type SupabaseObjectStoreOptions } from './supabase/index.js'
 import { makeUnavailableObjectStore } from './unavailable/index.js'
 import { makeFakeObjectStore } from './fake/index.js'
+import { makeLocalFSObjectStore, type LocalFSObjectStoreOptions } from './local/index.js'
 import {
   type EvidenceObjectStore,
   type ObjectStore,
@@ -15,7 +16,7 @@ import {
  * o adapter com base neste valor, então migrar de um provedor para outro é
  * apenas uma mudança de configuração — sem tocar nos consumidores.
  */
-export type ObjectStoreProvider = 's3' | 'supabase' | 'unavailable'
+export type ObjectStoreProvider = 's3' | 'supabase' | 'local' | 'unavailable'
 
 /**
  * Opções da fábrica genérica de object store. Só o provedor selecionado
@@ -25,6 +26,7 @@ export interface ObjectStoreFactoryOptions {
   readonly provider: ObjectStoreProvider
   readonly s3?: S3ObjectStoreOptions
   readonly supabase?: SupabaseObjectStoreOptions
+  readonly local?: LocalFSObjectStoreOptions
   readonly unavailableReason?: string
 }
 
@@ -46,6 +48,11 @@ export const makeObjectStore = (opts: ObjectStoreFactoryOptions): EvidenceObject
         throw new Error('object store: opções do Supabase são obrigatórias para o provedor "supabase"')
       return makeSupabaseObjectStore(opts.supabase)
     }
+    case 'local': {
+      if (!opts.local)
+        throw new Error('object store: opções do local filesystem são obrigatórias para o provedor "local"')
+      return makeLocalFSObjectStore(opts.local)
+    }
     case 'unavailable':
       return makeUnavailableObjectStore(opts.unavailableReason)
     default:
@@ -61,8 +68,10 @@ export {
   makeFakeObjectStore,
   makeS3ObjectStore,
   makeSupabaseObjectStore,
+  makeLocalFSObjectStore,
   makeUnavailableObjectStore,
   sha256Of,
   type S3ObjectStoreOptions,
   type SupabaseObjectStoreOptions,
+  type LocalFSObjectStoreOptions,
 }

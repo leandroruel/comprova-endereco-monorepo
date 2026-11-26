@@ -1,6 +1,7 @@
 import { createLogger, createMetrics } from '@comprova/observability'
 import { createDbPool, eq, runMigrations } from '@comprova/db'
 import * as t from '@comprova/db'
+import { sha256Of, type ObjectStore, type StoredObject } from '@comprova/providers'
 import { evidenceSetHashOfObservations, policyHashOf, SCORER_VERSION } from '@comprova/core'
 import {
   DID_CONTEXT_URL,
@@ -45,6 +46,21 @@ import { runFastPath } from '../src/services/fastpath.js'
 import { makeConfiguredSigningKeyProvider } from '../src/services/signing-key-provider.js'
 import { rotateSigningKey } from '../src/services/signing-key-rotation.js'
 import { parseSigningKeys } from '../src/services/signing-keys.js'
+
+// TestObjectStore: in-memory object store for tests (same pattern as evidence-intake.int.test.ts)
+class TestObjectStore implements ObjectStore {
+  readonly objects = new Map<string, { readonly data: Buffer; readonly contentType: string }>()
+
+  async put(key: string, data: Uint8Array, contentType: string): Promise<StoredObject> {
+    const bytes = Buffer.from(data)
+    this.objects.set(key, { data: bytes, contentType })
+    return { key, uri: `test://${key}`, sha256: sha256Of(data), bytes: data.byteLength }
+  }
+
+  async delete(key: string): Promise<void> {
+    this.objects.delete(key)
+  }
+}
 
 // FASE 12 — ponta a ponta: validation persistida → credential builder → credencial
 // assinada → JSON transportável → verifier independente → VALID. Também cobre a
@@ -187,12 +203,14 @@ const config: AppConfig = {
   TERMS_DOCUMENT_HASH: 'sha256:abc123def456',
   WORKER_LOOPS: false,
 }
+const testStore = new TestObjectStore()
 const app = await buildApp({
   config,
   db: appPool.db,
   redis,
   logger: createLogger({ level: 'silent' }),
   metrics: createMetrics(),
+  objectStore: testStore,
 })
 
 afterAll(async () => {

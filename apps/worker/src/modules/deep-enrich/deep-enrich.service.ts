@@ -5,6 +5,7 @@ import {
   evaluateClaim,
   evidenceSetHashOfObservations,
   hasExternalUnavailability,
+  isEligibleForCredential,
   observationFromSignal,
   SCORER_VERSION,
   weightedScore,
@@ -12,12 +13,17 @@ import {
   type ClaimObservation,
   type ClaimType,
   type Clock,
+  type CredentialIssuerDeps,
   type Policy,
   type Signal,
   type SignalCacheReader,
   type SubjectType,
   type Verdict,
 } from '@comprova/core'
+import {
+  issueCredential,
+  loadActiveSigningKey,
+} from '@comprova/api/services'
 import type { DeepEnrichInput, DeepEnrichResult } from './deep-enrich.schema.js'
 import {
   emitOutcomeEvents,
@@ -33,6 +39,11 @@ import {
 import { runCheckersSequentially, signalFromRow } from './deep-enrich.signals.js'
 import { buildCheckContext, loadValidationState } from './deep-enrich.state.js'
 
+/** Superfície mínima de log usada pelo deep enrich (compatível com pino). */
+export interface DeepEnrichLogger {
+  warn: (obj: Record<string, unknown>, msg?: string) => void
+}
+
 export interface DeepEnrichDeps {
   readonly db: Db
   readonly t1Checkers: readonly Checker[]
@@ -47,6 +58,10 @@ export interface DeepEnrichDeps {
   readonly policyHash: string
   readonly clock: Clock
   readonly signalCache?: SignalCacheReader
+  /** Configuração do issuer de credencial (opcional). Se ausente, a emissão automática é pulada. */
+  readonly credentialIssuer?: CredentialIssuerDeps
+  /** Logger opcional para falhas de emissão automática (best-effort). */
+  readonly logger?: DeepEnrichLogger
 }
 
 const AMBIGUITY_THRESHOLD = 0.55
@@ -379,6 +394,45 @@ export const deepEnrich = async (deps: DeepEnrichDeps, input: DeepEnrichInput): 
     // (mesmo que sem cobrança), então o status é 'blocked_quota' e não
     // 'completed' nem 'partial'.
     isCompleted = blockedByQuota ? 'blocked_quota' : !stillPartial ? 'completed' : 'partial'
+
+    // Emissão automática de credencial para validações elegíveis.
+    //
+    // Roda na mesma transação da conclusão, mas dentro de um SAVEPOINT: a
+    // emissão é best-effort e não pode abortar a validação já concluída. Sem o
+    // savepoint, qualquer erro do Postgres durante a emissão abortaria a
+    // transação inteira e o `catch` não conseguiria salvá-la (Postgres marca a
+    // transação como failed). O savepoint isola a falha e preserva o commit da
+    // validação/uso; a credencial pode ser reemitida depois pelo endpoint
+    // manual, que é idempotente (`ensureFirstCredentialIssuance`).
+    //
+    // Requisitos de elegibilidade:
+    //   - Validation status = 'completed' (não blocked_quota, não partial)
+    //   - Veredito elegível (CONFIRMED_COMMERCIAL, SHARED_VIRTUAL, etc.)
+    //   - Tenant tem chave de assinatura ativa
+    //   - credentialIssuer configurado
+    if (
+      isCompleted === 'completed' &&
+      isEligibleForCredential(decision.verdict) &&
+      deps.credentialIssuer !== undefined
+    ) {
+      const credentialIssuer = deps.credentialIssuer
+      try {
+        await tx.transaction(async (savepoint) => {
+          const signingKey = await loadActiveSigningKey(savepoint, input.tenantId)
+          if (signingKey === null) return
+          await issueCredential(savepoint, input.tenantId, input.validationId, {
+            ...credentialIssuer,
+            now: deps.clock.now,
+          })
+        })
+      } catch (error) {
+        deps.logger?.warn(
+          { err: error, tenantId: input.tenantId, validationId: input.validationId },
+          'automatic credential issuance failed; validation completion preserved',
+        )
+      }
+    }
+
     return { score, decision, stillPartial: blockedByQuota ? false : stillPartial }
   })
 

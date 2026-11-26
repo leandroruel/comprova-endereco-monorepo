@@ -8,6 +8,7 @@ import {
   sql,
   recordUsageEventInTx,
   validationBillingKey,
+  debitWalletForValidation,
   type DbTx,
 } from '@comprova/db'
 import * as t from '@comprova/db'
@@ -484,6 +485,16 @@ export const emitOutcomeEvents = async (
       billable,
       source: 'deep',
     })
+
+    // Wallet debit: apenas para eventos faturáveis. Usa a mesma chave de
+    // idempotência do usage_billing_unit para garantir que o débito ocorra
+    // exatamente uma vez por validação + tenant. Se o usage event foi replay
+    // (recordUsageEventInTx não lança mas retorna replayed), o wallet_debit
+    // também será replay pela idempotency_key e não debitará duas vezes.
+    if (billable) {
+      const idempotencyKey = validationBillingKey(write.validationId)
+      await debitWalletForValidation(tx, 1_000_000, write.validationId, idempotencyKey)
+    }
   } catch (err) {
     if (err instanceof QuotaExceededError) {
       // A cota hard impediu o faturamento. Marcar a validação com um estado de

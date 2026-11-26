@@ -13,6 +13,7 @@ import {
   validationBillingKey,
   validationIdempotency,
   withTenant,
+  debitWalletForValidation,
   type Db,
 } from '@comprova/db'
 import { makeUsageService } from '../modules/usage/usage.service.js'
@@ -880,6 +881,14 @@ export const runFastPath = async (
         billable,
         source: 'validation',
       })
+
+      // Wallet debit: apenas para eventos faturáveis. Usa a mesma chave de
+      // idempotência do usage_billing_unit para garantir que o débito ocorra
+      // exatamente uma vez por validação + tenant.
+      if (billable) {
+        const idempotencyKey = validationBillingKey(validationId)
+        await debitWalletForValidation(tx, 1_000_000, validationId, idempotencyKey)
+      }
     } else {
       await usage.recordUsageEventInTx(tx, {
         tenantId: tenant.tenantId,
