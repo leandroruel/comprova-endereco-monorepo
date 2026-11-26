@@ -59,6 +59,11 @@ GRANT EXECUTE ON FUNCTION wallet_adjust TO app_user;
 -- ---------------------------------------------------------------------------
 -- A idempotência agora é checada APÓS o lock, eliminando race condition.
 -- A constraint UNIQUE (tenant_id, idempotency_key) é a barreira final.
+--
+-- Primeiro, remover a função antiga com o tipo de retorno antigo para poder
+-- recriar com o novo tipo de retorno (inclui status e reason).
+-- CASCADE é necessário porque a função antiga tinha tipo de retorno diferente (3 colunas vs 5).
+DROP FUNCTION IF EXISTS wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb) CASCADE;
 
 -- ============================================================================
 -- wallet_credit
@@ -147,7 +152,7 @@ END $$;
 -- ============================================================================
 -- wallet_debit
 -- ============================================================================
-CREATE OR REPLACE FUNCTION wallet_debit(
+CREATE FUNCTION wallet_debit(
   p_tenant_id uuid,
   p_amount_micros bigint,
   p_reference_type text,
@@ -224,7 +229,7 @@ BEGIN
   IF v_available < p_amount_micros THEN
     RETURN QUERY SELECT 'skipped', NULL::bigint, NULL::bigint, NULL::bigint, 'insufficient_balance';
     RETURN;
-  END IF
+  END IF;
 
   v_available := v_available - p_amount_micros;
 
@@ -245,11 +250,16 @@ BEGIN
     p_reference_type, p_reference_id,
     p_idempotency_key, p_actor, p_reason, COALESCE(p_metadata, '{}')
   )
-  RETURNING wl.entry_id, wl.balance_after_micros, wl.reserved_after_micros
+  RETURNING entry_id, balance_after_micros, reserved_after_micros
   INTO v_entry_id, v_available, v_reserved;
 
   RETURN QUERY SELECT 'debited', v_entry_id, v_available, v_reserved, NULL;
 END $$;
+
+-- A função foi recriada acima com tipo de retorno novo; o DROP/CREATE
+-- restaura os privilégios padrão (EXECUTE para PUBLIC), então revogamos de novo.
+REVOKE EXECUTE ON FUNCTION wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb) TO app_user;
 
 -- ============================================================================
 -- wallet_reserve
@@ -455,19 +465,19 @@ BEGIN
 
   IF p_amount_micros = 0 THEN
     RAISE EXCEPTION 'amount_micros cannot be zero';
-  END IF.
+  END IF;
 
-  LOCK TABLE wallet IN ROW EXCLUSIVE MODE.
+  LOCK TABLE wallet IN ROW EXCLUSIVE MODE;
 
   SELECT available_balance, reserved_balance
   INTO v_available, v_reserved
   FROM wallet
   WHERE tenant_id = p_tenant_id
-  FOR UPDATE.
+  FOR UPDATE;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Wallet not found for tenant %', p_tenant_id;
-  END IF.
+  END IF;
 
   IF p_amount_micros > 0 THEN
     v_available := v_available + p_amount_micros;
@@ -478,13 +488,13 @@ BEGIN
     END IF;
     v_available := v_available - abs(p_amount_micros);
     v_entry_type := 'adjustment';
-  END IF.
+  END IF;
 
   UPDATE wallet
   SET available_balance = v_available,
       version = version + 1,
       updated_at = now()
-  WHERE tenant_id = p_tenant_id.
+  WHERE tenant_id = p_tenant_id;
 
   INSERT INTO wallet_ledger (
     tenant_id, entry_type, amount_micros,
@@ -498,9 +508,9 @@ BEGIN
     p_actor, p_reason, COALESCE(p_metadata, '{}')
   )
   RETURNING entry_id, balance_after_micros, reserved_after_micros
-  INTO v_entry_id, v_available, v_reserved.
+  INTO v_entry_id, v_available, v_reserved;
 
-  RETURN QUERY SELECT v_entry_id, v_available, v_reserved.
+  RETURN QUERY SELECT v_entry_id, v_available, v_reserved;
 END $$;
 
 -- Reafirmar grants

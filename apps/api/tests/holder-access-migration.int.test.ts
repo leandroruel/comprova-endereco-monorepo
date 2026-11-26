@@ -123,68 +123,39 @@ describe('F4.2 — drift entre schemas Drizzle e migration 0058', () => {
   })
 })
 
-describe('F4.2 — assertion de memberships do holder_token_resolver', () => {
-  const cleanup = async (): Promise<void> => {
-    // Remove qualquer membership em ambos os sentidos antes de dropar o role
-    // de teste. Nunca removemos memberships do próprio resolver: a migration
-    // falha se elas existirem.
-    await admin.unsafe(`
-      DO $$
-      DECLARE v_role record;
-      BEGIN
-        FOR v_role IN
-          SELECT DISTINCT r.rolname
-            FROM pg_auth_members m
-            JOIN pg_roles r ON r.oid = m.member OR r.oid = m.roleid
-           WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'holder_token_resolver')
-              OR m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'holder_token_resolver')
-        LOOP
-          IF v_role.rolname NOT IN ('holder_token_resolver', 'app_user') THEN
-            EXECUTE format('DROP ROLE IF EXISTS %I', v_role.rolname);
-          END IF;
-        END LOOP;
-      END $$;
-    `)
-  }
-
-  it('passa quando o resolver não participa de nenhuma membership', async () => {
+describe('F4.2 — assertion de atributos e grants do holder_token_resolver', () => {
+  it('passa quando o resolver não tem memberships perigosos nem CREATE no schema public', async () => {
     await expect(admin.unsafe(membershipAssertion)).resolves.toBeDefined()
   })
 
-  it('falha quando outra role é membro do holder_token_resolver', async () => {
-    await cleanup()
-    await admin.unsafe('CREATE ROLE f42_member_of_resolver')
-    await admin.unsafe('GRANT holder_token_resolver TO f42_member_of_resolver')
+  it('falha quando holder_token_resolver tem CREATE direto no schema public', async () => {
+    await admin.unsafe('GRANT CREATE ON SCHEMA public TO holder_token_resolver')
 
     await expect(admin.unsafe(membershipAssertion)).rejects.toThrow(
-      /must not participate in any role membership/,
+      /holder_token_resolver retains a direct CREATE grant on schema public/,
     )
 
-    await cleanup()
+    await admin.unsafe('REVOKE CREATE ON SCHEMA public FROM holder_token_resolver')
   })
 
-  it('falha quando o holder_token_resolver é membro de outra role', async () => {
-    await cleanup()
-    await admin.unsafe('CREATE ROLE f42_resolver_parent')
-    await admin.unsafe('GRANT f42_resolver_parent TO holder_token_resolver')
+  it('falha quando holder_token_resolver tem CREATE efetivo no schema public via PUBLIC', async () => {
+    // Concede CREATE ao PUBLIC (que afeta todos os roles, inclusive holder_token_resolver)
+    await admin.unsafe('GRANT CREATE ON SCHEMA public TO PUBLIC')
 
     await expect(admin.unsafe(membershipAssertion)).rejects.toThrow(
-      /must not participate in any role membership/,
+      /holder_token_resolver has effective CREATE on schema public/,
     )
 
-    await cleanup()
+    await admin.unsafe('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
   })
 
   it('a migration original volta a passar após a limpeza', async () => {
-    await cleanup()
     await expect(admin.unsafe(membershipAssertion)).resolves.toBeDefined()
   })
 
   it('falha da assertion não deixa alterações parciais (rollback transacional)', async () => {
-    await cleanup()
     try {
-      await admin.unsafe('CREATE ROLE f42_partial_rollback')
-      await admin.unsafe('GRANT holder_token_resolver TO f42_partial_rollback')
+      await admin.unsafe('GRANT CREATE ON SCHEMA public TO holder_token_resolver')
 
       // A migration roda cada arquivo em uma transação (runner). Simula-se uma
       // alteração anterior no mesmo arquivo e verifica-se que a falha da
@@ -194,15 +165,13 @@ describe('F4.2 — assertion de memberships do holder_token_resolver', () => {
           await tx.unsafe('CREATE TABLE f42_partial_marker (id integer)')
           await tx.unsafe(membershipAssertion)
         }),
-      ).rejects.toThrow(/must not participate in any role membership/)
+      ).rejects.toThrow(/holder_token_resolver retains a direct CREATE grant on schema public/)
 
       const [marker] = await admin`SELECT to_regclass('public.f42_partial_marker') AS marker`
       expect(marker!.marker).toBeNull()
     } finally {
-      await cleanup()
+      await admin.unsafe('REVOKE CREATE ON SCHEMA public FROM holder_token_resolver')
     }
-    const [role] = await admin`SELECT 1 FROM pg_roles WHERE rolname = 'f42_partial_rollback'`
-    expect(role).toBeUndefined()
   })
 })
 

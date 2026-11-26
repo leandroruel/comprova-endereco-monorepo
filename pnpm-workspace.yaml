@@ -45,9 +45,6 @@ overrides:
   # versão vulnerável até o parent soltar a correção.
   '@tanstack/router-core>seroval': '>=1.6.12'
   'seroval-plugins>seroval': '>=1.6.12'
-# Hoist vitest-browser-react to root node_modules for dashboard tests
-hoistPattern:
-  - vitest-browser-react
 permissions:
   '@tanstack/react-table':
     skills: false

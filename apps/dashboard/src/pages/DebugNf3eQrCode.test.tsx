@@ -1,9 +1,12 @@
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { render } from 'vitest-browser-react'
+import { render as renderRaw } from 'vitest-browser-react'
 import type { DebugNf3eQrCodeResponse } from '@/api/client'
 import { DebugNf3eQrCodePage } from './DebugNf3eQrCode'
 import { DashboardLayout } from '@/components/layout'
+import { AppProviders } from '@/test-utils/app-providers'
+
+const render = (ui: Parameters<typeof renderRaw>[0]) => renderRaw(<AppProviders>{ui}</AppProviders>)
 
 const pdf = (): File =>
   new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'conta.pdf', { type: 'application/pdf' })

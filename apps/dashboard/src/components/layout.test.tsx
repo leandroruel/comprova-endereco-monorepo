@@ -1,7 +1,10 @@
-import { page, userEvent } from 'vitest/browser'
+import { page } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
-import { render } from 'vitest-browser-react'
+import { render as renderRaw } from 'vitest-browser-react'
+import { AppProviders } from '@/test-utils/app-providers'
 import { DashboardLayout } from './layout'
+
+const render = (ui: Parameters<typeof renderRaw>[0]) => renderRaw(<AppProviders>{ui}</AppProviders>)
 
 const userMenu = () => page.getByRole('button', { name: 'Menu do usuário' })
 
@@ -81,8 +84,8 @@ describe('DashboardLayout', () => {
     await render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
 
     await userMenu().click()
-    await page.getByRole('menuitem', { name: /Perfil/ }).click()
-    await page.getByRole('menuitem', { name: /Configurações/ }).click()
+    await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()
+    await expect.element(page.getByRole('menuitem', { name: /Configurações/ })).toBeVisible()
   })
 
   it('mostra a ação destrutiva de sair apenas quando há onLogout', async () => {

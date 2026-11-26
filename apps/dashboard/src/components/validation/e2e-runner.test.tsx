@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
+import { AppProviders } from '@/test-utils/app-providers'
 import type {
   AddressInput,
   CepAddressLookup,
@@ -109,7 +110,11 @@ const done = baseValidation({
 
 const wrap = (node: React.ReactElement) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={client}>
+      <AppProviders>{node}</AppProviders>
+    </QueryClientProvider>,
+  )
 }
 
 const setFile = (): void => {
