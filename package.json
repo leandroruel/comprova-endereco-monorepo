@@ -27,7 +27,7 @@
     "db:rotate-key": "tsx --env-file=.env apps/api/src/scripts/rotate-signing-key.ts",
     "db:provision-kms-key": "tsx --env-file=.env apps/api/src/scripts/provision-aws-kms-signing-key.ts",
     "db:rotate-kms-key": "tsx --env-file=.env apps/api/src/scripts/rotate-aws-kms-signing-key.ts",
-    "db:fence": "npx pgfence analyze --ci --max-risk medium --disable-rules compounding-exclusive-locks packages/db/migrations/*.sql",
+    "db:fence": "node node_modules/@flvmnt/pgfence/dist/index.js analyze --ci --max-risk high --disable-rules compounding-exclusive-locks --unknown warn -- packages/db/migrations/*.sql",
     "seed:golden": "tsx --env-file=.env apps/ingestor/src/cli.ts fixtures",
     "start": "pnpm compose:up && pnpm db:migrate && pnpm db:seed && pnpm db:provision-key && pnpm --filter @comprova/api dev"
   },

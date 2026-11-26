@@ -11,7 +11,7 @@ SET application_name = 'comprova-migrations';
 -- Inclui: null-safe tenant guard, idempotência dupla (antes/depois do lock),
 -- NULL::bigint casting, table alias no RETURNING, revoke EXECUTE FROM PUBLIC.
 
-DROP FUNCTION IF EXISTS wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb);
+DROP FUNCTION IF EXISTS public.wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb);
 
 CREATE FUNCTION wallet_debit(
   p_tenant_id uuid,
@@ -122,5 +122,5 @@ BEGIN
 END $$;
 
 -- Revoke EXECUTE from PUBLIC (0089 recria a função, então revoga aqui também)
-REVOKE EXECUTE ON FUNCTION wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION wallet_debit TO app_user;
+REVOKE EXECUTE ON FUNCTION public.wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb) TO app_user;

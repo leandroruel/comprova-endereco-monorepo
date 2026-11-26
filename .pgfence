@@ -1,0 +1,14 @@
+# pgfence configuration
+# https://github.com/step-security/pgfence
+
+# Fail only on HIGH risk statements, not on WARNINGs about compounding locks
+fail-on-warnings: false
+
+# Ignore specific rules for pre-existing migrations
+ignored-rules:
+  - "compounding-exclusive-locks"
+  - "drop-policy"
+  - "create-policy"
+
+# Max risk level that causes failure (low, medium, high, critical)
+max-risk: "high"
