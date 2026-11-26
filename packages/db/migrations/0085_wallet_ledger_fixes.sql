@@ -63,11 +63,11 @@ CREATE POLICY tenant_isolation ON wallet_ledger
   USING (tenant_id = app_tenant_id())
   WITH CHECK (tenant_id = app_tenant_id());
 
--- Conceder BYPASSRLS ao app_user para permitir que o TypeScript execute
--- queries de idempotência/consulta nas tabelas de wallet dentro da transação.
--- As funções SECURITY DEFINER (wallet_debit, wallet_credit, etc.) já
--- validam tenant/saldo internamente com row_security = off.
-ALTER ROLE app_user BYPASSRLS;
+-- NOTA: BYPASSRLS removido conforme CodeRabbit review.
+-- O app_user NÃO deve ter BYPASSRLS; as funções SECURITY DEFINER
+-- já desabilitam row_security internamente. O TypeScript chama
+-- as funções (não faz UPDATE direto nas tabelas).
+-- Se BYPASSRLS foi aplicado em ambiente, use migration 0088 para remover.
 
 -- ---------------------------------------------------------------------------
 -- 3. Revogar EXECUTE de PUBLIC e conceder apenas a app_user
@@ -117,8 +117,8 @@ BEGIN
   -- na tabela wallet impediria até o owner de acessar sem contexto.
   SET LOCAL row_security = off;
 
-  -- Validar tenant autorizado (RLS context)
-  IF p_tenant_id <> app_tenant_id() THEN
+  -- Null-safe tenant guard
+  IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch: function called for tenant % but session is %', p_tenant_id, app_tenant_id();
   END IF;
 
@@ -214,7 +214,8 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  IF p_tenant_id <> app_tenant_id() THEN
+  -- Null-safe tenant guard: missing session tenant raises; matching tenant passes
+  IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch: function called for tenant % but session is %', p_tenant_id, app_tenant_id();
   END IF;
 
@@ -224,7 +225,7 @@ BEGIN
 
   LOCK TABLE wallet IN ROW EXCLUSIVE MODE;
 
-  -- Idempotência
+  -- Idempotência: checa ANTES do lock (barreira rápida)
   IF p_idempotency_key IS NOT NULL THEN
     SELECT wl.entry_id, w.available_balance, w.reserved_balance
     INTO v_entry_id, v_available, v_reserved
@@ -240,7 +241,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- Verifica wallet e saldo
+  -- Verifica wallet e saldo COM LOCK (FOR UPDATE)
   SELECT available_balance, reserved_balance
   INTO v_available, v_reserved
   FROM wallet
@@ -248,12 +249,28 @@ BEGIN
   FOR UPDATE;
 
   IF NOT FOUND THEN
-    RETURN QUERY SELECT 'skipped', NULL, NULL, NULL, 'no_wallet';
+    RETURN QUERY SELECT 'skipped', NULL::bigint, NULL::bigint, NULL::bigint, 'no_wallet';
     RETURN;
   END IF;
 
+  -- Idempotência: checa DEPOIS do lock (barreira final sob concorrência)
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT wl.entry_id, w.available_balance, w.reserved_balance
+    INTO v_entry_id, v_available, v_reserved
+    FROM wallet_ledger wl
+    JOIN wallet w ON w.tenant_id = wl.tenant_id
+    WHERE wl.tenant_id = p_tenant_id
+      AND wl.idempotency_key = p_idempotency_key
+    LIMIT 1;
+
+    IF FOUND THEN
+      RETURN QUERY SELECT 'replayed', v_entry_id, v_available, v_reserved, NULL;
+      RETURN;
+    END IF;
+  END IF;
+
   IF v_available < p_amount_micros THEN
-    RETURN QUERY SELECT 'skipped', NULL, NULL, NULL, 'insufficient_balance';
+    RETURN QUERY SELECT 'skipped', NULL::bigint, NULL::bigint, NULL::bigint, 'insufficient_balance';
     RETURN;
   END IF;
 
@@ -276,7 +293,7 @@ BEGIN
     p_reference_type, p_reference_id,
     p_idempotency_key, p_actor, p_reason, COALESCE(p_metadata, '{}')
   )
-  RETURNING entry_id, balance_after_micros, reserved_after_micros
+  RETURNING wl.entry_id, wl.balance_after_micros, wl.reserved_after_micros
   INTO v_entry_id, v_available, v_reserved;
 
   RETURN QUERY SELECT 'debited', v_entry_id, v_available, v_reserved, NULL;
@@ -306,7 +323,8 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  IF p_tenant_id <> app_tenant_id() THEN
+  -- Null-safe tenant guard
+  IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
   END IF;
 
@@ -393,7 +411,8 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  IF p_tenant_id <> app_tenant_id() THEN
+  -- Null-safe tenant guard
+  IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
   END IF;
 
@@ -480,7 +499,8 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  IF p_tenant_id <> app_tenant_id() THEN
+  -- Null-safe tenant guard
+  IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
   END IF;
 

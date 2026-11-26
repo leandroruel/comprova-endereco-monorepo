@@ -54,73 +54,60 @@ export const debitWalletForValidation = async (
     throw new Error('amountMicros must be positive')
   }
 
-  // Idempotência: verifica se já existe entrada com essa chave
-  const existing = await tx.execute(sql`
-    SELECT entry_id, balance_after_micros, reserved_after_micros
-    FROM wallet_ledger
-    WHERE tenant_id = app_tenant_id()
-      AND idempotency_key = ${idempotencyKey}
-    LIMIT 1
-  `)
-  if (existing.length > 0) {
-    const row = existing[0]!
-    return {
-      status: 'replayed',
-      entryId: Number(row.entry_id),
-      availableBalanceMicros: Number(row.balance_after_micros),
-      reservedBalanceMicros: Number(row.reserved_after_micros),
-    }
-  }
+  await tx.execute(sql`SET LOCAL row_security = off`)
 
-  // Lock na wallet e verifica saldo
-  const walletRows = await tx.execute(sql`
-    SELECT available_balance, reserved_balance
-    FROM wallet
-    WHERE tenant_id = app_tenant_id()
-    FOR UPDATE
-  `)
-  const wallet = walletRows[0] as { available_balance: number; reserved_balance: number } | undefined
-  if (!wallet) {
-    return { status: 'skipped', reason: 'no_wallet' }
-  }
-  if (Number(wallet.available_balance) < amountMicros) {
-    return { status: 'skipped', reason: 'insufficient_balance' }
-  }
-
-  // Atualiza wallet
-  const newAvailable = Number(wallet.available_balance) - amountMicros
-  const newReserved = Number(wallet.reserved_balance)
-  await tx.execute(sql`
-    UPDATE wallet
-    SET available_balance = ${newAvailable},
-        reserved_balance = ${newReserved},
-        version = version + 1,
-        updated_at = now()
-    WHERE tenant_id = app_tenant_id()
-  `)
-
-  // Insere no ledger
-  const ledgerRows = await tx.execute(sql`
-    INSERT INTO wallet_ledger (
-      tenant_id, entry_type, amount_micros,
-      balance_after_micros, reserved_after_micros,
-      reference_type, reference_id,
-      idempotency_key, actor, reason, metadata
-    ) VALUES (
-      app_tenant_id(), 'debit', ${amountMicros},
-      ${newAvailable}, ${newReserved},
-      'validation', ${validationId}::uuid,
-      ${idempotencyKey}, 'system', 'validation completed', '{}'::jsonb
+  const rows = await tx.execute(sql`
+    SELECT *
+    FROM wallet_debit(
+      app_tenant_id(),
+      ${amountMicros}::bigint,
+      'validation'::text,
+      ${validationId}::uuid,
+      'system'::text,
+      'validation completed'::text,
+      ${idempotencyKey}::text,
+      '{}'::jsonb
     )
-    RETURNING entry_id
   `)
 
-  const entryId = Number(ledgerRows[0]!.entry_id)
+  const row = rows[0] as
+    | {
+        status: string
+        entry_id: number | null
+        available_balance_micros: number | null
+        reserved_balance_micros: number | null
+        reason: string | null
+      }
+    | undefined
+
+  // A função SQL sempre retorna uma linha (debited, replayed, ou skipped)
+  if (!row) {
+    throw new Error('wallet_debit returned no rows')
+  }
+
+  // entry_id NULL indica replay ou skipped
+  if (row.entry_id === null) {
+    if (row.status === 'replayed') {
+      // Replay inclui os saldos atuais
+      return {
+        status: 'replayed',
+        entryId: 0, // não aplicável para replay
+        availableBalanceMicros: Number(row.available_balance_micros ?? 0),
+        reservedBalanceMicros: Number(row.reserved_balance_micros ?? 0),
+      }
+    }
+    if (row.status === 'skipped') {
+      return { status: 'skipped', reason: row.reason as 'no_wallet' | 'insufficient_balance' }
+    }
+    throw new Error(`Unexpected wallet_debit status: ${row.status}`)
+  }
+
+  // Debitado com sucesso
   return {
     status: 'debited',
-    entryId,
-    availableBalanceMicros: newAvailable,
-    reservedBalanceMicros: newReserved,
+    entryId: Number(row.entry_id),
+    availableBalanceMicros: Number(row.available_balance_micros),
+    reservedBalanceMicros: Number(row.reserved_balance_micros),
   }
 }
 
