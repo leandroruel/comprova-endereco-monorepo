@@ -10,4 +10,8 @@ export {
 } from './credential-issuer.js'
 
 export { makeSigningKeyProvider } from './signing-key-provider.factory.js'
-export { type SigningKeyProvider, type SigningKeyRequest, SigningKeyProviderError } from './signing-key-provider.js'
+export {
+  type SigningKeyProvider,
+  type SigningKeyRequest,
+  SigningKeyProviderError,
+} from './signing-key-provider.js'

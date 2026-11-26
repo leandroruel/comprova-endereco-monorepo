@@ -53,7 +53,7 @@ export const hasStorageConfig = (env: WorkerEnv): env is StorageConfiguredEnv =>
   (env.supabaseUrl !== undefined &&
     env.supabaseServiceRoleKey !== undefined &&
     env.supabaseStorageBucket !== undefined) ||
-  (env.localStoragePath !== undefined)
+  env.localStoragePath !== undefined
 
 export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore => {
   if (

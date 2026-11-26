@@ -20,10 +20,7 @@ import {
   type SubjectType,
   type Verdict,
 } from '@comprova/core'
-import {
-  issueCredential,
-  loadActiveSigningKey,
-} from '@comprova/api/services'
+import { issueCredential, loadActiveSigningKey } from '@comprova/api/services'
 import type { DeepEnrichInput, DeepEnrichResult } from './deep-enrich.schema.js'
 import {
   emitOutcomeEvents,

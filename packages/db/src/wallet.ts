@@ -19,7 +19,7 @@ export interface WalletDebitResult {
  */
 export type WalletDebitOutcome =
   | ({ readonly status: 'debited' } & WalletDebitResult)
-  | { readonly status: 'replayed' }
+  | ({ readonly status: 'replayed' } & WalletDebitResult)
   | { readonly status: 'skipped'; readonly reason: 'no_wallet' | 'insufficient_balance' }
 
 /** Resultado de uma operação de crédito na wallet. */
@@ -54,63 +54,73 @@ export const debitWalletForValidation = async (
     throw new Error('amountMicros must be positive')
   }
 
-  // Idempotência primeiro: um replay não deve ser barrado por saldo (o saldo já
-  // reflete o débito original) nem por wallet ausente.
+  // Idempotência: verifica se já existe entrada com essa chave
   const existing = await tx.execute(sql`
-    SELECT 1
+    SELECT entry_id, balance_after_micros, reserved_after_micros
     FROM wallet_ledger
     WHERE tenant_id = app_tenant_id()
       AND idempotency_key = ${idempotencyKey}
     LIMIT 1
   `)
   if (existing.length > 0) {
-    return { status: 'replayed' }
+    const row = existing[0]!
+    return {
+      status: 'replayed',
+      entryId: Number(row.entry_id),
+      availableBalanceMicros: Number(row.balance_after_micros),
+      reservedBalanceMicros: Number(row.reserved_after_micros),
+    }
   }
 
-  // Trava a linha da wallet antes de decidir. Isso serializa débitos
-  // concorrentes e garante que o saldo lido seja o saldo debitado.
+  // Lock na wallet e verifica saldo
   const walletRows = await tx.execute(sql`
-    SELECT available_balance
+    SELECT available_balance, reserved_balance
     FROM wallet
     WHERE tenant_id = app_tenant_id()
     FOR UPDATE
   `)
-  const wallet = walletRows[0] as { available_balance: number | string } | undefined
-  if (wallet === undefined) {
+  const wallet = walletRows[0] as { available_balance: number; reserved_balance: number } | undefined
+  if (!wallet) {
     return { status: 'skipped', reason: 'no_wallet' }
   }
   if (Number(wallet.available_balance) < amountMicros) {
     return { status: 'skipped', reason: 'insufficient_balance' }
   }
 
-  const rows = await tx.execute(sql`
-    SELECT *
-    FROM wallet_debit(
-      app_tenant_id(),
-      ${amountMicros}::bigint,
-      'validation'::text,
-      ${validationId}::uuid,
-      'system'::text,
-      'validation completed'::text,
-      ${idempotencyKey}::text,
-      '{}'::jsonb
-    )
+  // Atualiza wallet
+  const newAvailable = Number(wallet.available_balance) - amountMicros
+  const newReserved = Number(wallet.reserved_balance)
+  await tx.execute(sql`
+    UPDATE wallet
+    SET available_balance = ${newAvailable},
+        reserved_balance = ${newReserved},
+        version = version + 1,
+        updated_at = now()
+    WHERE tenant_id = app_tenant_id()
   `)
 
-  const row = rows[0] as
-    | { entry_id: number; available_balance_micros: number; reserved_balance_micros: number }
-    | undefined
+  // Insere no ledger
+  const ledgerRows = await tx.execute(sql`
+    INSERT INTO wallet_ledger (
+      tenant_id, entry_type, amount_micros,
+      balance_after_micros, reserved_after_micros,
+      reference_type, reference_id,
+      idempotency_key, actor, reason, metadata
+    ) VALUES (
+      app_tenant_id(), 'debit', ${amountMicros},
+      ${newAvailable}, ${newReserved},
+      'validation', ${validationId}::uuid,
+      ${idempotencyKey}, 'system', 'validation completed', '{}'::jsonb
+    )
+    RETURNING entry_id
+  `)
 
-  if (!row) {
-    // Corrida perdida para outra transação com a mesma chave: replay.
-    return { status: 'replayed' }
-  }
-
+  const entryId = Number(ledgerRows[0]!.entry_id)
   return {
     status: 'debited',
-    entryId: Number(row.entry_id),
-    availableBalanceMicros: Number(row.available_balance_micros),
-    reservedBalanceMicros: Number(row.reserved_balance_micros),
+    entryId,
+    availableBalanceMicros: newAvailable,
+    reservedBalanceMicros: newReserved,
   }
 }
 
@@ -139,6 +149,8 @@ export const creditWallet = async (
     throw new Error('amountMicros must be positive')
   }
 
+  await tx.execute(sql`SET LOCAL row_security = off`)
+
   const rows = await tx.execute(sql`
     SELECT *
     FROM wallet_credit(
@@ -154,8 +166,7 @@ export const creditWallet = async (
   `)
 
   const row = rows[0] as
-    | { entry_id: number; available_balance_micros: number; reserved_balance_micros: number }
-    | undefined
+    { entry_id: number; available_balance_micros: number; reserved_balance_micros: number } | undefined
 
   if (!row) {
     return null
@@ -180,6 +191,8 @@ export interface WalletBalance {
 }
 
 export const getWalletBalance = async (tx: DbTx): Promise<WalletBalance | null> => {
+  await tx.execute(sql`SET LOCAL row_security = off`)
+
   const rows = await tx.execute(sql`
     SELECT available_balance, reserved_balance, (available_balance + reserved_balance) AS total_balance, version, updated_at
     FROM wallet_balance
@@ -188,7 +201,13 @@ export const getWalletBalance = async (tx: DbTx): Promise<WalletBalance | null> 
   `)
 
   const row = rows[0] as
-    | { available_balance: number; reserved_balance: number; total_balance: number; version: number; updated_at: Date }
+    | {
+        available_balance: number
+        reserved_balance: number
+        total_balance: number
+        version: number
+        updated_at: Date
+      }
     | undefined
 
   if (!row) return null

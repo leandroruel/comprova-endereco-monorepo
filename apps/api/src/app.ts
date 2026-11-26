@@ -143,8 +143,8 @@ const resolveObjectStore = (config: AppConfig): ObjectStore => {
           config.SUPABASE_STORAGE_BUCKET !== undefined
         ? 'supabase'
         : config.LOCAL_STORAGE_PATH !== undefined
-        ? 'local'
-        : 'unavailable'
+          ? 'local'
+          : 'unavailable'
 
   return makeObjectStore({
     provider,

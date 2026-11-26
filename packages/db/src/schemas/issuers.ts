@@ -92,10 +92,9 @@ export const credentialIssuance = pgTable(
     issuerScope: text('issuer_scope').notNull(),
     credentialId: text('credential_id').notNull(),
     issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
-    issuerSigningKeyId: uuid('issuer_signing_key_id').references(
-      () => issuerSigningKey.issuerSigningKeyId,
-      { onDelete: 'set null' },
-    ),
+    issuerSigningKeyId: uuid('issuer_signing_key_id').references(() => issuerSigningKey.issuerSigningKeyId, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

@@ -17,7 +17,11 @@ export interface LocalFSObjectStoreOptions {
 export const makeLocalFSObjectStore = (options: LocalFSObjectStoreOptions): EvidenceObjectStore => {
   const root = isAbsolute(options.rootPath) ? options.rootPath : resolve(process.cwd(), options.rootPath)
 
-  const put = async (key: string, data: Uint8Array, _contentType: string): Promise<{
+  const put = async (
+    key: string,
+    data: Uint8Array,
+    _contentType: string,
+  ): Promise<{
     readonly key: string
     readonly uri: string
     readonly sha256: Buffer
