@@ -40,13 +40,7 @@ const TabsContext = React.createContext<{
   onValueChange: (value: string) => void
 } | null>(null)
 
-export function Tabs({
-  children,
-  className,
-  defaultValue = 'simple',
-  value,
-  onValueChange,
-}: TabsProps) {
+export function Tabs({ children, className, defaultValue = 'simple', value, onValueChange }: TabsProps) {
   const [internalValue, setInternalValue] = React.useState(defaultValue)
   const controlledValue = value ?? internalValue
 
@@ -63,16 +57,14 @@ export function Tabs({
 }
 
 export function TabList({ children, className }: TabListProps) {
-  return <div className={cx('flex w-full items-center gap-1 border-b border-separator-border', className)}>{children}</div>
+  return (
+    <div className={cx('flex w-full items-center gap-1 border-b border-separator-border', className)}>
+      {children}
+    </div>
+  )
 }
 
-export function Tab({
-  children,
-  className,
-  value,
-  icon: Icon,
-  ...props
-}: TabProps) {
+export function Tab({ children, className, value, icon: Icon, ...props }: TabProps) {
   const context = React.useContext(TabsContext)
   const isSelected = context?.value === value
 
@@ -104,5 +96,14 @@ export function TabPanel({ children, className, value }: TabPanelProps) {
 
   if (!isSelected) return null
 
-  return <div className={cx('outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-border-focus-ring', className)}>{children}</div>
+  return (
+    <div
+      className={cx(
+        'outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  )
 }

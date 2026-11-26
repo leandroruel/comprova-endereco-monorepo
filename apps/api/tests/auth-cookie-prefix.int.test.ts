@@ -185,7 +185,11 @@ describe('auth cookie prefix isolation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/admin/sign-up/email',
-      body: { email: `signup-bloqueado-${Date.now()}@exemplo.com`, password: ADMIN_PASSWORD, name: 'Blocked' },
+      body: {
+        email: `signup-bloqueado-${Date.now()}@exemplo.com`,
+        password: ADMIN_PASSWORD,
+        name: 'Blocked',
+      },
     })
 
     expect(res.statusCode).toBe(400)

@@ -113,8 +113,7 @@ async function proxyToApi(request: Request, env: Env): Promise<Response> {
   const origin = request.headers.get('Origin') ?? ''
   const referer = request.headers.get('Referer') ?? ''
   const isAllowedOrigin =
-    allowedOrigin.length > 0 &&
-    (origin === allowedOrigin || referer.startsWith(allowedOrigin))
+    allowedOrigin.length > 0 && (origin === allowedOrigin || referer.startsWith(allowedOrigin))
 
   if (!isAllowedOrigin) {
     return new Response(JSON.stringify({ error: 'Acesso não autorizado' }), {
@@ -134,9 +133,7 @@ async function proxyToApi(request: Request, env: Env): Promise<Response> {
   upstreamHeaders.set('Authorization', `Bearer ${env.API_KEY}`)
   upstreamHeaders.delete('host')
 
-  const body = ['GET', 'HEAD'].includes(request.method)
-    ? undefined
-    : request.body
+  const body = ['GET', 'HEAD'].includes(request.method) ? undefined : request.body
 
   try {
     const upstream = await fetch(targetUrl, {
@@ -155,12 +152,9 @@ async function proxyToApi(request: Request, env: Env): Promise<Response> {
       headers: responseHeaders,
     })
   } catch {
-    return new Response(
-      JSON.stringify({ error: 'Erro ao comunicar com a API' }),
-      {
-        status: 502,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    )
+    return new Response(JSON.stringify({ error: 'Erro ao comunicar com a API' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 }

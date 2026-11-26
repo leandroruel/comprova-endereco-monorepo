@@ -102,7 +102,11 @@ export function ConsoleFixedBottom({ className }: ConsoleFixedBottomProps) {
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             aria-label={isExpanded ? 'Minimizar' : 'Expandir'}
           >
-            {isExpanded ? <Minimize2 className="size-3.5" aria-hidden /> : <Maximize2 className="size-3.5" aria-hidden />}
+            {isExpanded ? (
+              <Minimize2 className="size-3.5" aria-hidden />
+            ) : (
+              <Maximize2 className="size-3.5" aria-hidden />
+            )}
           </button>
         </div>
       </div>

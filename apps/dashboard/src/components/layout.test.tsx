@@ -19,11 +19,7 @@ describe('DashboardLayout', () => {
   })
 
   it('omite o item QRCode NF3e debugger quando o usuário não é admin', async () => {
-    await render(
-      <DashboardLayout userRole="user">
-        conteúdo
-      </DashboardLayout>,
-    )
+    await render(<DashboardLayout userRole="user">conteúdo</DashboardLayout>)
 
     await expect.element(page.getByRole('button', { name: 'Validações' })).toBeVisible()
     await expect.element(page.getByRole('button', { name: 'Busca em lote' })).toBeVisible()
@@ -31,21 +27,13 @@ describe('DashboardLayout', () => {
   })
 
   it('mostra o item QRCode NF3e debugger quando o usuário é admin', async () => {
-    await render(
-      <DashboardLayout userRole="admin">
-        conteúdo
-      </DashboardLayout>,
-    )
+    await render(<DashboardLayout userRole="admin">conteúdo</DashboardLayout>)
 
     await expect.element(page.getByRole('button', { name: 'QRCode NF3e debugger' })).toBeVisible()
   })
 
   it('identifica o usuário no gatilho do menu e alterna o estado acessível', async () => {
-    await render(
-      <DashboardLayout userEmail="ana.souza@empresa.com">
-        conteúdo
-      </DashboardLayout>,
-    )
+    await render(<DashboardLayout userEmail="ana.souza@empresa.com">conteúdo</DashboardLayout>)
 
     const trigger = userMenu()
     await expect.element(trigger).toHaveAttribute('aria-expanded', 'false')
@@ -90,11 +78,7 @@ describe('DashboardLayout', () => {
   })
 
   it('abre o menu com Perfil e Configurações', async () => {
-    await render(
-      <DashboardLayout userEmail="ana@empresa.com">
-        conteúdo
-      </DashboardLayout>,
-    )
+    await render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
 
     await userMenu().click()
     await page.getByRole('menuitem', { name: /Perfil/ }).click()
@@ -117,11 +101,7 @@ describe('DashboardLayout', () => {
   })
 
   it('omite "Sair" quando o logout não está conectado', async () => {
-    await render(
-      <DashboardLayout userEmail="ana@empresa.com">
-        conteúdo
-      </DashboardLayout>,
-    )
+    await render(<DashboardLayout userEmail="ana@empresa.com">conteúdo</DashboardLayout>)
 
     await userMenu().click()
     await expect.element(page.getByRole('menuitem', { name: /Perfil/ })).toBeVisible()

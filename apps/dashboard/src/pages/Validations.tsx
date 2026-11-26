@@ -68,7 +68,11 @@ export default function Validations({
   const simpleMutation = useMutation({
     mutationFn: () => createValidation(document.trim()),
     onError: (error) => {
-      add({ variant: 'error', title: 'Falha ao validar', message: error instanceof Error ? error.message : 'Erro' })
+      add({
+        variant: 'error',
+        title: 'Falha ao validar',
+        message: error instanceof Error ? error.message : 'Erro',
+      })
     },
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
@@ -87,7 +91,11 @@ export default function Validations({
       return created
     },
     onError: (error) => {
-      add({ variant: 'error', title: 'Falha ao validar', message: error instanceof Error ? error.message : 'Erro' })
+      add({
+        variant: 'error',
+        title: 'Falha ao validar',
+        message: error instanceof Error ? error.message : 'Erro',
+      })
     },
     onSuccess: (result) => {
       setHistory((prev) => [result, ...prev])
@@ -133,19 +141,33 @@ export default function Validations({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className={cx(
-            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-            apiStatus === 'online'
-              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-              : apiStatus === 'checking'
-                ? 'bg-muted text-muted-foreground border border-border-button-default'
-                : 'bg-red-50 text-red-800 border border-red-200',
-          )}>
-            <span className={`h-1.5 w-1.5 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 animate-pulse' : apiStatus === 'checking' ? 'bg-muted-foreground animate-pulse' : 'bg-red-500'}`} aria-hidden />
+          <span
+            className={cx(
+              'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+              apiStatus === 'online'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : apiStatus === 'checking'
+                  ? 'bg-muted text-muted-foreground border border-border-button-default'
+                  : 'bg-red-50 text-red-800 border border-red-200',
+            )}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 animate-pulse' : apiStatus === 'checking' ? 'bg-muted-foreground animate-pulse' : 'bg-red-500'}`}
+              aria-hidden
+            />
             API Receita:{' '}
             {apiStatus === 'online' ? 'Online' : apiStatus === 'checking' ? 'Verificando…' : 'Offline'}
           </span>
-          <Button variant="outline" size="sm" onClick={() => { setDocument(''); setFile(null); setActiveValidation(null) }} disabled={simpleMutation.isPending || completeMutation.isPending}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setDocument('')
+              setFile(null)
+              setActiveValidation(null)
+            }}
+            disabled={simpleMutation.isPending || completeMutation.isPending}
+          >
             <XCircle className="size-3.5 mr-1.5" aria-hidden />
             Novo
           </Button>
@@ -227,7 +249,9 @@ export default function Validations({
                 </form>
                 {simpleMutation.isError && (
                   <p className="mt-2 text-sm text-destructive" role="alert">
-                    {simpleMutation.error instanceof Error ? simpleMutation.error.message : 'Erro desconhecido'}
+                    {simpleMutation.error instanceof Error
+                      ? simpleMutation.error.message
+                      : 'Erro desconhecido'}
                   </p>
                 )}
               </CardContent>
@@ -242,20 +266,31 @@ export default function Validations({
                   </h3>
                   <div className="space-y-3">
                     <div className="flex items-center gap-2">
-                      <span className={cx(
-                        activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
-                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-                      )}
+                      <span
+                        className={cx(
+                          activeValidation.verdict === 'CONFIRMED_COMMERCIAL'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-red-100 text-red-800',
+                          'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                        )}
                       >
-                        {activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}
+                        {activeValidation.verdict === 'CONFIRMED_COMMERCIAL' ? (
+                          <CheckCircle2 className="size-3.5" />
+                        ) : (
+                          <XCircle className="size-3.5" />
+                        )}
                         {activeValidation.verdict}
                       </span>
-                      <span className="text-xs font-mono text-muted-foreground">{activeValidation.score?.toFixed(3) ?? '—'}</span>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {activeValidation.score?.toFixed(3) ?? '—'}
+                      </span>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       <div className="bg-muted/50 p-2 rounded">
                         <p className="text-[10px] text-muted-foreground uppercase">Confiança</p>
-                        <p className="text-sm font-medium">{activeValidation.confidence?.toFixed(2) ?? '—'}</p>
+                        <p className="text-sm font-medium">
+                          {activeValidation.confidence?.toFixed(2) ?? '—'}
+                        </p>
                       </div>
                       <div className="bg-muted/50 p-2 rounded">
                         <p className="text-[10px] text-muted-foreground uppercase">Score</p>
@@ -317,9 +352,7 @@ export default function Validations({
                         className="pl-9 font-mono text-sm"
                       />
                     </div>
-                    <label
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent"
-                    >
+                    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent">
                       <FileUp className="h-3 w-3" aria-hidden />
                       <span>{file?.name || 'Anexar comprovante (PDF/imagem)'}</span>
                       <input
@@ -335,7 +368,9 @@ export default function Validations({
                     {file && (
                       <div className="flex items-center gap-2 bg-amber-50 p-2 rounded border border-amber-200 mt-2">
                         <FileUp className="size-4 text-amber-600" aria-hidden />
-                        <span className="text-xs text-amber-800">{file.name} ({file.size} bytes)</span>
+                        <span className="text-xs text-amber-800">
+                          {file.name} ({file.size} bytes)
+                        </span>
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
@@ -360,7 +395,9 @@ export default function Validations({
                   </form>
                   {completeMutation.isError && (
                     <p className="mt-2 text-sm text-destructive" role="alert">
-                      {completeMutation.error instanceof Error ? completeMutation.error.message : 'Erro desconhecido'}
+                      {completeMutation.error instanceof Error
+                        ? completeMutation.error.message
+                        : 'Erro desconhecido'}
                     </p>
                   )}
                 </CardContent>
@@ -375,7 +412,9 @@ export default function Validations({
                   {history.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
                       <Timer className="mb-2 h-6 w-6 text-muted-foreground/30" />
-                      <p className="text-xs font-medium text-muted-foreground">Nenhuma validação registrada</p>
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Nenhuma validação registrada
+                      </p>
                       <p className="mt-1 text-[10px] text-muted-foreground/70">
                         Execute uma validação para ver o histórico
                       </p>

@@ -69,11 +69,7 @@ const PAGE_TITLES: Record<SettingsPage, string> = {
   appearance: 'Aparência',
 }
 
-export function SettingsModal({
-  isOpen,
-  onClose,
-  defaultPage = 'profile',
-}: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, defaultPage = 'profile' }: SettingsModalProps) {
   const direction = useDirection()
   const [page, setPage] = useState<SettingsPage>(defaultPage)
 
@@ -197,42 +193,42 @@ export function SettingsModal({
                 </span>
                 <div className="flex w-full flex-col gap-1">
                   {group.items.map((item) => {
-                      const selected = item.page !== undefined && item.page === page
-                      return (
-                        <button
-                          key={`${group.label}:${item.label}`}
-                          type="button"
-                          aria-label={item.label}
-                          title={item.label}
-                          aria-current={selected ? 'page' : undefined}
-                          onClick={
-                            item.page
-                              ? () => {
-                                  setPage(item.page!)
-                                  setContentScrolled(false)
-                                }
-                              : undefined
-                          }
+                    const selected = item.page !== undefined && item.page === page
+                    return (
+                      <button
+                        key={`${group.label}:${item.label}`}
+                        type="button"
+                        aria-label={item.label}
+                        title={item.label}
+                        aria-current={selected ? 'page' : undefined}
+                        onClick={
+                          item.page
+                            ? () => {
+                                setPage(item.page!)
+                                setContentScrolled(false)
+                              }
+                            : undefined
+                        }
+                        className={cx(
+                          'flex w-full cursor-pointer items-center gap-2 rounded-2lg p-2 text-start',
+                          'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                          selected
+                            ? 'bg-background-secondary-hover'
+                            : 'hover:bg-background-secondary-hover/60',
+                        )}
+                      >
+                        <item.icon className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
+                        <span
                           className={cx(
-                            'flex w-full cursor-pointer items-center gap-2 rounded-2lg p-2 text-start',
-                            'outline-none transition-colors duration-150 ease focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-                            selected
-                              ? 'bg-background-secondary-hover'
-                              : 'hover:bg-background-secondary-hover/60',
+                            'hidden truncate text-body-medium sm:block',
+                            selected ? 'text-text-primary' : 'text-text-secondary',
                           )}
                         >
-                          <item.icon className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-                          <span
-                            className={cx(
-                              'hidden truncate text-body-medium sm:block',
-                              selected ? 'text-text-primary' : 'text-text-secondary',
-                            )}
-                          >
-                            {item.label}
-                          </span>
-                        </button>
-                      )
-                    })}
+                          {item.label}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             ))}
@@ -240,48 +236,46 @@ export function SettingsModal({
 
           {/* Content pane — fixed title row, scrollable page below */}
           <div className="flex min-w-0 flex-1 flex-col">
-            <div
-              className={cx('flex shrink-0 items-center justify-between px-8 pt-8 pb-3')}
-            >
-                  <h2 className="text-title-3-medium text-text-primary">{PAGE_TITLES[page]}</h2>
-                  <button
-                    type="button"
-                    aria-label="Close settings"
-                    onClick={onClose}
-                    className={cx(
-                      'flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full',
-                      'bg-background-tertiary-default text-foreground-icon-secondary',
-                      'transition-colors duration-150 ease hover:bg-background-tertiary-hover',
-                      'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-                    )}
-                  >
-                    <RiCloseLine className="size-4" aria-hidden />
-                  </button>
-                </div>
-                <div className="relative min-h-0 flex-1">
-                  <div
-                    className="h-full overflow-y-auto px-8 pb-8"
-                    onScroll={(e) => setContentScrolled(e.currentTarget.scrollTop > 0)}
-                  >
-                    {page === 'profile' ? (
-                      <SettingsProfile onSaved={showSavedToast} />
-                    ) : page === 'security' ? (
-                      <SettingsSecurity />
-                    ) : (
-                      <SettingsAppearance />
-                    )}
-                  </div>
-                  {/* Progressive top fade — eases in once the page is scrolled so
+            <div className={cx('flex shrink-0 items-center justify-between px-8 pt-8 pb-3')}>
+              <h2 className="text-title-3-medium text-text-primary">{PAGE_TITLES[page]}</h2>
+              <button
+                type="button"
+                aria-label="Close settings"
+                onClick={onClose}
+                className={cx(
+                  'flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full',
+                  'bg-background-tertiary-default text-foreground-icon-secondary',
+                  'transition-colors duration-150 ease hover:bg-background-tertiary-hover',
+                  'outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                )}
+              >
+                <RiCloseLine className="size-4" aria-hidden />
+              </button>
+            </div>
+            <div className="relative min-h-0 flex-1">
+              <div
+                className="h-full overflow-y-auto px-8 pb-8"
+                onScroll={(e) => setContentScrolled(e.currentTarget.scrollTop > 0)}
+              >
+                {page === 'profile' ? (
+                  <SettingsProfile onSaved={showSavedToast} />
+                ) : page === 'security' ? (
+                  <SettingsSecurity />
+                ) : (
+                  <SettingsAppearance />
+                )}
+              </div>
+              {/* Progressive top fade — eases in once the page is scrolled so
                 content dissolves under the title row instead of hard-cutting. */}
-                  <div
-                    aria-hidden
-                    className={cx(
-                      'pointer-events-none absolute inset-x-0 top-0 h-10 bg-linear-to-b from-background-primary-default to-transparent',
-                      'transition-opacity duration-200 ease-out',
-                      contentScrolled ? 'opacity-100' : 'opacity-0',
-                    )}
-                  />
-                </div>
+              <div
+                aria-hidden
+                className={cx(
+                  'pointer-events-none absolute inset-x-0 top-0 h-10 bg-linear-to-b from-background-primary-default to-transparent',
+                  'transition-opacity duration-200 ease-out',
+                  contentScrolled ? 'opacity-100' : 'opacity-0',
+                )}
+              />
+            </div>
           </div>
         </div>
 
