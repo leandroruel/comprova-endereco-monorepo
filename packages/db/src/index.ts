@@ -4,6 +4,7 @@ export * from './runner.js'
 export * from './migrate-reference-data.js'
 export * from './adapters/index.js'
 export * from './usage-metering.js'
+export * from './wallet.js'
 export { and, count, eq, or, lte, gte, gt, lt, isNull, isNotNull, desc, asc, inArray, sql } from 'drizzle-orm'
 // Introspecção de schemas (testes de drift Drizzle ↔ migrations). Reexportado
 // aqui para que pacotes consumidores não precisem declarar `drizzle-orm`.

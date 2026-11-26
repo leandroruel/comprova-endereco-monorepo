@@ -9,11 +9,13 @@ import {
 } from '@comprova/db'
 import {
   makeFakeObjectStore,
+  makeLocalFSObjectStore,
   makeNominatimGeocoder,
   makeOverpassPlaces,
   makeS3ObjectStore,
   makeSupabaseObjectStore,
   type EvidenceObjectStore,
+  type LocalFSObjectStoreOptions,
 } from '@comprova/providers'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -40,6 +42,7 @@ type StorageConfiguredEnv = WorkerEnv & {
   readonly supabaseUrl: string
   readonly supabaseServiceRoleKey: string
   readonly supabaseStorageBucket: string
+  readonly localStoragePath: string
 }
 
 export const hasStorageConfig = (env: WorkerEnv): env is StorageConfiguredEnv =>
@@ -49,7 +52,8 @@ export const hasStorageConfig = (env: WorkerEnv): env is StorageConfiguredEnv =>
     env.s3Bucket !== undefined) ||
   (env.supabaseUrl !== undefined &&
     env.supabaseServiceRoleKey !== undefined &&
-    env.supabaseStorageBucket !== undefined)
+    env.supabaseStorageBucket !== undefined) ||
+  env.localStoragePath !== undefined
 
 export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore => {
   if (
@@ -76,6 +80,10 @@ export const makeObjectStore = (env: WorkerEnv): EvidenceObjectStore => {
       supabaseServiceRoleKey: env.supabaseServiceRoleKey,
       bucket: env.supabaseStorageBucket,
     })
+  }
+  if (env.localStoragePath !== undefined) {
+    const localOptions: LocalFSObjectStoreOptions = { rootPath: env.localStoragePath }
+    return makeLocalFSObjectStore(localOptions)
   }
   return makeFakeObjectStore()
 }

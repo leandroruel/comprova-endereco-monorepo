@@ -20,6 +20,8 @@ export interface WorkerEnv {
   readonly supabaseUrl?: string
   readonly supabaseServiceRoleKey?: string
   readonly supabaseStorageBucket?: string
+  /** Local filesystem storage path for development/local validation. */
+  readonly localStoragePath?: string
   /** Limite de bytes que o analisador F1.2 carrega em memória. */
   readonly evidenceAnalysisMaxBytes: number
   /**
@@ -29,6 +31,14 @@ export interface WorkerEnv {
   readonly documentIntelligenceUrl?: string
   readonly documentIntelligenceTimeoutMs?: number
   readonly documentIntelligenceMaxFileSizeMb?: number
+  /** Origem HTTPS do issuer de credencial (`CREDENTIAL_ISSUER_ORIGIN`). */
+  readonly credentialIssuerOrigin?: string
+  /** Material de assinatura por tenant (JSON). */
+  readonly credentialSigningKeys?: string
+  /** Backend de assinatura: 'local' ou 'aws-kms'. */
+  readonly signingKeyProvider?: 'local' | 'aws-kms'
+  /** Região do AWS KMS. */
+  readonly awsKmsRegion?: string
 }
 
 export const findRepoRoot = (startDir: string): string => {
@@ -57,7 +67,12 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     supabaseUrl: nonEmpty(env.SUPABASE_URL),
     supabaseServiceRoleKey: nonEmpty(env.SUPABASE_SERVICE_ROLE_KEY),
     supabaseStorageBucket: nonEmpty(env.SUPABASE_STORAGE_BUCKET),
+    localStoragePath: nonEmpty(env.LOCAL_STORAGE_PATH),
     documentIntelligenceUrl: nonEmpty(env.DOCUMENT_INTELLIGENCE_URL),
+    credentialIssuerOrigin: nonEmpty(env.CREDENTIAL_ISSUER_ORIGIN),
+    credentialSigningKeys: nonEmpty(env.CREDENTIAL_SIGNING_KEYS),
+    signingKeyProvider: nonEmpty(env.SIGNING_KEY_PROVIDER),
+    awsKmsRegion: nonEmpty(env.AWS_KMS_REGION),
   }
 
   const parsedAnalysisMaxBytes = Number(
@@ -100,6 +115,10 @@ export const workerEnvFromProcess = (env: NodeJS.ProcessEnv = process.env): Work
     documentIntelligenceMaxFileSizeMb: parsedDiMaxFileSizeMb,
     logLevel: env.LOG_LEVEL ?? 'info',
     logFile: nonEmpty(env.LOG_FILE),
+    credentialIssuerOrigin: optional.credentialIssuerOrigin,
+    credentialSigningKeys: optional.credentialSigningKeys,
+    signingKeyProvider: (optional.signingKeyProvider as 'local' | 'aws-kms') ?? 'local',
+    awsKmsRegion: optional.awsKmsRegion,
     ...Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined)),
   }
 }

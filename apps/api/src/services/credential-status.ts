@@ -88,8 +88,9 @@ export class CredentialIssuanceIdentityConflictError extends Error {
  * credencial REVOKED. `now` só é lido quando não existe linha: o instante da
  * primeira prova é imutável.
  *
- * Não guarda o documento assinado; só `issued_at` e o ponteiro de status
- * (`credential_id`). A reemissão usa `issued_at` como `proof.created`.
+ * Não guarda o documento assinado; só `issued_at`, o ponteiro de status
+ * (`credential_id`) e a chave de assinatura usada (`issuer_signing_key_id`).
+ * A reemissão usa `issued_at` como `proof.created`.
  */
 export const ensureFirstCredentialIssuance = async (
   db: Db,
@@ -98,6 +99,7 @@ export const ensureFirstCredentialIssuance = async (
   validationId: string,
   credentialId: string,
   now: () => Date,
+  issuerSigningKeyId: string | null = null,
 ): Promise<Date> => {
   return withTenant(db, tenantId, async (tx) => {
     const read = () =>
@@ -107,6 +109,7 @@ export const ensureFirstCredentialIssuance = async (
           issuerScope: t.credentialIssuance.issuerScope,
           credentialId: t.credentialIssuance.credentialId,
           issuedAt: t.credentialIssuance.issuedAt,
+          issuerSigningKeyId: t.credentialIssuance.issuerSigningKeyId,
         })
         .from(t.credentialIssuance)
         .where(eq(t.credentialIssuance.validationId, validationId))
@@ -117,6 +120,7 @@ export const ensureFirstCredentialIssuance = async (
       readonly issuerScope: string
       readonly credentialId: string
       readonly issuedAt: Date
+      readonly issuerSigningKeyId: string | null
     }): Date => {
       if (
         existing.tenantId !== tenantId ||
@@ -151,6 +155,7 @@ export const ensureFirstCredentialIssuance = async (
         issuerScope,
         credentialId,
         issuedAt: first,
+        issuerSigningKeyId,
       })
       .onConflictDoNothing()
       .returning({ issuedAt: t.credentialIssuance.issuedAt })

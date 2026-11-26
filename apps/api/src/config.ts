@@ -110,6 +110,13 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().min(1).optional(),
   /**
+   * Local filesystem storage para artefatos de comprovante (desenvolvimento/local).
+   * Quando definido, usa o filesystem local em vez de S3/Supabase. O caminho
+   * deve ser absoluto ou relativo ao working directory. Mutuamente exclusivo
+   * com S3 e Supabase: a prioridade é S3 > Supabase > Local > Unavailable.
+   */
+  LOCAL_STORAGE_PATH: z.string().min(1).optional(),
+  /**
    * Limite de upload do comprovante em bytes. O default é o limite que o
    * banco já impõe em `evidence_artifact` (50 MiB). É configurável apenas
    * para baixo, para testes e para políticas operacionais mais restritas.
