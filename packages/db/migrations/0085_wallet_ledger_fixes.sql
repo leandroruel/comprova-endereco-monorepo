@@ -39,36 +39,6 @@ REVOKE INSERT ON wallet_ledger FROM app_user;
 -- GRANT SELECT ON wallet TO app_user;  -- já existe
 -- GRANT SELECT ON wallet_ledger TO app_user;  -- já existe
 
--- Conceder BYPASSRLS para app_user nas tabelas de wallet: as funções
--- SECURITY DEFINER já validam tenant/saldo; o TypeScript é apenas um
--- wrapper fino que chama as funções. O FORCE RLS nas tabelas impede até
--- o owner de consultar sem contexto, então BYPASSRLS é necessário para
--- o app_user executar as queries de idempotência/consulta dentro da transação.
-ALTER TABLE wallet DISABLE ROW LEVEL SECURITY;
-ALTER TABLE wallet_ledger DISABLE ROW LEVEL SECURITY;
-
--- Re-habilitar RLS mas sem FORCE, para que o owner (funções SECURITY DEFINER)
--- possa acessar sem contexto, enquanto app_user respeita as policies.
-ALTER TABLE wallet ENABLE ROW LEVEL SECURITY;
-ALTER TABLE wallet_ledger ENABLE ROW LEVEL SECURITY;
-
--- Recriar policies sem FORCE
-DROP POLICY IF EXISTS tenant_isolation ON wallet;
-CREATE POLICY tenant_isolation ON wallet
-  USING (tenant_id = app_tenant_id())
-  WITH CHECK (tenant_id = app_tenant_id());
-
-DROP POLICY IF EXISTS tenant_isolation ON wallet_ledger;
-CREATE POLICY tenant_isolation ON wallet_ledger
-  USING (tenant_id = app_tenant_id())
-  WITH CHECK (tenant_id = app_tenant_id());
-
--- NOTA: BYPASSRLS removido conforme CodeRabbit review.
--- O app_user NÃO deve ter BYPASSRLS; as funções SECURITY DEFINER
--- já desabilitam row_security internamente. O TypeScript chama
--- as funções (não faz UPDATE direto nas tabelas).
--- Se BYPASSRLS foi aplicado em ambiente, use migration 0088 para remover.
-
 -- ---------------------------------------------------------------------------
 -- 3. Revogar EXECUTE de PUBLIC e conceder apenas a app_user
 -- ---------------------------------------------------------------------------
@@ -112,12 +82,8 @@ DECLARE
   v_available bigint;
   v_reserved bigint;
 BEGIN
-  -- Desabilita RLS dentro da função: a função é SECURITY DEFINER e valida
-  -- o tenant explicitamente via p_tenant_id = app_tenant_id(). O FORCE RLS
-  -- na tabela wallet impediria até o owner de acessar sem contexto.
   SET LOCAL row_security = off;
 
-  -- Null-safe tenant guard
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch: function called for tenant % but session is %', p_tenant_id, app_tenant_id();
   END IF;
@@ -126,15 +92,12 @@ BEGIN
     RAISE EXCEPTION 'amount_micros must be positive';
   END IF;
 
-  -- Lock serializa operações concorrentes no mesmo tenant
   LOCK TABLE wallet IN ROW EXCLUSIVE MODE;
 
-  -- Garante existência da wallet
   INSERT INTO wallet (tenant_id, available_balance, reserved_balance, version)
   VALUES (p_tenant_id, 0, 0, 1)
   ON CONFLICT (tenant_id) DO NOTHING;
 
-  -- Idempotência: checa ANTES de modificar, sob o lock
   IF p_idempotency_key IS NOT NULL THEN
     SELECT wl.entry_id, w.available_balance, w.reserved_balance
     INTO v_entry_id, v_available, v_reserved
@@ -150,7 +113,6 @@ BEGIN
     END IF;
   END IF;
 
-  -- Obtém saldos atuais com row lock
   SELECT available_balance, reserved_balance
   INTO v_available, v_reserved
   FROM wallet
@@ -159,14 +121,12 @@ BEGIN
 
   v_available := v_available + p_amount_micros;
 
-  -- Atualiza wallet
   UPDATE wallet
   SET available_balance = v_available,
       version = version + 1,
       updated_at = now()
   WHERE tenant_id = p_tenant_id;
 
-  -- Registra no ledger (constraint UNIQUE garante idempotência final)
   INSERT INTO wallet_ledger (
     tenant_id, entry_type, amount_micros,
     balance_after_micros, reserved_after_micros,
@@ -187,11 +147,7 @@ END $$;
 -- ============================================================================
 -- wallet_debit
 -- ============================================================================
--- Retorna status no resultado: 'debited', 'replayed', 'skipped' (com reason)
--- para evitar exceções que abortam a transação.
-DROP FUNCTION IF EXISTS wallet_debit(uuid, bigint, text, uuid, text, text, text, jsonb);
-
-CREATE FUNCTION wallet_debit(
+CREATE OR REPLACE FUNCTION wallet_debit(
   p_tenant_id uuid,
   p_amount_micros bigint,
   p_reference_type text,
@@ -214,7 +170,6 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  -- Null-safe tenant guard: missing session tenant raises; matching tenant passes
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch: function called for tenant % but session is %', p_tenant_id, app_tenant_id();
   END IF;
@@ -225,7 +180,6 @@ BEGIN
 
   LOCK TABLE wallet IN ROW EXCLUSIVE MODE;
 
-  -- Idempotência: checa ANTES do lock (barreira rápida)
   IF p_idempotency_key IS NOT NULL THEN
     SELECT wl.entry_id, w.available_balance, w.reserved_balance
     INTO v_entry_id, v_available, v_reserved
@@ -241,7 +195,6 @@ BEGIN
     END IF;
   END IF;
 
-  -- Verifica wallet e saldo COM LOCK (FOR UPDATE)
   SELECT available_balance, reserved_balance
   INTO v_available, v_reserved
   FROM wallet
@@ -253,7 +206,6 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Idempotência: checa DEPOIS do lock (barreira final sob concorrência)
   IF p_idempotency_key IS NOT NULL THEN
     SELECT wl.entry_id, w.available_balance, w.reserved_balance
     INTO v_entry_id, v_available, v_reserved
@@ -272,7 +224,7 @@ BEGIN
   IF v_available < p_amount_micros THEN
     RETURN QUERY SELECT 'skipped', NULL::bigint, NULL::bigint, NULL::bigint, 'insufficient_balance';
     RETURN;
-  END IF;
+  END IF
 
   v_available := v_available - p_amount_micros;
 
@@ -323,7 +275,6 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  -- Null-safe tenant guard
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
   END IF;
@@ -411,7 +362,6 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  -- Null-safe tenant guard
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
   END IF;
@@ -499,26 +449,25 @@ DECLARE
 BEGIN
   SET LOCAL row_security = off;
 
-  -- Null-safe tenant guard
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
   END IF;
 
   IF p_amount_micros = 0 THEN
     RAISE EXCEPTION 'amount_micros cannot be zero';
-  END IF;
+  END IF.
 
-  LOCK TABLE wallet IN ROW EXCLUSIVE MODE;
+  LOCK TABLE wallet IN ROW EXCLUSIVE MODE.
 
   SELECT available_balance, reserved_balance
   INTO v_available, v_reserved
   FROM wallet
   WHERE tenant_id = p_tenant_id
-  FOR UPDATE;
+  FOR UPDATE.
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Wallet not found for tenant %', p_tenant_id;
-  END IF;
+  END IF.
 
   IF p_amount_micros > 0 THEN
     v_available := v_available + p_amount_micros;
@@ -529,13 +478,13 @@ BEGIN
     END IF;
     v_available := v_available - abs(p_amount_micros);
     v_entry_type := 'adjustment';
-  END IF;
+  END IF.
 
   UPDATE wallet
   SET available_balance = v_available,
       version = version + 1,
       updated_at = now()
-  WHERE tenant_id = p_tenant_id;
+  WHERE tenant_id = p_tenant_id.
 
   INSERT INTO wallet_ledger (
     tenant_id, entry_type, amount_micros,
@@ -549,9 +498,9 @@ BEGIN
     p_actor, p_reason, COALESCE(p_metadata, '{}')
   )
   RETURNING entry_id, balance_after_micros, reserved_after_micros
-  INTO v_entry_id, v_available, v_reserved;
+  INTO v_entry_id, v_available, v_reserved.
 
-  RETURN QUERY SELECT v_entry_id, v_available, v_reserved;
+  RETURN QUERY SELECT v_entry_id, v_available, v_reserved.
 END $$;
 
 -- Reafirmar grants
