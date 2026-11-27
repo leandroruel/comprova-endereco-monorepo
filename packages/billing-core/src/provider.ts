@@ -156,7 +156,7 @@ export interface ProviderInvoiceLine {
   readonly quantity: number
   readonly amountMicros: number
   readonly description?: string
-  readonly type: 'subscription' | 'usage' | 'credit' | 'proration'
+  readonly type: 'subscription' | 'usage' | 'credit' | 'proration' | 'tax' | 'discount' | 'charge' | 'pending'
   readonly periodStart?: Date
   readonly periodEnd?: Date
 }

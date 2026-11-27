@@ -505,23 +505,41 @@ export class SubscriptionService {
       return
     }
 
+    // Build update data, only including defined fields to avoid overwriting with null
+    const updateData: Partial<typeof t.tenantSubscription.$inferInsert> = {
+      status: providerSub.status,
+      currentPeriodStart: providerSub.currentPeriodStart,
+      currentPeriodEnd: providerSub.currentPeriodEnd,
+      cancelAtPeriodEnd: providerSub.cancelAtPeriodEnd,
+      metadata: {
+        ...providerSub.metadata,
+        lastSyncedAt: new Date().toISOString(),
+      },
+    }
+
+    // Only include optional fields if they are defined
+    if (providerSub.trialStart !== undefined) {
+      updateData.trialStart = providerSub.trialStart
+    }
+    if (providerSub.trialEnd !== undefined) {
+      updateData.trialEnd = providerSub.trialEnd
+    }
+    if (providerSub.canceledAt !== undefined) {
+      updateData.canceledAt = providerSub.canceledAt
+    }
+    if (providerSub.cancelAtPeriodEnd !== undefined) {
+      updateData.cancelAtPeriodEnd = providerSub.cancelAtPeriodEnd
+    }
+    if (providerSub.pausedAt !== undefined) {
+      updateData.pausedAt = providerSub.pausedAt
+    }
+    if (providerSub.defaultPaymentMethodId !== undefined) {
+      updateData.paymentMethodId = providerSub.defaultPaymentMethodId
+    }
+
     await db
       .update(t.tenantSubscription)
-      .set({
-        status: providerSub.status,
-        currentPeriodStart: providerSub.currentPeriodStart,
-        currentPeriodEnd: providerSub.currentPeriodEnd,
-        trialStart: providerSub.trialStart,
-        trialEnd: providerSub.trialEnd,
-        cancelAtPeriodEnd: providerSub.cancelAtPeriodEnd,
-        canceledAt: providerSub.canceledAt,
-        pausedAt: providerSub.pausedAt,
-        paymentMethodId: providerSub.defaultPaymentMethodId,
-        metadata: {
-          ...providerSub.metadata,
-          lastSyncedAt: new Date().toISOString(),
-        },
-      })
+      .set(updateData)
       .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
   }
 

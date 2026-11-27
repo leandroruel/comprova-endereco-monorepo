@@ -407,12 +407,20 @@ export class StripeProvider implements BillingProvider {
 
     const data = event.data as Record<string, unknown>
 
+    // Determine providerSubscriptionId based on event type
+    let providerSubscriptionId: string | undefined
+    if (event.type.startsWith('customer.subscription.')) {
+      providerSubscriptionId = data.id as string
+    } else if (event.type.startsWith('invoice.')) {
+      providerSubscriptionId = (data.subscription as string) ?? undefined
+    }
+
     return {
       type: typeMap[event.type] ?? (event.type as WebhookEventType),
       providerName: this.name,
-      providerSubscriptionId: (data.subscription as string) ?? (data.customer as string),
+      providerSubscriptionId,
       providerCustomerId: data.customer as string,
-      providerInvoiceId: data.id as string,
+      providerInvoiceId: event.type.startsWith('invoice.') ? (data.id as string) : undefined,
       providerPaymentId: this.extractPaymentId(data, event.type),
       payload: data,
     }
@@ -547,12 +555,26 @@ export class StripeProvider implements BillingProvider {
         quantity: line.quantity ?? 0,
         amountMicros: this.centavosToMicros(line.amount),
         description: line.description ?? undefined,
-        type: line.type as ProviderInvoiceLine['type'],
+        type: this.mapInvoiceLineType(line.type),
         periodStart: line.period?.start ? new Date(line.period.start * 1000) : undefined,
         periodEnd: line.period?.end ? new Date(line.period.end * 1000) : undefined,
       })),
       metadata: inv.metadata as Record<string, string>,
     }
+  }
+
+  private mapInvoiceLineType(type: string): ProviderInvoiceLine['type'] {
+    const typeMap: Record<string, ProviderInvoiceLine['type']> = {
+      subscription: 'subscription',
+      usage: 'usage',
+      credit: 'credit',
+      proration: 'proration',
+      tax: 'credit', // map tax to credit
+      discount: 'credit', // map discount to credit
+      charge: 'charge', // map charge to charge (need to add to type)
+      pending: 'pending', // map pending to pending (need to add to type)
+    }
+    return typeMap[type] ?? 'charge'
   }
 
   private mapPayment(pi: Stripe.PaymentIntent): ProviderPayment {
