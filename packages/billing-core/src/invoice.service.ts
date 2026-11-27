@@ -10,6 +10,7 @@ import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { eq, and, desc } from '@comprova/db'
 import { randomUUID } from 'node:crypto'
+import { CustomerService } from './customer.service.js'
 
 export interface InvoiceWithDetails {
   readonly invoice: t.Invoice
@@ -21,6 +22,7 @@ export class InvoiceService {
   constructor(
     private readonly db: Db,
     private readonly providerRegistry: ProviderRegistry,
+    private readonly customerService: CustomerService,
   ) {}
 
   /**
@@ -71,7 +73,9 @@ export class InvoiceService {
         dueDate: providerInvoice.dueDate,
         paidAt: providerInvoice.paidAt,
         metadata: providerInvoice.metadata,
-        tenantId: providerInvoice.customerId, // Stripe customer ID maps to tenant
+        tenantId:
+          (await this.customerService.getTenantByProviderCustomerId(providerInvoice.customerId, db))
+            ?.tenantId ?? providerInvoice.customerId,
         number: providerInvoice.id, // Use provider invoice ID as number
       })
       .onConflictDoUpdate({
@@ -135,7 +139,9 @@ export class InvoiceService {
         paidAt: providerPayment.paidAt,
         refundedAt: providerPayment.refundedAt,
         metadata: providerPayment.metadata,
-        tenantId: providerPayment.customerId, // Stripe customer ID maps to tenant
+        tenantId:
+          (await this.customerService.getTenantByProviderCustomerId(providerPayment.customerId, db))
+            ?.tenantId ?? providerPayment.customerId,
         provider: providerName,
       })
       .onConflictDoUpdate({

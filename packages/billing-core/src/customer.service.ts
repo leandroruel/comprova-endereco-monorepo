@@ -148,6 +148,34 @@ export class CustomerService {
   }
 
   /**
+   * Busca tenant pelo ID do customer no provider (ex.: Stripe customer ID).
+   */
+  async getTenantByProviderCustomerId(
+    providerCustomerId: string,
+    tx?: Db | DbTx,
+  ): Promise<{ tenantId: string; providerName: string } | null> {
+    const db = tx ?? this.db
+
+    const [tenantRecord] = await db
+      .select({
+        tenantId: t.tenant.tenantId,
+        providerName: t.tenant.providerName,
+      })
+      .from(t.tenant)
+      .where(eq(t.tenant.stripeCustomerId, providerCustomerId))
+      .limit(1)
+
+    if (!tenantRecord) {
+      return null
+    }
+
+    return {
+      tenantId: tenantRecord.tenantId,
+      providerName: tenantRecord.providerName ?? 'stripe',
+    }
+  }
+
+  /**
    * Remove payment method do customer.
    */
   async detachPaymentMethod(tenantId: string, paymentMethodId: string, tx?: Db | DbTx): Promise<void> {
