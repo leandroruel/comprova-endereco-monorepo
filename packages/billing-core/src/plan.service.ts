@@ -153,6 +153,7 @@ export class BillingPlanService {
         )
       }
 
+      const priceIdempotencyKey = `${input.idempotencyKey ?? `plan-price-${planId}`}-${normalizedPriceMicros}-${input.interval ?? plan.interval}-${input.intervalCount ?? plan.intervalCount}`
       const newPrice = await provider.createPrice(plan.providerProductId ?? '', {
         currency: (plan.features as PlanFeatures).currency,
         unitAmountMicros: normalizedPriceMicros,
@@ -161,7 +162,7 @@ export class BillingPlanService {
         trialPeriodDays: plan.trialPeriodDays ?? undefined,
         usageType: 'licensed',
         metadata: { comprova_plan_id: planId, comprova_plan_name: plan.name },
-        idempotencyKey: `${input.idempotencyKey ?? `plan-price-${planId}`}-${Date.now()}`,
+        idempotencyKey: priceIdempotencyKey,
       })
 
       // Arquiva o price antigo no provider

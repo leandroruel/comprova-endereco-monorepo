@@ -128,6 +128,7 @@ export class StripeProvider implements BillingProvider {
       {
         email: input.email,
         name: input.name,
+        address: input.address ? this.mapAddress(input.address) : undefined,
         metadata: input.metadata,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -141,6 +142,7 @@ export class StripeProvider implements BillingProvider {
       {
         email: input.email,
         name: input.name,
+        address: input.address ? this.mapAddress(input.address) : undefined,
         metadata: input.metadata,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -163,7 +165,7 @@ export class StripeProvider implements BillingProvider {
       customer: customerId,
       type: 'card',
     })
-    return methods.data.map(this.mapPaymentMethod)
+    return methods.data.map((m) => this.mapPaymentMethod(m))
   }
 
   // ============================================================================
@@ -197,20 +199,14 @@ export class StripeProvider implements BillingProvider {
       if (!itemId) {
         throw new Error('Subscription has no items')
       }
-      const updateItems: Stripe.SubscriptionUpdateParams.Item[] = []
+      const updateItem: Stripe.SubscriptionUpdateParams.Item = { id: itemId }
       if (input.priceId) {
-        updateItems.push({
-          id: itemId,
-          price: input.priceId,
-        })
+        updateItem.price = input.priceId
       }
       if (input.quantity !== undefined) {
-        updateItems.push({
-          id: itemId,
-          quantity: input.quantity,
-        })
+        updateItem.quantity = input.quantity
       }
-      updateParams.items = updateItems
+      updateParams.items = [updateItem]
       updateParams.proration_behavior = input.prorationBehavior ?? 'create_prorations'
     }
     if (input.trialEnd) {
@@ -312,7 +308,7 @@ export class StripeProvider implements BillingProvider {
       starting_after: options?.startingAfter,
       status: options?.status as Stripe.InvoiceListParams.Status | undefined,
     })
-    return invoices.data.map(this.mapInvoice)
+    return invoices.data.map((inv) => this.mapInvoice(inv))
   }
 
   async getPayment(id: string): Promise<ProviderPayment | null> {
@@ -499,18 +495,23 @@ export class StripeProvider implements BillingProvider {
 
   private mapSubscription(sub: Stripe.Subscription): ProviderSubscription {
     const price = sub.items.data[0]?.price
+    // Map Stripe's incomplete_expired to canceled locally
+    const status =
+      sub.status === 'incomplete_expired' ? 'canceled' : (sub.status as ProviderSubscription['status'])
     return {
       id: sub.id,
       customerId: sub.customer as string,
       priceId: price?.id ?? '',
-      status: sub.status as ProviderSubscription['status'],
+      status,
       currentPeriodStart: new Date(sub.current_period_start * 1000),
       currentPeriodEnd: new Date(sub.current_period_end * 1000),
       trialStart: sub.trial_start ? new Date(sub.trial_start * 1000) : undefined,
       trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : undefined,
       cancelAtPeriodEnd: sub.cancel_at_period_end,
       canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : undefined,
-      pausedAt: sub.pause_collection ? new Date() : undefined,
+      pausedAt: sub.pause_collection
+        ? new Date(sub.pause_collection.behavior === 'void' ? sub.current_period_end * 1000 : Date.now())
+        : undefined,
       defaultPaymentMethodId: (sub.default_payment_method as string) ?? undefined,
       metadata: sub.metadata as Record<string, string>,
       items: sub.items.data.map((item) => ({
@@ -610,6 +611,16 @@ export class StripeProvider implements BillingProvider {
       city: addr.city ?? '',
       state: addr.state ?? '',
       zip: addr.postal_code ?? '',
+      country: addr.country ?? 'BR',
+    }
+  }
+
+  private mapAddress(addr: Address): Stripe.AddressParam {
+    return {
+      line1: addr.street,
+      city: addr.city,
+      state: addr.state,
+      postal_code: addr.zip,
       country: addr.country ?? 'BR',
     }
   }

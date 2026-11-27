@@ -26,7 +26,7 @@ export type Currency = 'BRL' | 'USD' | 'EUR'
 export type Interval = 'month' | 'year'
 
 export type SubscriptionStatus =
-  'incomplete' | 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid' | 'paused'
+  'incomplete' | 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid' | 'paused' | 'incomplete_expired'
 
 export type InvoiceStatus = 'draft' | 'open' | 'paid' | 'void' | 'uncollectible' | 'pending'
 

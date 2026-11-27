@@ -75,7 +75,10 @@ export class InvoiceService {
         metadata: providerInvoice.metadata,
         tenantId:
           (await this.customerService.getTenantByProviderCustomerId(providerInvoice.customerId, db))
-            ?.tenantId ?? providerInvoice.customerId,
+            ?.tenantId ??
+          (() => {
+            throw new Error(`Tenant not found for Stripe customer ${providerInvoice.customerId}`)
+          })(),
         number: providerInvoice.id, // Use provider invoice ID as number
       })
       .onConflictDoUpdate({
@@ -141,7 +144,10 @@ export class InvoiceService {
         metadata: providerPayment.metadata,
         tenantId:
           (await this.customerService.getTenantByProviderCustomerId(providerPayment.customerId, db))
-            ?.tenantId ?? providerPayment.customerId,
+            ?.tenantId ??
+          (() => {
+            throw new Error(`Tenant not found for Stripe customer ${providerPayment.customerId}`)
+          })(),
         provider: providerName,
       })
       .onConflictDoUpdate({

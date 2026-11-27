@@ -33,6 +33,7 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', [
   'canceled',
   'unpaid',
   'paused',
+  'incomplete_expired',
 ])
 export const invoiceStatusEnum = pgEnum('invoice_status', [
   'draft',
