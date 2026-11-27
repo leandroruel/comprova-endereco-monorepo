@@ -715,5 +715,3 @@ export interface BillingProvider {
   constructEvent(payload: string, signature: string): ProviderWebhookEvent
   parseWebhookEvent(event: ProviderWebhookEvent): NormalizedWebhookEvent
 }
-
-

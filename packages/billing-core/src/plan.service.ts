@@ -6,7 +6,7 @@
  */
 
 import type { ProviderRegistry } from './provider-registry.js'
-import type { BillingProvider, ProviderPrice, PlanFeatures, PlanPricing } from './provider.js'
+import type { PlanFeatures, PlanPricing, Interval } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { eq, desc } from '@comprova/db'
@@ -70,12 +70,18 @@ export class BillingPlanService {
 
     // 3. Salva plano local com IDs do provider
     const planId = randomUUID()
+    const slug = input.name
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
     const [plan] = await db
       .insert(t.billingPlan)
       .values({
         id: planId,
         name: input.name,
+        slug,
         description: input.description,
+        billingModel: 'postpaid',
         providerName: input.providerName,
         providerProductId: product.id,
         providerPriceId: price.id,
@@ -109,34 +115,46 @@ export class BillingPlanService {
 
     // Atualiza Product se nome/descrição mudaram
     if (input.name || input.description) {
-      await provider.updateProduct(plan.providerProductId, {
-        name: input.name,
-        description: input.description,
-        idempotencyKey: `plan-product-${planId}-update`,
-      })
+      const productId = plan.providerProductId ?? ''
+      if (productId) {
+        await provider.updateProduct(productId, {
+          name: input.name,
+          description: input.description,
+          idempotencyKey: `plan-product-${planId}-update`,
+        })
+      }
       if (input.name) updateData.name = input.name
       if (input.description !== undefined) updateData.description = input.description
     }
 
     // Se preço ou intervalo mudaram, cria NOVO price (Stripe não permite alterar price existente)
-    const priceChanged = input.monthlyPriceMicros !== undefined && input.monthlyPriceMicros !== plan.monthlyPriceMicros
+    const priceChanged =
+      input.monthlyPriceMicros !== undefined && input.monthlyPriceMicros !== plan.monthlyPriceMicros
     const intervalChanged = input.interval !== undefined && input.interval !== plan.interval
-    const intervalCountChanged = input.intervalCount !== undefined && input.intervalCount !== plan.intervalCount
+    const intervalCountChanged =
+      input.intervalCount !== undefined && input.intervalCount !== plan.intervalCount
 
     if (priceChanged || intervalChanged || intervalCountChanged) {
-      const newPrice = await provider.createPrice(plan.providerProductId, {
-        currency: plan.features.currency,
+      const productId = plan.providerProductId ?? ''
+      if (!productId) {
+        throw new Error('Plan has no providerProductId')
+      }
+      const newPrice = await provider.createPrice(productId, {
+        currency: (plan.features as PlanFeatures).currency,
         unitAmountMicros: input.monthlyPriceMicros ?? plan.monthlyPriceMicros,
-        interval: input.interval ?? plan.interval,
+        interval: (input.interval ?? plan.interval) as Interval,
         intervalCount: input.intervalCount ?? plan.intervalCount,
-        trialPeriodDays: plan.trialPeriodDays,
+        trialPeriodDays: plan.trialPeriodDays ?? undefined,
         usageType: 'licensed',
         metadata: { comprova_plan_id: planId, comprova_plan_name: plan.name },
         idempotencyKey: `plan-price-${planId}-${Date.now()}`,
       })
 
       // Arquiva o price antigo no provider
-      await provider.archiveProduct(plan.providerPriceId)
+      const oldPriceId = plan.providerPriceId ?? ''
+      if (oldPriceId) {
+        await provider.archiveProduct(oldPriceId)
+      }
 
       updateData.providerPriceId = newPrice.id
       if (input.monthlyPriceMicros !== undefined) updateData.monthlyPriceMicros = input.monthlyPriceMicros
@@ -146,14 +164,17 @@ export class BillingPlanService {
 
     // Atualiza features se fornecido
     if (input.features) {
-      updateData.features = { ...plan.features, ...input.features }
+      updateData.features = { ...(plan.features as PlanFeatures), ...input.features }
     }
 
     if (input.isActive !== undefined) {
       updateData.isActive = input.isActive
       // Se desativando, arquiva price no provider
       if (!input.isActive) {
-        await provider.archiveProduct(plan.providerPriceId)
+        const priceId = plan.providerPriceId ?? ''
+        if (priceId) {
+          await provider.archiveProduct(priceId)
+        }
       }
     }
 
@@ -178,12 +199,12 @@ export class BillingPlanService {
     const plan = await this.getPlan(planId, db)
     const provider = this.providerRegistry.get(plan.providerName)
 
-    await provider.archiveProduct(plan.providerPriceId)
+    const priceId = plan.providerPriceId ?? ''
+    if (priceId) {
+      await provider.archiveProduct(priceId)
+    }
 
-    await db
-      .update(t.billingPlan)
-      .set({ isActive: false })
-      .where(eq(t.billingPlan.id, planId))
+    await db.update(t.billingPlan).set({ isActive: false }).where(eq(t.billingPlan.id, planId))
   }
 
   /**
@@ -191,11 +212,7 @@ export class BillingPlanService {
    */
   async getPlan(planId: string, db?: Db | DbTx): Promise<t.BillingPlan> {
     const client = db ?? this.db
-    const [plan] = await client
-      .select()
-      .from(t.billingPlan)
-      .where(eq(t.billingPlan.id, planId))
-      .limit(1)
+    const [plan] = await client.select().from(t.billingPlan).where(eq(t.billingPlan.id, planId)).limit(1)
 
     if (!plan) {
       throw new Error(`Billing plan not found: ${planId}`)
@@ -239,10 +256,7 @@ export class BillingPlanService {
    */
   async listAllPlans(db?: Db | DbTx): Promise<ReadonlyArray<t.BillingPlan>> {
     const client = db ?? this.db
-    return client
-      .select()
-      .from(t.billingPlan)
-      .orderBy(desc(t.billingPlan.createdAt))
+    return client.select().from(t.billingPlan).orderBy(desc(t.billingPlan.createdAt))
   }
 
   /**
@@ -251,12 +265,12 @@ export class BillingPlanService {
   async getPlanPricing(planId: string, db?: Db | DbTx): Promise<PlanPricing> {
     const plan = await this.getPlan(planId, db)
     return {
-      amountMicros: plan.monthlyPriceMicros / plan.features.validationsIncluded,
-      debitMode: plan.features.debitMode ?? 'grace',
-      validationsIncluded: plan.features.validationsIncluded,
-      overagePriceMicros: plan.features.overagePriceMicros,
-      currency: plan.features.currency,
-      providerPriceId: plan.providerPriceId,
+      amountMicros: plan.monthlyPriceMicros / (plan.features as PlanFeatures).validationsIncluded,
+      debitMode: (plan.features as PlanFeatures).debitMode ?? 'grace',
+      validationsIncluded: (plan.features as PlanFeatures).validationsIncluded,
+      overagePriceMicros: (plan.features as PlanFeatures).overagePriceMicros,
+      currency: (plan.features as PlanFeatures).currency,
+      providerPriceId: plan.providerPriceId ?? '',
       usageType: 'metered',
     }
   }

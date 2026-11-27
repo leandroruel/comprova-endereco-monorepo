@@ -6,7 +6,6 @@
  */
 
 import type { ProviderRegistry } from './provider-registry.js'
-import type { BillingProvider, ProviderInvoice, ProviderPayment, ListInvoicesOptions } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { eq, and, desc } from '@comprova/db'
@@ -28,11 +27,7 @@ export class InvoiceService {
    * Sincroniza invoice do provider para o banco local.
    * Chamado pelo webhook handler quando invoice.paid/finalized.
    */
-  async syncInvoice(
-    providerInvoiceId: string,
-    providerName: string,
-    tx?: DbTx,
-  ): Promise<t.Invoice | null> {
+  async syncInvoice(providerInvoiceId: string, providerName: string, tx?: DbTx): Promise<t.Invoice | null> {
     const db = tx ?? this.db
     const provider = this.providerRegistry.get(providerName)
 
@@ -72,6 +67,8 @@ export class InvoiceService {
         dueDate: providerInvoice.dueDate,
         paidAt: providerInvoice.paidAt,
         metadata: providerInvoice.metadata,
+        tenantId: providerInvoice.customerId, // Stripe customer ID maps to tenant
+        number: providerInvoice.id, // Use provider invoice ID as number
       })
       .onConflictDoUpdate({
         target: t.invoice.providerInvoiceId,
@@ -94,11 +91,7 @@ export class InvoiceService {
   /**
    * Sincroniza payment do provider.
    */
-  async syncPayment(
-    providerPaymentId: string,
-    providerName: string,
-    tx?: DbTx,
-  ): Promise<t.Payment | null> {
+  async syncPayment(providerPaymentId: string, providerName: string, tx?: DbTx): Promise<t.Payment | null> {
     const db = tx ?? this.db
     const provider = this.providerRegistry.get(providerName)
 
@@ -134,6 +127,8 @@ export class InvoiceService {
         paidAt: providerPayment.paidAt,
         refundedAt: providerPayment.refundedAt,
         metadata: providerPayment.metadata,
+        tenantId: providerPayment.customerId, // Stripe customer ID maps to tenant
+        provider: providerName,
       })
       .onConflictDoUpdate({
         target: t.payment.providerPaymentId,
@@ -187,11 +182,7 @@ export class InvoiceService {
   async getInvoice(invoiceId: string, tx?: DbTx): Promise<InvoiceWithDetails | null> {
     const db = tx ?? this.db
 
-    const [inv] = await db
-      .select()
-      .from(t.invoice)
-      .where(eq(t.invoice.id, invoiceId))
-      .limit(1)
+    const [inv] = await db.select().from(t.invoice).where(eq(t.invoice.id, invoiceId)).limit(1)
 
     if (!inv) return null
 
@@ -228,10 +219,7 @@ export class InvoiceService {
       .select()
       .from(t.invoice)
       .where(
-        and(
-          eq(t.invoice.providerInvoiceId, providerInvoiceId),
-          eq(t.invoice.providerName, providerName),
-        ),
+        and(eq(t.invoice.providerInvoiceId, providerInvoiceId), eq(t.invoice.providerName, providerName)),
       )
       .limit(1)
 
@@ -241,7 +229,10 @@ export class InvoiceService {
   /**
    * Obtém resumo de faturamento do tenant (para dashboard).
    */
-  async getBillingSummary(tenantId: string, tx?: DbTx): Promise<{
+  async getBillingSummary(
+    tenantId: string,
+    tx?: DbTx,
+  ): Promise<{
     readonly totalInvoicedMicros: number
     readonly totalPaidMicros: number
     readonly totalPendingMicros: number
@@ -265,10 +256,21 @@ export class InvoiceService {
       }
     }
 
+    const firstSubscription = subscriptions[0]
+    if (!firstSubscription) {
+      return {
+        totalInvoicedMicros: 0,
+        totalPaidMicros: 0,
+        totalPendingMicros: 0,
+        openInvoicesCount: 0,
+        overdueInvoicesCount: 0,
+      }
+    }
+
     const invoices = await db
       .select()
       .from(t.invoice)
-      .where(eq(t.invoice.subscriptionId, subscriptions[0].id))
+      .where(eq(t.invoice.subscriptionId, firstSubscription.id))
 
     let totalInvoicedMicros = 0
     let totalPaidMicros = 0
@@ -276,8 +278,8 @@ export class InvoiceService {
     let overdueInvoicesCount = 0
 
     for (const inv of invoices) {
-      totalInvoicedMicros += inv.amountDueMicros
-      totalPaidMicros += inv.amountPaidMicros
+      totalInvoicedMicros += inv.amountDueMicros ?? 0
+      totalPaidMicros += inv.amountPaidMicros ?? 0
 
       if (inv.status === 'open') {
         openInvoicesCount++

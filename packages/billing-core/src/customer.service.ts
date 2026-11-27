@@ -6,7 +6,7 @@
  */
 
 import type { ProviderRegistry } from './provider-registry.js'
-import type { ProviderCustomer, CreateCustomerInput, UpdateCustomerInput, ProviderPaymentMethod, Address } from './provider.js'
+import type { ProviderPaymentMethod, Address } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { eq, and } from '@comprova/db'
@@ -33,7 +33,7 @@ export class CustomerService {
   async ensureCustomer(
     tenantId: string,
     billingData: CustomerBillingData,
-    tx?: DbTx,
+    tx?: Db | DbTx,
   ): Promise<{ providerCustomerId: string; providerName: string }> {
     const db = tx ?? this.db
 
@@ -98,11 +98,7 @@ export class CustomerService {
   /**
    * Anexa um payment method ao customer e define como default.
    */
-  async attachPaymentMethod(
-    tenantId: string,
-    paymentMethodId: string,
-    tx?: DbTx,
-  ): Promise<void> {
+  async attachPaymentMethod(tenantId: string, paymentMethodId: string, tx?: Db | DbTx): Promise<void> {
     const db = tx ?? this.db
 
     const [tenantRecord] = await db
@@ -131,7 +127,7 @@ export class CustomerService {
   /**
    * Lista payment methods do customer.
    */
-  async listPaymentMethods(tenantId: string, tx?: DbTx): Promise<ReadonlyArray<ProviderPaymentMethod>> {
+  async listPaymentMethods(tenantId: string, tx?: Db | DbTx): Promise<ReadonlyArray<ProviderPaymentMethod>> {
     const db = tx ?? this.db
 
     const [tenantRecord] = await db
@@ -154,7 +150,7 @@ export class CustomerService {
   /**
    * Remove payment method do customer.
    */
-  async detachPaymentMethod(tenantId: string, paymentMethodId: string, tx?: DbTx): Promise<void> {
+  async detachPaymentMethod(tenantId: string, paymentMethodId: string, tx?: Db | DbTx): Promise<void> {
     const db = tx ?? this.db
 
     const [tenantRecord] = await db
@@ -177,6 +173,8 @@ export class CustomerService {
     await db
       .update(t.tenant)
       .set({ stripePaymentMethodId: null })
-      .where(and(eq(t.tenant.tenantId, tenantId), eq(sql`${t.tenant.stripePaymentMethodId}`, paymentMethodId)))
+      .where(
+        and(eq(t.tenant.tenantId, tenantId), eq(sql`${t.tenant.stripePaymentMethodId}`, paymentMethodId)),
+      )
   }
 }

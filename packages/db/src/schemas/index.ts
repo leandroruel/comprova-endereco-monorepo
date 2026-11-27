@@ -31,7 +31,16 @@ import { organizationInvitation, organizationMember } from './organizations.js'
 import { auditLog, tenantQuotaAudit, usageBillingUnit, usageEvent, usageEventIdempotency } from './usage.js'
 import { billingPlan, tenantSubscription, invoice, payment, providerWebhookEvent } from './billing.js'
 export { billingPlan, tenantSubscription, invoice, payment, providerWebhookEvent }
-export type { BillingPlan, NewBillingPlan, TenantSubscription, NewTenantSubscription, Invoice, NewInvoice, Payment, NewPayment } from './billing.js'
+export type {
+  BillingPlan,
+  NewBillingPlan,
+  TenantSubscription,
+  NewTenantSubscription,
+  Invoice,
+  NewInvoice,
+  Payment,
+  NewPayment,
+} from './billing.js'
 import { validation, validationIdempotency } from './validations.js'
 import { validationCustomerDocument } from './validation-customer-document.js'
 import { holder } from './holder.js'

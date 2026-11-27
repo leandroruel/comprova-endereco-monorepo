@@ -1389,11 +1389,12 @@ tenant_id)`** (0025): garante `claim.tenant_id = subject.tenant_id` (antes, a FK
 - **Nota** — `signal.evidence_id` referencia apenas artefato material (S3/VLM); a ligação observação↔claim é `claim_evidence.signal_id` (desambiguado na migração 0023).
 - **Testes** — `f3.int.test.ts` +1 (reuso de claim + ligação de evidências T1) e asserções no caso ambíguo. Suíte: 127/127.
 
-## Provider Abstraction Layer — Billing (2026-11-26)
+## Provider Abstraction Layer — Billing (2026-11-26) — **PR #85 aberto, type errors pendentes**
 
-Implementa **Provider Abstraction Layer** para billing, transformando Stripe em um *provider* plugável (não core).
+Implementa **Provider Abstraction Layer** para billing, transformando Stripe em um _provider_ plugável (não core).
 
 ### Core (`packages/billing-core/`)
+
 - **`BillingProvider` interface** — Operations: Products, Prices, Customers, Subscriptions, Invoices, Payments, Usage Metering, Credits, Webhooks
 - **`ProviderRegistry`** — DI container para múltiplos providers
 - **`PlanService`** — CRUD + auto sync Product+Price no provider
@@ -1402,16 +1403,19 @@ Implementa **Provider Abstraction Layer** para billing, transformando Stripe em 
 - **`InvoiceService`** — Invoice/Payment sync via webhooks
 
 ### Stripe Provider (`packages/billing-stripe/`)
+
 - **`StripeProvider`** — Full `BillingProvider` implementation usando Stripe SDK
 - Idempotency keys em todas as chamadas
 - Auto-registration helper
 
 ### Database
+
 - **Migration 0094** — provider fields em todas as tabelas de billing
 - **Novos schemas** — billingPlan, tenantSubscription, invoice, payment, providerWebhookEvent
 - **Enums** — subscription/invoice/payment/plan statuses
 
 ### Architecture
+
 ```
 Core (billing-core)          Providers
 ┌─────────────────────┐      ┌────────────────────┐
@@ -1426,16 +1430,25 @@ Core (billing-core)          Providers
 ```
 
 ### Key Benefits
+
 - **Stripe é um provider, não core** — Fácil adicionar Mercado Pago, Asaas depois
 - **Sales-led onboarding**: Admin cria plano → sync Stripe → Admin ativa billing no tenant → Verifier completa onboarding com payment_method
 - **Webhooks normalizados** → `provider_webhook_event` idempotente → sync local
 
 ### CI Status
+
 - ✅ `pnpm format` passes
-- ✅ `pnpm typecheck` (db package passes)
+- ❌ `pnpm typecheck` — **type errors pendentes** (missing required fields in inserts, null checks, unused imports)
 - ✅ `pnpm vitest run` (1671 tests pass)
 - ✅ `pnpm db:fence` passes
 - ✅ `pnpm lint` passes (warnings only)
+
+### Pendente para merge
+
+- Fix required fields in DB inserts (tenantId, number for invoice; tenantId, provider for payment; slug, billingModel for billingPlan)
+- Add null checks for optional fields
+- Remove unused imports in services
+- Fix transaction type compatibility
 
 ## Dashboard (apps/dashboard)
 

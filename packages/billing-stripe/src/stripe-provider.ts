@@ -14,6 +14,7 @@ import type {
   ProviderPaymentMethod,
   ProviderSubscription,
   ProviderInvoice,
+  ProviderInvoiceLine,
   ProviderPayment,
   ProviderCreditNote,
   ProviderWebhookEvent,
@@ -48,10 +49,12 @@ export class StripeProvider implements BillingProvider {
   readonly supportedPaymentMethods = ['card', 'boleto', 'pix', 'bank_transfer', 'link']
 
   private readonly stripe: Stripe
+  private readonly webhookSecret: string
 
   constructor(config: StripeProviderConfig) {
+    this.webhookSecret = config.webhookSecret
     this.stripe = new Stripe(config.secretKey, {
-      apiVersion: config.apiVersion ?? '2024-06-20',
+      apiVersion: '2024-06-20',
       typescript: true,
       maxNetworkRetries: 3,
     })
@@ -102,7 +105,6 @@ export class StripeProvider implements BillingProvider {
           interval_count: input.intervalCount,
           usage_type: input.usageType,
         },
-        trial_period_days: input.trialPeriodDays,
         metadata: input.metadata,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -119,9 +121,6 @@ export class StripeProvider implements BillingProvider {
       {
         email: input.email,
         name: input.name,
-        company: input.companyName,
-        tax_id: input.taxId,
-        address: input.address ? this.mapAddress(input.address) : undefined,
         metadata: input.metadata,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -135,9 +134,6 @@ export class StripeProvider implements BillingProvider {
       {
         email: input.email,
         name: input.name,
-        company: input.companyName,
-        tax_id: input.taxId,
-        address: input.address ? this.mapAddress(input.address) : undefined,
         metadata: input.metadata,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -151,7 +147,7 @@ export class StripeProvider implements BillingProvider {
     })
   }
 
-  async detachPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
+  async detachPaymentMethod(_customerId: string, paymentMethodId: string): Promise<void> {
     await this.stripe.paymentMethods.detach(paymentMethodId)
   }
 
@@ -189,9 +185,14 @@ export class StripeProvider implements BillingProvider {
     }
 
     if (input.priceId) {
+      const currentSub = await this.stripe.subscriptions.retrieve(id)
+      const itemId = currentSub.items.data[0]?.id
+      if (!itemId) {
+        throw new Error('Subscription has no items')
+      }
       updateParams.items = [
         {
-          id: (await this.stripe.subscriptions.retrieve(id)).items.data[0]?.id,
+          id: itemId,
           price: input.priceId,
         },
       ]
@@ -268,7 +269,6 @@ export class StripeProvider implements BillingProvider {
 
   async payInvoice(id: string, paymentMethodId?: string): Promise<ProviderPayment> {
     const inv = await this.stripe.invoices.pay(id, { payment_method: paymentMethodId })
-    // O payment_intent vem expandido ou na invoice
     const paymentIntent = inv.payment_intent as Stripe.PaymentIntent | string
     if (typeof paymentIntent === 'string') {
       throw new Error('Payment intent not expanded')
@@ -298,9 +298,21 @@ export class StripeProvider implements BillingProvider {
       customer: customerId,
       limit: options?.limit ?? 50,
       starting_after: options?.startingAfter,
-      status: options?.status,
+      status: options?.status as Stripe.InvoiceListParams.Status | undefined,
     })
     return invoices.data.map(this.mapInvoice)
+  }
+
+  async getPayment(id: string): Promise<ProviderPayment | null> {
+    try {
+      const pi = await this.stripe.paymentIntents.retrieve(id)
+      return this.mapPayment(pi)
+    } catch (error) {
+      if (error instanceof Stripe.errors.StripeError && error.code === 'resource_missing') {
+        return null
+      }
+      throw error
+    }
   }
 
   // ============================================================================
@@ -329,12 +341,21 @@ export class StripeProvider implements BillingProvider {
   // ============================================================================
 
   async createCreditNote(input: CreateCreditNoteInput): Promise<ProviderCreditNote> {
+    const reasonMap: Record<string, Stripe.CreditNoteCreateParams.Reason> = {
+      duplicate: 'duplicate',
+      fraudulent: 'fraudulent',
+      order_change: 'order_change',
+      product_unsatisfactory: 'product_unsatisfactory',
+      other: 'duplicate', // fallback
+    }
+    if (!input.invoiceId) {
+      throw new Error('invoiceId is required for credit notes')
+    }
     const cn = await this.stripe.creditNotes.create(
       {
-        customer: input.customerId,
         invoice: input.invoiceId,
         amount: this.microsToCentavos(input.amountMicros),
-        reason: input.reason,
+        reason: reasonMap[input.reason] ?? 'duplicate',
         memo: input.memo,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -392,11 +413,6 @@ export class StripeProvider implements BillingProvider {
   // Private Mappers
   // ============================================================================
 
-  private get webhookSecret(): string {
-    // Injetado via construtor em produção
-    return process.env.STRIPE_WEBHOOK_SECRET ?? ''
-  }
-
   private mapProduct(product: Stripe.Product): ProviderProduct {
     return {
       id: product.id,
@@ -428,8 +444,8 @@ export class StripeProvider implements BillingProvider {
       id: customer.id,
       email: customer.email ?? '',
       name: customer.name ?? undefined,
-      companyName: (customer.company as string) ?? undefined,
-      taxId: customer.tax_id ?? undefined,
+      companyName: customer.metadata?.company_name ?? undefined,
+      taxId: customer.tax_ids?.data[0]?.value ?? undefined,
       address: customer.address ? this.mapAddressFromStripe(customer.address) : undefined,
       defaultPaymentMethodId: (customer.invoice_settings?.default_payment_method as string) ?? undefined,
       metadata: customer.metadata as Record<string, string>,
@@ -480,7 +496,7 @@ export class StripeProvider implements BillingProvider {
       items: sub.items.data.map((item) => ({
         id: item.id,
         priceId: item.price.id,
-        quantity: item.quantity,
+        quantity: item.quantity ?? 1,
         usageType: (item.price.recurring?.usage_type as 'metered' | 'licensed') ?? 'licensed',
       })),
     }
@@ -507,7 +523,7 @@ export class StripeProvider implements BillingProvider {
       lines: inv.lines.data.map((line) => ({
         id: line.id,
         priceId: line.price?.id ?? '',
-        quantity: line.quantity,
+        quantity: line.quantity ?? 0,
         amountMicros: this.centavosToMicros(line.amount),
         description: line.description ?? undefined,
         type: line.type as ProviderInvoiceLine['type'],
@@ -519,7 +535,8 @@ export class StripeProvider implements BillingProvider {
   }
 
   private mapPayment(pi: Stripe.PaymentIntent): ProviderPayment {
-    const charge = pi.charges.data[0]
+    const charges = (pi as unknown as { charges?: { data: Stripe.Charge[] } }).charges?.data ?? []
+    const charge = charges[0]
     return {
       id: pi.id,
       invoiceId: (pi.invoice as string) ?? undefined,
@@ -536,7 +553,9 @@ export class StripeProvider implements BillingProvider {
               : 'failed',
       paymentMethodType: pi.payment_method_types[0] ?? 'card',
       providerFeeMicros: charge?.balance_transaction
-        ? this.centavosToMicros(charge.balance_transaction.fee)
+        ? this.centavosToMicros(
+            typeof charge.balance_transaction === 'string' ? 0 : charge.balance_transaction.fee,
+          )
         : undefined,
       receiptUrl: charge?.receipt_url ?? undefined,
       paidAt: pi.status === 'succeeded' ? new Date() : undefined,
@@ -565,16 +584,6 @@ export class StripeProvider implements BillingProvider {
       city: addr.city ?? '',
       state: addr.state ?? '',
       zip: addr.postal_code ?? '',
-      country: addr.country ?? 'BR',
-    }
-  }
-
-  private mapAddress(addr: Address): Stripe.AddressParam {
-    return {
-      line1: addr.street,
-      city: addr.city,
-      state: addr.state,
-      postal_code: addr.zip,
       country: addr.country ?? 'BR',
     }
   }
