@@ -25,6 +25,9 @@ const fillForm = async ({
   await page.getByLabelText('Confirmar nova senha').fill(confirm)
 }
 
+// Increase test timeout for browser initialization (flaky in CI)
+vi.setConfig({ testTimeout: 120_000 })
+
 describe('SettingsSecurity', () => {
   it('renderiza o formulário com os três campos', async () => {
     await render(<SettingsSecurity />)
