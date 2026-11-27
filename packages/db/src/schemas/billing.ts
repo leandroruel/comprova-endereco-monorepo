@@ -58,7 +58,9 @@ export const paymentStatusEnum = pgEnum('payment_status', [
 export const billingPlan = pgTable(
   'billing_plan',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `plan_id`; o nome do campo Drizzle é
+    // mantido como `id` para preservar a API dos serviços.
+    id: uuid('plan_id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     slug: text('slug').notNull().unique(),
     description: text('description'),
@@ -105,7 +107,8 @@ export type NewBillingPlan = typeof billingPlan.$inferInsert
 export const tenantSubscription = pgTable(
   'tenant_subscription',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `subscription_id`.
+    id: uuid('subscription_id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
@@ -159,7 +162,8 @@ export type NewTenantSubscription = typeof tenantSubscription.$inferInsert
 export const invoice = pgTable(
   'invoice',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `invoice_id`.
+    id: uuid('invoice_id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
@@ -216,7 +220,8 @@ export type NewInvoice = typeof invoice.$inferInsert
 export const payment = pgTable(
   'payment',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `payment_id`.
+    id: uuid('payment_id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
@@ -273,6 +278,8 @@ export const providerWebhookEvent = pgTable(
     processedAt: timestamp('processed_at', { withTimezone: true }),
     processingError: text('processing_error'),
     retryCount: integer('retry_count').notNull().default(0),
+    // Instante em que uma entrega reservou o evento para processamento.
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

@@ -9,11 +9,18 @@ import type { ProviderRegistry } from './provider-registry.js'
 import type { NormalizedWebhookEvent } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
-import { eq, and, desc } from '@comprova/db'
+import { eq, and, desc, isNull, isNotNull, lt, or, sql } from '@comprova/db'
 import { BillingPlanService } from './plan.service.js'
 import { CustomerService } from './customer.service.js'
 import { InvoiceService } from './invoice.service.js'
 import { randomUUID } from 'node:crypto'
+
+/**
+ * Quanto tempo uma reserva de webhook pode ficar sem conclusão antes de ser
+ * considerada órfã (processo caiu no meio). Entregas concorrentes dentro dessa
+ * janela são tratadas como "em processamento".
+ */
+const WEBHOOK_CLAIM_STALE_MS = 5 * 60 * 1000
 
 export interface ActivateBillingInput {
   readonly tenantId: string
@@ -419,12 +426,166 @@ export class SubscriptionService {
   }
 
   /**
-   * Processa evento de webhook normalizado.
-   * Delega para handlers específicos baseados no tipo.
+   * Processa evento de webhook normalizado de forma persistente e idempotente.
+   *
+   * O evento é identificado por (provider, providerEventId). O processamento
+   * dos efeitos de negócio e a marcação de conclusão acontecem na mesma
+   * transação; falhas ficam registradas em `provider_webhook_event` para
+   * diagnóstico e reprocessamento em uma entrega posterior.
    */
   async handleWebhookEvent(event: NormalizedWebhookEvent, tx?: DbTx): Promise<void> {
-    const db = tx ?? this.db
+    // Reserve the event outside the business transaction. The unique
+    // constraint on (provider_name, provider_event_id) makes this the
+    // concurrency gate: only one delivery can claim the row.
+    const claimed = await this.claimWebhookEvent(this.db, event)
+    if (!claimed) return
 
+    const process = async (db: Db | DbTx): Promise<void> => {
+      await this.applyTenantContext(event, db)
+      await this.dispatchWebhookEvent(event, db)
+      await this.markWebhookProcessed(db, event)
+    }
+
+    try {
+      if (tx) {
+        await process(tx)
+      } else {
+        await this.db.transaction(process)
+      }
+    } catch (error) {
+      // Persist the failure on the base connection so a rollback of the
+      // business transaction does not erase the retry marker.
+      await this.markWebhookFailed(this.db, event, error)
+      throw error
+    }
+  }
+
+  /**
+   * Reserva o evento para processamento.
+   *
+   * Retorna `false` quando outra entrega já processou o evento ou está
+   * processando agora. Eventos que falharam (ou cuja reserva ficou órfã por
+   * muito tempo) podem ser reivindicados novamente.
+   */
+  private async claimWebhookEvent(db: Db | DbTx, event: NormalizedWebhookEvent): Promise<boolean> {
+    const now = new Date()
+
+    const [inserted] = await db
+      .insert(t.providerWebhookEvent)
+      .values({
+        providerName: event.providerName,
+        providerEventId: event.providerEventId,
+        eventType: event.type,
+        payload: event.payload ?? {},
+        claimedAt: now,
+      })
+      .onConflictDoNothing()
+      .returning({ id: t.providerWebhookEvent.id })
+
+    if (inserted) {
+      return true
+    }
+
+    const [existing] = await db
+      .select()
+      .from(t.providerWebhookEvent)
+      .where(this.webhookEventWhere(event))
+      .limit(1)
+
+    if (!existing || existing.processedAt) {
+      return false
+    }
+
+    // A previous delivery failed: atomically clear the error and claim it.
+    if (existing.processingError) {
+      const [retried] = await db
+        .update(t.providerWebhookEvent)
+        .set({
+          processingError: null,
+          claimedAt: now,
+          retryCount: sql`${t.providerWebhookEvent.retryCount} + 1`,
+        })
+        .where(
+          and(
+            this.webhookEventWhere(event),
+            isNull(t.providerWebhookEvent.processedAt),
+            isNotNull(t.providerWebhookEvent.processingError),
+          ),
+        )
+        .returning({ id: t.providerWebhookEvent.id })
+
+      return retried !== undefined
+    }
+
+    // No error and not completed: assume another delivery is processing it.
+    // Only reclaim if the claim is stale (e.g. the process crashed).
+    const staleBefore = new Date(now.getTime() - WEBHOOK_CLAIM_STALE_MS)
+    const [reclaimed] = await db
+      .update(t.providerWebhookEvent)
+      .set({
+        claimedAt: now,
+        retryCount: sql`${t.providerWebhookEvent.retryCount} + 1`,
+      })
+      .where(
+        and(
+          this.webhookEventWhere(event),
+          isNull(t.providerWebhookEvent.processedAt),
+          isNull(t.providerWebhookEvent.processingError),
+          or(isNull(t.providerWebhookEvent.claimedAt), lt(t.providerWebhookEvent.claimedAt, staleBefore)),
+        ),
+      )
+      .returning({ id: t.providerWebhookEvent.id })
+
+    return reclaimed !== undefined
+  }
+
+  private webhookEventWhere(event: NormalizedWebhookEvent) {
+    return and(
+      eq(t.providerWebhookEvent.providerName, event.providerName),
+      eq(t.providerWebhookEvent.providerEventId, event.providerEventId),
+    )
+  }
+
+  private async markWebhookProcessed(db: Db | DbTx, event: NormalizedWebhookEvent): Promise<void> {
+    await db
+      .update(t.providerWebhookEvent)
+      .set({ processedAt: new Date(), processingError: null, claimedAt: null })
+      .where(and(this.webhookEventWhere(event), isNull(t.providerWebhookEvent.processedAt)))
+  }
+
+  private async markWebhookFailed(
+    db: Db | DbTx,
+    event: NormalizedWebhookEvent,
+    error: unknown,
+  ): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error)
+    await db
+      .update(t.providerWebhookEvent)
+      .set({ processingError: message.slice(0, 4_000), claimedAt: null })
+      .where(and(this.webhookEventWhere(event), isNull(t.providerWebhookEvent.processedAt)))
+  }
+
+  /**
+   * Resolve o tenant a partir do customer do provider (não de dados enviados
+   * pelo cliente) e define o contexto usado pelas policies de RLS.
+   */
+  private async applyTenantContext(event: NormalizedWebhookEvent, db: Db | DbTx): Promise<void> {
+    if (!event.providerCustomerId) {
+      return
+    }
+
+    const tenant = await this.customerService.getTenantByProviderCustomerId(event.providerCustomerId, db)
+
+    if (!tenant) {
+      throw new Error(
+        `Tenant not found for provider customer ${event.providerCustomerId} (${event.providerName})`,
+      )
+    }
+
+    await db.execute(sql`SELECT set_config('app.tenant_id', ${tenant.tenantId}, true)`)
+  }
+
+  private async dispatchWebhookEvent(event: NormalizedWebhookEvent, db: Db | DbTx): Promise<void> {
     switch (event.type) {
       case 'subscription.created':
       case 'subscription.updated':
@@ -505,36 +666,29 @@ export class SubscriptionService {
       return
     }
 
-    // Build update data, only including defined fields to avoid overwriting with null
+    // Build update data. Optional provider fields are `Date | null`: `null`
+    // explicitly clears the local value, while `undefined` (only meaningful
+    // for `pausedAt`) means "provider cannot determine it, keep local".
+    const isPaused = providerSub.pauseCollection !== null || providerSub.status === 'paused'
     const updateData: Partial<typeof t.tenantSubscription.$inferInsert> = {
-      status: providerSub.status,
+      status: isPaused ? 'paused' : providerSub.status,
       currentPeriodStart: providerSub.currentPeriodStart,
       currentPeriodEnd: providerSub.currentPeriodEnd,
       cancelAtPeriodEnd: providerSub.cancelAtPeriodEnd,
+      trialStart: providerSub.trialStart,
+      trialEnd: providerSub.trialEnd,
+      canceledAt: providerSub.canceledAt,
+      paymentMethodId: providerSub.defaultPaymentMethodId,
       metadata: {
         ...providerSub.metadata,
         lastSyncedAt: new Date().toISOString(),
       },
     }
 
-    // Only include optional fields if they are defined
-    if (providerSub.trialStart !== undefined) {
-      updateData.trialStart = providerSub.trialStart
-    }
-    if (providerSub.trialEnd !== undefined) {
-      updateData.trialEnd = providerSub.trialEnd
-    }
-    if (providerSub.canceledAt !== undefined) {
-      updateData.canceledAt = providerSub.canceledAt
-    }
-    if (providerSub.cancelAtPeriodEnd !== undefined) {
-      updateData.cancelAtPeriodEnd = providerSub.cancelAtPeriodEnd
-    }
+    // Stripe does not expose a collection-pause timestamp. Preserve the local
+    // value while paused instead of writing a fabricated date on every sync.
     if (providerSub.pausedAt !== undefined) {
       updateData.pausedAt = providerSub.pausedAt
-    }
-    if (providerSub.defaultPaymentMethodId !== undefined) {
-      updateData.paymentMethodId = providerSub.defaultPaymentMethodId
     }
 
     await db
@@ -550,6 +704,7 @@ export class SubscriptionService {
         status: 'canceled',
         canceledAt: new Date(),
         cancelAtPeriodEnd: false,
+        pausedAt: null,
       })
       .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
   }

@@ -133,6 +133,17 @@ export interface ProviderSubscriptionItem {
   readonly usageType?: 'metered' | 'licensed'
 }
 
+/**
+ * Pausa da cobrança (Stripe `pause_collection`).
+ *
+ * É distinta do status de ciclo de vida da subscription: no Stripe a
+ * subscription continua `active` enquanto a cobrança está pausada.
+ */
+export interface ProviderSubscriptionPause {
+  readonly behavior: 'keep_as_draft' | 'mark_uncollectible' | 'void'
+  readonly resumesAt: Date | null
+}
+
 export interface ProviderSubscription {
   readonly id: string
   readonly customerId: string
@@ -140,12 +151,31 @@ export interface ProviderSubscription {
   readonly status: SubscriptionStatus
   readonly currentPeriodStart: Date
   readonly currentPeriodEnd: Date
-  readonly trialStart?: Date
-  readonly trialEnd?: Date
+  /**
+   * `null` significa que o provider informa explicitamente que não há trial.
+   * Não use `undefined` para representar ausência: campos obrigatórios e
+   * anuláveis distinguem "sem valor" (null) de "não informado".
+   */
+  readonly trialStart: Date | null
+  readonly trialEnd: Date | null
   readonly cancelAtPeriodEnd: boolean
-  readonly canceledAt?: Date
-  readonly pausedAt?: Date
-  readonly defaultPaymentMethodId?: string
+  readonly canceledAt: Date | null
+  /**
+   * Data real de pausa conhecida pelo provider.
+   *
+   * - `Date`: o provider informou a data da pausa.
+   * - `null`: o provider informa explicitamente que não há pausa.
+   * - `undefined`: o provider não consegue determinar a data (ex.: Stripe
+   *   `pause_collection` não expõe um timestamp de início). Nesse caso a
+   *   sincronização preserva o valor local em vez de inventar uma data.
+   */
+  readonly pausedAt?: Date | null
+  readonly defaultPaymentMethodId: string | null
+  /**
+   * Pausa de cobrança ativa, quando o provider a modela separadamente do
+   * status. `null` significa que não há pausa de cobrança.
+   */
+  readonly pauseCollection: ProviderSubscriptionPause | null
   readonly metadata: Readonly<Record<string, string>>
   readonly items: ReadonlyArray<ProviderSubscriptionItem>
 }
@@ -221,6 +251,8 @@ export interface ProviderWebhookEvent {
 export interface NormalizedWebhookEvent {
   readonly type: WebhookEventType
   readonly providerName: string
+  /** ID único do evento no provider (ex.: `evt_...` no Stripe). */
+  readonly providerEventId: string
   readonly providerSubscriptionId?: string
   readonly providerCustomerId?: string
   readonly providerInvoiceId?: string

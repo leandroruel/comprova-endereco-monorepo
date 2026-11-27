@@ -390,6 +390,8 @@ export class StripeProvider implements BillingProvider {
     const typeMap: Record<string, WebhookEventType> = {
       'customer.subscription.created': 'subscription.created',
       'customer.subscription.updated': 'subscription.updated',
+      'customer.subscription.paused': 'subscription.updated',
+      'customer.subscription.resumed': 'subscription.updated',
       'customer.subscription.deleted': 'subscription.canceled',
       'customer.subscription.trial_will_end': 'subscription.trial_will_end',
       'invoice.created': 'invoice.created',
@@ -410,17 +412,26 @@ export class StripeProvider implements BillingProvider {
     // Determine providerSubscriptionId based on event type
     let providerSubscriptionId: string | undefined
     if (event.type.startsWith('customer.subscription.')) {
-      providerSubscriptionId = data.id as string
+      providerSubscriptionId = this.extractId(data.id) ?? undefined
     } else if (event.type.startsWith('invoice.')) {
-      providerSubscriptionId = (data.subscription as string) ?? undefined
+      providerSubscriptionId = this.extractId(data.subscription) ?? undefined
     }
+
+    // customer.updated carries the customer ID in data.id, not data.customer.
+    const providerCustomerId =
+      event.type === 'customer.updated'
+        ? (this.extractId(data.id) ?? undefined)
+        : (this.extractId(data.customer) ?? undefined)
 
     return {
       type: typeMap[event.type] ?? (event.type as WebhookEventType),
       providerName: this.name,
+      providerEventId: event.id,
       providerSubscriptionId,
-      providerCustomerId: data.customer as string,
-      providerInvoiceId: event.type.startsWith('invoice.') ? (data.id as string) : undefined,
+      providerCustomerId,
+      providerInvoiceId: event.type.startsWith('invoice.')
+        ? (this.extractId(data.id) ?? undefined)
+        : undefined,
       providerPaymentId: this.extractPaymentId(data, event.type),
       payload: data,
     }
@@ -428,9 +439,23 @@ export class StripeProvider implements BillingProvider {
 
   private extractPaymentId(data: Record<string, unknown>, type: string): string | undefined {
     if (type === 'payment_intent.succeeded' || type === 'payment_intent.payment_failed') {
-      return data.id as string // payment_intent events have the payment intent ID in data.id
+      return this.extractId(data.id) ?? undefined
     }
-    return (data.payment_intent as string) ?? (data.charge as string)
+    return this.extractId(data.payment_intent) ?? this.extractId(data.charge) ?? undefined
+  }
+
+  /**
+   * Extrai o ID de um campo que o Stripe pode devolver como string ou como
+   * objeto expandido.
+   */
+  private extractId(value: unknown): string | null {
+    if (typeof value === 'string') {
+      return value
+    }
+    if (value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string') {
+      return (value as { id: string }).id
+    }
+    return null
   }
 
   // ============================================================================
@@ -506,21 +531,38 @@ export class StripeProvider implements BillingProvider {
     // Map Stripe's incomplete_expired to canceled locally
     const status =
       sub.status === 'incomplete_expired' ? 'canceled' : (sub.status as ProviderSubscription['status'])
+
+    // `pause_collection` does NOT change the subscription status in Stripe:
+    // the subscription stays `active` while payment collection is paused.
+    const pauseCollection = sub.pause_collection
+      ? {
+          behavior: sub.pause_collection.behavior,
+          resumesAt: sub.pause_collection.resumes_at
+            ? new Date(sub.pause_collection.resumes_at * 1000)
+            : null,
+        }
+      : null
+
+    // Stripe does not expose the instant a collection pause started. When
+    // paused, `pausedAt` is undefined so the service preserves the local
+    // value instead of fabricating a date on every sync. When not paused,
+    // `null` explicitly clears any stale local value.
+    const pausedAt = sub.status === 'paused' || pauseCollection ? undefined : null
+
     return {
       id: sub.id,
-      customerId: sub.customer as string,
+      customerId: this.extractId(sub.customer) ?? '',
       priceId: price?.id ?? '',
       status,
       currentPeriodStart: new Date(sub.current_period_start * 1000),
       currentPeriodEnd: new Date(sub.current_period_end * 1000),
-      trialStart: sub.trial_start ? new Date(sub.trial_start * 1000) : undefined,
-      trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : undefined,
+      trialStart: sub.trial_start ? new Date(sub.trial_start * 1000) : null,
+      trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
       cancelAtPeriodEnd: sub.cancel_at_period_end,
-      canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : undefined,
-      pausedAt: sub.pause_collection
-        ? new Date(sub.pause_collection.behavior === 'void' ? sub.current_period_end * 1000 : Date.now())
-        : undefined,
-      defaultPaymentMethodId: (sub.default_payment_method as string) ?? undefined,
+      canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
+      pausedAt,
+      defaultPaymentMethodId: this.extractId(sub.default_payment_method),
+      pauseCollection,
       metadata: sub.metadata as Record<string, string>,
       items: sub.items.data.map((item) => ({
         id: item.id,
@@ -534,8 +576,8 @@ export class StripeProvider implements BillingProvider {
   private mapInvoice(inv: Stripe.Invoice): ProviderInvoice {
     return {
       id: inv.id,
-      subscriptionId: (inv.subscription as string) ?? undefined,
-      customerId: inv.customer as string,
+      subscriptionId: this.extractId(inv.subscription) ?? undefined,
+      customerId: this.extractId(inv.customer) ?? '',
       status: inv.status as ProviderInvoice['status'],
       amountDueMicros: this.centavosToMicros(inv.amount_due),
       amountPaidMicros: this.centavosToMicros(inv.amount_paid),
@@ -549,32 +591,56 @@ export class StripeProvider implements BillingProvider {
         inv.status === 'paid' && inv.status_transitions?.paid_at
           ? new Date(inv.status_transitions.paid_at * 1000)
           : undefined,
-      lines: inv.lines.data.map((line) => ({
-        id: line.id,
-        priceId: line.price?.id ?? '',
-        quantity: line.quantity ?? 0,
-        amountMicros: this.centavosToMicros(line.amount),
-        description: line.description ?? undefined,
-        type: this.mapInvoiceLineType(line.type),
-        periodStart: line.period?.start ? new Date(line.period.start * 1000) : undefined,
-        periodEnd: line.period?.end ? new Date(line.period.end * 1000) : undefined,
-      })),
+      lines: inv.lines.data.map((line) => this.mapInvoiceLine(line)),
       metadata: inv.metadata as Record<string, string>,
     }
   }
 
-  private mapInvoiceLineType(type: string): ProviderInvoiceLine['type'] {
-    const typeMap: Record<string, ProviderInvoiceLine['type']> = {
-      subscription: 'subscription',
-      usage: 'usage',
-      credit: 'credit',
-      proration: 'proration',
-      tax: 'credit', // map tax to credit
-      discount: 'credit', // map discount to credit
-      charge: 'charge', // map charge to charge (need to add to type)
-      pending: 'pending', // map pending to pending (need to add to type)
+  private mapInvoiceLine(line: Stripe.InvoiceLineItem): ProviderInvoiceLine {
+    return {
+      id: line.id,
+      priceId: line.price?.id ?? '',
+      quantity: line.quantity ?? 0,
+      amountMicros: this.centavosToMicros(line.amount),
+      description: line.description ?? undefined,
+      // In the Stripe API version used here, `line.type` only distinguishes
+      // `subscription` from `invoiceitem`; proration is a separate boolean.
+      type: line.proration ? 'proration' : this.mapInvoiceLineType(line.type),
+      periodStart: line.period ? new Date(line.period.start * 1000) : undefined,
+      periodEnd: line.period ? new Date(line.period.end * 1000) : undefined,
     }
-    return typeMap[type] ?? 'charge'
+  }
+
+  /**
+   * Mapeamento explícito entre os tipos de linha do Stripe e o domínio.
+   *
+   * Um tipo desconhecido falha de forma rastreável em vez de ser rotulado
+   * como `charge` (o que alteraria o significado contábil da linha).
+   */
+  private mapInvoiceLineType(type: string): ProviderInvoiceLine['type'] {
+    switch (type) {
+      case 'subscription':
+        return 'subscription'
+      case 'invoiceitem':
+        // Item avulso de fatura: uma cobrança pontual, não uma assinatura.
+        return 'charge'
+      case 'usage':
+        return 'usage'
+      case 'credit':
+        return 'credit'
+      case 'proration':
+        return 'proration'
+      case 'tax':
+        return 'tax'
+      case 'discount':
+        return 'discount'
+      case 'charge':
+        return 'charge'
+      case 'pending':
+        return 'pending'
+      default:
+        throw new Error(`Unsupported Stripe invoice line type: ${type}`)
+    }
   }
 
   private mapPayment(pi: Stripe.PaymentIntent): ProviderPayment {
