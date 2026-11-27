@@ -49,14 +49,16 @@ export class BillingPlanService {
     const provider = this.providerRegistry.get(input.providerName)
 
     // 1. Cria Product no provider
+    const productIdempotencyKey = `${input.idempotencyKey ?? `plan-product-${input.name}`}-product`
     const product = await provider.createProduct({
       name: input.name,
       description: input.description,
       metadata: { comprova_plan_name: input.name },
-      idempotencyKey: input.idempotencyKey ?? `plan-product-${input.name}`,
+      idempotencyKey: productIdempotencyKey,
     })
 
     // 2. Cria Price no provider
+    const priceIdempotencyKey = `${input.idempotencyKey ?? `plan-price-${input.name}`}-price`
     const price = await provider.createPrice(product.id, {
       currency: input.features.currency,
       unitAmountMicros: input.monthlyPriceMicros,
@@ -65,7 +67,7 @@ export class BillingPlanService {
       trialPeriodDays: input.features.trialDays,
       usageType: 'licensed',
       metadata: { comprova_plan_name: input.name },
-      idempotencyKey: input.idempotencyKey ?? `plan-price-${input.name}`,
+      idempotencyKey: priceIdempotencyKey,
     })
 
     // 3. Salva plano local com IDs do provider
@@ -117,10 +119,11 @@ export class BillingPlanService {
     if (input.name || input.description) {
       const productId = plan.providerProductId ?? ''
       if (productId) {
+        const productUpdateIdempotencyKey = `${input.idempotencyKey ?? `plan-product-${planId}-update`}-product`
         await provider.updateProduct(productId, {
           name: input.name,
           description: input.description,
-          idempotencyKey: `plan-product-${planId}-update`,
+          idempotencyKey: productUpdateIdempotencyKey,
         })
       }
       if (input.name) updateData.name = input.name
@@ -139,25 +142,36 @@ export class BillingPlanService {
       if (!productId) {
         throw new Error('Plan has no providerProductId')
       }
-      const newPrice = await provider.createPrice(productId, {
+
+      // Verifica precisão do preço (Stripe suporta apenas centavos)
+      const newPriceMicros = input.monthlyPriceMicros ?? plan.monthlyPriceMicros
+      const priceCentavos = Math.round(newPriceMicros / 10_000)
+      const normalizedPriceMicros = priceCentavos * 10_000
+      if (normalizedPriceMicros !== newPriceMicros) {
+        throw new Error(
+          `Price must be in centavos precision (multiple of 10,000 micros). Got ${newPriceMicros}, nearest is ${normalizedPriceMicros}`,
+        )
+      }
+
+      const newPrice = await provider.createPrice(plan.providerProductId ?? '', {
         currency: (plan.features as PlanFeatures).currency,
-        unitAmountMicros: input.monthlyPriceMicros ?? plan.monthlyPriceMicros,
+        unitAmountMicros: normalizedPriceMicros,
         interval: (input.interval ?? plan.interval) as Interval,
         intervalCount: input.intervalCount ?? plan.intervalCount,
         trialPeriodDays: plan.trialPeriodDays ?? undefined,
         usageType: 'licensed',
         metadata: { comprova_plan_id: planId, comprova_plan_name: plan.name },
-        idempotencyKey: `plan-price-${planId}-${Date.now()}`,
+        idempotencyKey: `${input.idempotencyKey ?? `plan-price-${planId}`}-${Date.now()}`,
       })
 
       // Arquiva o price antigo no provider
       const oldPriceId = plan.providerPriceId ?? ''
       if (oldPriceId) {
-        await provider.archiveProduct(oldPriceId)
+        await provider.archivePrice(oldPriceId)
       }
 
       updateData.providerPriceId = newPrice.id
-      if (input.monthlyPriceMicros !== undefined) updateData.monthlyPriceMicros = input.monthlyPriceMicros
+      if (input.monthlyPriceMicros !== undefined) updateData.monthlyPriceMicros = normalizedPriceMicros
       if (input.interval !== undefined) updateData.interval = input.interval
       if (input.intervalCount !== undefined) updateData.intervalCount = input.intervalCount
     }
@@ -167,13 +181,18 @@ export class BillingPlanService {
       updateData.features = { ...(plan.features as PlanFeatures), ...input.features }
     }
 
+    // Sincroniza trialPeriodDays com features.trialDays
+    if (input.features?.trialDays !== undefined) {
+      updateData.trialPeriodDays = input.features.trialDays ?? 0
+    }
+
     if (input.isActive !== undefined) {
       updateData.isActive = input.isActive
       // Se desativando, arquiva price no provider
       if (!input.isActive) {
         const priceId = plan.providerPriceId ?? ''
         if (priceId) {
-          await provider.archiveProduct(priceId)
+          await provider.archivePrice(priceId)
         }
       }
     }
@@ -201,7 +220,7 @@ export class BillingPlanService {
 
     const priceId = plan.providerPriceId ?? ''
     if (priceId) {
-      await provider.archiveProduct(priceId)
+      await provider.archivePrice(priceId)
     }
 
     await db.update(t.billingPlan).set({ isActive: false }).where(eq(t.billingPlan.id, planId))

@@ -52,6 +52,9 @@ export class StripeProvider implements BillingProvider {
   private readonly webhookSecret: string
 
   constructor(config: StripeProviderConfig) {
+    if (!config.webhookSecret) {
+      throw new Error('webhookSecret is required')
+    }
     this.webhookSecret = config.webhookSecret
     this.stripe = new Stripe(config.secretKey, {
       apiVersion: '2024-06-20',
@@ -92,6 +95,10 @@ export class StripeProvider implements BillingProvider {
 
   async archiveProduct(id: string): Promise<void> {
     await this.stripe.products.update(id, { active: false })
+  }
+
+  async archivePrice(id: string): Promise<void> {
+    await this.stripe.prices.update(id, { active: false })
   }
 
   async createPrice(productId: string, input: CreatePriceInput): Promise<ProviderPrice> {
@@ -184,22 +191,27 @@ export class StripeProvider implements BillingProvider {
       metadata: input.metadata,
     }
 
-    if (input.priceId) {
+    if (input.priceId || input.quantity !== undefined) {
       const currentSub = await this.stripe.subscriptions.retrieve(id)
       const itemId = currentSub.items.data[0]?.id
       if (!itemId) {
         throw new Error('Subscription has no items')
       }
-      updateParams.items = [
-        {
+      const updateItems: Stripe.SubscriptionUpdateParams.Item[] = []
+      if (input.priceId) {
+        updateItems.push({
           id: itemId,
           price: input.priceId,
-        },
-      ]
+        })
+      }
+      if (input.quantity !== undefined) {
+        updateItems.push({
+          id: itemId,
+          quantity: input.quantity,
+        })
+      }
+      updateParams.items = updateItems
       updateParams.proration_behavior = input.prorationBehavior ?? 'create_prorations'
-    }
-    if (input.quantity !== undefined) {
-      updateParams.items = [{ quantity: input.quantity }]
     }
     if (input.trialEnd) {
       updateParams.trial_end = Math.floor(input.trialEnd.getTime() / 1000)
@@ -401,12 +413,20 @@ export class StripeProvider implements BillingProvider {
 
     return {
       type: typeMap[event.type] ?? (event.type as WebhookEventType),
+      providerName: this.name,
       providerSubscriptionId: (data.subscription as string) ?? (data.customer as string),
       providerCustomerId: data.customer as string,
       providerInvoiceId: data.id as string,
-      providerPaymentId: (data.payment_intent as string) ?? (data.charge as string),
+      providerPaymentId: this.extractPaymentId(data, event.type),
       payload: data,
     }
+  }
+
+  private extractPaymentId(data: Record<string, unknown>, type: string): string | undefined {
+    if (type === 'payment_intent.succeeded' || type === 'payment_intent.payment_failed') {
+      return data.id as string // payment_intent events have the payment intent ID in data.id
+    }
+    return (data.payment_intent as string) ?? (data.charge as string)
   }
 
   // ============================================================================
@@ -550,7 +570,13 @@ export class StripeProvider implements BillingProvider {
             ? 'pending'
             : pi.status === 'requires_payment_method'
               ? 'pending'
-              : 'failed',
+              : pi.status === 'requires_action'
+                ? 'pending'
+                : pi.status === 'requires_confirmation'
+                  ? 'pending'
+                  : pi.status === 'requires_capture'
+                    ? 'pending'
+                    : 'failed',
       paymentMethodType: pi.payment_method_types[0] ?? 'card',
       providerFeeMicros: charge?.balance_transaction
         ? this.centavosToMicros(

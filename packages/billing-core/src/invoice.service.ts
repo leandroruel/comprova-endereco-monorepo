@@ -27,7 +27,11 @@ export class InvoiceService {
    * Sincroniza invoice do provider para o banco local.
    * Chamado pelo webhook handler quando invoice.paid/finalized.
    */
-  async syncInvoice(providerInvoiceId: string, providerName: string, tx?: DbTx): Promise<t.Invoice | null> {
+  async syncInvoice(
+    providerInvoiceId: string,
+    providerName: string,
+    tx?: Db | DbTx,
+  ): Promise<t.Invoice | null> {
     const db = tx ?? this.db
     const provider = this.providerRegistry.get(providerName)
 
@@ -91,7 +95,11 @@ export class InvoiceService {
   /**
    * Sincroniza payment do provider.
    */
-  async syncPayment(providerPaymentId: string, providerName: string, tx?: DbTx): Promise<t.Payment | null> {
+  async syncPayment(
+    providerPaymentId: string,
+    providerName: string,
+    tx?: Db | DbTx,
+  ): Promise<t.Payment | null> {
     const db = tx ?? this.db
     const provider = this.providerRegistry.get(providerName)
 
@@ -157,20 +165,10 @@ export class InvoiceService {
   ): Promise<ReadonlyArray<t.Invoice>> {
     const db = tx ?? this.db
 
-    const subscriptions = await db
-      .select({ id: t.tenantSubscription.id })
-      .from(t.tenantSubscription)
-      .where(eq(t.tenantSubscription.tenantId, tenantId))
-
-    if (subscriptions.length === 0) {
-      return []
-    }
-
     return db
       .select({ invoice: t.invoice })
       .from(t.invoice)
-      .innerJoin(t.tenantSubscription, eq(t.invoice.subscriptionId, t.tenantSubscription.id))
-      .where(eq(t.tenantSubscription.tenantId, tenantId))
+      .where(eq(t.invoice.tenantId, tenantId))
       .orderBy(desc(t.invoice.createdAt))
       .limit(options?.limit ?? 50)
       .then((rows: ReadonlyArray<{ invoice: t.Invoice }>) => rows.map((r) => r.invoice))
@@ -241,36 +239,7 @@ export class InvoiceService {
   }> {
     const db = tx ?? this.db
 
-    const subscriptions = await db
-      .select({ id: t.tenantSubscription.id })
-      .from(t.tenantSubscription)
-      .where(eq(t.tenantSubscription.tenantId, tenantId))
-
-    if (subscriptions.length === 0) {
-      return {
-        totalInvoicedMicros: 0,
-        totalPaidMicros: 0,
-        totalPendingMicros: 0,
-        openInvoicesCount: 0,
-        overdueInvoicesCount: 0,
-      }
-    }
-
-    const firstSubscription = subscriptions[0]
-    if (!firstSubscription) {
-      return {
-        totalInvoicedMicros: 0,
-        totalPaidMicros: 0,
-        totalPendingMicros: 0,
-        openInvoicesCount: 0,
-        overdueInvoicesCount: 0,
-      }
-    }
-
-    const invoices = await db
-      .select()
-      .from(t.invoice)
-      .where(eq(t.invoice.subscriptionId, firstSubscription.id))
+    const invoices = await db.select().from(t.invoice).where(eq(t.invoice.tenantId, tenantId))
 
     let totalInvoicedMicros = 0
     let totalPaidMicros = 0

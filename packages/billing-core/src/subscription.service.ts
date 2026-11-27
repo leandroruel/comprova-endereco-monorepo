@@ -12,6 +12,7 @@ import * as t from '@comprova/db'
 import { eq, and, desc } from '@comprova/db'
 import { BillingPlanService } from './plan.service.js'
 import { CustomerService } from './customer.service.js'
+import { InvoiceService } from './invoice.service.js'
 import { randomUUID } from 'node:crypto'
 
 export interface ActivateBillingInput {
@@ -42,6 +43,7 @@ export class SubscriptionService {
     private readonly providerRegistry: ProviderRegistry,
     private readonly planService: BillingPlanService,
     private readonly customerService: CustomerService,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   /**
@@ -82,13 +84,13 @@ export class SubscriptionService {
       await provider.attachPaymentMethod(customerResult.providerCustomerId, input.paymentMethodId)
     }
 
-    // 4. Cria subscription no provider
+    // 4. Cria subscription no provider - sempre allow_incomplete para permitir 3DS
     const subscription = await provider.createSubscription({
       customerId: customerResult.providerCustomerId,
       priceId,
       trialDays: input.trialDays ?? plan.trialPeriodDays ?? undefined,
       defaultPaymentMethodId: input.paymentMethodId,
-      paymentBehavior: input.paymentMethodId ? 'default_incomplete' : 'allow_incomplete',
+      paymentBehavior: 'allow_incomplete',
       metadata: {
         comprova_tenant_id: input.tenantId,
         comprova_plan_id: plan.id,
@@ -426,8 +428,8 @@ export class SubscriptionService {
     switch (event.type) {
       case 'subscription.created':
       case 'subscription.updated':
-        if (event.providerSubscriptionId) {
-          await this.syncSubscription(event.providerSubscriptionId, event.providerSubscriptionId, db)
+        if (event.providerSubscriptionId && event.providerName) {
+          await this.syncSubscription(event.providerSubscriptionId, event.providerName, db)
         }
         break
 
@@ -443,27 +445,34 @@ export class SubscriptionService {
         }
         break
 
+      case 'invoice.created':
+      case 'invoice.finalized':
+        if (event.providerInvoiceId && event.providerName) {
+          await this.invoiceService.syncInvoice(event.providerInvoiceId, event.providerName, db)
+        }
+        break
+
       case 'invoice.paid':
-        if (event.providerInvoiceId) {
-          await this.syncInvoice(event.providerInvoiceId, db)
+        if (event.providerInvoiceId && event.providerName) {
+          await this.invoiceService.syncInvoice(event.providerInvoiceId, event.providerName, db)
         }
         break
 
       case 'invoice.payment_failed':
-        if (event.providerInvoiceId) {
-          await this.handleInvoicePaymentFailed(event.providerInvoiceId, db)
+        if (event.providerInvoiceId && event.providerName) {
+          await this.invoiceService.syncInvoice(event.providerInvoiceId, event.providerName, db)
         }
         break
 
       case 'payment_intent.succeeded':
-        if (event.providerPaymentId) {
-          await this.syncPayment(event.providerPaymentId, db)
+        if (event.providerPaymentId && event.providerName) {
+          await this.invoiceService.syncPayment(event.providerPaymentId, event.providerName, db)
         }
         break
 
       case 'payment_intent.payment_failed':
-        if (event.providerPaymentId) {
-          await this.handlePaymentFailed(event.providerPaymentId, db)
+        if (event.providerPaymentId && event.providerName) {
+          await this.invoiceService.syncPayment(event.providerPaymentId, event.providerName, db)
         }
         break
 
@@ -529,22 +538,6 @@ export class SubscriptionService {
 
   private async handleTrialWillEnd(providerSubscriptionId: string, _db: Db | DbTx): Promise<void> {
     console.log(`Trial will end for subscription: ${providerSubscriptionId}`)
-  }
-
-  private async syncInvoice(providerInvoiceId: string, _db: Db | DbTx): Promise<void> {
-    console.log(`Invoice paid: ${providerInvoiceId}`)
-  }
-
-  private async handleInvoicePaymentFailed(providerInvoiceId: string, _db: Db | DbTx): Promise<void> {
-    console.log(`Invoice payment failed: ${providerInvoiceId}`)
-  }
-
-  private async syncPayment(providerPaymentId: string, _db: Db | DbTx): Promise<void> {
-    console.log(`Payment succeeded: ${providerPaymentId}`)
-  }
-
-  private async handlePaymentFailed(providerPaymentId: string, _db: Db | DbTx): Promise<void> {
-    console.log(`Payment failed: ${providerPaymentId}`)
   }
 
   private async handlePaymentMethodAttached(providerCustomerId: string, _db: Db | DbTx): Promise<void> {

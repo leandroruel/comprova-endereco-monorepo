@@ -220,6 +220,7 @@ export interface ProviderWebhookEvent {
 
 export interface NormalizedWebhookEvent {
   readonly type: WebhookEventType
+  readonly providerName: string
   readonly providerSubscriptionId?: string
   readonly providerCustomerId?: string
   readonly providerInvoiceId?: string
@@ -341,6 +342,7 @@ export interface BillingProvider {
   createProduct(input: CreateProductInput): Promise<ProviderProduct>
   updateProduct(id: string, input: UpdateProductInput): Promise<void>
   archiveProduct(id: string): Promise<void>
+  archivePrice(id: string): Promise<void>
   createPrice(productId: string, input: CreatePriceInput): Promise<ProviderPrice>
 
   // ---------------------------------------------------------------------------
@@ -663,6 +665,7 @@ export interface BillingProvider {
   createProduct(input: CreateProductInput): Promise<ProviderProduct>
   updateProduct(id: string, input: UpdateProductInput): Promise<void>
   archiveProduct(id: string): Promise<void>
+  archivePrice(id: string): Promise<void>
   createPrice(productId: string, input: CreatePriceInput): Promise<ProviderPrice>
 
   // ---------------------------------------------------------------------------
