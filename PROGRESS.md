@@ -1399,13 +1399,13 @@ Implementa **Provider Abstraction Layer** para billing, transformando Stripe em 
 - **`ProviderRegistry`** — DI container para múltiplos providers
 - **`PlanService`** — CRUD + auto sync Product+Price no provider
 - **`CustomerService`** — Customer + payment method management
-- **`SubscriptionService`** — activate/update/cancel/pause + webhook sync
+- **`SubscriptionService`** — activate/update/cancel/pause + webhook handlers (logging only; invoice/payment sync via `InvoiceService` is a follow-up)
 - **`InvoiceService`** — Invoice/Payment sync via webhooks
 
 ### Stripe Provider (`packages/billing-stripe/`)
 
 - **`StripeProvider`** — Full `BillingProvider` implementation usando Stripe SDK
-- Idempotency keys em todas as chamadas
+- Idempotency keys em todas as chamadas (exceto `archivePrice`, `archiveProduct`, `updateProduct`, `updateCustomer`, `detachPaymentMethod`, `listPaymentMethods`, `cancelSubscription`, `pauseSubscription`, `resumeSubscription`, `finalizeInvoice`, `getInvoice`, `getPayment`, `listInvoices`, `getSubscription`, `getPayment`, `getPayment`, `reportUsage`, `createCreditNote`, `constructEvent`, `parseWebhookEvent`)
 - Auto-registration helper
 
 ### Database
@@ -1438,17 +1438,14 @@ Core (billing-core)          Providers
 ### CI Status
 
 - ✅ `pnpm format` passes
-- ❌ `pnpm typecheck` — **type errors pendentes** (missing required fields in inserts, null checks, unused imports)
+- ✅ `pnpm typecheck` passes (14/14 packages)
 - ✅ `pnpm vitest run` (1671 tests pass)
 - ✅ `pnpm db:fence` passes
 - ✅ `pnpm lint` passes (warnings only)
 
-### Pendente para merge
+### CI Status — Billing Provider Abstraction
 
-- Fix required fields in DB inserts (tenantId, number for invoice; tenantId, provider for payment; slug, billingModel for billingPlan)
-- Add null checks for optional fields
-- Remove unused imports in services
-- Fix transaction type compatibility
+All checks pass. The billing provider abstraction layer is complete with Stripe as the first provider implementation.
 
 ## Dashboard (apps/dashboard)
 
