@@ -265,6 +265,98 @@ describe('StripeProvider.mapInvoice', () => {
   })
 })
 
+const makePaymentIntent = (overrides: Record<string, unknown> = {}) =>
+  ({
+    id: 'pi_123',
+    object: 'payment_intent',
+    customer: 'cus_123',
+    invoice: 'in_123',
+    status: 'succeeded',
+    amount: 2_000,
+    currency: 'brl',
+    payment_method_types: ['card'],
+    latest_charge: null,
+    metadata: {},
+    ...overrides,
+  }) as unknown as Stripe.PaymentIntent
+
+describe('StripeProvider.getPayment / mapPayment', () => {
+  it('solicita expansão de latest_charge no retrieve', async () => {
+    stripeMock.retrievePaymentIntent.mockResolvedValue(makePaymentIntent())
+
+    await makeProvider().getPayment('pi_123')
+
+    expect(stripeMock.retrievePaymentIntent).toHaveBeenCalledWith('pi_123', {
+      expand: ['latest_charge'],
+    })
+  })
+
+  it('mapeia pagamento com latest_charge expandido (fee e recibo)', async () => {
+    stripeMock.retrievePaymentIntent.mockResolvedValue(
+      makePaymentIntent({
+        latest_charge: {
+          id: 'ch_123',
+          receipt_url: 'https://receipt.stripe.com/invoice/123',
+          balance_transaction: {
+            id: 'txn_123',
+            fee: 150,
+          } as unknown as Stripe.BalanceTransaction,
+        },
+      }),
+    )
+
+    const payment = await makeProvider().getPayment('pi_123')
+
+    expect(payment).toMatchObject({
+      id: 'pi_123',
+      invoiceId: 'in_123',
+      customerId: 'cus_123',
+      amountMicros: 20_000_000,
+      currency: 'BRL',
+      status: 'succeeded',
+      paymentMethodType: 'card',
+      providerFeeMicros: 1_500_000,
+      receiptUrl: 'https://receipt.stripe.com/invoice/123',
+    })
+    expect(payment?.paidAt).not.toBeNull()
+  })
+
+  it('mapeia pagamento sem latest_charge expandido (sem fee nem recibo)', async () => {
+    stripeMock.retrievePaymentIntent.mockResolvedValue(makePaymentIntent({ latest_charge: null }))
+
+    const payment = await makeProvider().getPayment('pi_123')
+
+    expect(payment?.providerFeeMicros).toBeUndefined()
+    expect(payment?.receiptUrl).toBeUndefined()
+    expect(payment?.status).toBe('succeeded')
+  })
+
+  it('mapeia latest_charge como string (ID, não objeto)', async () => {
+    stripeMock.retrievePaymentIntent.mockResolvedValue(makePaymentIntent({ latest_charge: 'ch_123' }))
+
+    const payment = await makeProvider().getPayment('pi_123')
+
+    expect(payment?.providerFeeMicros).toBeUndefined()
+    expect(payment?.receiptUrl).toBeUndefined()
+  })
+
+  it('mapeia payment_intent falhado como failed', async () => {
+    stripeMock.retrievePaymentIntent.mockResolvedValue(makePaymentIntent({ status: 'failed' }))
+
+    const payment = await makeProvider().getPayment('pi_123')
+
+    expect(payment?.status).toBe('failed')
+  })
+
+  it('mapeia payment_intent processing como pending', async () => {
+    stripeMock.retrievePaymentIntent.mockResolvedValue(makePaymentIntent({ status: 'processing' }))
+
+    const payment = await makeProvider().getPayment('pi_123')
+
+    expect(payment?.status).toBe('pending')
+  })
+})
+
 describe('StripeProvider.parseWebhookEvent', () => {
   const provider = makeProvider()
 

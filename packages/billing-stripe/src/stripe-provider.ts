@@ -313,7 +313,11 @@ export class StripeProvider implements BillingProvider {
 
   async getPayment(id: string): Promise<ProviderPayment | null> {
     try {
-      const pi = await this.stripe.paymentIntents.retrieve(id)
+      // latest_charge não vem expandido por padrão em PaymentIntent.retrieve;
+      // é necessário solicitá-lo explicitamente para obter receipt_url e fee.
+      const pi = await this.stripe.paymentIntents.retrieve(id, {
+        expand: ['latest_charge'],
+      })
       return this.mapPayment(pi)
     } catch (error) {
       if (error instanceof Stripe.errors.StripeError && error.code === 'resource_missing') {
@@ -354,7 +358,8 @@ export class StripeProvider implements BillingProvider {
       fraudulent: 'fraudulent',
       order_change: 'order_change',
       product_unsatisfactory: 'product_unsatisfactory',
-      other: 'duplicate', // fallback
+      // `other` é um motivo válido na Stripe e não deve ser convertido para
+      // `duplicate` (que registraria um motivo incorreto).
     }
     if (!input.invoiceId) {
       throw new Error('invoiceId is required for credit notes')
@@ -644,8 +649,11 @@ export class StripeProvider implements BillingProvider {
   }
 
   private mapPayment(pi: Stripe.PaymentIntent): ProviderPayment {
-    const charges = (pi as unknown as { charges?: { data: Stripe.Charge[] } }).charges?.data ?? []
-    const charge = charges[0]
+    // `latest_charge` é string (ID) ou Charge expandido, dependendo da
+    // expansão solicitada. Não confiar em `charges` (não vem expandido por
+    // padrão em PaymentIntent.retrieve).
+    const charge = typeof pi.latest_charge === 'object' && pi.latest_charge !== null ? pi.latest_charge : null
+
     return {
       id: pi.id,
       invoiceId: (pi.invoice as string) ?? undefined,
@@ -667,9 +675,11 @@ export class StripeProvider implements BillingProvider {
                     ? 'pending'
                     : 'failed',
       paymentMethodType: pi.payment_method_types[0] ?? 'card',
-      providerFeeMicros: charge?.balance_transaction
+      providerFeeMicros: charge
         ? this.centavosToMicros(
-            typeof charge.balance_transaction === 'string' ? 0 : charge.balance_transaction.fee,
+            typeof charge.balance_transaction === 'object' && charge.balance_transaction !== null
+              ? charge.balance_transaction.fee
+              : 0,
           )
         : undefined,
       receiptUrl: charge?.receipt_url ?? undefined,

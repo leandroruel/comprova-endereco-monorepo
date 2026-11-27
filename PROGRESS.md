@@ -1549,3 +1549,16 @@ pnpm db:fence        # pgfence gate de migrações
 - Dump completo (10 arquivos da Receita + CNEFE de todas as UFs)
 - Conta AWS (apply Terraform, DR, soak test)
 - Multi-região (LGPD data residency)
+
+## Billing — PR #85 (round final de correções, 2026-11-27)
+
+- **Fix 1 — `syncSubscription()` distingue campo ausente / nulo / presente:** `trialStart`, `trialEnd`, `canceledAt`, `pausedAt`, `paymentMethodId` agora usam `Date | null` / `string | null` no contrato `ProviderSubscription`; `null` limpa localmente, valor presente atualiza, `undefined` (apenas `pausedAt`) preserva o local.
+- **Fix 2 — `pause_collection` não sobrescreve paused como `active`:** status de ciclo de vida é derivado separadamente da pausa de cobrança; sem `Date.now()` como data de pausa; `pausedAt` local preservado em sincronizações repetidas; limpo no resume.
+- **Fix 3 — Webhooks idempotentes:** `provider_event_id` em `NormalizedWebhookEvent`; claim atômico via `INSERT … ON CONFLICT DO NOTHING` em `provider_webhook_event`; registro de estado/falhas; retry de eventos falhados; isolamento de tenant via customer do provider (não do payload); `customer.subscription.paused/resumed` mapeados para `subscription.updated`; migração `0095` concede `UPDATE` nas colunas de processamento.
+- **Fix 4 — Mapeamento explícito de linhas de fatura:** `invoiceitem`→`charge`, `tax`→`tax`, `discount`→`discount`, `proration`→`proration`; tipos desconhecidos lançam erro rastreável (não são mascarados como `charge`); valores, quantidade, descrição, período e preço preservados.
+- **Correção de pagamento:** `getPayment()` solicita `expand: ['latest_charge']`; `mapPayment()` lê `pi.latest_charge` (objeto ou string) em vez de `pi.charges`, preenchendo `providerFeeMicros` e `receiptUrl`.
+- **Correção de crédito:** `createCreditNote()` não converte motivo `other` em `duplicate` (mantém o motivo válido da Stripe).
+- **Testes:** 16 testes de integração (`subscription.service.test.ts`) e 19 testes de unidade (`stripe-provider.test.ts`), incluindo mapeamento de pagamento com/sem `latest_charge` expandido.
+- **Validação local:** typecheck (db, billing-core, billing-stripe), lint, format, `db:fence` (migração 0095 SAFE), suíte completa: 150 arquivos / 1706 testes passando.
+- **CI:** disparado no SHA `0af3082` (checks `ci`, `security`, `python-tests` em andamento; Supabase Preview skipped).
+- **Limitações:** CI do SHA final ainda sem conclusão confirmada; nenhuma reescrita de billing, nenhuma nova dependência paga, sem mudanças em `main`, sem merge de PR.
