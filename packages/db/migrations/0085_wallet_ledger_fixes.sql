@@ -87,7 +87,6 @@ DECLARE
   v_available bigint;
   v_reserved bigint;
 BEGIN
-  SET LOCAL row_security = off;
 
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch: function called for tenant % but session is %', p_tenant_id, app_tenant_id();
@@ -173,7 +172,6 @@ DECLARE
   v_available bigint;
   v_reserved bigint;
 BEGIN
-  SET LOCAL row_security = off;
 
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch: function called for tenant % but session is %', p_tenant_id, app_tenant_id();
@@ -283,7 +281,6 @@ DECLARE
   v_available bigint;
   v_reserved bigint;
 BEGIN
-  SET LOCAL row_security = off;
 
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
@@ -370,7 +367,6 @@ DECLARE
   v_available bigint;
   v_reserved bigint;
 BEGIN
-  SET LOCAL row_security = off;
 
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';
@@ -457,7 +453,6 @@ DECLARE
   v_reserved bigint;
   v_entry_type text;
 BEGIN
-  SET LOCAL row_security = off;
 
   IF p_tenant_id IS DISTINCT FROM app_tenant_id() THEN
     RAISE EXCEPTION 'tenant mismatch';

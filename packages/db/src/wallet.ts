@@ -54,8 +54,6 @@ export const debitWalletForValidation = async (
     throw new Error('amountMicros must be positive')
   }
 
-  await tx.execute(sql`SET LOCAL row_security = off`)
-
   const rows = await tx.execute(sql`
     SELECT *
     FROM wallet_debit(
@@ -136,8 +134,6 @@ export const creditWallet = async (
     throw new Error('amountMicros must be positive')
   }
 
-  await tx.execute(sql`SET LOCAL row_security = off`)
-
   const rows = await tx.execute(sql`
     SELECT *
     FROM wallet_credit(
@@ -178,8 +174,6 @@ export interface WalletBalance {
 }
 
 export const getWalletBalance = async (tx: DbTx): Promise<WalletBalance | null> => {
-  await tx.execute(sql`SET LOCAL row_security = off`)
-
   const rows = await tx.execute(sql`
     SELECT available_balance, reserved_balance, (available_balance + reserved_balance) AS total_balance, version, updated_at
     FROM wallet_balance

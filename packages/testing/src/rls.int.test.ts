@@ -117,11 +117,10 @@ describe('RLS multi-tenant isolation', () => {
     expect(fromA).toHaveLength(1)
   })
 
-  it('audit_log aceita eventos de sistema sem tenant (RLS desabilitado na 0090)', async () => {
-    // Migration 0090 desabilitou RLS em audit_log (log append-only de baixo risco).
-    // Sem RLS, todos os tenants veem todas as linhas. O teste original esperava
-    // isolamento, mas o comportamento atual é intencional: sem RLS não há filtro.
+  it('audit_log isola leitura por tenant mas expõe eventos de sistema', async () => {
+    // Evento de sistema (sem tenant_id) deve ser visível a todos
     await appPool.db.insert(t.auditLog).values({ actor: 'system', action: 'test-event' })
+    // Evento de tenantA só deve ser visível para tenantA
     await withTenant(appPool.db, tenantA, (tx) =>
       tx.insert(t.auditLog).values({
         tenantId: tenantA,
@@ -131,17 +130,25 @@ describe('RLS multi-tenant isolation', () => {
     )
 
     const asA = await withTenant(appPool.db, tenantA, (tx) =>
-      tx.select({ actor: t.auditLog.actor, action: t.auditLog.action }).from(t.auditLog),
+      tx
+        .select({ actor: t.auditLog.actor, action: t.auditLog.action, tenantId: t.auditLog.tenantId })
+        .from(t.auditLog),
     )
     const asB = await withTenant(appPool.db, tenantB, (tx) =>
-      tx.select({ actor: t.auditLog.actor, action: t.auditLog.action }).from(t.auditLog),
+      tx
+        .select({ actor: t.auditLog.actor, action: t.auditLog.action, tenantId: t.auditLog.tenantId })
+        .from(t.auditLog),
     )
 
-    // Sem RLS, ambos tenants veem todas as linhas (2 cada: 1 system + 1 tenantA)
+    // TenantA vê: evento de sistema + evento próprio = 2
     expect(asA).toHaveLength(2)
-    expect(asB).toHaveLength(2)
-    expect(asA.some((r) => r.action === 'test-event')).toBe(true)
-    expect(asA.some((r) => r.action === 'test-event-a')).toBe(true)
+    expect(asA.some((r) => r.action === 'test-event' && r.tenantId === null)).toBe(true)
+    expect(asA.some((r) => r.action === 'test-event-a' && r.tenantId === tenantA)).toBe(true)
+
+    // TenantB vê: apenas evento de sistema = 1 (evento de tenantA é isolado)
+    expect(asB).toHaveLength(1)
+    expect(asB[0]?.action).toBe('test-event')
+    expect(asB[0]?.tenantId).toBeNull()
   })
 
   it('bloqueia update/delete em audit_log via grants', async () => {

@@ -7,6 +7,28 @@ services:
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
 
+  # --- Document Intelligence (Tesseract/Marker OCR) ---
+  # Deploy separadamente (ex.: container registry privado) e configure a URL.
+  # O serviço expõe /ready para health check e /parse para extração de texto.
+  - type: web
+    name: comprova-document-intelligence
+    region: ohio
+    plan: free
+    runtime: docker
+    dockerfilePath: apps/document-intelligence/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: PORT
+        value: '8000'
+      - key: HOST
+        value: '0.0.0.0'
+    healthCheckPath: /ready
+    autoDeploy: false
+
   # --- API Comprova (Fastify/Node.js) ---
   - type: web
     name: comprova-api
@@ -63,6 +85,33 @@ services:
         sync: false
       - key: TERMS_DOCUMENT_HASH
         sync: false
+      # --- Object Store (evidence upload) ---
+      # Configure S3 OU Supabase Storage OU LOCAL_STORAGE_PATH.
+      # O provider é selecionado automaticamente pela disponibilidade.
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: us-east-1
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_BUCKET
+        value: evidence
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: evidence
+      - key: LOCAL_STORAGE_PATH
+        sync: false
+      # --- Document Intelligence (para upload de documentos com OCR) ---
+      - key: DOCUMENT_INTELLIGENCE_URL
+        fromService:
+          type: web
+          name: comprova-document-intelligence
+          property: hostport
     healthCheckPath: /healthz
     autoDeploy: false
 
@@ -110,12 +159,16 @@ services:
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
         value: evidence
-      - key: SUPABASE_URL
+      - key: LOCAL_STORAGE_PATH
         sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: SUPABASE_STORAGE_BUCKET
-        value: evidence
       - key: DOCUMENT_INTELLIGENCE_URL
+        fromService:
+          type: web
+          name: comprova-document-intelligence
+          property: hostport
+      # --- Credential Issuance (deve espelhar a API) ---
+      - key: CREDENTIAL_ISSUER_ORIGIN
+        value: https://comprova-api.onrender.com
+      - key: CREDENTIAL_SIGNING_KEYS
         sync: false
     autoDeploy: false
