@@ -165,6 +165,16 @@ const EnvSchema = z.object({
    * Ausente indica que não há texto oficial disponível para exibição.
    */
   TERMS_DOCUMENT_CONTENT: z.string().optional(),
+  /**
+   * Stripe secret key (sk_live_... ou sk_test_...). Obrigatório para ativar
+   * o provider de billing Stripe.
+   */
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  /**
+   * Stripe webhook signing secret (whsec_...). Obrigatório para validar
+   * eventos recebidos do Stripe.
+   */
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
 })
 
 export type AppConfig = z.infer<typeof EnvSchema>

@@ -226,6 +226,9 @@ importers:
       '@aws-sdk/client-kms':
         specifier: 3.1151.0
         version: 3.1151.0
+      '@comprova/billing-stripe':
+        specifier: workspace:*
+        version: link:../../packages/billing-stripe
       '@comprova/checkers':
         specifier: workspace:*
         version: link:../../packages/checkers

@@ -5,8 +5,19 @@ import { buildApp, buildFastPathDeps } from './app.js'
 import { loadConfig } from './config.js'
 import { startBatchLoop } from './services/batch-processor.js'
 import { startPublisherLoop } from './modules/webhooks/outbox-publisher.js'
+import { initializeStripeProvider } from '@comprova/billing-stripe'
 
 const config = loadConfig()
+
+// Inicializa provider de billing (Stripe) se credenciais estiverem presentes.
+// Falha fechado no boot se houver erro de configuração do Stripe.
+if (config.STRIPE_SECRET_KEY && config.STRIPE_WEBHOOK_SECRET) {
+  initializeStripeProvider({
+    secretKey: config.STRIPE_SECRET_KEY,
+    webhookSecret: config.STRIPE_WEBHOOK_SECRET,
+  })
+}
+
 const logger = createLogger({ level: config.LOG_LEVEL, base: { service: 'api' }, file: config.LOG_FILE })
 const pool = createDbPool(config.DATABASE_URL)
 const adminPool = config.DATABASE_ADMIN_URL !== undefined ? createDbPool(config.DATABASE_ADMIN_URL) : null
