@@ -1,5 +1,6 @@
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
+import { z } from 'zod'
 
 export type BillingRoutesDeps = {
   readonly db: import('@comprova/db').Db
@@ -18,17 +19,14 @@ export const registerBillingRoutes = (
   // Stripe webhook endpoint — raw body needed for signature verification
   // fastify-raw-body plugin adds rawBody config
   app.post(
-    '/v1/billing/webhooks',
+    '/billing/webhooks',
     {
       config: { rawBody: true } as any,
       schema: {
-        body: { type: 'string' },
+        body: z.string(),
         response: {
-          200: { type: 'object', properties: { received: { type: 'boolean' } } },
-          400: {
-            type: 'object',
-            properties: { type: { type: 'string' }, title: { type: 'string' }, status: { type: 'integer' } },
-          },
+          200: z.object({ received: z.boolean() }),
+          400: z.object({ type: z.string(), title: z.string(), status: z.number() }),
         },
       },
     },

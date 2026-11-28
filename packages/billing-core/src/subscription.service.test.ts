@@ -388,19 +388,20 @@ describe('persistência e idempotência de webhooks', () => {
     expect(row?.processedAt).not.toBeNull()
   })
 
-  it('falha durante o processamento registra o erro e não marca como concluído', async () => {
+  it('falha durante o processamento não deixa row órfão (rollback do claim)', async () => {
     provider.subscriptionError = new Error('provider unavailable')
 
     await expect(handleSubscriptionEvent('evt_failed')).rejects.toThrow('provider unavailable')
 
+    // Com claim dentro da transação, o rollback remove o claim completamente.
+    // Não fica row órfão com processedAt: null.
     const row = await getWebhookRow('evt_failed')
-    expect(row?.processedAt).toBeNull()
-    expect(row?.processingError).toContain('provider unavailable')
+    expect(row).toBeUndefined()
     // A transação de negócio foi revertida.
     expect((await getLocalSubscription()).trialStart).toBeNull()
   })
 
-  it('reprocessa um evento que falhou anteriormente', async () => {
+  it('reprocessa um evento que falhou anteriormente (nova entrega cria novo claim)', async () => {
     provider.subscriptionError = new Error('provider unavailable')
     await expect(handleSubscriptionEvent('evt_retry')).rejects.toThrow('provider unavailable')
 
@@ -413,7 +414,8 @@ describe('persistência e idempotência de webhooks', () => {
     const row = await getWebhookRow('evt_retry')
     expect(row?.processedAt).not.toBeNull()
     expect(row?.processingError).toBeNull()
-    expect(row?.retryCount).toBe(1)
+    // Nova entrega cria claim fresco, retryCount = 0
+    expect(row?.retryCount).toBe(0)
     expect((await getLocalSubscription()).trialStart).toEqual(new Date('2026-01-02T00:00:00Z'))
   })
 

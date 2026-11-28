@@ -228,6 +228,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
     secret: deps.config.API_KEY_PEPPER,
   })
 
+  // fastify-raw-body: needed for Stripe webhook signature verification
+  // (requires raw body before JSON parsing)
+  await app.register((await import('fastify-raw-body')).default)
+
   // Fallback de CORS no onResponse: garante que os cabeçalhos CORS estejam
   // sempre presentes, mesmo quando o plugin @fastify/cors não os aplica (ex.:
   // respostas de erro, 404, 500, ou qualquer comportamento inesperado do
