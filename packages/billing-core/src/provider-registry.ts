@@ -2,26 +2,11 @@
  * Provider Registry — Dependency Injection para BillingProviders
  *
  * Permite registrar múltiplos providers (Stripe, Mercado Pago, Asaas)
- * e resolvê-los por nome ou por entidade (plan, subscription).
+ * e resolvê-los por nome.
  */
 
 import type { BillingProvider } from './provider.js'
-
-// Type placeholders for plan and subscription (defined in db schemas)
-export interface BillingPlan {
-  readonly providerName: string
-  readonly providerPriceId: string
-  readonly providerProductId: string
-  readonly features: Record<string, unknown>
-  readonly id: string
-}
-
-export interface TenantSubscription {
-  readonly providerName: string
-  readonly providerSubscriptionId: string
-  readonly providerCustomerId: string
-  readonly id: string
-}
+import type { BillingPlan, TenantSubscription } from '@comprova/db'
 
 export class ProviderRegistry {
   private readonly providers = new Map<string, BillingProvider>()
@@ -49,6 +34,13 @@ export class ProviderRegistry {
   }
 
   /**
+   * Verifica se um provider está registrado.
+   */
+  has(name: string): boolean {
+    return this.providers.has(name)
+  }
+
+  /**
    * Obtém provider a partir de um billing_plan.
    */
   getByPlan(plan: BillingPlan): BillingProvider {
@@ -60,34 +52,6 @@ export class ProviderRegistry {
    */
   getBySubscription(subscription: TenantSubscription): BillingProvider {
     return this.get(subscription.providerName)
-  }
-
-  /**
-   * Lista todos os providers registrados.
-   */
-  list(): ReadonlyArray<BillingProvider> {
-    return Array.from(this.providers.values())
-  }
-
-  /**
-   * Verifica se um provider está registrado.
-   */
-  has(name: string): boolean {
-    return this.providers.has(name)
-  }
-
-  /**
-   * Remove um provider (útil para testes).
-   */
-  unregister(name: string): boolean {
-    return this.providers.delete(name)
-  }
-
-  /**
-   * Limpa todos os providers (útil para testes).
-   */
-  clear(): void {
-    this.providers.clear()
   }
 }
 

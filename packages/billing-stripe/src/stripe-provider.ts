@@ -14,6 +14,7 @@ import type {
   ProviderPaymentMethod,
   ProviderSubscription,
   ProviderInvoice,
+  ProviderInvoiceLine,
   ProviderPayment,
   ProviderCreditNote,
   ProviderWebhookEvent,
@@ -34,11 +35,50 @@ import type {
   Address,
 } from '@comprova/billing-core'
 
+/**
+ * Status do PaymentIntent → status local. Estados intermediários de
+ * confirmação são "pending"; tudo não mapeado é "failed".
+ */
+const paymentStatusByIntentStatus: Record<string, ProviderPayment['status']> = {
+  succeeded: 'succeeded',
+  processing: 'pending',
+  requires_payment_method: 'pending',
+  requires_action: 'pending',
+  requires_confirmation: 'pending',
+  requires_capture: 'pending',
+}
+
+/**
+ * Tipo da linha de fatura no Stripe → tipo no domínio. `invoiceitem` é um
+ * item avulso (cobrança pontual), não uma assinatura.
+ */
+const invoiceLineTypeByStripe: Record<string, ProviderInvoiceLine['type']> = {
+  subscription: 'subscription',
+  invoiceitem: 'charge',
+  usage: 'usage',
+  credit: 'credit',
+  proration: 'proration',
+  tax: 'tax',
+  discount: 'discount',
+  charge: 'charge',
+  pending: 'pending',
+}
+
 export interface StripeProviderConfig {
   readonly secretKey: string
   readonly webhookSecret: string
-  readonly apiVersion?: string
-  readonly publishableKey?: string
+}
+
+/**
+ * Preserva no memo um motivo que a API do Stripe não aceita como `reason`
+ * (ex.: `other`). Idempotente: não duplica a anotação se o memo já a traz.
+ */
+function composeMemoWithReason(reason: string, memo: string | undefined): string {
+  const tag = `reason: ${reason}`
+  if (memo?.includes(tag)) {
+    return memo
+  }
+  return `[${tag}]${memo ? ` ${memo}` : ''}`
 }
 
 export class StripeProvider implements BillingProvider {
@@ -48,10 +88,15 @@ export class StripeProvider implements BillingProvider {
   readonly supportedPaymentMethods = ['card', 'boleto', 'pix', 'bank_transfer', 'link']
 
   private readonly stripe: Stripe
+  private readonly webhookSecret: string
 
   constructor(config: StripeProviderConfig) {
+    if (!config.webhookSecret) {
+      throw new Error('webhookSecret is required')
+    }
+    this.webhookSecret = config.webhookSecret
     this.stripe = new Stripe(config.secretKey, {
-      apiVersion: config.apiVersion ?? '2024-06-20',
+      apiVersion: '2024-06-20',
       typescript: true,
       maxNetworkRetries: 3,
     })
@@ -75,16 +120,24 @@ export class StripeProvider implements BillingProvider {
   }
 
   async updateProduct(id: string, input: UpdateProductInput): Promise<void> {
-    await this.stripe.products.update(id, {
-      name: input.name,
-      description: input.description,
-      metadata: input.metadata,
-      active: input.active,
-    }, { idempotencyKey: input.idempotencyKey })
+    await this.stripe.products.update(
+      id,
+      {
+        name: input.name,
+        description: input.description,
+        metadata: input.metadata,
+        active: input.active,
+      },
+      { idempotencyKey: input.idempotencyKey },
+    )
   }
 
   async archiveProduct(id: string): Promise<void> {
     await this.stripe.products.update(id, { active: false })
+  }
+
+  async archivePrice(id: string): Promise<void> {
+    await this.stripe.prices.update(id, { active: false })
   }
 
   async createPrice(productId: string, input: CreatePriceInput): Promise<ProviderPrice> {
@@ -96,9 +149,11 @@ export class StripeProvider implements BillingProvider {
         recurring: {
           interval: input.interval,
           interval_count: input.intervalCount,
+          // Cumprir o contrato de entrada: trial padrão configurado no Price
+          // (usado com trial_from_plan), além do trial por subscription.
+          trial_period_days: input.trialPeriodDays,
           usage_type: input.usageType,
         },
-        trial_period_days: input.trialPeriodDays,
         metadata: input.metadata,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -115,8 +170,6 @@ export class StripeProvider implements BillingProvider {
       {
         email: input.email,
         name: input.name,
-        company: input.companyName,
-        tax_id: input.taxId,
         address: input.address ? this.mapAddress(input.address) : undefined,
         metadata: input.metadata,
       },
@@ -126,14 +179,16 @@ export class StripeProvider implements BillingProvider {
   }
 
   async updateCustomer(id: string, input: UpdateCustomerInput): Promise<void> {
-    await this.stripe.customers.update(id, {
-      email: input.email,
-      name: input.name,
-      company: input.companyName,
-      tax_id: input.taxId,
-      address: input.address ? this.mapAddress(input.address) : undefined,
-      metadata: input.metadata,
-    }, { idempotencyKey: input.idempotencyKey })
+    await this.stripe.customers.update(
+      id,
+      {
+        email: input.email,
+        name: input.name,
+        address: input.address ? this.mapAddress(input.address) : undefined,
+        metadata: input.metadata,
+      },
+      { idempotencyKey: input.idempotencyKey },
+    )
   }
 
   async attachPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
@@ -143,7 +198,7 @@ export class StripeProvider implements BillingProvider {
     })
   }
 
-  async detachPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
+  async detachPaymentMethod(_customerId: string, paymentMethodId: string): Promise<void> {
     await this.stripe.paymentMethods.detach(paymentMethodId)
   }
 
@@ -152,7 +207,7 @@ export class StripeProvider implements BillingProvider {
       customer: customerId,
       type: 'card',
     })
-    return methods.data.map(this.mapPaymentMethod)
+    return methods.data.map((m) => this.mapPaymentMethod(m))
   }
 
   // ============================================================================
@@ -180,15 +235,21 @@ export class StripeProvider implements BillingProvider {
       metadata: input.metadata,
     }
 
-    if (input.priceId) {
-      updateParams.items = [{
-        id: (await this.stripe.subscriptions.retrieve(id)).items.data[0]?.id,
-        price: input.priceId,
-      }]
+    if (input.priceId || input.quantity !== undefined) {
+      const currentSub = await this.stripe.subscriptions.retrieve(id)
+      const itemId = currentSub.items.data[0]?.id
+      if (!itemId) {
+        throw new Error('Subscription has no items')
+      }
+      const updateItem: Stripe.SubscriptionUpdateParams.Item = { id: itemId }
+      if (input.priceId) {
+        updateItem.price = input.priceId
+      }
+      if (input.quantity !== undefined) {
+        updateItem.quantity = input.quantity
+      }
+      updateParams.items = [updateItem]
       updateParams.proration_behavior = input.prorationBehavior ?? 'create_prorations'
-    }
-    if (input.quantity !== undefined) {
-      updateParams.items = [{ quantity: input.quantity }]
     }
     if (input.trialEnd) {
       updateParams.trial_end = Math.floor(input.trialEnd.getTime() / 1000)
@@ -220,17 +281,12 @@ export class StripeProvider implements BillingProvider {
   }
 
   async getSubscription(id: string): Promise<ProviderSubscription | null> {
-    try {
+    return this.retrieveOrNull(async () => {
       const subscription = await this.stripe.subscriptions.retrieve(id, {
         expand: ['default_payment_method', 'items.data.price.product'],
       })
       return this.mapSubscription(subscription)
-    } catch (error) {
-      if (error instanceof Stripe.errors.StripeError && error.code === 'resource_missing') {
-        return null
-      }
-      throw error
-    }
+    })
   }
 
   // ============================================================================
@@ -258,7 +314,6 @@ export class StripeProvider implements BillingProvider {
 
   async payInvoice(id: string, paymentMethodId?: string): Promise<ProviderPayment> {
     const inv = await this.stripe.invoices.pay(id, { payment_method: paymentMethodId })
-    // O payment_intent vem expandido ou na invoice
     const paymentIntent = inv.payment_intent as Stripe.PaymentIntent | string
     if (typeof paymentIntent === 'string') {
       throw new Error('Payment intent not expanded')
@@ -267,27 +322,52 @@ export class StripeProvider implements BillingProvider {
   }
 
   async getInvoice(id: string): Promise<ProviderInvoice | null> {
-    try {
+    return this.retrieveOrNull(async () => {
       const inv = await this.stripe.invoices.retrieve(id, {
         expand: ['lines.data.price.product', 'subscription', 'payment_intent'],
       })
       return this.mapInvoice(inv)
+    })
+  }
+
+  async listInvoices(
+    customerId: string,
+    options?: ListInvoicesOptions,
+  ): Promise<ReadonlyArray<ProviderInvoice>> {
+    const invoices = await this.stripe.invoices.list({
+      customer: customerId,
+      limit: options?.limit ?? 50,
+      starting_after: options?.startingAfter,
+      status: options?.status as Stripe.InvoiceListParams.Status | undefined,
+    })
+    return invoices.data.map((inv) => this.mapInvoice(inv))
+  }
+
+  async getPayment(id: string): Promise<ProviderPayment | null> {
+    return this.retrieveOrNull(async () => {
+      // latest_charge não vem expandido por padrão em PaymentIntent.retrieve;
+      // balance_transaction também não — ambos são necessários para receipt_url
+      // e a tarifa do provider.
+      const pi = await this.stripe.paymentIntents.retrieve(id, {
+        expand: ['latest_charge', 'latest_charge.balance_transaction'],
+      })
+      return this.mapPayment(pi)
+    })
+  }
+
+  /**
+   * Executa uma retrieve no Stripe convertendo `resource_missing` em `null`
+   * (objeto não existe mais no provider); demais erros propagam.
+   */
+  private async retrieveOrNull<T>(retrieve: () => Promise<T>): Promise<T | null> {
+    try {
+      return await retrieve()
     } catch (error) {
       if (error instanceof Stripe.errors.StripeError && error.code === 'resource_missing') {
         return null
       }
       throw error
     }
-  }
-
-  async listInvoices(customerId: string, options?: ListInvoicesOptions): Promise<ReadonlyArray<ProviderInvoice>> {
-    const invoices = await this.stripe.invoices.list({
-      customer: customerId,
-      limit: options?.limit ?? 50,
-      starting_after: options?.startingAfter,
-      status: options?.status,
-    })
-    return invoices.data.map(this.mapInvoice)
   }
 
   // ============================================================================
@@ -316,13 +396,33 @@ export class StripeProvider implements BillingProvider {
   // ============================================================================
 
   async createCreditNote(input: CreateCreditNoteInput): Promise<ProviderCreditNote> {
+    if (!input.invoiceId) {
+      throw new Error('invoiceId is required for credit notes')
+    }
+
+    // Mapeamento exaustivo: `other` não é motivo aceito pela API do Stripe
+    // (v16), então o campo `reason` é omitido e o motivo real é preservado no
+    // memo — nunca rotulado incorretamente como `duplicate`.
+    const reasonByInput: Record<
+      ProviderCreditNote['reason'],
+      Stripe.CreditNoteCreateParams.Reason | undefined
+    > = {
+      duplicate: 'duplicate',
+      fraudulent: 'fraudulent',
+      order_change: 'order_change',
+      product_unsatisfactory: 'product_unsatisfactory',
+      other: undefined,
+    }
+
+    const stripeReason = reasonByInput[input.reason]
+    const memo = stripeReason === undefined ? composeMemoWithReason(input.reason, input.memo) : input.memo
+
     const cn = await this.stripe.creditNotes.create(
       {
-        customer: input.customerId,
         invoice: input.invoiceId,
         amount: this.microsToCentavos(input.amountMicros),
-        reason: input.reason,
-        memo: input.memo,
+        reason: stripeReason,
+        memo,
       },
       { idempotencyKey: input.idempotencyKey },
     )
@@ -348,6 +448,8 @@ export class StripeProvider implements BillingProvider {
     const typeMap: Record<string, WebhookEventType> = {
       'customer.subscription.created': 'subscription.created',
       'customer.subscription.updated': 'subscription.updated',
+      'customer.subscription.paused': 'subscription.updated',
+      'customer.subscription.resumed': 'subscription.updated',
       'customer.subscription.deleted': 'subscription.canceled',
       'customer.subscription.trial_will_end': 'subscription.trial_will_end',
       'invoice.created': 'invoice.created',
@@ -365,24 +467,73 @@ export class StripeProvider implements BillingProvider {
 
     const data = event.data as Record<string, unknown>
 
+    // Determine providerSubscriptionId based on event type
+    const providerSubscriptionId = this.subscriptionIdForEvent(event.type, data)
+
+    // customer.updated carries the customer ID in data.id, not data.customer.
+    const providerCustomerId =
+      event.type === 'customer.updated'
+        ? (this.extractId(data.id) ?? undefined)
+        : (this.extractId(data.customer) ?? undefined)
+
+    // payment_method events carry the method itself in data.id.
+    const providerPaymentMethodId = event.type.startsWith('payment_method.')
+      ? (this.extractId(data.id) ?? undefined)
+      : undefined
+
     return {
       type: typeMap[event.type] ?? (event.type as WebhookEventType),
-      providerSubscriptionId: data.subscription as string ?? data.customer as string,
-      providerCustomerId: data.customer as string,
-      providerInvoiceId: data.id as string,
-      providerPaymentId: data.payment_intent as string ?? data.charge as string,
+      providerName: this.name,
+      providerEventId: event.id,
+      providerSubscriptionId,
+      providerCustomerId,
+      providerInvoiceId: event.type.startsWith('invoice.')
+        ? (this.extractId(data.id) ?? undefined)
+        : undefined,
+      providerPaymentId: this.extractPaymentId(data, event.type),
+      providerPaymentMethodId,
       payload: data,
     }
+  }
+
+  /**
+   * Resolve o ID da subscription envolvida no evento: eventos de subscription
+   * carregam o objeto em `data.id`; eventos de invoice em `data.subscription`.
+   */
+  private subscriptionIdForEvent(type: string, data: Record<string, unknown>): string | undefined {
+    if (type.startsWith('customer.subscription.')) {
+      return this.extractId(data.id) ?? undefined
+    }
+    if (type.startsWith('invoice.')) {
+      return this.extractId(data.subscription) ?? undefined
+    }
+    return undefined
+  }
+
+  private extractPaymentId(data: Record<string, unknown>, type: string): string | undefined {
+    if (type === 'payment_intent.succeeded' || type === 'payment_intent.payment_failed') {
+      return this.extractId(data.id) ?? undefined
+    }
+    return this.extractId(data.payment_intent) ?? this.extractId(data.charge) ?? undefined
+  }
+
+  /**
+   * Extrai o ID de um campo que o Stripe pode devolver como string ou como
+   * objeto expandido.
+   */
+  private extractId(value: unknown): string | null {
+    if (typeof value === 'string') {
+      return value
+    }
+    if (value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string') {
+      return (value as { id: string }).id
+    }
+    return null
   }
 
   // ============================================================================
   // Private Mappers
   // ============================================================================
-
-  private get webhookSecret(): string {
-    // Injetado via construtor em produção
-    return process.env.STRIPE_WEBHOOK_SECRET ?? ''
-  }
 
   private mapProduct(product: Stripe.Product): ProviderProduct {
     return {
@@ -401,12 +552,12 @@ export class StripeProvider implements BillingProvider {
       productId: price.product as string,
       currency: price.currency.toUpperCase() as Currency,
       unitAmountMicros: this.centavosToMicros(price.unit_amount ?? 0),
-      interval: price.recurring?.interval as Interval ?? 'month',
+      interval: (price.recurring?.interval as Interval) ?? 'month',
       intervalCount: price.recurring?.interval_count ?? 1,
       trialPeriodDays: price.recurring?.trial_period_days ?? undefined,
       metadata: price.metadata as Record<string, string>,
       active: price.active,
-      usageType: price.recurring?.usage_type as 'metered' | 'licensed' ?? 'licensed',
+      usageType: (price.recurring?.usage_type as 'metered' | 'licensed') ?? 'licensed',
     }
   }
 
@@ -415,10 +566,10 @@ export class StripeProvider implements BillingProvider {
       id: customer.id,
       email: customer.email ?? '',
       name: customer.name ?? undefined,
-      companyName: customer.company as string ?? undefined,
-      taxId: customer.tax_id ?? undefined,
+      companyName: customer.metadata?.company_name ?? undefined,
+      taxId: customer.tax_ids?.data[0]?.value ?? undefined,
       address: customer.address ? this.mapAddressFromStripe(customer.address) : undefined,
-      defaultPaymentMethodId: customer.invoice_settings?.default_payment_method as string ?? undefined,
+      defaultPaymentMethodId: (customer.invoice_settings?.default_payment_method as string) ?? undefined,
       metadata: customer.metadata as Record<string, string>,
       createdAt: new Date(customer.created * 1000),
     }
@@ -428,41 +579,69 @@ export class StripeProvider implements BillingProvider {
     return {
       id: pm.id,
       type: pm.type,
-      card: pm.card ? {
-        brand: pm.card.brand,
-        last4: pm.card.last4,
-        expMonth: pm.card.exp_month,
-        expYear: pm.card.exp_year,
-      } : undefined,
-      billingDetails: pm.billing_details ? {
-        name: pm.billing_details.name ?? undefined,
-        email: pm.billing_details.email ?? undefined,
-        address: pm.billing_details.address ? this.mapAddressFromStripe(pm.billing_details.address) : undefined,
-      } : undefined,
+      card: pm.card
+        ? {
+            brand: pm.card.brand,
+            last4: pm.card.last4,
+            expMonth: pm.card.exp_month,
+            expYear: pm.card.exp_year,
+          }
+        : undefined,
+      billingDetails: pm.billing_details
+        ? {
+            name: pm.billing_details.name ?? undefined,
+            email: pm.billing_details.email ?? undefined,
+            address: pm.billing_details.address
+              ? this.mapAddressFromStripe(pm.billing_details.address)
+              : undefined,
+          }
+        : undefined,
     }
   }
 
   private mapSubscription(sub: Stripe.Subscription): ProviderSubscription {
     const price = sub.items.data[0]?.price
+    // Map Stripe's incomplete_expired to canceled locally
+    const status =
+      sub.status === 'incomplete_expired' ? 'canceled' : (sub.status as ProviderSubscription['status'])
+
+    // `pause_collection` does NOT change the subscription status in Stripe:
+    // the subscription stays `active` while payment collection is paused.
+    const pauseCollection = sub.pause_collection
+      ? {
+          behavior: sub.pause_collection.behavior,
+          resumesAt: sub.pause_collection.resumes_at
+            ? new Date(sub.pause_collection.resumes_at * 1000)
+            : null,
+        }
+      : null
+
+    // Stripe does not expose the instant a collection pause started. When
+    // paused, `pausedAt` is undefined so the service preserves the local
+    // value instead of fabricating a date on every sync. When not paused,
+    // `null` explicitly clears any stale local value.
+    const pausedAt = sub.status === 'paused' || pauseCollection ? undefined : null
+
     return {
       id: sub.id,
-      customerId: sub.customer as string,
+      customerId: this.extractId(sub.customer) ?? '',
       priceId: price?.id ?? '',
-      status: sub.status as ProviderSubscription['status'],
+      status,
       currentPeriodStart: new Date(sub.current_period_start * 1000),
       currentPeriodEnd: new Date(sub.current_period_end * 1000),
-      trialStart: sub.trial_start ? new Date(sub.trial_start * 1000) : undefined,
-      trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : undefined,
+      trialStart: sub.trial_start ? new Date(sub.trial_start * 1000) : null,
+      trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
       cancelAtPeriodEnd: sub.cancel_at_period_end,
-      canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : undefined,
-      pausedAt: sub.pause_collection ? new Date() : undefined,
-      defaultPaymentMethodId: sub.default_payment_method as string ?? undefined,
+      canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
+      pausedAt,
+      defaultPaymentMethodId: this.extractId(sub.default_payment_method),
+      pauseCollection,
       metadata: sub.metadata as Record<string, string>,
-      items: sub.items.data.map(item => ({
+      items: sub.items.data.map((item) => ({
         id: item.id,
         priceId: item.price.id,
-        quantity: item.quantity,
-        usageType: item.price.recurring?.usage_type as 'metered' | 'licensed' ?? 'licensed',
+        quantity: item.quantity ?? 1,
+        usageType: (item.price.recurring?.usage_type as 'metered' | 'licensed') ?? 'licensed',
       })),
     }
   }
@@ -470,8 +649,8 @@ export class StripeProvider implements BillingProvider {
   private mapInvoice(inv: Stripe.Invoice): ProviderInvoice {
     return {
       id: inv.id,
-      subscriptionId: inv.subscription as string ?? undefined,
-      customerId: inv.customer as string,
+      subscriptionId: this.extractId(inv.subscription) ?? undefined,
+      customerId: this.extractId(inv.customer) ?? '',
       status: inv.status as ProviderInvoice['status'],
       amountDueMicros: this.centavosToMicros(inv.amount_due),
       amountPaidMicros: this.centavosToMicros(inv.amount_paid),
@@ -481,41 +660,72 @@ export class StripeProvider implements BillingProvider {
       periodStart: new Date(inv.period_start * 1000),
       periodEnd: new Date(inv.period_end * 1000),
       dueDate: inv.due_date ? new Date(inv.due_date * 1000) : undefined,
-      paidAt: inv.status === 'paid' && inv.status_transitions?.paid_at
-        ? new Date(inv.status_transitions.paid_at * 1000)
-        : undefined,
-      lines: inv.lines.data.map(line => ({
-        id: line.id,
-        priceId: line.price?.id ?? '',
-        quantity: line.quantity,
-        amountMicros: this.centavosToMicros(line.amount),
-        description: line.description ?? undefined,
-        type: line.type as ProviderInvoiceLine['type'],
-        periodStart: line.period?.start ? new Date(line.period.start * 1000) : undefined,
-        periodEnd: line.period?.end ? new Date(line.period.end * 1000) : undefined,
-      })),
+      paidAt:
+        inv.status === 'paid' && inv.status_transitions?.paid_at
+          ? new Date(inv.status_transitions.paid_at * 1000)
+          : undefined,
+      lines: inv.lines.data.map((line) => this.mapInvoiceLine(line)),
       metadata: inv.metadata as Record<string, string>,
     }
   }
 
+  private mapInvoiceLine(line: Stripe.InvoiceLineItem): ProviderInvoiceLine {
+    return {
+      id: line.id,
+      priceId: line.price?.id ?? '',
+      quantity: line.quantity ?? 0,
+      amountMicros: this.centavosToMicros(line.amount),
+      description: line.description ?? undefined,
+      // In the Stripe API version used here, `line.type` only distinguishes
+      // `subscription` from `invoiceitem`; proration is a separate boolean.
+      type: line.proration ? 'proration' : this.mapInvoiceLineType(line.type),
+      periodStart: line.period ? new Date(line.period.start * 1000) : undefined,
+      periodEnd: line.period ? new Date(line.period.end * 1000) : undefined,
+    }
+  }
+
+  /**
+   * Mapeamento explícito entre os tipos de linha do Stripe e o domínio.
+   *
+   * Um tipo desconhecido falha de forma rastreável em vez de ser rotulado
+   * como `charge` (o que alteraria o significado contábil da linha).
+   */
+  private mapInvoiceLineType(type: string): ProviderInvoiceLine['type'] {
+    const lineType = invoiceLineTypeByStripe[type]
+
+    if (lineType === undefined) {
+      throw new Error(`Unsupported Stripe invoice line type: ${type}`)
+    }
+    return lineType
+  }
+
   private mapPayment(pi: Stripe.PaymentIntent): ProviderPayment {
-    const charge = pi.charges.data[0]
+    // `latest_charge` é string (ID) ou Charge expandido, dependendo da
+    // expansão solicitada. Não confiar em `charges` (não vem expandido por
+    // padrão em PaymentIntent.retrieve).
+    const charge = typeof pi.latest_charge === 'object' && pi.latest_charge !== null ? pi.latest_charge : null
+    // Fee só existe com balance_transaction expandido; sem expansão o valor
+    // fica indefinido em vez de sincronizar um zero enganoso.
+    const balanceTransaction = charge?.balance_transaction
+    const providerFeeMicros =
+      typeof balanceTransaction === 'object' && balanceTransaction !== null
+        ? this.centavosToMicros(balanceTransaction.fee)
+        : undefined
+    // Data real do pagamento: instante do charge no provider, nunca o relógio
+    // do processo de sincronização.
+    const paidAt = pi.status === 'succeeded' && charge ? new Date(charge.created * 1000) : undefined
+
     return {
       id: pi.id,
-      invoiceId: pi.invoice as string ?? undefined,
+      invoiceId: (pi.invoice as string) ?? undefined,
       customerId: pi.customer as string,
       amountMicros: this.centavosToMicros(pi.amount),
       currency: pi.currency.toUpperCase() as Currency,
-      status: pi.status === 'succeeded' ? 'succeeded'
-        : pi.status === 'processing' ? 'pending'
-        : pi.status === 'requires_payment_method' ? 'pending'
-        : 'failed',
+      status: paymentStatusByIntentStatus[pi.status] ?? 'failed',
       paymentMethodType: pi.payment_method_types[0] ?? 'card',
-      providerFeeMicros: charge?.balance_transaction
-        ? this.centavosToMicros(charge.balance_transaction.fee)
-        : undefined,
+      providerFeeMicros,
       receiptUrl: charge?.receipt_url ?? undefined,
-      paidAt: pi.status === 'succeeded' ? new Date() : undefined,
+      paidAt,
       refundedAt: undefined,
       metadata: pi.metadata as Record<string, string>,
     }
@@ -525,7 +735,7 @@ export class StripeProvider implements BillingProvider {
     return {
       id: cn.id,
       customerId: cn.customer as string,
-      invoiceId: cn.invoice as string ?? undefined,
+      invoiceId: (cn.invoice as string) ?? undefined,
       amountMicros: this.centavosToMicros(cn.amount),
       currency: cn.currency.toUpperCase() as Currency,
       reason: cn.reason as ProviderCreditNote['reason'],

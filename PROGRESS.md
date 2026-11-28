@@ -1389,14 +1389,65 @@ tenant_id)`** (0025): garante `claim.tenant_id = subject.tenant_id` (antes, a FK
 - **Nota** — `signal.evidence_id` referencia apenas artefato material (S3/VLM); a ligação observação↔claim é `claim_evidence.signal_id` (desambiguado na migração 0023).
 - **Testes** — `f3.int.test.ts` +1 (reuso de claim + ligação de evidências T1) e asserções no caso ambíguo. Suíte: 127/127.
 
-## Dashboard (apps/dashboard)
+## Provider Abstraction Layer — Billing (2026-11-26) — **PR #85 aberto, type errors pendentes**
 
-- **Better Auth** — login/signup com email/senha, sessão de 7 dias, cookie httpOnly, trustedOrigins, strength meter, confirmar senha
-- **Stats por usuário** — total de consultas, documentos únicos (DISTINCT doc_hmac), CNPJ/CPF, confirmadas/não sucedidas
-- **Busca em lote** — drag & drop CSV, textarea, processamento em background, progresso em tempo real, export CSV/JSON
-- **Sidebar** — navegação entre Valações e Busca em lote, nome do usuário, botão Sair
-- **Hooks order fix** — todos os hooks antes dos early returns (crash após login)
-- **VLM_ENABLED=false** — botões deep/auto escondidos da UI, API retorna 422 DEEP_PATH_DISABLED
+Implementa **Provider Abstraction Layer** para billing, transformando Stripe em um _provider_ plugável (não core).
+
+### Core (`packages/billing-core/`)
+
+- **`BillingProvider` interface** — Operations: Products, Prices, Customers, Subscriptions, Invoices, Payments, Usage Metering, Credits, Webhooks
+- **`ProviderRegistry`** — DI container para múltiplos providers
+- **`PlanService`** — CRUD + auto sync Product+Price no provider
+- **`CustomerService`** — Customer + payment method management
+- **`SubscriptionService`** — activate/update/cancel/pause + webhook handlers (logging only; invoice/payment sync via `InvoiceService` is a follow-up)
+- **`InvoiceService`** — Invoice/Payment sync via webhooks
+
+### Stripe Provider (`packages/billing-stripe/`)
+
+- **`StripeProvider`** — Full `BillingProvider` implementation usando Stripe SDK
+- Idempotency keys em todas as chamadas (exceto `archivePrice`, `archiveProduct`, `updateProduct`, `updateCustomer`, `detachPaymentMethod`, `listPaymentMethods`, `cancelSubscription`, `pauseSubscription`, `resumeSubscription`, `finalizeInvoice`, `getInvoice`, `getPayment`, `listInvoices`, `getSubscription`, `getPayment`, `getPayment`, `reportUsage`, `createCreditNote`, `constructEvent`, `parseWebhookEvent`)
+- Auto-registration helper
+
+### Database
+
+- **Migration 0094** — provider fields em todas as tabelas de billing
+- **Novos schemas** — billingPlan, tenantSubscription, invoice, payment, providerWebhookEvent
+- **Enums** — subscription/invoice/payment/plan statuses
+
+### Architecture
+
+```
+Core (billing-core)          Providers
+┌─────────────────────┐      ┌────────────────────┐
+│ PlanService         │      │ StripeProvider     │
+│ SubscriptionService │◄────►│ (billing-stripe)   │
+│ CustomerService     │      │ MercadoPagoProvider│
+│ InvoiceService      │      │ (futuro)           │
+└─────────────────────┘      └────────────────────┘
+       ▲
+       │ interface BillingProvider
+       ▼
+```
+
+### Key Benefits
+
+- **Stripe é um provider, não core** — Fácil adicionar Mercado Pago, Asaas depois
+- **Sales-led onboarding**: Admin cria plano → sync Stripe → Admin ativa billing no tenant → Verifier completa onboarding com payment_method
+- **Webhooks normalizados** → `provider_webhook_event` idempotente → sync local
+
+### CI Status
+
+- ✅ `pnpm format` passes
+- ✅ `pnpm typecheck` passes (14/14 packages)
+- ✅ `pnpm vitest run` (1671 tests pass)
+- ✅ `pnpm db:fence` passes
+- ✅ `pnpm lint` passes (warnings only)
+
+### CI Status — Billing Provider Abstraction
+
+All checks pass. The billing provider abstraction layer is complete with Stripe as the first provider implementation.
+
+## Dashboard (apps/dashboard)
 
 ## API (apps/api)
 
@@ -1498,3 +1549,28 @@ pnpm db:fence        # pgfence gate de migrações
 - Dump completo (10 arquivos da Receita + CNEFE de todas as UFs)
 - Conta AWS (apply Terraform, DR, soak test)
 - Multi-região (LGPD data residency)
+
+## Billing — PR #85 (round final de correções, 2026-11-27)
+
+- **Fix 1 — `syncSubscription()` distingue campo ausente / nulo / presente:** `trialStart`, `trialEnd`, `canceledAt`, `pausedAt`, `paymentMethodId` agora usam `Date | null` / `string | null` no contrato `ProviderSubscription`; `null` limpa localmente, valor presente atualiza, `undefined` (apenas `pausedAt`) preserva o local.
+- **Fix 2 — `pause_collection` não sobrescreve paused como `active`:** status de ciclo de vida é derivado separadamente da pausa de cobrança; sem `Date.now()` como data de pausa; `pausedAt` local preservado em sincronizações repetidas; limpo no resume.
+- **Fix 3 — Webhooks idempotentes:** `provider_event_id` em `NormalizedWebhookEvent`; claim atômico via `INSERT … ON CONFLICT DO NOTHING` em `provider_webhook_event`; registro de estado/falhas; retry de eventos falhados; isolamento de tenant via customer do provider (não do payload); `customer.subscription.paused/resumed` mapeados para `subscription.updated`; migração `0095` concede `UPDATE` nas colunas de processamento.
+- **Fix 4 — Mapeamento explícito de linhas de fatura:** `invoiceitem`→`charge`, `tax`→`tax`, `discount`→`discount`, `proration`→`proration`; tipos desconhecidos lançam erro rastreável (não são mascarados como `charge`); valores, quantidade, descrição, período e preço preservados.
+- **Correção de pagamento:** `getPayment()` solicita `expand: ['latest_charge', 'latest_charge.balance_transaction']`; `mapPayment()` lê `pi.latest_charge` (objeto ou string) em vez de `pi.charges`, preenchendo `providerFeeMicros` e `receiptUrl`; fee fica indefinida (não zero) quando `balance_transaction` não veio expandido; `paidAt` deriva de `charge.created` (nunca do relógio do processo).
+- **Correção de crédito:** `createCreditNote()` com `reason: 'other'` omite o campo `reason` (a API Stripe v16 não aceita `other`) e preserva o motivo real no memo — nunca rotula como `duplicate`.
+- **Contrato de entrada integral (emenda):** `createPrice()` envia `trial_period_days` em `recurring` (configuração de trial no Price, usada com `trial_from_plan`); memo da credit note `other` recebe automaticamente a anotação `[reason: other]` (idempotente, sem duplicar se já presente).
+- **Review pós-correções (round 3, 2026-11-27):** revisão de duas vias (standards + spec) sobre o diff completo do PR e fixes aplicados:
+  - Tri-state (ausente/null/presente) estendido a `trialStart`, `trialEnd`, `canceledAt`, `defaultPaymentMethodId` no contrato `ProviderSubscription`; `syncSubscription` só sobrescreve campos informados.
+  - `past_due` sob `pause_collection` preserva o ciclo de vida (só subscription ativa colapsa para `paused`).
+  - Linhas de invoice persistidas em `invoice.items` (JSONB) no `syncInvoice` (insert e update), preservando amounts, quantity, description, period e price reference.
+  - Handlers de webhook reais: `subscription.trial_will_end` re-sincroniza a subscription; `payment_method.attached` persiste `stripe_payment_method_id` no tenant (novo campo `providerPaymentMethodId` no evento normalizado).
+  - DRY: `getSubscriptionOrThrow`/`findSubscriptionById` (subscription.service), `findTenantBilling`/`requireTenantBilling` (customer.service), `findSubscriptionIdByProviderId`/`findInvoiceIdByProviderId`/`requireTenantId` (invoice.service), `retrieveOrNull` (stripe-provider), lookup maps para status de pagamento e tipos de linha (sem switch/ternários aninhados).
+  - Registry: tipos placeholder substituídos pelos tipos reais de `@comprova/db`; métodos sem uso removidos (`list`/`unregister`/`clear`); `has` agora usado pelo auto-registration idempotente (que também eliminou o singleton mutável com `let` em billing-stripe).
+  - Config do Stripe sem campos ignorados (`apiVersion`/`publishableKey` removidos do `StripeProviderConfig`).
+  - Estilo: zero `let` e zero mutação de acumuladores em billing-core/billing-stripe (`reduce` imutável, spreads condicionais).
+  - Drift schema↔migração: PKs alinhadas (`plan_id`, `subscription_id`, `invoice_id`, `payment_id`); nota documentando que pgEnums são apenas tipagem (migrações usam text + CHECK).
+  - RLS: exceção de `provider_webhook_event` (ledger por provider, sem `tenant_id`) registrada em [ADR-0046](docs/adr/0046-provider-webhook-event-sem-rls-por-tenant.md) e referenciada na migration 0095.
+- **Testes:** 21 testes de integração (`subscription.service.test.ts`) e 28 testes de unidade (`stripe-provider.test.ts`), incluindo tri-state, `past_due` pausado, linhas de invoice persistidas, credit note sem falsa rotulagem e expansão dupla do PaymentIntent.
+- **Validação local:** typecheck (db, billing-core, billing-stripe), lint, format, `db:fence` (migração 0095 SAFE), suíte completa: 150 arquivos / 1706 testes passando.
+- **CI:** disparado no SHA `0af3082` (checks `ci`, `security`, `python-tests` em andamento; Supabase Preview skipped).
+- **Limitações:** CI do SHA final ainda sem conclusão confirmada; edits em `0085_wallet_ledger_fixes.sql`, `render.yaml` e testes de RLS/timeouts são pré-existentes no branch (rounds anteriores, fora do escopo deste round); `db, tx?` boilerplate nos services mantido (idiomático, alternativa adicionaria complexidade); dinheiro segue `number` micros (unidade canônica do banco — type Money dedicado seria refactor amplo).

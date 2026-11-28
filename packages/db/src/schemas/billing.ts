@@ -4,18 +4,55 @@
  * Criadas pela migration 0094 (provider abstraction layer).
  */
 
-import { bigint, boolean, index, integer, pgTable, text, timestamp, unique, uuid, jsonb, pgEnum } from 'drizzle-orm/pg-core'
+import {
+  bigint,
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+  jsonb,
+  pgEnum,
+} from 'drizzle-orm/pg-core'
 import { tenant } from './tenancy.js'
 import { adminAuthUser } from './auth.js'
 
 // ============================================================================
 // Enums
 // ============================================================================
+// As migrações criam estas colunas como `text` + CHECK (0077/0094); os
+// pgEnums aqui existem apenas para tipagem TS — Drizzle não emite DDL neste
+// repo (migrations SQL + db:fence).
 
 export const billingPlanStatusEnum = pgEnum('billing_plan_status', ['active', 'archived', 'deprecated'])
-export const subscriptionStatusEnum = pgEnum('subscription_status', ['incomplete', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused'])
-export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'open', 'paid', 'void', 'uncollectible', 'pending'])
-export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'succeeded', 'failed', 'refunded', 'partially_refunded'])
+export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'incomplete',
+  'trialing',
+  'active',
+  'past_due',
+  'canceled',
+  'unpaid',
+  'paused',
+  'incomplete_expired',
+])
+export const invoiceStatusEnum = pgEnum('invoice_status', [
+  'draft',
+  'open',
+  'paid',
+  'void',
+  'uncollectible',
+  'pending',
+])
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'pending',
+  'succeeded',
+  'failed',
+  'refunded',
+  'partially_refunded',
+])
 
 // ============================================================================
 // billing_plan — Planos de billing configurados pelo admin
@@ -24,7 +61,9 @@ export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'succeeded
 export const billingPlan = pgTable(
   'billing_plan',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `plan_id`; o nome do campo Drizzle é
+    // mantido como `id` para preservar a API dos serviços.
+    id: uuid('plan_id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     slug: text('slug').notNull().unique(),
     description: text('description'),
@@ -71,7 +110,8 @@ export type NewBillingPlan = typeof billingPlan.$inferInsert
 export const tenantSubscription = pgTable(
   'tenant_subscription',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `subscription_id`.
+    id: uuid('subscription_id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
@@ -125,12 +165,12 @@ export type NewTenantSubscription = typeof tenantSubscription.$inferInsert
 export const invoice = pgTable(
   'invoice',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `invoice_id`.
+    id: uuid('invoice_id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
-    subscriptionId: uuid('subscription_id')
-      .references(() => tenantSubscription.id, { onDelete: 'set null' }),
+    subscriptionId: uuid('subscription_id').references(() => tenantSubscription.id, { onDelete: 'set null' }),
     number: text('number').notNull(),
     status: invoiceStatusEnum('status').notNull().default('draft'),
     periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
@@ -183,12 +223,12 @@ export type NewInvoice = typeof invoice.$inferInsert
 export const payment = pgTable(
   'payment',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    // A migration 0077 criou a PK como `payment_id`.
+    id: uuid('payment_id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenant.tenantId),
-    invoiceId: uuid('invoice_id')
-      .references(() => invoice.id, { onDelete: 'set null' }),
+    invoiceId: uuid('invoice_id').references(() => invoice.id, { onDelete: 'set null' }),
     amountMicros: bigint('amount_micros', { mode: 'number' }).notNull(),
     currency: text('currency').notNull().default('BRL'),
     status: paymentStatusEnum('status').notNull().default('pending'),
@@ -233,6 +273,9 @@ export type NewPayment = typeof payment.$inferInsert
 export const providerWebhookEvent = pgTable(
   'provider_webhook_event',
   {
+    // PK é bigserial na migração 0094 (sequence, não IDENTITY). O marker
+    // abaixo existe só para tornar `id` opcional no tipo de insert — Drizzle
+    // não emite DDL neste repo (migrations SQL + db:fence).
     id: bigint('id', { mode: 'number' }).primaryKey().generatedByDefaultAsIdentity(),
     providerName: text('provider_name').notNull(),
     providerEventId: text('provider_event_id').notNull(),
@@ -241,10 +284,15 @@ export const providerWebhookEvent = pgTable(
     processedAt: timestamp('processed_at', { withTimezone: true }),
     processingError: text('processing_error'),
     retryCount: integer('retry_count').notNull().default(0),
+    // Instante em que uma entrega reservou o evento para processamento.
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    unique('provider_webhook_event_provider_name_provider_event_id_key').on(t.providerName, t.providerEventId),
+    unique('provider_webhook_event_provider_name_provider_event_id_key').on(
+      t.providerName,
+      t.providerEventId,
+    ),
     index('idx_provider_webhook_event_created').on(t.createdAt),
   ],
 )

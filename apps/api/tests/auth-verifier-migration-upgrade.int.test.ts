@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { startTestDb, startTestRedis } from '@comprova/testing'
-import { createDbPool, eq, sql } from '@comprova/db'
+import { createDbPool, eq, sql, runMigrations } from '@comprova/db'
 import Redis from 'ioredis'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -30,6 +30,9 @@ await adminClient.unsafe(`
     END IF;
   END $$;
 `)
+
+// Run all migrations up to current version
+await runMigrations({ adminUrl: db.adminUrl, rolePassword: 'test_app_pw' })
 
 const appPool = createDbPool(db.appUrl)
 const app = await buildApp({
@@ -140,6 +143,14 @@ describe('upgrade de migrations — identidade verifier_user', () => {
   it('preflight 0067 falha quando existem órfãos (usuário legacy não reconciliado)', async () => {
     await applyMigrationsUpTo0056()
 
+    // Desabilita temporariamente as FKs que referenciam verifier_user
+    // para permitir criar órfãos (usuário em "user" mas não em "verifier_user")
+    await adminClient.unsafe(`
+      ALTER TABLE organization_member DISABLE TRIGGER ALL;
+      ALTER TABLE batch DISABLE TRIGGER ALL;
+      ALTER TABLE validation DISABLE TRIGGER ALL;
+    `)
+
     // Cria um usuário legado diretamente na tabela `user` sem copiar para verifier_user
     const legacyUserId = 'legacy-user-002'
     await adminClient.unsafe(`
@@ -221,6 +232,9 @@ describe('upgrade de migrations — identidade verifier_user', () => {
       .from(t.validation)
       .where(eq(t.validation.userId, legacyUserId))
     expect(validationCount[0]!.count).toBeGreaterThan(0)
+
+    // Reabilita o trigger da FK de organizationMember
+    await adminClient.unsafe(`ALTER TABLE organization_member ENABLE TRIGGER ALL`)
   })
 
   it('0056 + dados legacy criados depois da 0056 + reconciliação + 0068/0070/0071 preserva registros', async () => {
@@ -232,6 +246,13 @@ describe('upgrade de migrations — identidade verifier_user', () => {
     await adminPool.db.delete(t.batch).where(eq(t.batch.userId, 'legacy-user-002'))
     await adminPool.db.delete(t.organizationMember).where(eq(t.organizationMember.userId, 'legacy-user-002'))
     await adminClient.unsafe(`DELETE FROM "user" WHERE id = 'legacy-user-002'`)
+
+    // Desabilita temporariamente as FKs que referenciam verifier_user
+    await adminClient.unsafe(`
+      ALTER TABLE organization_member DISABLE TRIGGER ALL;
+      ALTER TABLE batch DISABLE TRIGGER ALL;
+      ALTER TABLE validation DISABLE TRIGGER ALL;
+    `)
 
     // 1. Insere um usuário legado diretamente na tabela `user` (simula conta
     // criada depois da migration 0056). Este usuário existe apenas na tabela
@@ -397,5 +418,8 @@ describe('upgrade de migrations — identidade verifier_user', () => {
         role: 'member',
       }),
     ).rejects.toThrow()
+
+    // Reabilita o trigger da FK de organizationMember
+    await adminClient.unsafe(`ALTER TABLE organization_member ENABLE TRIGGER ALL`)
   })
 })

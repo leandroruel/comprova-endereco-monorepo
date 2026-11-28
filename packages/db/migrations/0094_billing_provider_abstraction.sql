@@ -59,7 +59,7 @@ ALTER TABLE tenant_subscription
   DROP CONSTRAINT IF EXISTS tenant_subscription_status_check;
 ALTER TABLE tenant_subscription
   ADD CONSTRAINT tenant_subscription_status_check
-  CHECK (status IN ('incomplete', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused'));
+  CHECK (status IN ('incomplete', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused', 'incomplete_expired'));
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_tenant_subscription_tenant_provider
