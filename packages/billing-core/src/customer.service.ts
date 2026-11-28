@@ -6,19 +6,11 @@
  */
 
 import type { ProviderRegistry } from './provider-registry.js'
-import type { ProviderPaymentMethod, Address } from './provider.js'
+import type { ProviderPaymentMethod, BillingContact } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { eq, and } from '@comprova/db'
 import { sql } from 'drizzle-orm'
-
-export interface CustomerBillingData {
-  readonly email: string
-  readonly companyName: string
-  readonly taxId: string
-  readonly address: Address
-  readonly contactEmail?: string
-}
 
 export class CustomerService {
   constructor(
@@ -27,17 +19,12 @@ export class CustomerService {
   ) {}
 
   /**
-   * Garante que existe um customer no provider para o tenant.
-   * Se não existe, cria. Se existe, atualiza dados.
+   * Busca os dados de billing de um tenant (customer e provider).
    */
-  async ensureCustomer(
+  private async findTenantBilling(
     tenantId: string,
-    billingData: CustomerBillingData,
-    tx?: Db | DbTx,
-  ): Promise<{ providerCustomerId: string; providerName: string }> {
-    const db = tx ?? this.db
-
-    // Busca tenant para ver se já tem customer
+    db: Db | DbTx,
+  ): Promise<{ stripeCustomerId: string | null; providerName: string } | null> {
     const [tenantRecord] = await db
       .select({
         stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
@@ -47,12 +34,52 @@ export class CustomerService {
       .where(eq(t.tenant.tenantId, tenantId))
       .limit(1)
 
+    return tenantRecord
+      ? {
+          stripeCustomerId: tenantRecord.stripeCustomerId,
+          providerName: tenantRecord.providerName ?? 'stripe',
+        }
+      : null
+  }
+
+  /**
+   * Busca os dados de billing de um tenant que precisa ter customer.
+   */
+  private async requireTenantBilling(
+    tenantId: string,
+    db: Db | DbTx,
+  ): Promise<{ stripeCustomerId: string; providerName: string }> {
+    const tenantRecord = await this.findTenantBilling(tenantId, db)
+
+    if (!tenantRecord?.stripeCustomerId) {
+      throw new Error(`Tenant has no billing customer: ${tenantId}`)
+    }
+
+    return { stripeCustomerId: tenantRecord.stripeCustomerId, providerName: tenantRecord.providerName }
+  }
+
+  /**
+   * Garante que existe um customer no provider para o tenant.
+   * Se não existe, cria. Se existe, atualiza dados.
+   */
+  async ensureCustomer(
+    tenantId: string,
+    billingData: BillingContact,
+    tx?: Db | DbTx,
+  ): Promise<{ providerCustomerId: string; providerName: string }> {
+    const db = tx ?? this.db
+
+    const tenantRecord = await this.findTenantBilling(tenantId, db)
+
     if (!tenantRecord) {
       throw new Error(`Tenant not found: ${tenantId}`)
     }
 
-    const providerName = tenantRecord.providerName ?? 'stripe'
-    const provider = this.providerRegistry.get(providerName)
+    const provider = this.providerRegistry.get(tenantRecord.providerName)
+    const customerMetadata = {
+      comprova_tenant_id: tenantId,
+      comprova_cnpj: billingData.taxId,
+    }
 
     if (tenantRecord.stripeCustomerId) {
       // Atualiza customer existente
@@ -62,12 +89,9 @@ export class CustomerService {
         companyName: billingData.companyName,
         taxId: billingData.taxId,
         address: billingData.address,
-        metadata: {
-          comprova_tenant_id: tenantId,
-          comprova_cnpj: billingData.taxId,
-        },
+        metadata: customerMetadata,
       })
-      return { providerCustomerId: tenantRecord.stripeCustomerId, providerName }
+      return { providerCustomerId: tenantRecord.stripeCustomerId, providerName: tenantRecord.providerName }
     }
 
     // Cria novo customer no provider
@@ -77,10 +101,7 @@ export class CustomerService {
       companyName: billingData.companyName,
       taxId: billingData.taxId,
       address: billingData.address,
-      metadata: {
-        comprova_tenant_id: tenantId,
-        comprova_cnpj: billingData.taxId,
-      },
+      metadata: customerMetadata,
     })
 
     // Salva provider_customer_id no tenant
@@ -88,11 +109,11 @@ export class CustomerService {
       .update(t.tenant)
       .set({
         stripeCustomerId: customer.id,
-        providerName,
+        providerName: tenantRecord.providerName,
       })
       .where(eq(t.tenant.tenantId, tenantId))
 
-    return { providerCustomerId: customer.id, providerName }
+    return { providerCustomerId: customer.id, providerName: tenantRecord.providerName }
   }
 
   /**
@@ -101,21 +122,9 @@ export class CustomerService {
   async attachPaymentMethod(tenantId: string, paymentMethodId: string, tx?: Db | DbTx): Promise<void> {
     const db = tx ?? this.db
 
-    const [tenantRecord] = await db
-      .select({
-        stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
-        providerName: sql<string | null>`${t.tenant.providerName}`,
-      })
-      .from(t.tenant)
-      .where(eq(t.tenant.tenantId, tenantId))
-      .limit(1)
+    const { stripeCustomerId, providerName } = await this.requireTenantBilling(tenantId, db)
 
-    if (!tenantRecord || !tenantRecord.stripeCustomerId) {
-      throw new Error(`Tenant has no billing customer: ${tenantId}`)
-    }
-
-    const provider = this.providerRegistry.get(tenantRecord.providerName ?? 'stripe')
-    await provider.attachPaymentMethod(tenantRecord.stripeCustomerId, paymentMethodId)
+    await this.providerRegistry.get(providerName).attachPaymentMethod(stripeCustomerId, paymentMethodId)
 
     // Atualiza payment_method_id no tenant
     await db
@@ -130,21 +139,15 @@ export class CustomerService {
   async listPaymentMethods(tenantId: string, tx?: Db | DbTx): Promise<ReadonlyArray<ProviderPaymentMethod>> {
     const db = tx ?? this.db
 
-    const [tenantRecord] = await db
-      .select({
-        stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
-        providerName: sql<string | null>`${t.tenant.providerName}`,
-      })
-      .from(t.tenant)
-      .where(eq(t.tenant.tenantId, tenantId))
-      .limit(1)
+    const tenantRecord = await this.findTenantBilling(tenantId, db)
 
-    if (!tenantRecord || !tenantRecord.stripeCustomerId) {
+    if (!tenantRecord?.stripeCustomerId) {
       return []
     }
 
-    const provider = this.providerRegistry.get(tenantRecord.providerName ?? 'stripe')
-    return provider.listPaymentMethods(tenantRecord.stripeCustomerId)
+    return this.providerRegistry
+      .get(tenantRecord.providerName)
+      .listPaymentMethods(tenantRecord.stripeCustomerId)
   }
 
   /**
@@ -181,21 +184,9 @@ export class CustomerService {
   async detachPaymentMethod(tenantId: string, paymentMethodId: string, tx?: Db | DbTx): Promise<void> {
     const db = tx ?? this.db
 
-    const [tenantRecord] = await db
-      .select({
-        stripeCustomerId: sql<string | null>`${t.tenant.stripeCustomerId}`,
-        providerName: sql<string | null>`${t.tenant.providerName}`,
-      })
-      .from(t.tenant)
-      .where(eq(t.tenant.tenantId, tenantId))
-      .limit(1)
+    const { stripeCustomerId, providerName } = await this.requireTenantBilling(tenantId, db)
 
-    if (!tenantRecord || !tenantRecord.stripeCustomerId) {
-      throw new Error(`Tenant has no billing customer: ${tenantId}`)
-    }
-
-    const provider = this.providerRegistry.get(tenantRecord.providerName ?? 'stripe')
-    await provider.detachPaymentMethod(tenantRecord.stripeCustomerId, paymentMethodId)
+    await this.providerRegistry.get(providerName).detachPaymentMethod(stripeCustomerId, paymentMethodId)
 
     // Se era o default, limpa
     await db

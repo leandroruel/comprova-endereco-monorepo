@@ -35,11 +35,38 @@ import type {
   Address,
 } from '@comprova/billing-core'
 
+/**
+ * Status do PaymentIntent → status local. Estados intermediários de
+ * confirmação são "pending"; tudo não mapeado é "failed".
+ */
+const paymentStatusByIntentStatus: Record<string, ProviderPayment['status']> = {
+  succeeded: 'succeeded',
+  processing: 'pending',
+  requires_payment_method: 'pending',
+  requires_action: 'pending',
+  requires_confirmation: 'pending',
+  requires_capture: 'pending',
+}
+
+/**
+ * Tipo da linha de fatura no Stripe → tipo no domínio. `invoiceitem` é um
+ * item avulso (cobrança pontual), não uma assinatura.
+ */
+const invoiceLineTypeByStripe: Record<string, ProviderInvoiceLine['type']> = {
+  subscription: 'subscription',
+  invoiceitem: 'charge',
+  usage: 'usage',
+  credit: 'credit',
+  proration: 'proration',
+  tax: 'tax',
+  discount: 'discount',
+  charge: 'charge',
+  pending: 'pending',
+}
+
 export interface StripeProviderConfig {
   readonly secretKey: string
   readonly webhookSecret: string
-  readonly apiVersion?: string
-  readonly publishableKey?: string
 }
 
 export class StripeProvider implements BillingProvider {
@@ -239,17 +266,12 @@ export class StripeProvider implements BillingProvider {
   }
 
   async getSubscription(id: string): Promise<ProviderSubscription | null> {
-    try {
+    return this.retrieveOrNull(async () => {
       const subscription = await this.stripe.subscriptions.retrieve(id, {
         expand: ['default_payment_method', 'items.data.price.product'],
       })
       return this.mapSubscription(subscription)
-    } catch (error) {
-      if (error instanceof Stripe.errors.StripeError && error.code === 'resource_missing') {
-        return null
-      }
-      throw error
-    }
+    })
   }
 
   // ============================================================================
@@ -285,17 +307,12 @@ export class StripeProvider implements BillingProvider {
   }
 
   async getInvoice(id: string): Promise<ProviderInvoice | null> {
-    try {
+    return this.retrieveOrNull(async () => {
       const inv = await this.stripe.invoices.retrieve(id, {
         expand: ['lines.data.price.product', 'subscription', 'payment_intent'],
       })
       return this.mapInvoice(inv)
-    } catch (error) {
-      if (error instanceof Stripe.errors.StripeError && error.code === 'resource_missing') {
-        return null
-      }
-      throw error
-    }
+    })
   }
 
   async listInvoices(
@@ -312,13 +329,24 @@ export class StripeProvider implements BillingProvider {
   }
 
   async getPayment(id: string): Promise<ProviderPayment | null> {
-    try {
+    return this.retrieveOrNull(async () => {
       // latest_charge não vem expandido por padrão em PaymentIntent.retrieve;
-      // é necessário solicitá-lo explicitamente para obter receipt_url e fee.
+      // balance_transaction também não — ambos são necessários para receipt_url
+      // e a tarifa do provider.
       const pi = await this.stripe.paymentIntents.retrieve(id, {
-        expand: ['latest_charge'],
+        expand: ['latest_charge', 'latest_charge.balance_transaction'],
       })
       return this.mapPayment(pi)
+    })
+  }
+
+  /**
+   * Executa uma retrieve no Stripe convertendo `resource_missing` em `null`
+   * (objeto não existe mais no provider); demais erros propagam.
+   */
+  private async retrieveOrNull<T>(retrieve: () => Promise<T>): Promise<T | null> {
+    try {
+      return await retrieve()
     } catch (error) {
       if (error instanceof Stripe.errors.StripeError && error.code === 'resource_missing') {
         return null
@@ -353,22 +381,29 @@ export class StripeProvider implements BillingProvider {
   // ============================================================================
 
   async createCreditNote(input: CreateCreditNoteInput): Promise<ProviderCreditNote> {
-    const reasonMap: Record<string, Stripe.CreditNoteCreateParams.Reason> = {
+    if (!input.invoiceId) {
+      throw new Error('invoiceId is required for credit notes')
+    }
+
+    // Mapeamento exaustivo: `other` não é motivo aceito pela API do Stripe
+    // (v16), então o campo `reason` é omitido e o motivo real fica no memo —
+    // nunca rotulado incorretamente como `duplicate`.
+    const reasonByInput: Record<
+      ProviderCreditNote['reason'],
+      Stripe.CreditNoteCreateParams.Reason | undefined
+    > = {
       duplicate: 'duplicate',
       fraudulent: 'fraudulent',
       order_change: 'order_change',
       product_unsatisfactory: 'product_unsatisfactory',
-      // `other` é um motivo válido na Stripe e não deve ser convertido para
-      // `duplicate` (que registraria um motivo incorreto).
+      other: undefined,
     }
-    if (!input.invoiceId) {
-      throw new Error('invoiceId is required for credit notes')
-    }
+
     const cn = await this.stripe.creditNotes.create(
       {
         invoice: input.invoiceId,
         amount: this.microsToCentavos(input.amountMicros),
-        reason: reasonMap[input.reason] ?? 'duplicate',
+        reason: reasonByInput[input.reason],
         memo: input.memo,
       },
       { idempotencyKey: input.idempotencyKey },
@@ -415,18 +450,18 @@ export class StripeProvider implements BillingProvider {
     const data = event.data as Record<string, unknown>
 
     // Determine providerSubscriptionId based on event type
-    let providerSubscriptionId: string | undefined
-    if (event.type.startsWith('customer.subscription.')) {
-      providerSubscriptionId = this.extractId(data.id) ?? undefined
-    } else if (event.type.startsWith('invoice.')) {
-      providerSubscriptionId = this.extractId(data.subscription) ?? undefined
-    }
+    const providerSubscriptionId = this.subscriptionIdForEvent(event.type, data)
 
     // customer.updated carries the customer ID in data.id, not data.customer.
     const providerCustomerId =
       event.type === 'customer.updated'
         ? (this.extractId(data.id) ?? undefined)
         : (this.extractId(data.customer) ?? undefined)
+
+    // payment_method events carry the method itself in data.id.
+    const providerPaymentMethodId = event.type.startsWith('payment_method.')
+      ? (this.extractId(data.id) ?? undefined)
+      : undefined
 
     return {
       type: typeMap[event.type] ?? (event.type as WebhookEventType),
@@ -438,8 +473,23 @@ export class StripeProvider implements BillingProvider {
         ? (this.extractId(data.id) ?? undefined)
         : undefined,
       providerPaymentId: this.extractPaymentId(data, event.type),
+      providerPaymentMethodId,
       payload: data,
     }
+  }
+
+  /**
+   * Resolve o ID da subscription envolvida no evento: eventos de subscription
+   * carregam o objeto em `data.id`; eventos de invoice em `data.subscription`.
+   */
+  private subscriptionIdForEvent(type: string, data: Record<string, unknown>): string | undefined {
+    if (type.startsWith('customer.subscription.')) {
+      return this.extractId(data.id) ?? undefined
+    }
+    if (type.startsWith('invoice.')) {
+      return this.extractId(data.subscription) ?? undefined
+    }
+    return undefined
   }
 
   private extractPaymentId(data: Record<string, unknown>, type: string): string | undefined {
@@ -623,29 +673,12 @@ export class StripeProvider implements BillingProvider {
    * como `charge` (o que alteraria o significado contábil da linha).
    */
   private mapInvoiceLineType(type: string): ProviderInvoiceLine['type'] {
-    switch (type) {
-      case 'subscription':
-        return 'subscription'
-      case 'invoiceitem':
-        // Item avulso de fatura: uma cobrança pontual, não uma assinatura.
-        return 'charge'
-      case 'usage':
-        return 'usage'
-      case 'credit':
-        return 'credit'
-      case 'proration':
-        return 'proration'
-      case 'tax':
-        return 'tax'
-      case 'discount':
-        return 'discount'
-      case 'charge':
-        return 'charge'
-      case 'pending':
-        return 'pending'
-      default:
-        throw new Error(`Unsupported Stripe invoice line type: ${type}`)
+    const lineType = invoiceLineTypeByStripe[type]
+
+    if (lineType === undefined) {
+      throw new Error(`Unsupported Stripe invoice line type: ${type}`)
     }
+    return lineType
   }
 
   private mapPayment(pi: Stripe.PaymentIntent): ProviderPayment {
@@ -653,6 +686,16 @@ export class StripeProvider implements BillingProvider {
     // expansão solicitada. Não confiar em `charges` (não vem expandido por
     // padrão em PaymentIntent.retrieve).
     const charge = typeof pi.latest_charge === 'object' && pi.latest_charge !== null ? pi.latest_charge : null
+    // Fee só existe com balance_transaction expandido; sem expansão o valor
+    // fica indefinido em vez de sincronizar um zero enganoso.
+    const balanceTransaction = charge?.balance_transaction
+    const providerFeeMicros =
+      typeof balanceTransaction === 'object' && balanceTransaction !== null
+        ? this.centavosToMicros(balanceTransaction.fee)
+        : undefined
+    // Data real do pagamento: instante do charge no provider, nunca o relógio
+    // do processo de sincronização.
+    const paidAt = pi.status === 'succeeded' && charge ? new Date(charge.created * 1000) : undefined
 
     return {
       id: pi.id,
@@ -660,30 +703,11 @@ export class StripeProvider implements BillingProvider {
       customerId: pi.customer as string,
       amountMicros: this.centavosToMicros(pi.amount),
       currency: pi.currency.toUpperCase() as Currency,
-      status:
-        pi.status === 'succeeded'
-          ? 'succeeded'
-          : pi.status === 'processing'
-            ? 'pending'
-            : pi.status === 'requires_payment_method'
-              ? 'pending'
-              : pi.status === 'requires_action'
-                ? 'pending'
-                : pi.status === 'requires_confirmation'
-                  ? 'pending'
-                  : pi.status === 'requires_capture'
-                    ? 'pending'
-                    : 'failed',
+      status: paymentStatusByIntentStatus[pi.status] ?? 'failed',
       paymentMethodType: pi.payment_method_types[0] ?? 'card',
-      providerFeeMicros: charge
-        ? this.centavosToMicros(
-            typeof charge.balance_transaction === 'object' && charge.balance_transaction !== null
-              ? charge.balance_transaction.fee
-              : 0,
-          )
-        : undefined,
+      providerFeeMicros,
       receiptUrl: charge?.receipt_url ?? undefined,
-      paidAt: pi.status === 'succeeded' ? new Date() : undefined,
+      paidAt,
       refundedAt: undefined,
       metadata: pi.metadata as Record<string, string>,
     }

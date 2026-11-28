@@ -18,6 +18,18 @@ export interface Address {
   readonly country?: string
 }
 
+/**
+ * Dados de cobrança do tenant — viajam juntos em toda operação de
+ * customer/subscription (evita repetir o quarteto email/empresa/CNPJ/endereço).
+ */
+export interface BillingContact {
+  readonly email: string
+  readonly companyName: string
+  readonly taxId: string
+  readonly address: Address
+  readonly contactEmail?: string
+}
+
 // ============================================================================
 // Tipos Básicos (Provider-Agnósticos)
 // ============================================================================
@@ -151,15 +163,17 @@ export interface ProviderSubscription {
   readonly status: SubscriptionStatus
   readonly currentPeriodStart: Date
   readonly currentPeriodEnd: Date
-  /**
-   * `null` significa que o provider informa explicitamente que não há trial.
-   * Não use `undefined` para representar ausência: campos obrigatórios e
-   * anuláveis distinguem "sem valor" (null) de "não informado".
-   */
-  readonly trialStart: Date | null
-  readonly trialEnd: Date | null
   readonly cancelAtPeriodEnd: boolean
-  readonly canceledAt: Date | null
+  /**
+   * Campos anuláveis seguem a convenção tri-state:
+   *
+   * - `Date`/`string` (presente): o provider informou o valor; sincronizar.
+   * - `null`: o provider informa explicitamente que não há valor; limpar local.
+   * - `undefined`: o provider não informou o campo; preservar o valor local.
+   */
+  readonly trialStart?: Date | null
+  readonly trialEnd?: Date | null
+  readonly canceledAt?: Date | null
   /**
    * Data real de pausa conhecida pelo provider.
    *
@@ -170,7 +184,7 @@ export interface ProviderSubscription {
    *   sincronização preserva o valor local em vez de inventar uma data.
    */
   readonly pausedAt?: Date | null
-  readonly defaultPaymentMethodId: string | null
+  readonly defaultPaymentMethodId?: string | null
   /**
    * Pausa de cobrança ativa, quando o provider a modela separadamente do
    * status. `null` significa que não há pausa de cobrança.
@@ -257,6 +271,7 @@ export interface NormalizedWebhookEvent {
   readonly providerCustomerId?: string
   readonly providerInvoiceId?: string
   readonly providerPaymentId?: string
+  readonly providerPaymentMethodId?: string
   readonly payload: unknown
 }
 

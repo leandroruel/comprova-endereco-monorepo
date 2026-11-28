@@ -12,33 +12,33 @@ export type { StripeProviderConfig } from './stripe-provider.js'
 import { providerRegistry } from '@comprova/billing-core'
 import { StripeProvider } from './stripe-provider.js'
 
-let _stripeProvider: StripeProvider | null = null
+const STRIPE_PROVIDER_NAME = 'stripe'
 
 /**
- * Inicializa e registra o StripeProvider.
- * Deve ser chamado uma vez no bootstrap da aplicação.
+ * Inicializa e registra o StripeProvider (idempotente).
+ * Deve ser chamado no bootstrap da aplicação.
  */
 export function initializeStripeProvider(config: {
   secretKey: string
   webhookSecret: string
-  apiVersion?: string
-  publishableKey?: string
 }): StripeProvider {
-  if (_stripeProvider) {
-    return _stripeProvider
+  if (providerRegistry.has(STRIPE_PROVIDER_NAME)) {
+    return getStripeProvider()
   }
 
-  _stripeProvider = new StripeProvider(config)
-  providerRegistry.register(_stripeProvider)
-  return _stripeProvider
+  const provider = new StripeProvider(config)
+  providerRegistry.register(provider)
+  return provider
 }
 
 /**
- * Obtém instância já inicializada (lança erro se não inicializada).
+ * Obtém instância já registrada (lança erro se não inicializada).
  */
 export function getStripeProvider(): StripeProvider {
-  if (!_stripeProvider) {
-    throw new Error('StripeProvider not initialized. Call initializeStripeProvider() first.')
+  const provider = providerRegistry.get(STRIPE_PROVIDER_NAME)
+
+  if (!(provider instanceof StripeProvider)) {
+    throw new Error(`Provider registered as "${STRIPE_PROVIDER_NAME}" is not a StripeProvider`)
   }
-  return _stripeProvider
+  return provider
 }

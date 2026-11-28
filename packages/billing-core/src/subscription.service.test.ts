@@ -2,7 +2,12 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { createDbPool, eq, runMigrations, sql } from '@comprova/db'
 import * as t from '@comprova/db'
 import { startTestDb, TEST_APP_DB_PASSWORD } from '@comprova/testing'
-import type { BillingProvider, NormalizedWebhookEvent, ProviderSubscription } from './provider.js'
+import type {
+  BillingProvider,
+  NormalizedWebhookEvent,
+  ProviderInvoice,
+  ProviderSubscription,
+} from './provider.js'
 import { ProviderRegistry } from './provider-registry.js'
 import { BillingPlanService } from './plan.service.js'
 import { CustomerService } from './customer.service.js'
@@ -47,6 +52,7 @@ const makeProviderSubscription = (overrides: Partial<ProviderSubscription> = {})
 class FakeStripeProvider {
   readonly name = 'stripe'
   subscription: ProviderSubscription = makeProviderSubscription()
+  invoice: ProviderInvoice | null = null
   subscriptionError: Error | null = null
   getSubscriptionCalls = 0
 
@@ -56,6 +62,10 @@ class FakeStripeProvider {
       throw this.subscriptionError
     }
     return this.subscription
+  }
+
+  async getInvoice(): Promise<ProviderInvoice | null> {
+    return this.invoice
   }
 }
 
@@ -127,6 +137,7 @@ const resetLocalSubscription = async (overrides: Partial<t.NewTenantSubscription
 await adminPool.db.insert(t.tenant).values({
   tenantId: TENANT_ID,
   name: 'billing-webhook-test',
+  type: 'organization',
   providerName: 'stripe',
   stripeCustomerId: PROVIDER_CUSTOMER_ID,
 })
@@ -161,10 +172,15 @@ await adminPool.db.insert(t.tenantSubscription).values({
 
 beforeEach(async () => {
   provider.subscription = makeProviderSubscription()
+  provider.invoice = null
   provider.subscriptionError = null
   provider.getSubscriptionCalls = 0
   await resetLocalSubscription()
   await adminPool.db.delete(t.providerWebhookEvent)
+  await adminPool.db
+    .update(t.tenant)
+    .set({ stripePaymentMethodId: null })
+    .where(eq(t.tenant.tenantId, TENANT_ID))
 })
 
 afterAll(async () => {
@@ -226,6 +242,24 @@ describe('sync de campos opcionais da subscription', () => {
     expect((await getLocalSubscription()).paymentMethodId).toBeNull()
   })
 
+  it('campo não informado pelo provider preserva o valor local (tri-state)', async () => {
+    const trialStart = new Date('2026-01-02T00:00:00Z')
+    const trialEnd = new Date('2026-01-09T00:00:00Z')
+    await resetLocalSubscription({ trialStart, trialEnd })
+
+    // Provider omitiu os campos: nada deve ser sobrescrito.
+    provider.subscription = makeProviderSubscription({
+      trialStart: undefined,
+      trialEnd: undefined,
+    })
+
+    await handleSubscriptionEvent('evt_trial_absent')
+
+    const local = await getLocalSubscription()
+    expect(local.trialStart).toEqual(trialStart)
+    expect(local.trialEnd).toEqual(trialEnd)
+  })
+
   it('repetir a sincronização não altera os valores já sincronizados', async () => {
     const trialStart = new Date('2026-01-02T00:00:00Z')
     const trialEnd = new Date('2026-01-09T00:00:00Z')
@@ -277,6 +311,20 @@ describe('subscriptions pausadas', () => {
     const local = await getLocalSubscription()
     expect(local.status).toBe('active')
     expect(local.pausedAt).toBeNull()
+  })
+
+  it('past_due sob pausa de cobrança preserva o status de ciclo de vida', async () => {
+    await resetLocalSubscription({ status: 'past_due' })
+    provider.subscription = makeProviderSubscription({
+      status: 'past_due',
+      pauseCollection: { behavior: 'mark_uncollectible', resumesAt: null },
+    })
+
+    await handleSubscriptionEvent('evt_past_due_paused')
+
+    // A pausa de cobrança não apaga o ciclo de vida: só subscription ativa
+    // colapsa para 'paused'.
+    expect((await getLocalSubscription()).status).toBe('past_due')
   })
 
   it('sincronizações repetidas não geram um novo pausedAt', async () => {
@@ -392,5 +440,108 @@ describe('persistência e idempotência de webhooks', () => {
 
     expect((await getWebhookRow('evt_foreign_tenant'))?.processedAt).not.toBeNull()
     expect((await getLocalSubscription()).tenantId).toBe(TENANT_ID)
+  })
+})
+
+describe('efeitos de negócio por tipo de evento', () => {
+  it('trial_will_end re-sincroniza a subscription', async () => {
+    await service.handleWebhookEvent({
+      type: 'subscription.trial_will_end',
+      providerName: 'stripe',
+      providerEventId: 'evt_trial_will_end',
+      providerSubscriptionId: PROVIDER_SUBSCRIPTION_ID,
+      providerCustomerId: PROVIDER_CUSTOMER_ID,
+      payload: {},
+    })
+
+    expect(provider.getSubscriptionCalls).toBe(1)
+    expect((await getWebhookRow('evt_trial_will_end'))?.processedAt).not.toBeNull()
+  })
+
+  it('payment_method.attached persiste o payment method no tenant', async () => {
+    await service.handleWebhookEvent({
+      type: 'payment_method.attached',
+      providerName: 'stripe',
+      providerEventId: 'evt_pm_attached',
+      providerCustomerId: PROVIDER_CUSTOMER_ID,
+      providerPaymentMethodId: 'pm_attached_1',
+      payload: { id: 'pm_attached_1' },
+    })
+
+    const [tenant] = await adminPool.db
+      .select()
+      .from(t.tenant)
+      .where(eq(t.tenant.tenantId, TENANT_ID))
+      .limit(1)
+    expect(tenant?.stripePaymentMethodId).toBe('pm_attached_1')
+    expect((await getWebhookRow('evt_pm_attached'))?.processedAt).not.toBeNull()
+  })
+
+  it('invoice.paid persiste as linhas da fatura (amounts, quantidade, descrição, período, preço)', async () => {
+    provider.invoice = {
+      id: 'in_test_lines',
+      subscriptionId: PROVIDER_SUBSCRIPTION_ID,
+      customerId: PROVIDER_CUSTOMER_ID,
+      status: 'paid',
+      amountDueMicros: 12_340_000,
+      amountPaidMicros: 12_340_000,
+      currency: 'BRL',
+      periodStart: PERIOD_START,
+      periodEnd: PERIOD_END,
+      paidAt: new Date('2026-01-15T00:00:00Z'),
+      lines: [
+        {
+          id: 'il_test_1',
+          priceId: 'price_test',
+          quantity: 2,
+          amountMicros: 12_340_000,
+          description: 'Mensalidade plano teste',
+          type: 'subscription',
+          periodStart: PERIOD_START,
+          periodEnd: PERIOD_END,
+        },
+        {
+          id: 'il_test_2',
+          priceId: '',
+          quantity: 1,
+          amountMicros: 990_000,
+          description: 'Imposto',
+          type: 'tax',
+          periodStart: PERIOD_START,
+          periodEnd: PERIOD_END,
+        },
+      ],
+      metadata: {},
+    }
+
+    await service.handleWebhookEvent({
+      type: 'invoice.paid',
+      providerName: 'stripe',
+      providerEventId: 'evt_invoice_paid',
+      providerInvoiceId: 'in_test_lines',
+      providerCustomerId: PROVIDER_CUSTOMER_ID,
+      payload: {},
+    })
+
+    const [invoice] = await adminPool.db
+      .select()
+      .from(t.invoice)
+      .where(eq(t.invoice.providerInvoiceId, 'in_test_lines'))
+      .limit(1)
+
+    expect(invoice).toBeDefined()
+    const items = invoice?.items as ReadonlyArray<Record<string, unknown>>
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({
+      id: 'il_test_1',
+      priceId: 'price_test',
+      quantity: 2,
+      amountMicros: 12_340_000,
+      description: 'Mensalidade plano teste',
+      type: 'subscription',
+    })
+    // Taxa não é reclassificada como crédito/cobrança.
+    expect(items[1]).toMatchObject({ id: 'il_test_2', type: 'tax', amountMicros: 990_000 })
+    expect((await getWebhookRow('evt_invoice_paid'))?.processedAt).not.toBeNull()
   })
 })

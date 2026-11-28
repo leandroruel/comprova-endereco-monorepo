@@ -26,6 +26,18 @@ export class InvoiceService {
   ) {}
 
   /**
+   * Resolve o tenant local a partir do customer do provider ou lança erro.
+   */
+  private async requireTenantId(customerId: string, db: Db | DbTx): Promise<string> {
+    const tenant = await this.customerService.getTenantByProviderCustomerId(customerId, db)
+
+    if (!tenant) {
+      throw new Error(`Tenant not found for provider customer ${customerId}`)
+    }
+    return tenant.tenantId
+  }
+
+  /**
    * Sincroniza invoice do provider para o banco local.
    * Chamado pelo webhook handler quando invoice.paid/finalized.
    */
@@ -42,18 +54,12 @@ export class InvoiceService {
       return null
     }
 
-    // Busca subscription local pelo provider_subscription_id
-    const subscriptionId = providerInvoice.subscriptionId
-    let localSubscriptionId: string | null = null
-
-    if (subscriptionId) {
-      const [sub] = await db
-        .select({ id: t.tenantSubscription.id })
-        .from(t.tenantSubscription)
-        .where(eq(t.tenantSubscription.providerSubscriptionId, subscriptionId))
-        .limit(1)
-      localSubscriptionId = sub?.id ?? null
-    }
+    const localSubscriptionId = providerInvoice.subscriptionId
+      ? await this.findSubscriptionIdByProviderId(providerInvoice.subscriptionId, db)
+      : null
+    const tenantId = await this.requireTenantId(providerInvoice.customerId, db)
+    // Linhas do provider persistidas em `items` (JSONB) para relatórios.
+    const lines = providerInvoice.lines
 
     const [synced] = await db
       .insert(t.invoice)
@@ -73,13 +79,9 @@ export class InvoiceService {
         dueDate: providerInvoice.dueDate,
         paidAt: providerInvoice.paidAt,
         metadata: providerInvoice.metadata,
-        tenantId:
-          (await this.customerService.getTenantByProviderCustomerId(providerInvoice.customerId, db))
-            ?.tenantId ??
-          (() => {
-            throw new Error(`Tenant not found for Stripe customer ${providerInvoice.customerId}`)
-          })(),
+        tenantId,
         number: providerInvoice.id, // Use provider invoice ID as number
+        items: lines,
       })
       .onConflictDoUpdate({
         target: t.invoice.providerInvoiceId,
@@ -92,11 +94,28 @@ export class InvoiceService {
           dueDate: providerInvoice.dueDate,
           paidAt: providerInvoice.paidAt,
           metadata: providerInvoice.metadata,
+          items: lines,
         },
       })
       .returning()
 
     return synced ?? null
+  }
+
+  /**
+   * Busca o id local de uma subscription a partir do id no provider.
+   */
+  private async findSubscriptionIdByProviderId(
+    providerSubscriptionId: string,
+    db: Db | DbTx,
+  ): Promise<string | null> {
+    const [sub] = await db
+      .select({ id: t.tenantSubscription.id })
+      .from(t.tenantSubscription)
+      .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
+      .limit(1)
+
+    return sub?.id ?? null
   }
 
   /**
@@ -115,16 +134,10 @@ export class InvoiceService {
       return null
     }
 
-    // Busca invoice local se houver
-    let localInvoiceId: string | null = null
-    if (providerPayment.invoiceId) {
-      const [inv] = await db
-        .select({ id: t.invoice.id })
-        .from(t.invoice)
-        .where(eq(t.invoice.providerInvoiceId, providerPayment.invoiceId))
-        .limit(1)
-      localInvoiceId = inv?.id ?? null
-    }
+    const localInvoiceId = providerPayment.invoiceId
+      ? await this.findInvoiceIdByProviderId(providerPayment.invoiceId, db)
+      : null
+    const tenantId = await this.requireTenantId(providerPayment.customerId, db)
 
     const [synced] = await db
       .insert(t.payment)
@@ -142,12 +155,7 @@ export class InvoiceService {
         paidAt: providerPayment.paidAt,
         refundedAt: providerPayment.refundedAt,
         metadata: providerPayment.metadata,
-        tenantId:
-          (await this.customerService.getTenantByProviderCustomerId(providerPayment.customerId, db))
-            ?.tenantId ??
-          (() => {
-            throw new Error(`Tenant not found for Stripe customer ${providerPayment.customerId}`)
-          })(),
+        tenantId,
         provider: providerName,
       })
       .onConflictDoUpdate({
@@ -165,6 +173,19 @@ export class InvoiceService {
       .returning()
 
     return synced ?? null
+  }
+
+  /**
+   * Busca o id local de uma invoice a partir do id no provider.
+   */
+  private async findInvoiceIdByProviderId(providerInvoiceId: string, db: Db | DbTx): Promise<string | null> {
+    const [inv] = await db
+      .select({ id: t.invoice.id })
+      .from(t.invoice)
+      .where(eq(t.invoice.providerInvoiceId, providerInvoiceId))
+      .limit(1)
+
+    return inv?.id ?? null
   }
 
   /**
@@ -202,15 +223,13 @@ export class InvoiceService {
       .where(eq(t.payment.invoiceId, invoiceId))
       .orderBy(desc(t.payment.createdAt))
 
-    let subscription: t.TenantSubscription | undefined
-    if (inv.subscriptionId) {
-      const [sub] = await db
-        .select()
-        .from(t.tenantSubscription)
-        .where(eq(t.tenantSubscription.id, inv.subscriptionId))
-        .limit(1)
-      subscription = sub
-    }
+    const [subscription] = inv.subscriptionId
+      ? await db
+          .select()
+          .from(t.tenantSubscription)
+          .where(eq(t.tenantSubscription.id, inv.subscriptionId))
+          .limit(1)
+      : []
 
     return { invoice: inv, payments, subscription }
   }
@@ -252,30 +271,23 @@ export class InvoiceService {
     const db = tx ?? this.db
 
     const invoices = await db.select().from(t.invoice).where(eq(t.invoice.tenantId, tenantId))
+    const now = new Date()
 
-    let totalInvoicedMicros = 0
-    let totalPaidMicros = 0
-    let openInvoicesCount = 0
-    let overdueInvoicesCount = 0
-
-    for (const inv of invoices) {
-      totalInvoicedMicros += inv.amountDueMicros ?? 0
-      totalPaidMicros += inv.amountPaidMicros ?? 0
-
-      if (inv.status === 'open') {
-        openInvoicesCount++
-        if (inv.dueDate && inv.dueDate < new Date()) {
-          overdueInvoicesCount++
-        }
-      }
-    }
+    const summary = invoices.reduce(
+      (acc, inv) => ({
+        totalInvoicedMicros: acc.totalInvoicedMicros + (inv.amountDueMicros ?? 0),
+        totalPaidMicros: acc.totalPaidMicros + (inv.amountPaidMicros ?? 0),
+        openInvoicesCount: acc.openInvoicesCount + (inv.status === 'open' ? 1 : 0),
+        overdueInvoicesCount:
+          acc.overdueInvoicesCount +
+          (inv.status === 'open' && inv.dueDate !== null && inv.dueDate < now ? 1 : 0),
+      }),
+      { totalInvoicedMicros: 0, totalPaidMicros: 0, openInvoicesCount: 0, overdueInvoicesCount: 0 },
+    )
 
     return {
-      totalInvoicedMicros,
-      totalPaidMicros,
-      totalPendingMicros: totalInvoicedMicros - totalPaidMicros,
-      openInvoicesCount,
-      overdueInvoicesCount,
+      ...summary,
+      totalPendingMicros: summary.totalInvoicedMicros - summary.totalPaidMicros,
     }
   }
 }

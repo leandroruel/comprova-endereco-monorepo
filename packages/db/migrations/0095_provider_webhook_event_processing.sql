@@ -12,6 +12,11 @@ SET application_name = 'comprova-migrations';
 -- reserva (claimed_at). O UPDATE é restrito a essas colunas para não ampliar
 -- a superfície de escrita.
 --
+-- Nota: provider_webhook_event não tem RLS por tenant — a tabela é um ledger
+-- por provider (sem tenant_id) e não é exposta a usuários finais. A exceção à
+-- convenção de RLS em tabelas webhook_* está registrada em
+-- docs/adr/0046-provider-webhook-event-sem-rls-por-tenant.md.
+--
 -- A sequência do bigserial também precisa de USAGE: o GRANT ALL SEQUENCES da
 -- 0008 só alcançou as sequências existentes naquela migration.
 

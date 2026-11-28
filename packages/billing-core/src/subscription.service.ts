@@ -6,7 +6,7 @@
  */
 
 import type { ProviderRegistry } from './provider-registry.js'
-import type { NormalizedWebhookEvent } from './provider.js'
+import type { NormalizedWebhookEvent, BillingContact, BillingProvider } from './provider.js'
 import type { Db, DbTx } from '@comprova/db'
 import * as t from '@comprova/db'
 import { eq, and, desc, isNull, isNotNull, lt, or, sql } from '@comprova/db'
@@ -27,16 +27,7 @@ export interface ActivateBillingInput {
   readonly planId: string
   readonly paymentMethodId?: string
   readonly trialDays?: number
-  readonly billingContactEmail: string
-  readonly billingCompanyName: string
-  readonly billingCnpj: string
-  readonly billingAddress: {
-    readonly street: string
-    readonly city: string
-    readonly state: string
-    readonly zip: string
-    readonly country?: string
-  }
+  readonly billingContact: BillingContact
 }
 
 export interface SubscriptionWithPlan {
@@ -74,17 +65,7 @@ export class SubscriptionService {
     }
 
     // 2. Garante customer no provider
-    const customerResult = await this.customerService.ensureCustomer(
-      input.tenantId,
-      {
-        email: input.billingContactEmail,
-        companyName: input.billingCompanyName,
-        taxId: input.billingCnpj,
-        address: input.billingAddress,
-        contactEmail: input.billingContactEmail,
-      },
-      db,
-    )
+    const customerResult = await this.customerService.ensureCustomer(input.tenantId, input.billingContact, db)
 
     // 3. Anexa payment method se fornecido
     if (input.paymentMethodId) {
@@ -127,10 +108,10 @@ export class SubscriptionService {
         canceledAt: subscription.canceledAt,
         pausedAt: subscription.pausedAt,
         paymentMethodId: subscription.defaultPaymentMethodId ?? input.paymentMethodId,
-        billingContactEmail: input.billingContactEmail,
-        billingCompanyName: input.billingCompanyName,
-        billingCnpj: input.billingCnpj,
-        billingAddress: input.billingAddress,
+        billingContactEmail: input.billingContact.email,
+        billingCompanyName: input.billingContact.companyName,
+        billingCnpj: input.billingContact.taxId,
+        billingAddress: input.billingContact.address,
         billingCycleAnchor: subscription.currentPeriodStart ?? now,
         periodStart: subscription.currentPeriodStart ?? now,
         periodEnd,
@@ -172,84 +153,33 @@ export class SubscriptionService {
     tx?: DbTx,
   ): Promise<t.TenantSubscription> {
     const db = tx ?? this.db
-
-    const [sub] = await db
-      .select()
-      .from(t.tenantSubscription)
-      .where(eq(t.tenantSubscription.id, subscriptionId))
-      .limit(1)
-
-    if (!sub) {
-      throw new Error(`Subscription not found: ${subscriptionId}`)
-    }
-
+    const sub = await this.getSubscriptionOrThrow(subscriptionId, db)
     const provider = this.providerRegistry.get(sub.providerName)
-    const updateData: Partial<t.NewTenantSubscription> = {}
 
-    // Upgrade/downgrade de plano
-    if (input.planId && input.planId !== sub.planId) {
-      const newPlan = await this.planService.getPlan(input.planId, db)
-      if (newPlan.providerName !== sub.providerName) {
-        throw new Error('Cannot change provider via update. Create new subscription.')
-      }
+    const planChange =
+      input.planId && input.planId !== sub.planId ? await this.applyPlanChange(sub, input.planId, db) : {}
+    const cancelChange =
+      input.cancelAtPeriodEnd === undefined
+        ? {}
+        : await this.applyCancelAtPeriodEnd(
+            sub.providerSubscriptionId ?? '',
+            input.cancelAtPeriodEnd,
+            provider,
+          )
+    const trialChange =
+      input.trialEnd === undefined
+        ? {}
+        : await this.applyTrialEnd(sub.providerSubscriptionId ?? '', input.trialEnd, provider)
+    const paymentMethodChange =
+      input.paymentMethodId === undefined
+        ? {}
+        : await this.applyPaymentMethod(sub, input.paymentMethodId, provider)
 
-      const priceId = newPlan.providerPriceId ?? ''
-      if (!priceId) {
-        throw new Error('New plan has no providerPriceId')
-      }
-
-      await provider.updateSubscription(sub.providerSubscriptionId ?? '', {
-        priceId,
-        prorationBehavior: 'create_prorations',
-      })
-
-      updateData.planId = input.planId
-    }
-
-    // Cancelamento
-    if (input.cancelAtPeriodEnd !== undefined) {
-      if (input.cancelAtPeriodEnd) {
-        const subId = sub.providerSubscriptionId ?? ''
-        if (subId) {
-          await provider.cancelSubscription(subId, true)
-        }
-      } else {
-        const subId = sub.providerSubscriptionId ?? ''
-        if (subId) {
-          await provider.updateSubscription(subId, {
-            cancelAtPeriodEnd: false,
-          })
-        }
-      }
-      updateData.cancelAtPeriodEnd = input.cancelAtPeriodEnd
-    }
-
-    // Trial end
-    if (input.trialEnd !== undefined) {
-      const subId = sub.providerSubscriptionId ?? ''
-      if (subId) {
-        await provider.updateSubscription(subId, {
-          trialEnd: input.trialEnd,
-        })
-      }
-      updateData.trialEnd = input.trialEnd
-    }
-
-    // Payment method
-    if (input.paymentMethodId !== undefined) {
-      const subId = sub.providerSubscriptionId ?? ''
-      const customerId = sub.providerCustomerId ?? ''
-      if (input.paymentMethodId) {
-        if (subId && customerId) {
-          await provider.attachPaymentMethod(customerId, input.paymentMethodId)
-          await provider.updateSubscription(subId, {
-            defaultPaymentMethodId: input.paymentMethodId,
-          })
-        }
-      } else if (sub.paymentMethodId && subId && customerId) {
-        await provider.detachPaymentMethod(customerId, sub.paymentMethodId)
-      }
-      updateData.paymentMethodId = input.paymentMethodId
+    const updateData: Partial<t.NewTenantSubscription> = {
+      ...planChange,
+      ...cancelChange,
+      ...trialChange,
+      ...paymentMethodChange,
     }
 
     const [updated] = await db
@@ -266,25 +196,96 @@ export class SubscriptionService {
   }
 
   /**
+   * Aplica upgrade/downgrade de plano no provider (efeito) e devolve o patch local.
+   */
+  private async applyPlanChange(
+    sub: t.TenantSubscription,
+    planId: string,
+    db: Db | DbTx,
+  ): Promise<Partial<t.NewTenantSubscription>> {
+    const newPlan = await this.planService.getPlan(planId, db)
+    if (newPlan.providerName !== sub.providerName) {
+      throw new Error('Cannot change provider via update. Create new subscription.')
+    }
+
+    const priceId = newPlan.providerPriceId ?? ''
+    if (!priceId) {
+      throw new Error('New plan has no providerPriceId')
+    }
+
+    await this.providerRegistry.get(sub.providerName).updateSubscription(sub.providerSubscriptionId ?? '', {
+      priceId,
+      prorationBehavior: 'create_prorations',
+    })
+
+    return { planId }
+  }
+
+  /**
+   * Agenda/desfaz cancelamento no fim do período no provider e devolve o patch local.
+   */
+  private async applyCancelAtPeriodEnd(
+    providerSubscriptionId: string,
+    cancelAtPeriodEnd: boolean,
+    provider: BillingProvider,
+  ): Promise<Partial<t.NewTenantSubscription>> {
+    if (providerSubscriptionId) {
+      if (cancelAtPeriodEnd) {
+        await provider.cancelSubscription(providerSubscriptionId, true)
+      } else {
+        await provider.updateSubscription(providerSubscriptionId, { cancelAtPeriodEnd: false })
+      }
+    }
+    return { cancelAtPeriodEnd }
+  }
+
+  /**
+   * Ajusta o fim de trial no provider e devolve o patch local.
+   */
+  private async applyTrialEnd(
+    providerSubscriptionId: string,
+    trialEnd: Date,
+    provider: BillingProvider,
+  ): Promise<Partial<t.NewTenantSubscription>> {
+    if (providerSubscriptionId) {
+      await provider.updateSubscription(providerSubscriptionId, { trialEnd })
+    }
+    return { trialEnd }
+  }
+
+  /**
+   * Troca/remove o payment method no provider e devolve o patch local.
+   */
+  private async applyPaymentMethod(
+    sub: t.TenantSubscription,
+    paymentMethodId: string | null,
+    provider: BillingProvider,
+  ): Promise<Partial<t.NewTenantSubscription>> {
+    const providerSubscriptionId = sub.providerSubscriptionId ?? ''
+    const customerId = sub.providerCustomerId ?? ''
+
+    if (paymentMethodId && providerSubscriptionId && customerId) {
+      await provider.attachPaymentMethod(customerId, paymentMethodId)
+      await provider.updateSubscription(providerSubscriptionId, {
+        defaultPaymentMethodId: paymentMethodId,
+      })
+    } else if (!paymentMethodId && sub.paymentMethodId && providerSubscriptionId && customerId) {
+      await provider.detachPaymentMethod(customerId, sub.paymentMethodId)
+    }
+
+    return { paymentMethodId }
+  }
+
+  /**
    * Cancela subscription imediatamente (não no fim do período).
    */
   async cancelSubscriptionNow(subscriptionId: string, tx?: DbTx): Promise<void> {
     const db = tx ?? this.db
+    const sub = await this.getSubscriptionOrThrow(subscriptionId, db)
 
-    const [sub] = await db
-      .select()
-      .from(t.tenantSubscription)
-      .where(eq(t.tenantSubscription.id, subscriptionId))
-      .limit(1)
-
-    if (!sub) {
-      throw new Error(`Subscription not found: ${subscriptionId}`)
-    }
-
-    const provider = this.providerRegistry.get(sub.providerName)
     const subId = sub.providerSubscriptionId ?? ''
     if (subId) {
-      await provider.cancelSubscription(subId, false)
+      await this.providerRegistry.get(sub.providerName).cancelSubscription(subId, false)
     }
 
     await db
@@ -302,21 +303,11 @@ export class SubscriptionService {
    */
   async pauseSubscription(subscriptionId: string, tx?: DbTx): Promise<void> {
     const db = tx ?? this.db
+    const sub = await this.getSubscriptionOrThrow(subscriptionId, db)
 
-    const [sub] = await db
-      .select()
-      .from(t.tenantSubscription)
-      .where(eq(t.tenantSubscription.id, subscriptionId))
-      .limit(1)
-
-    if (!sub) {
-      throw new Error(`Subscription not found: ${subscriptionId}`)
-    }
-
-    const provider = this.providerRegistry.get(sub.providerName)
     const subId = sub.providerSubscriptionId ?? ''
     if (subId) {
-      await provider.pauseSubscription(subId)
+      await this.providerRegistry.get(sub.providerName).pauseSubscription(subId)
     }
 
     await db
@@ -333,21 +324,11 @@ export class SubscriptionService {
    */
   async resumeSubscription(subscriptionId: string, tx?: DbTx): Promise<void> {
     const db = tx ?? this.db
+    const sub = await this.getSubscriptionOrThrow(subscriptionId, db)
 
-    const [sub] = await db
-      .select()
-      .from(t.tenantSubscription)
-      .where(eq(t.tenantSubscription.id, subscriptionId))
-      .limit(1)
-
-    if (!sub) {
-      throw new Error(`Subscription not found: ${subscriptionId}`)
-    }
-
-    const provider = this.providerRegistry.get(sub.providerName)
     const subId = sub.providerSubscriptionId ?? ''
     if (subId) {
-      await provider.resumeSubscription(subId)
+      await this.providerRegistry.get(sub.providerName).resumeSubscription(subId)
     }
 
     await db
@@ -385,6 +366,16 @@ export class SubscriptionService {
   async getSubscription(subscriptionId: string, tx?: DbTx): Promise<t.TenantSubscription | null> {
     const db = tx ?? this.db
 
+    return this.findSubscriptionById(subscriptionId, db)
+  }
+
+  /**
+   * Busca subscription por ID local.
+   */
+  private async findSubscriptionById(
+    subscriptionId: string,
+    db: Db | DbTx,
+  ): Promise<t.TenantSubscription | null> {
     const [sub] = await db
       .select()
       .from(t.tenantSubscription)
@@ -392,6 +383,18 @@ export class SubscriptionService {
       .limit(1)
 
     return sub ?? null
+  }
+
+  /**
+   * Busca subscription por ID ou lança erro se inexistente.
+   */
+  private async getSubscriptionOrThrow(subscriptionId: string, db: Db | DbTx): Promise<t.TenantSubscription> {
+    const sub = await this.findSubscriptionById(subscriptionId, db)
+
+    if (!sub) {
+      throw new Error(`Subscription not found: ${subscriptionId}`)
+    }
+    return sub
   }
 
   /**
@@ -602,7 +605,7 @@ export class SubscriptionService {
 
       case 'subscription.trial_will_end':
         if (event.providerSubscriptionId) {
-          await this.handleTrialWillEnd(event.providerSubscriptionId, db)
+          await this.handleTrialWillEnd(event.providerSubscriptionId, event.providerName, db)
         }
         break
 
@@ -639,7 +642,7 @@ export class SubscriptionService {
 
       case 'payment_method.attached':
         if (event.providerCustomerId) {
-          await this.handlePaymentMethodAttached(event.providerCustomerId, db)
+          await this.handlePaymentMethodAttached(event.providerCustomerId, event.providerPaymentMethodId, db)
         }
         break
     }
@@ -666,29 +669,30 @@ export class SubscriptionService {
       return
     }
 
-    // Build update data. Optional provider fields are `Date | null`: `null`
-    // explicitly clears the local value, while `undefined` (only meaningful
-    // for `pausedAt`) means "provider cannot determine it, keep local".
-    const isPaused = providerSub.pauseCollection !== null || providerSub.status === 'paused'
+    // A pausa de cobrança só colapsa o status local quando o ciclo de vida
+    // está ativo (Stripe só permite pausar subscription ativa). Demais status
+    // (past_due, canceled...) preservam a semântica de ciclo de vida.
+    const syncStatus =
+      providerSub.status === 'active' && providerSub.pauseCollection !== null ? 'paused' : providerSub.status
+
+    // Convenção tri-state nos campos opcionais: presente sincroniza, `null`
+    // limpa o valor local, `undefined` preserva (provider não informou).
     const updateData: Partial<typeof t.tenantSubscription.$inferInsert> = {
-      status: isPaused ? 'paused' : providerSub.status,
+      status: syncStatus,
       currentPeriodStart: providerSub.currentPeriodStart,
       currentPeriodEnd: providerSub.currentPeriodEnd,
       cancelAtPeriodEnd: providerSub.cancelAtPeriodEnd,
-      trialStart: providerSub.trialStart,
-      trialEnd: providerSub.trialEnd,
-      canceledAt: providerSub.canceledAt,
-      paymentMethodId: providerSub.defaultPaymentMethodId,
       metadata: {
         ...providerSub.metadata,
         lastSyncedAt: new Date().toISOString(),
       },
-    }
-
-    // Stripe does not expose a collection-pause timestamp. Preserve the local
-    // value while paused instead of writing a fabricated date on every sync.
-    if (providerSub.pausedAt !== undefined) {
-      updateData.pausedAt = providerSub.pausedAt
+      ...(providerSub.trialStart !== undefined && { trialStart: providerSub.trialStart }),
+      ...(providerSub.trialEnd !== undefined && { trialEnd: providerSub.trialEnd }),
+      ...(providerSub.canceledAt !== undefined && { canceledAt: providerSub.canceledAt }),
+      ...(providerSub.pausedAt !== undefined && { pausedAt: providerSub.pausedAt }),
+      ...(providerSub.defaultPaymentMethodId !== undefined && {
+        paymentMethodId: providerSub.defaultPaymentMethodId,
+      }),
     }
 
     await db
@@ -709,11 +713,40 @@ export class SubscriptionService {
       .where(eq(t.tenantSubscription.providerSubscriptionId, providerSubscriptionId))
   }
 
-  private async handleTrialWillEnd(providerSubscriptionId: string, _db: Db | DbTx): Promise<void> {
-    console.log(`Trial will end for subscription: ${providerSubscriptionId}`)
+  /**
+   * Trial terminando em breve: re-sincroniza a subscription para que o
+   * `trial_end` local continue refletindo o provider.
+   */
+  private async handleTrialWillEnd(
+    providerSubscriptionId: string,
+    providerName: string,
+    db: Db | DbTx,
+  ): Promise<void> {
+    await this.syncSubscription(providerSubscriptionId, providerName, db)
   }
 
-  private async handlePaymentMethodAttached(providerCustomerId: string, _db: Db | DbTx): Promise<void> {
-    console.log(`Payment method attached for customer: ${providerCustomerId}`)
+  /**
+   * Payment method anexado ao customer no provider: persiste localmente para
+   * que o dashboard exiba o método padrão correto.
+   */
+  private async handlePaymentMethodAttached(
+    providerCustomerId: string,
+    providerPaymentMethodId: string | undefined,
+    db: Db | DbTx,
+  ): Promise<void> {
+    if (!providerPaymentMethodId) {
+      return
+    }
+
+    const tenant = await this.customerService.getTenantByProviderCustomerId(providerCustomerId, db)
+
+    if (!tenant) {
+      throw new Error(`Tenant not found for provider customer ${providerCustomerId}`)
+    }
+
+    await db
+      .update(t.tenant)
+      .set({ stripePaymentMethodId: providerPaymentMethodId })
+      .where(eq(t.tenant.tenantId, tenant.tenantId))
   }
 }

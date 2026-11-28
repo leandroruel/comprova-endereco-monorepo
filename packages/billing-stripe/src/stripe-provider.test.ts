@@ -4,6 +4,7 @@ const stripeMock = vi.hoisted(() => ({
   retrieveSubscription: vi.fn(),
   retrieveInvoice: vi.fn(),
   retrievePaymentIntent: vi.fn(),
+  createCreditNote: vi.fn(),
   constructEvent: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ vi.mock('stripe', () => {
     subscriptions = { retrieve: stripeMock.retrieveSubscription }
     invoices = { retrieve: stripeMock.retrieveInvoice }
     paymentIntents = { retrieve: stripeMock.retrievePaymentIntent }
+    creditNotes = { create: stripeMock.createCreditNote }
     webhooks = { constructEvent: stripeMock.constructEvent }
   }
 
@@ -107,6 +109,7 @@ beforeEach(() => {
   stripeMock.retrieveSubscription.mockReset()
   stripeMock.retrieveInvoice.mockReset()
   stripeMock.retrievePaymentIntent.mockReset()
+  stripeMock.createCreditNote.mockReset()
   stripeMock.constructEvent.mockReset()
 })
 
@@ -281,28 +284,32 @@ const makePaymentIntent = (overrides: Record<string, unknown> = {}) =>
   }) as unknown as Stripe.PaymentIntent
 
 describe('StripeProvider.getPayment / mapPayment', () => {
-  it('solicita expansão de latest_charge no retrieve', async () => {
+  const CHARGE_CREATED_AT = new Date(1_700_500_000 * 1000)
+
+  const makeExpandedCharge = (overrides: Record<string, unknown> = {}) => ({
+    id: 'ch_123',
+    created: 1_700_500_000,
+    receipt_url: 'https://receipt.stripe.com/invoice/123',
+    balance_transaction: {
+      id: 'txn_123',
+      fee: 150,
+    } as unknown as Stripe.BalanceTransaction,
+    ...overrides,
+  })
+
+  it('solicita expansão de latest_charge e balance_transaction no retrieve', async () => {
     stripeMock.retrievePaymentIntent.mockResolvedValue(makePaymentIntent())
 
     await makeProvider().getPayment('pi_123')
 
     expect(stripeMock.retrievePaymentIntent).toHaveBeenCalledWith('pi_123', {
-      expand: ['latest_charge'],
+      expand: ['latest_charge', 'latest_charge.balance_transaction'],
     })
   })
 
-  it('mapeia pagamento com latest_charge expandido (fee e recibo)', async () => {
+  it('mapeia pagamento com latest_charge expandido (fee, recibo e paidAt do charge)', async () => {
     stripeMock.retrievePaymentIntent.mockResolvedValue(
-      makePaymentIntent({
-        latest_charge: {
-          id: 'ch_123',
-          receipt_url: 'https://receipt.stripe.com/invoice/123',
-          balance_transaction: {
-            id: 'txn_123',
-            fee: 150,
-          } as unknown as Stripe.BalanceTransaction,
-        },
-      }),
+      makePaymentIntent({ latest_charge: makeExpandedCharge() }),
     )
 
     const payment = await makeProvider().getPayment('pi_123')
@@ -318,7 +325,20 @@ describe('StripeProvider.getPayment / mapPayment', () => {
       providerFeeMicros: 1_500_000,
       receiptUrl: 'https://receipt.stripe.com/invoice/123',
     })
-    expect(payment?.paidAt).not.toBeNull()
+    expect(payment?.paidAt).toEqual(CHARGE_CREATED_AT)
+  })
+
+  it('fee fica indefinida (não zero) quando balance_transaction não veio expandido', async () => {
+    stripeMock.retrievePaymentIntent.mockResolvedValue(
+      makePaymentIntent({
+        latest_charge: makeExpandedCharge({ balance_transaction: 'txn_123' }),
+      }),
+    )
+
+    const payment = await makeProvider().getPayment('pi_123')
+
+    expect(payment?.providerFeeMicros).toBeUndefined()
+    expect(payment?.receiptUrl).toBe('https://receipt.stripe.com/invoice/123')
   })
 
   it('mapeia pagamento sem latest_charge expandido (sem fee nem recibo)', async () => {
@@ -328,6 +348,8 @@ describe('StripeProvider.getPayment / mapPayment', () => {
 
     expect(payment?.providerFeeMicros).toBeUndefined()
     expect(payment?.receiptUrl).toBeUndefined()
+    // Sem charge expandido não há fonte confiável para a data do pagamento.
+    expect(payment?.paidAt).toBeUndefined()
     expect(payment?.status).toBe('succeeded')
   })
 
@@ -338,6 +360,7 @@ describe('StripeProvider.getPayment / mapPayment', () => {
 
     expect(payment?.providerFeeMicros).toBeUndefined()
     expect(payment?.receiptUrl).toBeUndefined()
+    expect(payment?.paidAt).toBeUndefined()
   })
 
   it('mapeia payment_intent falhado como failed', async () => {
@@ -354,6 +377,64 @@ describe('StripeProvider.getPayment / mapPayment', () => {
     const payment = await makeProvider().getPayment('pi_123')
 
     expect(payment?.status).toBe('pending')
+  })
+})
+
+describe('StripeProvider.createCreditNote', () => {
+  const provider = makeProvider()
+
+  it('mantém motivo mapeado (duplicate)', async () => {
+    stripeMock.createCreditNote.mockResolvedValue({
+      id: 'cn_123',
+      customer: 'cus_123',
+      invoice: 'in_123',
+      amount: 500,
+      currency: 'brl',
+      reason: 'duplicate',
+      memo: null,
+      status: 'issued',
+      created: 1_700_000_000,
+    })
+
+    const cn = await provider.createCreditNote({
+      invoiceId: 'in_123',
+      amountMicros: 5_000_000,
+      reason: 'duplicate',
+    })
+
+    expect(stripeMock.createCreditNote).toHaveBeenCalledWith(
+      { invoice: 'in_123', amount: 500, reason: 'duplicate', memo: undefined },
+      { idempotencyKey: undefined },
+    )
+    expect(cn.reason).toBe('duplicate')
+  })
+
+  it('não converte other em duplicate: omite o campo reason', async () => {
+    stripeMock.createCreditNote.mockResolvedValue({
+      id: 'cn_124',
+      customer: 'cus_123',
+      invoice: 'in_123',
+      amount: 500,
+      currency: 'brl',
+      reason: null,
+      memo: 'Reembolso por acordo',
+      status: 'issued',
+      created: 1_700_000_000,
+    })
+
+    const cn = await provider.createCreditNote({
+      invoiceId: 'in_123',
+      amountMicros: 5_000_000,
+      reason: 'other',
+      memo: 'Reembolso por acordo',
+    })
+
+    expect(stripeMock.createCreditNote).toHaveBeenCalledWith(
+      { invoice: 'in_123', amount: 500, reason: undefined, memo: 'Reembolso por acordo' },
+      { idempotencyKey: undefined },
+    )
+    // Sem rotulagem falsa: a Stripe registra sem motivo (null), nunca 'duplicate'.
+    expect(cn.reason).toBeNull()
   })
 })
 

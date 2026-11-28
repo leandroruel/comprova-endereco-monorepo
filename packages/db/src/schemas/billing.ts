@@ -23,6 +23,9 @@ import { adminAuthUser } from './auth.js'
 // ============================================================================
 // Enums
 // ============================================================================
+// As migrações criam estas colunas como `text` + CHECK (0077/0094); os
+// pgEnums aqui existem apenas para tipagem TS — Drizzle não emite DDL neste
+// repo (migrations SQL + db:fence).
 
 export const billingPlanStatusEnum = pgEnum('billing_plan_status', ['active', 'archived', 'deprecated'])
 export const subscriptionStatusEnum = pgEnum('subscription_status', [
@@ -270,6 +273,9 @@ export type NewPayment = typeof payment.$inferInsert
 export const providerWebhookEvent = pgTable(
   'provider_webhook_event',
   {
+    // PK é bigserial na migração 0094 (sequence, não IDENTITY). O marker
+    // abaixo existe só para tornar `id` opcional no tipo de insert — Drizzle
+    // não emite DDL neste repo (migrations SQL + db:fence).
     id: bigint('id', { mode: 'number' }).primaryKey().generatedByDefaultAsIdentity(),
     providerName: text('provider_name').notNull(),
     providerEventId: text('provider_event_id').notNull(),

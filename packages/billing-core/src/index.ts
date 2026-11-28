@@ -18,6 +18,6 @@ export { InvoiceService } from './invoice.service.js'
 // Types re-exportados para conveniência
 export type { PlanFeatures, PlanPricing } from './provider.js'
 export type { CreatePlanInput, UpdatePlanInput } from './plan.service.js'
-export type { CustomerBillingData } from './customer.service.js'
+export type { BillingContact } from './provider.js'
 export type { ActivateBillingInput, SubscriptionWithPlan } from './subscription.service.js'
 export type { InvoiceWithDetails } from './invoice.service.js'
