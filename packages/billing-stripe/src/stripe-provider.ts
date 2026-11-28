@@ -69,6 +69,18 @@ export interface StripeProviderConfig {
   readonly webhookSecret: string
 }
 
+/**
+ * Preserva no memo um motivo que a API do Stripe não aceita como `reason`
+ * (ex.: `other`). Idempotente: não duplica a anotação se o memo já a traz.
+ */
+function composeMemoWithReason(reason: string, memo: string | undefined): string {
+  const tag = `reason: ${reason}`
+  if (memo?.includes(tag)) {
+    return memo
+  }
+  return `[${tag}]${memo ? ` ${memo}` : ''}`
+}
+
 export class StripeProvider implements BillingProvider {
   readonly name = 'stripe'
   readonly supportedCurrencies: readonly Currency[] = ['BRL', 'USD', 'EUR']
@@ -137,6 +149,9 @@ export class StripeProvider implements BillingProvider {
         recurring: {
           interval: input.interval,
           interval_count: input.intervalCount,
+          // Cumprir o contrato de entrada: trial padrão configurado no Price
+          // (usado com trial_from_plan), além do trial por subscription.
+          trial_period_days: input.trialPeriodDays,
           usage_type: input.usageType,
         },
         metadata: input.metadata,
@@ -386,8 +401,8 @@ export class StripeProvider implements BillingProvider {
     }
 
     // Mapeamento exaustivo: `other` não é motivo aceito pela API do Stripe
-    // (v16), então o campo `reason` é omitido e o motivo real fica no memo —
-    // nunca rotulado incorretamente como `duplicate`.
+    // (v16), então o campo `reason` é omitido e o motivo real é preservado no
+    // memo — nunca rotulado incorretamente como `duplicate`.
     const reasonByInput: Record<
       ProviderCreditNote['reason'],
       Stripe.CreditNoteCreateParams.Reason | undefined
@@ -399,12 +414,15 @@ export class StripeProvider implements BillingProvider {
       other: undefined,
     }
 
+    const stripeReason = reasonByInput[input.reason]
+    const memo = stripeReason === undefined ? composeMemoWithReason(input.reason, input.memo) : input.memo
+
     const cn = await this.stripe.creditNotes.create(
       {
         invoice: input.invoiceId,
         amount: this.microsToCentavos(input.amountMicros),
-        reason: reasonByInput[input.reason],
-        memo: input.memo,
+        reason: stripeReason,
+        memo,
       },
       { idempotencyKey: input.idempotencyKey },
     )

@@ -4,6 +4,7 @@ const stripeMock = vi.hoisted(() => ({
   retrieveSubscription: vi.fn(),
   retrieveInvoice: vi.fn(),
   retrievePaymentIntent: vi.fn(),
+  createPrice: vi.fn(),
   createCreditNote: vi.fn(),
   constructEvent: vi.fn(),
 }))
@@ -19,6 +20,7 @@ vi.mock('stripe', () => {
     subscriptions = { retrieve: stripeMock.retrieveSubscription }
     invoices = { retrieve: stripeMock.retrieveInvoice }
     paymentIntents = { retrieve: stripeMock.retrievePaymentIntent }
+    prices = { create: stripeMock.createPrice }
     creditNotes = { create: stripeMock.createCreditNote }
     webhooks = { constructEvent: stripeMock.constructEvent }
   }
@@ -109,6 +111,7 @@ beforeEach(() => {
   stripeMock.retrieveSubscription.mockReset()
   stripeMock.retrieveInvoice.mockReset()
   stripeMock.retrievePaymentIntent.mockReset()
+  stripeMock.createPrice.mockReset()
   stripeMock.createCreditNote.mockReset()
   stripeMock.constructEvent.mockReset()
 })
@@ -380,6 +383,50 @@ describe('StripeProvider.getPayment / mapPayment', () => {
   })
 })
 
+describe('StripeProvider.createPrice', () => {
+  it('envia trial_period_days dentro de recurring', async () => {
+    stripeMock.createPrice.mockResolvedValue({
+      id: 'price_new',
+      product: 'prod_123',
+      currency: 'brl',
+      unit_amount: 5_000,
+      recurring: {
+        interval: 'month',
+        interval_count: 1,
+        trial_period_days: 14,
+        usage_type: 'licensed',
+      },
+      metadata: {},
+      active: true,
+    })
+
+    await makeProvider().createPrice('prod_123', {
+      currency: 'BRL',
+      unitAmountMicros: 50_000_000,
+      interval: 'month',
+      intervalCount: 1,
+      trialPeriodDays: 14,
+      usageType: 'licensed',
+    })
+
+    expect(stripeMock.createPrice).toHaveBeenCalledWith(
+      {
+        product: 'prod_123',
+        currency: 'brl',
+        unit_amount: 5_000,
+        recurring: {
+          interval: 'month',
+          interval_count: 1,
+          trial_period_days: 14,
+          usage_type: 'licensed',
+        },
+        metadata: undefined,
+      },
+      { idempotencyKey: undefined },
+    )
+  })
+})
+
 describe('StripeProvider.createCreditNote', () => {
   const provider = makeProvider()
 
@@ -409,7 +456,7 @@ describe('StripeProvider.createCreditNote', () => {
     expect(cn.reason).toBe('duplicate')
   })
 
-  it('não converte other em duplicate: omite o campo reason', async () => {
+  it('não converte other em duplicate: omite o campo reason e preserva o motivo no memo', async () => {
     stripeMock.createCreditNote.mockResolvedValue({
       id: 'cn_124',
       customer: 'cus_123',
@@ -417,7 +464,7 @@ describe('StripeProvider.createCreditNote', () => {
       amount: 500,
       currency: 'brl',
       reason: null,
-      memo: 'Reembolso por acordo',
+      memo: '[reason: other] Reembolso por acordo',
       status: 'issued',
       created: 1_700_000_000,
     })
@@ -430,11 +477,62 @@ describe('StripeProvider.createCreditNote', () => {
     })
 
     expect(stripeMock.createCreditNote).toHaveBeenCalledWith(
-      { invoice: 'in_123', amount: 500, reason: undefined, memo: 'Reembolso por acordo' },
+      { invoice: 'in_123', amount: 500, reason: undefined, memo: '[reason: other] Reembolso por acordo' },
       { idempotencyKey: undefined },
     )
     // Sem rotulagem falsa: a Stripe registra sem motivo (null), nunca 'duplicate'.
     expect(cn.reason).toBeNull()
+  })
+
+  it('other sem memo: o motivo ainda chega ao memo', async () => {
+    stripeMock.createCreditNote.mockResolvedValue({
+      id: 'cn_125',
+      customer: 'cus_123',
+      invoice: 'in_123',
+      amount: 500,
+      currency: 'brl',
+      reason: null,
+      memo: '[reason: other]',
+      status: 'issued',
+      created: 1_700_000_000,
+    })
+
+    await provider.createCreditNote({
+      invoiceId: 'in_123',
+      amountMicros: 5_000_000,
+      reason: 'other',
+    })
+
+    expect(stripeMock.createCreditNote).toHaveBeenCalledWith(
+      { invoice: 'in_123', amount: 500, reason: undefined, memo: '[reason: other]' },
+      { idempotencyKey: undefined },
+    )
+  })
+
+  it('other com memo que já anota o motivo: não duplica a anotação', async () => {
+    stripeMock.createCreditNote.mockResolvedValue({
+      id: 'cn_126',
+      customer: 'cus_123',
+      invoice: 'in_123',
+      amount: 500,
+      currency: 'brl',
+      reason: null,
+      memo: '[reason: other] Reembolso por acordo',
+      status: 'issued',
+      created: 1_700_000_000,
+    })
+
+    await provider.createCreditNote({
+      invoiceId: 'in_123',
+      amountMicros: 5_000_000,
+      reason: 'other',
+      memo: '[reason: other] Reembolso por acordo',
+    })
+
+    expect(stripeMock.createCreditNote).toHaveBeenCalledWith(
+      { invoice: 'in_123', amount: 500, reason: undefined, memo: '[reason: other] Reembolso por acordo' },
+      { idempotencyKey: undefined },
+    )
   })
 })
 
