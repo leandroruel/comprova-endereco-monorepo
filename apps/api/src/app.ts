@@ -64,6 +64,7 @@ import { registerUsageRoutes } from './modules/usage/usage.routes.js'
 import { registerValidationRoutes } from './modules/validations/validations.routes.js'
 import { registerDocumentRoutes } from './modules/documents/documents.routes.js'
 import { registerWebhookRoutes } from './modules/webhooks/webhooks.routes.js'
+import { registerBillingRoutes } from './modules/billing/billing.routes.js'
 import { registerDebugNf3eQrCodeRoute } from './modules/debug/nf3e-qrcode.js'
 import { registerMeRoute } from './modules/me/me.route.js'
 import { registerOrganizationsRoutes } from './modules/organizations/organizations.routes.js'
@@ -129,6 +130,11 @@ export interface AppDeps {
    * com 503, nunca grava em memória silenciosamente.
    */
   readonly objectStore?: ObjectStore
+  /**
+   * ProviderRegistry global (billing). Injetado para rotas de billing webhooks.
+   * Opcional: testes podem omitir; se ausente, rotas de billing não são registradas.
+   */
+  readonly providerRegistry?: import('@comprova/billing-core').ProviderRegistry
 }
 
 const resolveObjectStore = (config: AppConfig): ObjectStore => {
@@ -221,6 +227,10 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
   await app.register(cookie, {
     secret: deps.config.API_KEY_PEPPER,
   })
+
+  // fastify-raw-body: needed for Stripe webhook signature verification
+  // (requires raw body before JSON parsing)
+  await app.register((await import('fastify-raw-body')).default)
 
   // Fallback de CORS no onResponse: garante que os cabeçalhos CORS estejam
   // sempre presentes, mesmo quando o plugin @fastify/cors não os aplica (ex.:
@@ -491,6 +501,9 @@ export const buildApp = async (deps: AppDeps): Promise<FastifyInstance> => {
       registerCredentialRoutes(v1, { db: deps.db })
       registerSigningKeyRoutes(v1, { db: deps.db })
       registerWebhookRoutes(v1, { db: deps.db, pepper: deps.config.API_KEY_PEPPER })
+      if (deps.providerRegistry) {
+        registerBillingRoutes(v1, { db: deps.db, providerRegistry: deps.providerRegistry })
+      }
       registerBatchRoutes(v1, { db: deps.db })
       registerStatsRoutes(v1, { db: deps.db })
       registerUsageRoutes(v1, { db: deps.db })

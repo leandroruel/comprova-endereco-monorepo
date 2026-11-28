@@ -435,15 +435,17 @@ export class SubscriptionService {
    * dos efeitos de negócio e a marcação de conclusão acontecem na mesma
    * transação; falhas ficam registradas em `provider_webhook_event` para
    * diagnóstico e reprocessamento em uma entrega posterior.
+   *
+   * A reserva (claim) e o processamento ocorrem na MESMA transação para
+   * evitar que um evento fique "claimed" mas não processado em caso de crash.
+   * Usa SELECT FOR UPDATE SKIP LOCKED no claim para evitar race conditions.
    */
   async handleWebhookEvent(event: NormalizedWebhookEvent, tx?: DbTx): Promise<void> {
-    // Reserve the event outside the business transaction. The unique
-    // constraint on (provider_name, provider_event_id) makes this the
-    // concurrency gate: only one delivery can claim the row.
-    const claimed = await this.claimWebhookEvent(this.db, event)
-    if (!claimed) return
-
     const process = async (db: Db | DbTx): Promise<void> => {
+      // Claim inside the transaction to ensure atomicity with processing
+      const claimed = await this.claimWebhookEvent(db, event)
+      if (!claimed) return
+
       await this.applyTenantContext(event, db)
       await this.dispatchWebhookEvent(event, db)
       await this.markWebhookProcessed(db, event)

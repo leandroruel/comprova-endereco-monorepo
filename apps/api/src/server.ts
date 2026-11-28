@@ -6,6 +6,7 @@ import { loadConfig } from './config.js'
 import { startBatchLoop } from './services/batch-processor.js'
 import { startPublisherLoop } from './modules/webhooks/outbox-publisher.js'
 import { initializeStripeProvider } from '@comprova/billing-stripe'
+import { providerRegistry } from '@comprova/billing-core'
 
 const config = loadConfig()
 
@@ -33,6 +34,7 @@ const app = await buildApp({
   redis,
   logger,
   metrics,
+  providerRegistry,
 })
 
 const stopPublisher = config.WORKER_LOOPS
